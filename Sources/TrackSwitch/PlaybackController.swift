@@ -68,8 +68,12 @@ final class PlaybackController: ObservableObject {
 
     func loadSelectedLibraryTrack(_ side: TrackSide) async {
         do {
-            let url = try libraryTrackSelector.selectedTrackURL()
-            await loadTrack(side, from: url)
+            let urls = try libraryTrackSelector.selectedTrackURLs()
+            let assignments = try Self.libraryAssignments(for: urls, clickedSide: side)
+
+            for (assignedSide, url) in assignments {
+                await loadTrack(assignedSide, from: url)
+            }
         } catch let error as PlaybackError {
             playbackError = error
         } catch {
@@ -194,6 +198,20 @@ final class PlaybackController: ObservableObject {
 
     func skip(by delta: TimeInterval) {
         seek(to: session.transportPosition + delta)
+    }
+
+    nonisolated static func libraryAssignments(
+        for urls: [URL],
+        clickedSide: TrackSide
+    ) throws -> [(TrackSide, URL)] {
+        switch urls.count {
+        case 1:
+            [(clickedSide, urls[0])]
+        case 2:
+            [(.a, urls[0]), (.b, urls[1])]
+        default:
+            throw PlaybackError.librarySelectionFailed("Select one or two tracks in Music.")
+        }
     }
 
     private func configureEngine() {
