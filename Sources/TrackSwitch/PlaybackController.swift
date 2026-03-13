@@ -1,0 +1,329 @@
+import AVFoundation
+import Combine
+import Foundation
+
+@MainActor
+final class PlaybackController: ObservableObject {
+    @Published private(set) var session = ComparisonSession()
+    @Published private(set) var playbackError: PlaybackError?
+    @Published private(set) var overlapWarning: String?
+
+    private let loader: AudioFileLoading
+    private let engine = AVAudioEngine()
+    private let playerA = AVAudioPlayerNode()
+    private let playerB = AVAudioPlayerNode()
+    private let mixerA = AVAudioMixerNode()
+    private let mixerB = AVAudioMixerNode()
+
+    private var engineConfigured = false
+    private var audioFileA: AVAudioFile?
+    private var audioFileB: AVAudioFile?
+    private var overlapStart: TimeInterval = 0
+    private var playbackStartedAt: CFTimeInterval?
+    private var playbackStartedFromTransport: TimeInterval = 0
+    private var timer: Timer?
+
+    init(loader: AudioFileLoading = AudioFileLoader()) {
+        self.loader = loader
+    }
+
+    func loadTrack(_ side: TrackSide, from url: URL) async {
+        do {
+            stop()
+            let metadata = try loader.loadTrackMetadata(from: url)
+            let file = try loader.makeAudioFile(from: url)
+
+            switch side {
+            case .a:
+                session.trackA = metadata
+                audioFileA = file
+                if session.trackB == nil {
+                    session.activeTrack = .a
+                }
+            case .b:
+                var adjusted = metadata
+                adjusted.offsetSeconds = session.trackB?.offsetSeconds ?? 0
+                adjusted.gainDB = session.trackB?.gainDB ?? 0
+                session.trackB = adjusted
+                audioFileB = file
+                if session.trackA == nil {
+                    session.activeTrack = .b
+                }
+            }
+
+            playbackError = nil
+            recalculateSessionDuration()
+            applyAudibility()
+        } catch let error as PlaybackError {
+            playbackError = error
+        } catch {
+            playbackError = .failedToOpenFile(url)
+        }
+    }
+
+    func play() {
+        guard session.isPlayable else { return }
+        playbackError = nil
+        do {
+            try ensureEngineRunning()
+            try reschedulePlayers(startingAt: session.transportPosition)
+            if audioFileA != nil {
+                playerA.play()
+            }
+            if audioFileB != nil {
+                playerB.play()
+            }
+            session.isPlaying = true
+            playbackStartedFromTransport = session.transportPosition
+            playbackStartedAt = CACurrentMediaTime()
+            startTimer()
+            applyAudibility()
+        } catch let error as PlaybackError {
+            playbackError = error
+        } catch {
+            playbackError = .engineStartFailed
+        }
+    }
+
+    func pause() {
+        guard session.isPlaying else { return }
+        session.transportPosition = currentTransportPosition()
+        playerA.pause()
+        playerB.pause()
+        session.isPlaying = false
+        playbackStartedAt = nil
+        playbackStartedFromTransport = session.transportPosition
+        timer?.invalidate()
+    }
+
+    func stop() {
+        playerA.stop()
+        playerB.stop()
+        session.isPlaying = false
+        session.transportPosition = 0
+        playbackStartedAt = nil
+        playbackStartedFromTransport = 0
+        timer?.invalidate()
+        applyAudibility()
+    }
+
+    func seek(to seconds: TimeInterval) {
+        guard session.isPlayable else { return }
+        let clamped = TransportMapping.clampedTransport(seconds, duration: session.duration)
+        session.transportPosition = clamped
+
+        guard session.isPlaying else { return }
+        do {
+            try reschedulePlayers(startingAt: clamped)
+            if audioFileA != nil {
+                playerA.play()
+            }
+            if audioFileB != nil {
+                playerB.play()
+            }
+            playbackStartedFromTransport = clamped
+            playbackStartedAt = CACurrentMediaTime()
+            applyAudibility()
+        } catch let error as PlaybackError {
+            playbackError = error
+        } catch {
+            playbackError = .schedulingFailed
+        }
+    }
+
+    func toggleActiveTrack() {
+        guard session.canToggleComparison else { return }
+        session.activeTrack = session.activeTrack == .a ? .b : .a
+        applyAudibility()
+    }
+
+    func setGain(_ side: TrackSide, db: Float) {
+        switch side {
+        case .a:
+            session.trackA?.gainDB = db
+        case .b:
+            session.trackB?.gainDB = db
+        }
+        applyAudibility()
+    }
+
+    func setOffset(_ side: TrackSide, seconds: TimeInterval) {
+        switch side {
+        case .a:
+            session.trackA?.offsetSeconds = seconds
+        case .b:
+            session.trackB?.offsetSeconds = seconds
+        }
+
+        recalculateSessionDuration()
+
+        guard session.isPlaying else { return }
+        do {
+            try reschedulePlayers(startingAt: session.transportPosition)
+            if audioFileA != nil {
+                playerA.play()
+            }
+            if audioFileB != nil {
+                playerB.play()
+            }
+            playbackStartedFromTransport = session.transportPosition
+            playbackStartedAt = CACurrentMediaTime()
+            applyAudibility()
+        } catch let error as PlaybackError {
+            playbackError = error
+        } catch {
+            playbackError = .schedulingFailed
+        }
+    }
+
+    func skip(by delta: TimeInterval) {
+        seek(to: session.transportPosition + delta)
+    }
+
+    private func configureEngine() {
+        guard !engineConfigured else { return }
+
+        engine.attach(playerA)
+        engine.attach(playerB)
+        engine.attach(mixerA)
+        engine.attach(mixerB)
+
+        engine.connect(playerA, to: mixerA, format: nil)
+        engine.connect(playerB, to: mixerB, format: nil)
+        engine.connect(mixerA, to: engine.mainMixerNode, format: nil)
+        engine.connect(mixerB, to: engine.mainMixerNode, format: nil)
+
+        engineConfigured = true
+        applyAudibility()
+    }
+
+    private func ensureEngineRunning() throws {
+        configureEngine()
+        if !engine.isRunning {
+            do {
+                try engine.start()
+            } catch {
+                throw PlaybackError.engineStartFailed
+            }
+        }
+    }
+
+    private func reschedulePlayers(startingAt relativeTransport: TimeInterval) throws {
+        guard session.duration > 0 else {
+            throw PlaybackError.schedulingFailed
+        }
+
+        let transport = TransportMapping.clampedTransport(relativeTransport, duration: session.duration)
+        playerA.stop()
+        playerB.stop()
+
+        if let trackA = session.trackA, let fileA = audioFileA {
+            let positionA = TransportMapping.filePosition(
+                forRelativeTransport: transport,
+                overlapStart: overlapStart,
+                offset: trackA.offsetSeconds
+            )
+            let frameA = AVAudioFramePosition(max(0, positionA * trackA.sampleRate))
+            let framesRemainingA = max(0, fileA.length - frameA)
+            guard framesRemainingA > 0 else {
+                throw PlaybackError.schedulingFailed
+            }
+            playerA.scheduleSegment(fileA, startingFrame: frameA, frameCount: AVAudioFrameCount(framesRemainingA), at: nil)
+        }
+
+        if let trackB = session.trackB, let fileB = audioFileB {
+            let positionB = TransportMapping.filePosition(
+                forRelativeTransport: transport,
+                overlapStart: overlapStart,
+                offset: trackB.offsetSeconds
+            )
+            let frameB = AVAudioFramePosition(max(0, positionB * trackB.sampleRate))
+            let framesRemainingB = max(0, fileB.length - frameB)
+            guard framesRemainingB > 0 else {
+                throw PlaybackError.schedulingFailed
+            }
+            playerB.scheduleSegment(fileB, startingFrame: frameB, frameCount: AVAudioFrameCount(framesRemainingB), at: nil)
+        }
+
+        session.transportPosition = transport
+    }
+
+    private func recalculateSessionDuration() {
+        if let trackA = session.trackA, let trackB = session.trackB {
+            guard let range = TransportMapping.overlapRange(trackA: trackA, trackB: trackB) else {
+                session.duration = 0
+                session.transportPosition = 0
+                overlapStart = 0
+                overlapWarning = "Offsets leave no overlap between Track A and Track B."
+                playbackError = .noValidOverlap
+                return
+            }
+
+            overlapStart = range.lowerBound
+            session.duration = range.upperBound - range.lowerBound
+            session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
+            let remainingFraction = session.duration / max(trackA.duration, trackB.duration)
+            overlapWarning = remainingFraction < 0.5 ? "Offsets reduce the compare range to \(session.duration.formattedTimestamp)." : nil
+            return
+        }
+
+        if let trackA = session.trackA {
+            overlapStart = trackA.offsetSeconds
+            session.duration = trackA.duration
+            session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
+            overlapWarning = nil
+            return
+        }
+
+        if let trackB = session.trackB {
+            overlapStart = trackB.offsetSeconds
+            session.duration = trackB.duration
+            session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
+            overlapWarning = nil
+            return
+        }
+
+        session.duration = 0
+        overlapStart = 0
+        overlapWarning = nil
+    }
+
+    private func applyAudibility() {
+        guard engineConfigured else { return }
+
+        let gainA = TransportMapping.linearGain(fromDB: session.trackA?.gainDB ?? 0)
+        let gainB = TransportMapping.linearGain(fromDB: session.trackB?.gainDB ?? 0)
+        let canPlayA = session.trackA != nil
+        let canPlayB = session.trackB != nil
+
+        mixerA.outputVolume = canPlayA && (session.activeTrack == .a || !canPlayB) ? gainA : 0
+        mixerB.outputVolume = canPlayB && (session.activeTrack == .b || !canPlayA) ? gainB : 0
+    }
+
+    private func startTimer() {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshTransportTick()
+            }
+        }
+    }
+
+    private func refreshTransportTick() {
+        guard session.isPlaying else { return }
+        let transport = currentTransportPosition()
+        session.transportPosition = transport
+        if transport >= session.duration {
+            stop()
+        }
+    }
+
+    private func currentTransportPosition() -> TimeInterval {
+        guard session.isPlaying, let playbackStartedAt else {
+            return TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
+        }
+
+        let elapsed = CACurrentMediaTime() - playbackStartedAt
+        return TransportMapping.clampedTransport(playbackStartedFromTransport + elapsed, duration: session.duration)
+    }
+}
