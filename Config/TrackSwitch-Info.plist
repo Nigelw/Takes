@@ -20,6 +20,8 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>TrackSwitch needs to read the selected local track from Music.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

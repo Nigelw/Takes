@@ -49,6 +49,7 @@ enum PlaybackError: LocalizedError, Equatable {
     case engineStartFailed
     case schedulingFailed
     case noValidOverlap
+    case librarySelectionFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -64,6 +65,8 @@ enum PlaybackError: LocalizedError, Equatable {
             "Audio playback could not be scheduled."
         case .noValidOverlap:
             "The current offsets leave no valid overlap between the two tracks."
+        case let .librarySelectionFailed(message):
+            message
         }
     }
 }

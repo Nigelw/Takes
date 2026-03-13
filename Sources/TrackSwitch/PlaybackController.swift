@@ -9,6 +9,7 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var overlapWarning: String?
 
     private let loader: AudioFileLoading
+    private let libraryTrackSelector: LibraryTrackSelecting
     private let engine = AVAudioEngine()
     private let playerA = AVAudioPlayerNode()
     private let playerB = AVAudioPlayerNode()
@@ -23,8 +24,12 @@ final class PlaybackController: ObservableObject {
     private var playbackStartedFromTransport: TimeInterval = 0
     private var timer: Timer?
 
-    init(loader: AudioFileLoading = AudioFileLoader()) {
+    init(
+        loader: AudioFileLoading = AudioFileLoader(),
+        libraryTrackSelector: LibraryTrackSelecting = LibraryTrackSelectionLoader()
+    ) {
         self.loader = loader
+        self.libraryTrackSelector = libraryTrackSelector
     }
 
     func loadTrack(_ side: TrackSide, from url: URL) async {
@@ -58,6 +63,17 @@ final class PlaybackController: ObservableObject {
             playbackError = error
         } catch {
             playbackError = .failedToOpenFile(url)
+        }
+    }
+
+    func loadSelectedLibraryTrack(_ side: TrackSide) async {
+        do {
+            let url = try libraryTrackSelector.selectedTrackURL()
+            await loadTrack(side, from: url)
+        } catch let error as PlaybackError {
+            playbackError = error
+        } catch {
+            playbackError = .librarySelectionFailed("Could not load the selected track from Music.")
         }
     }
 

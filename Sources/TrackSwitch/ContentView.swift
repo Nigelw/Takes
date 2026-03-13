@@ -81,6 +81,11 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             Button("Load \(side.title)", action: action)
+            Button("Load Selected from Music") {
+                Task {
+                    await controller.loadSelectedLibraryTrack(side)
+                }
+            }
             Text("Drop audio file here")
                 .font(.caption)
                 .foregroundStyle(.secondary)

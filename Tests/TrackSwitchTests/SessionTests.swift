@@ -1,4 +1,5 @@
 import AVFoundation
+import Foundation
 import Testing
 @testable import TrackSwitch
 
@@ -27,6 +28,31 @@ struct SessionTests {
         #expect(track.metadataSummary.contains("WAV"))
         #expect(track.metadataSummary.contains("44100"))
         #expect(track.metadataSummary.contains("02:00"))
+    }
+
+    @Test
+    func musicSelectionScriptTargetsMusicByBundleIdentifier() {
+        let script = LibraryTrackSelectionLoader.musicSelectionScript
+
+        #expect(script.contains("application id \"com.apple.Music\""))
+        #expect(!script.contains("\"iTunes\""))
+    }
+
+    @Test
+    func infoPlistDeclaresAppleEventsUsageDescription() throws {
+        let plistURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Config")
+            .appending(path: "TrackSwitch-Info.plist")
+
+        let data = try Data(contentsOf: plistURL)
+        let plist = try #require(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+
+        let usage = plist["NSAppleEventsUsageDescription"] as? String
+        #expect(usage?.isEmpty == false)
     }
 
     private func makeTrack(name: String) -> LoadedTrack {
