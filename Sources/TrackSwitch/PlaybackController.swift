@@ -19,7 +19,7 @@ final class PlaybackController: ObservableObject {
     private var engineConfigured = false
     private var audioFileA: AVAudioFile?
     private var audioFileB: AVAudioFile?
-    private var overlapStart: TimeInterval = 0
+    private var sessionStart: TimeInterval = 0
     private var playbackStartedAt: CFTimeInterval?
     private var playbackStartedFromTransport: TimeInterval = 0
     private var timer: Timer?
@@ -248,35 +248,31 @@ final class PlaybackController: ObservableObject {
         }
 
         let transport = TransportMapping.clampedTransport(relativeTransport, duration: session.duration)
+        let absoluteTransport = TransportMapping.absoluteTransportPosition(
+            relativeTransport: transport,
+            sessionStart: sessionStart
+        )
         playerA.stop()
         playerB.stop()
 
         if let trackA = session.trackA, let fileA = audioFileA {
-            let positionA = TransportMapping.filePosition(
-                forRelativeTransport: transport,
-                overlapStart: overlapStart,
-                offset: trackA.offsetSeconds
+            scheduleTrack(
+                trackA,
+                file: fileA,
+                on: playerA,
+                atRelativeTransport: transport,
+                absoluteTransport: absoluteTransport
             )
-            let frameA = AVAudioFramePosition(max(0, positionA * trackA.sampleRate))
-            let framesRemainingA = max(0, fileA.length - frameA)
-            guard framesRemainingA > 0 else {
-                throw PlaybackError.schedulingFailed
-            }
-            playerA.scheduleSegment(fileA, startingFrame: frameA, frameCount: AVAudioFrameCount(framesRemainingA), at: nil)
         }
 
         if let trackB = session.trackB, let fileB = audioFileB {
-            let positionB = TransportMapping.filePosition(
-                forRelativeTransport: transport,
-                overlapStart: overlapStart,
-                offset: trackB.offsetSeconds
+            scheduleTrack(
+                trackB,
+                file: fileB,
+                on: playerB,
+                atRelativeTransport: transport,
+                absoluteTransport: absoluteTransport
             )
-            let frameB = AVAudioFramePosition(max(0, positionB * trackB.sampleRate))
-            let framesRemainingB = max(0, fileB.length - frameB)
-            guard framesRemainingB > 0 else {
-                throw PlaybackError.schedulingFailed
-            }
-            playerB.scheduleSegment(fileB, startingFrame: frameB, frameCount: AVAudioFrameCount(framesRemainingB), at: nil)
         }
 
         session.transportPosition = transport
@@ -284,25 +280,31 @@ final class PlaybackController: ObservableObject {
 
     private func recalculateSessionDuration() {
         if let trackA = session.trackA, let trackB = session.trackB {
-            guard let range = TransportMapping.overlapRange(trackA: trackA, trackB: trackB) else {
+            guard let range = TransportMapping.sessionRange(trackA: trackA, trackB: trackB) else {
                 session.duration = 0
                 session.transportPosition = 0
-                overlapStart = 0
-                overlapWarning = "Offsets leave no overlap between Track A and Track B."
-                playbackError = .noValidOverlap
+                sessionStart = 0
+                overlapWarning = nil
                 return
             }
 
-            overlapStart = range.lowerBound
+            sessionStart = range.lowerBound
             session.duration = range.upperBound - range.lowerBound
             session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
-            let remainingFraction = session.duration / max(trackA.duration, trackB.duration)
-            overlapWarning = remainingFraction < 0.5 ? "Offsets reduce the compare range to \(session.duration.formattedTimestamp)." : nil
+            let overlapDuration = TransportMapping.validOverlapDuration(trackA: trackA, trackB: trackB)
+            if overlapDuration == 0 {
+                overlapWarning = "Track A and Track B do not overlap at the current offsets."
+            } else if overlapDuration < min(trackA.duration, trackB.duration) {
+                overlapWarning = "Offsets reduce the shared compare range to \(overlapDuration.formattedTimestamp)."
+            } else {
+                overlapWarning = nil
+            }
+            playbackError = nil
             return
         }
 
         if let trackA = session.trackA {
-            overlapStart = trackA.offsetSeconds
+            sessionStart = trackA.offsetSeconds
             session.duration = trackA.duration
             session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
             overlapWarning = nil
@@ -310,7 +312,7 @@ final class PlaybackController: ObservableObject {
         }
 
         if let trackB = session.trackB {
-            overlapStart = trackB.offsetSeconds
+            sessionStart = trackB.offsetSeconds
             session.duration = trackB.duration
             session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
             overlapWarning = nil
@@ -318,8 +320,57 @@ final class PlaybackController: ObservableObject {
         }
 
         session.duration = 0
-        overlapStart = 0
+        sessionStart = 0
         overlapWarning = nil
+    }
+
+    private func scheduleTrack(
+        _ track: LoadedTrack,
+        file: AVAudioFile,
+        on player: AVAudioPlayerNode,
+        atRelativeTransport relativeTransport: TimeInterval,
+        absoluteTransport: TimeInterval
+    ) {
+        let filePosition = absoluteTransport - track.offsetSeconds
+
+        if filePosition >= track.duration {
+            return
+        }
+
+        if filePosition < 0 {
+            let delaySeconds = -filePosition
+            scheduleSilence(on: player, format: file.processingFormat, duration: delaySeconds)
+            player.scheduleSegment(
+                file,
+                startingFrame: 0,
+                frameCount: AVAudioFrameCount(file.length),
+                at: nil
+            )
+            return
+        }
+
+        let frame = AVAudioFramePosition(filePosition * track.sampleRate)
+        let framesRemaining = max(0, file.length - frame)
+        guard framesRemaining > 0 else { return }
+        player.scheduleSegment(file, startingFrame: frame, frameCount: AVAudioFrameCount(framesRemaining), at: nil)
+    }
+
+    private func scheduleSilence(on player: AVAudioPlayerNode, format: AVAudioFormat, duration: TimeInterval) {
+        let frameLength = AVAudioFrameCount(max(0, duration * format.sampleRate))
+        guard frameLength > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength) else {
+            return
+        }
+
+        buffer.frameLength = frameLength
+        let audioBufferList = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        for audioBuffer in audioBufferList {
+            if let data = audioBuffer.mData {
+                memset(data, 0, Int(audioBuffer.mDataByteSize))
+            }
+        }
+
+        player.scheduleBuffer(buffer, at: nil, options: [])
     }
 
     private func applyAudibility() {

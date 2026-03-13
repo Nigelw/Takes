@@ -4,10 +4,10 @@ import Testing
 
 struct TransportMappingTests {
     @Test
-    func filePositionAccountsForOffsetAndOverlapStart() {
+    func filePositionAccountsForOffsetAndSessionStart() {
         let position = TransportMapping.filePosition(
             forRelativeTransport: 2,
-            overlapStart: 1.5,
+            sessionStart: 1.5,
             offset: 0.5
         )
 
@@ -15,19 +15,33 @@ struct TransportMappingTests {
     }
 
     @Test
-    func overlapDurationUsesIntersectionOfTrackWindows() {
+    func sessionRangeUsesUnionOfTrackWindows() throws {
         let trackA = makeTrack(duration: 10, offset: 0)
         let trackB = makeTrack(duration: 8, offset: 1.5)
 
-        #expect(TransportMapping.validOverlapDuration(trackA: trackA, trackB: trackB) == 8)
+        let range = try #require(TransportMapping.sessionRange(trackA: trackA, trackB: trackB))
+        #expect(range.lowerBound == 0)
+        #expect(range.upperBound == 10)
     }
 
     @Test
-    func overlapReturnsZeroWhenOffsetsRemoveIntersection() {
+    func sessionRangeCoversTracksEvenWhenTheyDoNotOverlap() throws {
         let trackA = makeTrack(duration: 5, offset: 0)
         let trackB = makeTrack(duration: 5, offset: 6)
 
-        #expect(TransportMapping.validOverlapDuration(trackA: trackA, trackB: trackB) == 0)
+        let range = try #require(TransportMapping.sessionRange(trackA: trackA, trackB: trackB))
+        #expect(range.lowerBound == 0)
+        #expect(range.upperBound == 11)
+    }
+
+    @Test
+    func trackValidityUsesOwnFileWindowWithinSession() {
+        let track = makeTrack(duration: 5, offset: 2)
+
+        #expect(!TransportMapping.isTrackAudible(track, atRelativeTransport: 1, sessionStart: 0))
+        #expect(TransportMapping.isTrackAudible(track, atRelativeTransport: 2, sessionStart: 0))
+        #expect(TransportMapping.isTrackAudible(track, atRelativeTransport: 7, sessionStart: 0))
+        #expect(!TransportMapping.isTrackAudible(track, atRelativeTransport: 7.01, sessionStart: 0))
     }
 
     @Test

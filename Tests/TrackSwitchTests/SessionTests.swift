@@ -22,6 +22,17 @@ struct SessionTests {
     }
 
     @Test
+    func sessionRemainsPlayableWithSingleTrackOrNoOverlapAsLongAsDurationExists() {
+        var session = ComparisonSession()
+        session.trackA = makeTrack(name: "a.wav")
+        session.trackB = makeTrack(name: "b.wav")
+        session.duration = 11
+
+        #expect(session.isPlayable)
+        #expect(session.canToggleComparison)
+    }
+
+    @Test
     func loadedTrackMetadataSummaryIncludesKeyFacts() {
         let track = makeTrack(name: "master.wav")
 
