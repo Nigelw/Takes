@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import Foundation
 import Testing
 @testable import TrackSwitch
@@ -133,6 +134,45 @@ struct SessionTests {
         #expect(assignments[0].1 == first)
         #expect(assignments[1].0 == .b)
         #expect(assignments[1].1 == second)
+    }
+
+    @Test
+    func numericControlStepUsesSmallAndLargeIncrements() {
+        let gainConfig = NumericControlConfiguration.gain
+        let offsetConfig = NumericControlConfiguration.offset
+
+        #expect(gainConfig.steppedValue(from: 0, direction: 1, largeStep: false) == 1)
+        #expect(gainConfig.steppedValue(from: 0, direction: -1, largeStep: true) == -10)
+        #expect(offsetConfig.steppedValue(from: 0, direction: 1, largeStep: false) == 10)
+        #expect(offsetConfig.steppedValue(from: 0, direction: -1, largeStep: true) == -100)
+    }
+
+    @Test
+    func numericControlStepClampsToConfiguredRange() {
+        let gainConfig = NumericControlConfiguration.gain
+        let offsetConfig = NumericControlConfiguration.offset
+
+        #expect(gainConfig.steppedValue(from: 20, direction: 1, largeStep: true) == 24)
+        #expect(gainConfig.steppedValue(from: -20, direction: -1, largeStep: true) == -24)
+        #expect(offsetConfig.steppedValue(from: 4950, direction: 1, largeStep: true) == 5000)
+        #expect(offsetConfig.steppedValue(from: -4950, direction: -1, largeStep: true) == -5000)
+    }
+
+    @Test
+    func numericControlUsesCurrentFieldValueWhenStepping() {
+        let offsetConfig = NumericControlConfiguration.offset
+
+        #expect(offsetConfig.steppedValue(fromText: "20", fallbackValue: 0, direction: 1, largeStep: false) == 30)
+        #expect(offsetConfig.steppedValue(fromText: "30", fallbackValue: 0, direction: 1, largeStep: true) == 130)
+        #expect(offsetConfig.steppedValue(fromText: "130", fallbackValue: 0, direction: -1, largeStep: true) == 30)
+    }
+
+    @Test
+    func numericControlTreatsShiftArrowSelectorsAsLargeStepCommands() {
+        #expect(NumericControlConfiguration.isLargeStepCommand(#selector(NSResponder.moveUp(_:))) == false)
+        #expect(NumericControlConfiguration.isLargeStepCommand(#selector(NSResponder.moveDown(_:))) == false)
+        #expect(NumericControlConfiguration.isLargeStepCommand(#selector(NSResponder.moveUpAndModifySelection(_:))) == true)
+        #expect(NumericControlConfiguration.isLargeStepCommand(#selector(NSResponder.moveDownAndModifySelection(_:))) == true)
     }
 
     private func makeTrack(name: String) -> LoadedTrack {

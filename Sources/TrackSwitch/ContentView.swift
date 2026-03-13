@@ -1,6 +1,34 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct NumericControlConfiguration {
+    let range: ClosedRange<Int>
+    let step: Int
+    let largeStep: Int
+    let suffix: String
+
+    static let gain = NumericControlConfiguration(range: -24...24, step: 1, largeStep: 10, suffix: "dB")
+    static let offset = NumericControlConfiguration(range: -5000...5000, step: 10, largeStep: 100, suffix: "ms")
+
+    func clamped(_ value: Int) -> Int {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
+
+    func steppedValue(from value: Int, direction: Int, largeStep: Bool) -> Int {
+        clamped(value + (largeStep ? self.largeStep : step) * direction)
+    }
+
+    func steppedValue(fromText text: String, fallbackValue: Int, direction: Int, largeStep: Bool) -> Int {
+        let parsed = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? fallbackValue
+        return steppedValue(from: parsed, direction: direction, largeStep: largeStep)
+    }
+
+    static func isLargeStepCommand(_ selector: Selector) -> Bool {
+        selector == #selector(NSResponder.moveUpAndModifySelection(_:))
+            || selector == #selector(NSResponder.moveDownAndModifySelection(_:))
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var controller: PlaybackController
 
@@ -112,10 +140,10 @@ struct ContentView: View {
                 }
                 .disabled(!controller.session.isPlayable)
 
-                Button("Toggle A/B") {
+                Button("Switch Playback") {
                     controller.toggleActiveTrack()
                 }
-                .keyboardShortcut(.tab, modifiers: [])
+                .keyboardShortcut("x", modifiers: [])
                 .disabled(!controller.session.canToggleComparison)
 
                 Spacer()
@@ -139,7 +167,7 @@ struct ContentView: View {
             )
             .disabled(!controller.session.isPlayable)
 
-            Text("Keyboard: Space play/pause, Tab toggle, Left/Right seek 1s, Shift+Left/Right seek 5s")
+            Text("Keyboard: Space play/pause, X switch playback, Left/Right seek 1s, Shift+Left/Right seek 5s")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -160,16 +188,27 @@ struct ContentView: View {
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Gain \(Int(track?.gainDB ?? 0)) dB")
+                let gainValue = Int((track?.gainDB ?? 0).rounded())
+                Text("Gain \(gainValue) dB")
                     .foregroundStyle(.secondary)
-                Slider(
-                    value: Binding(
-                        get: { Double(track?.gainDB ?? 0) },
-                        set: { controller.setGain(side, db: Float($0)) }
-                    ),
-                    in: -24...24,
-                    step: 0.5
-                )
+                HStack(alignment: .center, spacing: 10) {
+                    ResettableSlider(
+                        value: Binding(
+                            get: { Double(gainValue) },
+                            set: { controller.setGain(side, db: Float(Int($0.rounded()))) }
+                        ),
+                        range: -24...24,
+                        resetValue: 0
+                    )
+                    .frame(maxWidth: .infinity)
+                    NumericControlRow(
+                        value: Binding(
+                            get: { gainValue },
+                            set: { controller.setGain(side, db: Float($0)) }
+                        ),
+                        configuration: .gain
+                    )
+                }
                 .disabled(track == nil)
             }
 
@@ -178,14 +217,24 @@ struct ContentView: View {
                     let offsetMs = Int(((track?.offsetSeconds ?? 0) * 1000).rounded())
                     Text("Offset \(offsetMs) ms")
                         .foregroundStyle(.secondary)
-                    Slider(
-                        value: Binding(
-                            get: { (track?.offsetSeconds ?? 0) * 1000 },
-                            set: { controller.setOffset(side, seconds: $0 / 1000) }
-                        ),
-                        in: -5000...5000,
-                        step: 1
-                    )
+                    HStack(alignment: .center, spacing: 10) {
+                        ResettableSlider(
+                            value: Binding(
+                                get: { Double(offsetMs) },
+                                set: { controller.setOffset(side, seconds: Double(Int($0.rounded())) / 1000) }
+                            ),
+                            range: -5000...5000,
+                            resetValue: 0
+                        )
+                        .frame(maxWidth: .infinity)
+                        NumericControlRow(
+                            value: Binding(
+                                get: { offsetMs },
+                                set: { controller.setOffset(side, seconds: Double($0) / 1000) }
+                            ),
+                            configuration: .offset
+                        )
+                    }
                     .disabled(track == nil)
                 }
             }
@@ -244,6 +293,10 @@ struct ContentView: View {
 
     private func setupKeyMonitor() {
         let monitor = KeyMonitor { event in
+            if let window = NSApp.keyWindow, window.firstResponder is NSTextView {
+                return false
+            }
+
             switch event.keyCode {
             case 123:
                 controller.skip(by: event.modifierFlags.contains(.shift) ? -5 : -1)
@@ -251,12 +304,235 @@ struct ContentView: View {
             case 124:
                 controller.skip(by: event.modifierFlags.contains(.shift) ? 5 : 1)
                 return true
+            case 7:
+                controller.toggleActiveTrack()
+                return true
             default:
                 return false
             }
         }
         monitor.start()
         keyMonitor = monitor
+    }
+}
+
+private struct NumericControlRow: View {
+    @Binding var value: Int
+    let configuration: NumericControlConfiguration
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                value = configuration.steppedValue(from: value, direction: -1, largeStep: false)
+            } label: {
+                Image(systemName: "minus")
+            }
+            .buttonStyle(.bordered)
+
+            IntegerInputField(value: $value, configuration: configuration)
+                .frame(width: 70)
+
+            Text(configuration.suffix)
+                .foregroundStyle(.secondary)
+                .frame(width: 24, alignment: .leading)
+
+            Button {
+                value = configuration.steppedValue(from: value, direction: 1, largeStep: false)
+            } label: {
+                Image(systemName: "plus")
+            }
+            .buttonStyle(.bordered)
+
+            Button {
+                value = 0
+            } label: {
+                Label("Reset", systemImage: "arrow.counterclockwise")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+}
+
+private struct IntegerInputField: NSViewRepresentable {
+    @Binding var value: Int
+    let configuration: NumericControlConfiguration
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(value: $value, configuration: configuration)
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = NSTextField(frame: .zero)
+        textField.alignment = .right
+        textField.isBordered = true
+        textField.focusRingType = .default
+        textField.delegate = context.coordinator
+        textField.stringValue = "\(value)"
+        return textField
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        let clamped = configuration.clamped(value)
+        if clamped != value {
+            DispatchQueue.main.async {
+                self.value = clamped
+            }
+        }
+        if nsView.stringValue != "\(clamped)" {
+            nsView.stringValue = "\(clamped)"
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding private var value: Int
+        private let configuration: NumericControlConfiguration
+
+        init(value: Binding<Int>, configuration: NumericControlConfiguration) {
+            _value = value
+            self.configuration = configuration
+        }
+
+        @MainActor
+        func controlTextDidEndEditing(_ obj: Notification) {
+            guard let textField = obj.object as? NSTextField else { return }
+            syncValue(from: textField)
+        }
+
+        @MainActor
+        func controlTextDidChange(_ obj: Notification) {
+            guard let textField = obj.object as? NSTextField else { return }
+            if let parsed = Int(textField.stringValue.trimmingCharacters(in: .whitespaces)) {
+                value = configuration.clamped(parsed)
+            }
+        }
+
+        func applyStep(direction: Int, largeStep: Bool) {
+            value = configuration.steppedValue(from: value, direction: direction, largeStep: largeStep)
+        }
+
+        @MainActor
+        private func syncValue(from textField: NSTextField) {
+            let trimmed = textField.stringValue.trimmingCharacters(in: .whitespaces)
+            let parsed = Int(trimmed) ?? value
+            let clamped = configuration.clamped(parsed)
+            value = clamped
+            textField.stringValue = "\(clamped)"
+        }
+
+        @MainActor
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            switch commandSelector {
+            case #selector(NSResponder.moveUp(_:)):
+                applyStep(
+                    using: (control as? NSTextField)?.stringValue ?? "\(value)",
+                    direction: 1,
+                    largeStep: false
+                )
+                if let textField = control as? NSTextField { textField.stringValue = "\(value)" }
+                return true
+            case #selector(NSResponder.moveDown(_:)):
+                applyStep(
+                    using: (control as? NSTextField)?.stringValue ?? "\(value)",
+                    direction: -1,
+                    largeStep: false
+                )
+                if let textField = control as? NSTextField { textField.stringValue = "\(value)" }
+                return true
+            case #selector(NSResponder.moveUpAndModifySelection(_:)):
+                applyStep(
+                    using: (control as? NSTextField)?.stringValue ?? "\(value)",
+                    direction: 1,
+                    largeStep: true
+                )
+                if let textField = control as? NSTextField { textField.stringValue = "\(value)" }
+                return true
+            case #selector(NSResponder.moveDownAndModifySelection(_:)):
+                applyStep(
+                    using: (control as? NSTextField)?.stringValue ?? "\(value)",
+                    direction: -1,
+                    largeStep: true
+                )
+                if let textField = control as? NSTextField { textField.stringValue = "\(value)" }
+                return true
+            case #selector(NSResponder.insertNewline(_:)):
+                control.window?.makeFirstResponder(nil)
+                return true
+            default:
+                return false
+            }
+        }
+
+        private func applyStep(using currentText: String, direction: Int, largeStep: Bool) {
+            value = configuration.steppedValue(
+                fromText: currentText,
+                fallbackValue: value,
+                direction: direction,
+                largeStep: largeStep
+            )
+        }
+    }
+}
+
+private struct ResettableSlider: NSViewRepresentable {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let resetValue: Double
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(value: $value)
+    }
+
+    func makeNSView(context: Context) -> DoubleClickResetSlider {
+        let slider = DoubleClickResetSlider(value: value, minValue: range.lowerBound, maxValue: range.upperBound, target: context.coordinator, action: #selector(Coordinator.valueChanged(_:)))
+        slider.doubleActionHandler = {
+            context.coordinator.reset(to: resetValue)
+        }
+        return slider
+    }
+
+    func updateNSView(_ nsView: DoubleClickResetSlider, context: Context) {
+        nsView.minValue = range.lowerBound
+        nsView.maxValue = range.upperBound
+        if nsView.doubleValue != value {
+            nsView.doubleValue = value
+        }
+        nsView.doubleActionHandler = {
+            context.coordinator.reset(to: resetValue)
+        }
+    }
+
+    final class Coordinator: NSObject {
+        @Binding private var value: Double
+
+        init(value: Binding<Double>) {
+            _value = value
+        }
+
+        @MainActor
+        @objc func valueChanged(_ sender: NSSlider) {
+            value = sender.doubleValue
+        }
+
+        @MainActor
+        func reset(to resetValue: Double) {
+            value = resetValue
+        }
+    }
+}
+
+private final class DoubleClickResetSlider: NSSlider {
+    var doubleActionHandler: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            let resetValue = min(max(0, minValue), maxValue)
+            doubleValue = resetValue
+            doubleActionHandler?()
+            sendAction(action, to: target)
+            return
+        }
+
+        super.mouseDown(with: event)
     }
 }
 
