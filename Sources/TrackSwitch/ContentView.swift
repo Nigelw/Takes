@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var pendingImportSide: TrackSide?
     @State private var sliderPosition = 0.0
     @State private var keyMonitor: KeyMonitor?
+    @State private var dropTargetSide: TrackSide?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -80,10 +81,16 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             Button("Load \(side.title)", action: action)
+            Text("Drop audio file here")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(backgroundStyle(for: side), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: dropBinding(for: side)) { providers in
+            handleDrop(providers: providers, side: side)
+        }
     }
 
     private var transportSection: some View {
@@ -199,6 +206,37 @@ struct ContentView: View {
         }
     }
 
+    private func backgroundStyle(for side: TrackSide) -> some ShapeStyle {
+        if dropTargetSide == side {
+            return AnyShapeStyle(.blue.opacity(0.16))
+        }
+        return AnyShapeStyle(.quaternary.opacity(0.4))
+    }
+
+    private func dropBinding(for side: TrackSide) -> Binding<Bool> {
+        Binding(
+            get: { dropTargetSide == side },
+            set: { isTargeted in
+                dropTargetSide = isTargeted ? side : nil
+            }
+        )
+    }
+
+    private func handleDrop(providers: [NSItemProvider], side: TrackSide) -> Bool {
+        guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) else {
+            return false
+        }
+
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+            guard let url = extractDroppedFileURL(from: item) else { return }
+            Task { @MainActor in
+                await controller.loadTrack(side, from: url)
+            }
+        }
+
+        return true
+    }
+
     private func setupKeyMonitor() {
         let monitor = KeyMonitor { event in
             switch event.keyCode {
@@ -215,4 +253,20 @@ struct ContentView: View {
         monitor.start()
         keyMonitor = monitor
     }
+}
+
+private func extractDroppedFileURL(from item: NSSecureCoding?) -> URL? {
+    if let data = item as? Data {
+        return URL(dataRepresentation: data, relativeTo: nil)
+    }
+
+    if let url = item as? URL {
+        return url
+    }
+
+    if let text = item as? String {
+        return URL(string: text)
+    }
+
+    return nil
 }
