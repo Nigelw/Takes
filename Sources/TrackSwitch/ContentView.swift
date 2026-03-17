@@ -213,10 +213,6 @@ struct ContentView: View {
                 }
             )
             .disabled(!controller.session.isPlayable)
-
-            Text("Keyboard: Space play/pause, X switch playback, Left/Right seek 1s, Shift+Left/Right seek 10s, Command+Left rewind, Command+Right jump to end")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .padding()
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
