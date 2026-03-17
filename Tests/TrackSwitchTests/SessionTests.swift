@@ -182,6 +182,25 @@ struct SessionTests {
         #expect(NumericControlConfiguration.isLargeStepModifierFlags([.command, .shift]) == true)
     }
 
+    @Test
+    func numericControlTreatsEscapeAsCancelEditingCommand() {
+        #expect(NumericControlConfiguration.isCancelEditingCommand(#selector(NSResponder.insertNewline(_:))) == false)
+        #expect(NumericControlConfiguration.isCancelEditingCommand(#selector(NSResponder.cancelOperation(_:))) == true)
+    }
+
+    @Test
+    func numericControlEditStateRestoresCommittedValueOnCancel() {
+        var editState = NumericControlEditState(committedValue: 12)
+        editState.beginEditing(currentValue: 12)
+
+        #expect(editState.cancelledValue() == 12)
+
+        editState.commit(27)
+        editState.beginEditing(currentValue: 27)
+
+        #expect(editState.cancelledValue() == 27)
+    }
+
     private func makeTrack(name: String) -> LoadedTrack {
         LoadedTrack(
             url: URL(fileURLWithPath: "/tmp/\(name)"),

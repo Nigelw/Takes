@@ -31,6 +31,30 @@ struct NumericControlConfiguration {
     static func isLargeStepModifierFlags(_ modifierFlags: NSEvent.ModifierFlags) -> Bool {
         modifierFlags.contains(.shift)
     }
+
+    static func isCancelEditingCommand(_ selector: Selector) -> Bool {
+        selector == #selector(NSResponder.cancelOperation(_:))
+    }
+}
+
+struct NumericControlEditState {
+    private(set) var committedValue: Int
+
+    init(committedValue: Int) {
+        self.committedValue = committedValue
+    }
+
+    mutating func beginEditing(currentValue: Int) {
+        committedValue = currentValue
+    }
+
+    func cancelledValue() -> Int {
+        committedValue
+    }
+
+    mutating func commit(_ value: Int) {
+        committedValue = value
+    }
 }
 
 struct ContentView: View {
@@ -398,15 +422,31 @@ private struct IntegerInputField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextFieldDelegate {
         @Binding private var value: Int
         private let configuration: NumericControlConfiguration
+        private var editState: NumericControlEditState
+        private var isCancellingEdit = false
 
         init(value: Binding<Int>, configuration: NumericControlConfiguration) {
             _value = value
             self.configuration = configuration
+            editState = NumericControlEditState(committedValue: value.wrappedValue)
+        }
+
+        @MainActor
+        func controlTextDidBeginEditing(_ obj: Notification) {
+            editState.beginEditing(currentValue: value)
+            isCancellingEdit = false
         }
 
         @MainActor
         func controlTextDidEndEditing(_ obj: Notification) {
             guard let textField = obj.object as? NSTextField else { return }
+            if isCancellingEdit {
+                let restoredValue = editState.cancelledValue()
+                value = restoredValue
+                textField.stringValue = "\(restoredValue)"
+                isCancellingEdit = false
+                return
+            }
             syncValue(from: textField)
         }
 
@@ -428,6 +468,7 @@ private struct IntegerInputField: NSViewRepresentable {
             let parsed = Int(trimmed) ?? value
             let clamped = configuration.clamped(parsed)
             value = clamped
+            editState.commit(clamped)
             textField.stringValue = "\(clamped)"
         }
 
@@ -467,6 +508,15 @@ private struct IntegerInputField: NSViewRepresentable {
                 if let textField = control as? NSTextField { textField.stringValue = "\(value)" }
                 return true
             case #selector(NSResponder.insertNewline(_:)):
+                control.window?.makeFirstResponder(nil)
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                if let textField = control as? NSTextField {
+                    let restoredValue = editState.cancelledValue()
+                    value = restoredValue
+                    textField.stringValue = "\(restoredValue)"
+                }
+                isCancellingEdit = true
                 control.window?.makeFirstResponder(nil)
                 return true
             default:
