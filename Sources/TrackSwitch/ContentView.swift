@@ -27,6 +27,10 @@ struct NumericControlConfiguration {
         selector == #selector(NSResponder.moveUpAndModifySelection(_:))
             || selector == #selector(NSResponder.moveDownAndModifySelection(_:))
     }
+
+    static func isLargeStepModifierFlags(_ modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        modifierFlags.contains(.shift)
+    }
 }
 
 struct ContentView: View {
@@ -323,7 +327,11 @@ private struct NumericControlRow: View {
     var body: some View {
         HStack(spacing: 6) {
             Button {
-                value = configuration.steppedValue(from: value, direction: -1, largeStep: false)
+                value = configuration.steppedValue(
+                    from: value,
+                    direction: -1,
+                    largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
+                )
             } label: {
                 Image(systemName: "minus")
             }
@@ -337,7 +345,11 @@ private struct NumericControlRow: View {
                 .frame(width: 24, alignment: .leading)
 
             Button {
-                value = configuration.steppedValue(from: value, direction: 1, largeStep: false)
+                value = configuration.steppedValue(
+                    from: value,
+                    direction: 1,
+                    largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
+                )
             } label: {
                 Image(systemName: "plus")
             }

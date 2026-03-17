@@ -175,6 +175,13 @@ struct SessionTests {
         #expect(NumericControlConfiguration.isLargeStepCommand(#selector(NSResponder.moveDownAndModifySelection(_:))) == true)
     }
 
+    @Test
+    func numericControlTreatsShiftModifierAsLargeStepForButtons() {
+        #expect(NumericControlConfiguration.isLargeStepModifierFlags([]) == false)
+        #expect(NumericControlConfiguration.isLargeStepModifierFlags(.shift) == true)
+        #expect(NumericControlConfiguration.isLargeStepModifierFlags([.command, .shift]) == true)
+    }
+
     private func makeTrack(name: String) -> LoadedTrack {
         LoadedTrack(
             url: URL(fileURLWithPath: "/tmp/\(name)"),
