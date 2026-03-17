@@ -182,8 +182,8 @@ struct ContentView: View {
                 .keyboardShortcut(.space, modifiers: [])
                 .disabled(!controller.session.isPlayable)
 
-                Button("Stop") {
-                    controller.stop()
+                Button("Rewind") {
+                    controller.seek(to: 0)
                 }
                 .disabled(!controller.session.isPlayable)
 
@@ -214,7 +214,7 @@ struct ContentView: View {
             )
             .disabled(!controller.session.isPlayable)
 
-            Text("Keyboard: Space play/pause, X switch playback, Left/Right seek 1s, Shift+Left/Right seek 5s")
+            Text("Keyboard: Space play/pause, X switch playback, Left/Right seek 1s, Shift+Left/Right seek 5s, Command+Left rewind, Command+Right jump to end")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -346,9 +346,17 @@ struct ContentView: View {
 
             switch event.keyCode {
             case 123:
+                if event.modifierFlags.contains(.command) {
+                    controller.seek(to: 0)
+                    return true
+                }
                 controller.skip(by: event.modifierFlags.contains(.shift) ? -5 : -1)
                 return true
             case 124:
+                if event.modifierFlags.contains(.command) {
+                    controller.seek(to: controller.session.duration)
+                    return true
+                }
                 controller.skip(by: event.modifierFlags.contains(.shift) ? 5 : 1)
                 return true
             case 7:
