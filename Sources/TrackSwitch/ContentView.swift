@@ -214,7 +214,7 @@ struct ContentView: View {
             )
             .disabled(!controller.session.isPlayable)
 
-            Text("Keyboard: Space play/pause, X switch playback, Left/Right seek 1s, Shift+Left/Right seek 5s, Command+Left rewind, Command+Right jump to end")
+            Text("Keyboard: Space play/pause, X switch playback, Left/Right seek 1s, Shift+Left/Right seek 10s, Command+Left rewind, Command+Right jump to end")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -350,14 +350,14 @@ struct ContentView: View {
                     controller.seek(to: 0)
                     return true
                 }
-                controller.skip(by: event.modifierFlags.contains(.shift) ? -5 : -1)
+                controller.skip(by: event.modifierFlags.contains(.shift) ? -10 : -1)
                 return true
             case 124:
                 if event.modifierFlags.contains(.command) {
                     controller.seek(to: controller.session.duration)
                     return true
                 }
-                controller.skip(by: event.modifierFlags.contains(.shift) ? 5 : 1)
+                controller.skip(by: event.modifierFlags.contains(.shift) ? 10 : 1)
                 return true
             case 7:
                 controller.toggleActiveTrack()
