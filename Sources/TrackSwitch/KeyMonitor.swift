@@ -23,3 +23,26 @@ final class KeyMonitor {
         self.monitor = nil
     }
 }
+
+final class MouseMonitor {
+    private var monitor: Any?
+    private let handler: (NSEvent) -> Void
+
+    init(handler: @escaping (NSEvent) -> Void) {
+        self.handler = handler
+    }
+
+    func start() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            self?.handler(event)
+            return event
+        }
+    }
+
+    func stop() {
+        guard let monitor else { return }
+        NSEvent.removeMonitor(monitor)
+        self.monitor = nil
+    }
+}

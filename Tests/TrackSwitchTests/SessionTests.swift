@@ -201,6 +201,21 @@ struct SessionTests {
         #expect(editState.cancelledValue() == 27)
     }
 
+    @Test
+    func numericControlFocusPolicyClearsEditingFocusOnlyForOutsideClicks() {
+        let fieldEditor = NSTextView(frame: .zero)
+        let container = NSView(frame: .zero)
+        let textField = NSTextField(frame: .zero)
+        container.addSubview(textField)
+        let button = NSButton(frame: .zero)
+        container.addSubview(button)
+
+        #expect(NumericControlFocusPolicy.shouldClearEditingFocus(firstResponder: nil, clickedView: button) == false)
+        #expect(NumericControlFocusPolicy.shouldClearEditingFocus(firstResponder: fieldEditor, clickedView: textField) == false)
+        #expect(NumericControlFocusPolicy.shouldClearEditingFocus(firstResponder: fieldEditor, clickedView: button) == true)
+        #expect(NumericControlFocusPolicy.shouldClearEditingFocus(firstResponder: fieldEditor, clickedView: nil) == true)
+    }
+
     private func makeTrack(name: String) -> LoadedTrack {
         LoadedTrack(
             url: URL(fileURLWithPath: "/tmp/\(name)"),

@@ -57,6 +57,23 @@ struct NumericControlEditState {
     }
 }
 
+struct NumericControlFocusPolicy {
+    static func shouldClearEditingFocus(firstResponder: NSResponder?, clickedView: NSView?) -> Bool {
+        guard firstResponder is NSTextView else { return false }
+        guard let clickedView else { return true }
+
+        var currentView: NSView? = clickedView
+        while let view = currentView {
+            if view is NSTextField {
+                return false
+            }
+            currentView = view.superview
+        }
+
+        return true
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var controller: PlaybackController
 
@@ -64,6 +81,7 @@ struct ContentView: View {
     @State private var pendingImportSide: TrackSide?
     @State private var sliderPosition = 0.0
     @State private var keyMonitor: KeyMonitor?
+    @State private var mouseMonitor: MouseMonitor?
     @State private var dropTargetSide: TrackSide?
 
     var body: some View {
@@ -94,6 +112,7 @@ struct ContentView: View {
         }
         .onDisappear {
             keyMonitor?.stop()
+            mouseMonitor?.stop()
         }
         .onChange(of: controller.session.transportPosition) { _, newValue in
             sliderPosition = newValue
@@ -341,6 +360,21 @@ struct ContentView: View {
         }
         monitor.start()
         keyMonitor = monitor
+
+        let clickMonitor = MouseMonitor { event in
+            guard let window = event.window else { return }
+            let locationInWindow = event.locationInWindow
+            let clickedView = window.contentView?.hitTest(locationInWindow)
+
+            if NumericControlFocusPolicy.shouldClearEditingFocus(
+                firstResponder: window.firstResponder,
+                clickedView: clickedView
+            ) {
+                window.makeFirstResponder(nil)
+            }
+        }
+        clickMonitor.start()
+        mouseMonitor = clickMonitor
     }
 }
 
@@ -438,6 +472,19 @@ private struct IntegerInputField: NSViewRepresentable {
         }
 
         @MainActor
+        func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
+            guard let textField = control as? NSTextField else { return true }
+            if isCancellingEdit {
+                let restoredValue = editState.cancelledValue()
+                value = restoredValue
+                textField.stringValue = "\(restoredValue)"
+                return true
+            }
+            syncValue(from: textField, overrideText: fieldEditor.string)
+            return true
+        }
+
+        @MainActor
         func controlTextDidEndEditing(_ obj: Notification) {
             guard let textField = obj.object as? NSTextField else { return }
             if isCancellingEdit {
@@ -464,7 +511,12 @@ private struct IntegerInputField: NSViewRepresentable {
 
         @MainActor
         private func syncValue(from textField: NSTextField) {
-            let trimmed = textField.stringValue.trimmingCharacters(in: .whitespaces)
+            syncValue(from: textField, overrideText: nil)
+        }
+
+        @MainActor
+        private func syncValue(from textField: NSTextField, overrideText: String?) {
+            let trimmed = (overrideText ?? textField.stringValue).trimmingCharacters(in: .whitespaces)
             let parsed = Int(trimmed) ?? value
             let clamped = configuration.clamped(parsed)
             value = clamped
