@@ -5,6 +5,7 @@
 DerivedData/
 .derived-data/
 .swiftpm/
+.codex/
 
 *.xcuserstate
 xcuserdata/
