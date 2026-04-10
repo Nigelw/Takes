@@ -12,6 +12,7 @@
 		A10000000000000000000026 /* TrackSwitchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* TrackSwitchApp.swift */; };
 		A10000000000000000000027 /* TransportMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* TransportMapping.swift */; };
 		A10000000000000000000028 /* LibraryTrackSelectionLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001B /* LibraryTrackSelectionLoader.swift */; };
+		A10000000000000000000029 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* Assets.xcassets */; };
 		A10000000000000000000031 /* SessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* SessionTests.swift */; };
 		A10000000000000000000032 /* TransportMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* TransportMappingTests.swift */; };
 /* End PBXBuildFile section */
@@ -40,6 +41,7 @@
 		A10000000000000000000019 /* TransportMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportMappingTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000001A /* TrackSwitch-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "TrackSwitch-Info.plist"; sourceTree = "<group>"; };
 		A1000000000000000000001B /* LibraryTrackSelectionLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryTrackSelectionLoader.swift; sourceTree = "<group>"; };
+		A1000000000000000000001C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets/Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -63,6 +65,7 @@
 		A10000000000000000000004 = {
 			isa = PBXGroup;
 			children = (
+				A1000000000000000000001C /* Assets.xcassets */,
 				A10000000000000000000071 /* Sources */,
 				A10000000000000000000072 /* Tests */,
 				A10000000000000000000073 /* Config */,
@@ -209,6 +212,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000029 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -297,7 +301,7 @@
 		A100000000000000000000B0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -323,7 +327,7 @@
 		A100000000000000000000B1 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
