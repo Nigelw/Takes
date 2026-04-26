@@ -16,7 +16,7 @@ The app currently supports:
 - Independent offset adjustment for Track A and Track B
 - Independent gain trim per track through the track settings popup
 - Importing the current selection from Music.app
-- Loading one selected Music track into the clicked side
+- Loading one selected Music track through the shared Open assignment rules
 - Loading two selected Music tracks into A and B, ordered by Music's current view order
 - Shared transport playback with only one track audible at a time
 - Switching playback between A and B during playback
@@ -119,7 +119,7 @@ TrackSwitch/
 
 - `Models.swift` defines `LoadedTrack`, `ComparisonSession`, `TrackSide`, and `PlaybackError`.
 - `TransportMapping.swift` contains the pure transport math:
-  - session duration
+  - signed timeline bounds and range
   - overlap range
   - transport-to-file position mapping
   - audibility checks
@@ -146,7 +146,7 @@ Current transport behavior:
 
 - Playback is allowed with only one loaded track.
 - Switching playback requires both tracks to be loaded.
-- Track B keeps its own gain and offset values when you replace the file.
+- Each track keeps its own gain and offset values when you replace its file.
 - Music import requires Automation permission to control Music.
 - The app includes `NSAppleEventsUsageDescription` for that permission prompt.
 - If more than two tracks are selected in Music, the import should fail with a user-facing error.
@@ -162,7 +162,7 @@ Current transport behavior:
 
 Music import rules:
 
-- If one track is selected, it loads into the side whose button you clicked.
+- If one track is selected, it uses the shared assignment rules: fill Track A if empty, then Track B if empty, otherwise replace the active track.
 - If two tracks are selected, they load into Track A and Track B based on Music's playlist/library view order.
 - If the selection contains more than two tracks, the app shows an error.
 - The selected Music items must be local files on disk.
