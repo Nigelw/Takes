@@ -15,6 +15,7 @@ final class PlaybackController: ObservableObject {
     private let playerB = AVAudioPlayerNode()
     private let mixerA = AVAudioMixerNode()
     private let mixerB = AVAudioMixerNode()
+    nonisolated private static let maximumSilenceBufferDuration: TimeInterval = 5
 
     private var engineConfigured = false
     private var audioFileA: AVAudioFile?
@@ -228,6 +229,22 @@ final class PlaybackController: ObservableObject {
         )
     }
 
+    nonisolated static func silenceChunkDurations(
+        duration: TimeInterval,
+        maximumChunkDuration: TimeInterval = maximumSilenceBufferDuration
+    ) -> [TimeInterval] {
+        guard duration > 0, maximumChunkDuration > 0 else { return [] }
+
+        var chunks: [TimeInterval] = []
+        var remaining = duration
+        while remaining > 0 {
+            let chunk = min(remaining, maximumChunkDuration)
+            chunks.append(chunk)
+            remaining -= chunk
+        }
+        return chunks
+    }
+
     nonisolated static func importAssignments(
         for urls: [URL],
         in session: ComparisonSession
@@ -368,21 +385,23 @@ final class PlaybackController: ObservableObject {
     }
 
     private func scheduleSilence(on player: AVAudioPlayerNode, format: AVAudioFormat, duration: TimeInterval) {
-        let frameLength = AVAudioFrameCount(max(0, duration * format.sampleRate))
-        guard frameLength > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength) else {
-            return
-        }
-
-        buffer.frameLength = frameLength
-        let audioBufferList = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
-        for audioBuffer in audioBufferList {
-            if let data = audioBuffer.mData {
-                memset(data, 0, Int(audioBuffer.mDataByteSize))
+        for chunkDuration in Self.silenceChunkDurations(duration: duration) {
+            let frameLength = AVAudioFrameCount(max(0, chunkDuration * format.sampleRate))
+            guard frameLength > 0,
+                  let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength) else {
+                continue
             }
-        }
 
-        player.scheduleBuffer(buffer, at: nil, options: [])
+            buffer.frameLength = frameLength
+            let audioBufferList = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+            for audioBuffer in audioBufferList {
+                if let data = audioBuffer.mData {
+                    memset(data, 0, Int(audioBuffer.mDataByteSize))
+                }
+            }
+
+            player.scheduleBuffer(buffer, at: nil, options: [])
+        }
     }
 
     private func applyAudibility() {

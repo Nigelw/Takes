@@ -222,6 +222,37 @@ struct SessionTests {
     }
 
     @Test
+    func timelineRecalculationPreservesCurrentPositionWithoutZeroPreference() {
+        let position = PlaybackController.transportPositionAfterTimelineRecalculation(
+            currentPosition: -12,
+            timelineStart: -20,
+            timelineEnd: 120,
+            preferZero: false
+        )
+
+        #expect(position == -12)
+    }
+
+    @Test
+    func timelineRecalculationClampsWhenRangeExcludesZero() {
+        let position = PlaybackController.transportPositionAfterTimelineRecalculation(
+            currentPosition: 0,
+            timelineStart: 10,
+            timelineEnd: 120,
+            preferZero: true
+        )
+
+        #expect(position == 10)
+    }
+
+    @Test
+    func silenceSchedulingSplitsLongDurationsIntoBoundedChunks() {
+        let chunks = PlaybackController.silenceChunkDurations(duration: 12.5, maximumChunkDuration: 5)
+
+        #expect(chunks == [5, 5, 2.5])
+    }
+
+    @Test
     func numericControlStepUsesSmallAndLargeIncrements() {
         let gainConfig = NumericControlConfiguration.gain
         let offsetConfig = NumericControlConfiguration.offset
