@@ -55,6 +55,12 @@ struct SessionTests {
     }
 
     @Test
+    func unsignedTimestampClampsNegativeTimes() {
+        #expect(TimeInterval(-12).formattedTimestamp == "00:00")
+        #expect(TimeInterval(12).formattedTimestamp == "00:12")
+    }
+
+    @Test
     func loadedTrackMetadataSummaryIncludesKeyFacts() {
         let track = makeTrack(name: "master.wav")
 
