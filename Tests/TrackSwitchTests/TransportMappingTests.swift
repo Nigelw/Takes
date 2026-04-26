@@ -4,50 +4,66 @@ import Testing
 
 struct TransportMappingTests {
     @Test
-    func filePositionAccountsForOffsetAndSessionStart() {
-        let position = TransportMapping.filePosition(
-            forRelativeTransport: 2,
-            sessionStart: 1.5,
-            offset: 0.5
-        )
+    func timelineRangeIncludesZeroAndLoadedTrackRangeForSingleTrack() throws {
+        let track = makeTrack(duration: 10, offset: 6)
 
-        #expect(position == 3)
+        let range = try #require(TransportMapping.timelineRange(trackA: track, trackB: nil))
+
+        #expect(range.lowerBound == 0)
+        #expect(range.upperBound == 16)
     }
 
     @Test
-    func sessionRangeUsesUnionOfTrackWindows() throws {
+    func timelineRangeExpandsBelowZeroForNegativeOffsets() throws {
         let trackA = makeTrack(duration: 10, offset: 0)
-        let trackB = makeTrack(duration: 8, offset: 1.5)
+        let trackB = makeTrack(duration: 8, offset: -12)
 
-        let range = try #require(TransportMapping.sessionRange(trackA: trackA, trackB: trackB))
-        #expect(range.lowerBound == 0)
+        let range = try #require(TransportMapping.timelineRange(trackA: trackA, trackB: trackB))
+
+        #expect(range.lowerBound == -12)
         #expect(range.upperBound == 10)
     }
 
     @Test
-    func sessionRangeCoversTracksEvenWhenTheyDoNotOverlap() throws {
+    func timelineRangeCoversPositiveGapsBetweenTracks() throws {
         let trackA = makeTrack(duration: 5, offset: 0)
         let trackB = makeTrack(duration: 5, offset: 6)
 
-        let range = try #require(TransportMapping.sessionRange(trackA: trackA, trackB: trackB))
+        let range = try #require(TransportMapping.timelineRange(trackA: trackA, trackB: trackB))
+
         #expect(range.lowerBound == 0)
         #expect(range.upperBound == 11)
     }
 
     @Test
-    func trackValidityUsesOwnFileWindowWithinSession() {
-        let track = makeTrack(duration: 5, offset: 2)
-
-        #expect(!TransportMapping.isTrackAudible(track, atRelativeTransport: 1, sessionStart: 0))
-        #expect(TransportMapping.isTrackAudible(track, atRelativeTransport: 2, sessionStart: 0))
-        #expect(TransportMapping.isTrackAudible(track, atRelativeTransport: 7, sessionStart: 0))
-        #expect(!TransportMapping.isTrackAudible(track, atRelativeTransport: 7.01, sessionStart: 0))
+    func filePositionUsesSignedGlobalTimeAndTrackOffset() {
+        #expect(TransportMapping.filePosition(forGlobalTime: -8, offset: -10) == 2)
+        #expect(TransportMapping.filePosition(forGlobalTime: 3, offset: 5) == -2)
+        #expect(TransportMapping.filePosition(forGlobalTime: 9, offset: 5) == 4)
     }
 
     @Test
-    func clampedTransportStaysWithinSessionDuration() {
-        #expect(TransportMapping.clampedTransport(-1, duration: 10) == 0)
-        #expect(TransportMapping.clampedTransport(12, duration: 10) == 10)
+    func trackAudibilityUsesSignedGlobalTime() {
+        let track = makeTrack(duration: 5, offset: -2)
+
+        #expect(!TransportMapping.isTrackAudible(track, atGlobalTime: -2.01))
+        #expect(TransportMapping.isTrackAudible(track, atGlobalTime: -2))
+        #expect(TransportMapping.isTrackAudible(track, atGlobalTime: 3))
+        #expect(!TransportMapping.isTrackAudible(track, atGlobalTime: 3.01))
+    }
+
+    @Test
+    func clampTransportAllowsNegativeTimelineBounds() {
+        #expect(TransportMapping.clampedTransport(-20, timelineStart: -10, timelineEnd: 12) == -10)
+        #expect(TransportMapping.clampedTransport(-5, timelineStart: -10, timelineEnd: 12) == -5)
+        #expect(TransportMapping.clampedTransport(20, timelineStart: -10, timelineEnd: 12) == 12)
+    }
+
+    @Test
+    func normalizedPositionMapsSignedTimeIntoDisplaySpan() {
+        #expect(TransportMapping.normalizedPosition(globalTime: -10, timelineStart: -10, timelineEnd: 10) == 0)
+        #expect(TransportMapping.normalizedPosition(globalTime: 0, timelineStart: -10, timelineEnd: 10) == 0.5)
+        #expect(TransportMapping.normalizedPosition(globalTime: 10, timelineStart: -10, timelineEnd: 10) == 1)
     }
 
     @Test

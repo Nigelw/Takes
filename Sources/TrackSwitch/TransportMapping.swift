@@ -5,11 +5,16 @@ struct TransportMapping {
         offset...(offset + duration)
     }
 
-    static func sessionRange(trackA: LoadedTrack, trackB: LoadedTrack) -> ClosedRange<TimeInterval>? {
-        let a = transportBounds(duration: trackA.duration, offset: trackA.offsetSeconds)
-        let b = transportBounds(duration: trackB.duration, offset: trackB.offsetSeconds)
-        let lower = min(a.lowerBound, b.lowerBound)
-        let upper = max(a.upperBound, b.upperBound)
+    static func timelineRange(trackA: LoadedTrack?, trackB: LoadedTrack?) -> ClosedRange<TimeInterval>? {
+        let ranges = [trackA, trackB].compactMap { track -> ClosedRange<TimeInterval>? in
+            guard let track else { return nil }
+            return transportBounds(duration: track.duration, offset: track.offsetSeconds)
+        }
+
+        guard !ranges.isEmpty else { return nil }
+
+        let lower = min(0, ranges.map(\.lowerBound).min() ?? 0)
+        let upper = max(0, ranges.map(\.upperBound).max() ?? 0)
         guard upper > lower else { return nil }
         return lower...upper
     }
@@ -26,6 +31,41 @@ struct TransportMapping {
     static func validOverlapDuration(trackA: LoadedTrack, trackB: LoadedTrack) -> TimeInterval {
         guard let range = overlapRange(trackA: trackA, trackB: trackB) else { return 0 }
         return range.upperBound - range.lowerBound
+    }
+
+    static func filePosition(forGlobalTime globalTime: TimeInterval, offset: TimeInterval) -> TimeInterval {
+        globalTime - offset
+    }
+
+    static func isTrackAudible(_ track: LoadedTrack, atGlobalTime globalTime: TimeInterval) -> Bool {
+        let position = filePosition(forGlobalTime: globalTime, offset: track.offsetSeconds)
+        return position >= 0 && position <= track.duration
+    }
+
+    static func clampedTransport(
+        _ transport: TimeInterval,
+        timelineStart: TimeInterval,
+        timelineEnd: TimeInterval
+    ) -> TimeInterval {
+        min(max(transport, timelineStart), timelineEnd)
+    }
+
+    static func normalizedPosition(
+        globalTime: TimeInterval,
+        timelineStart: TimeInterval,
+        timelineEnd: TimeInterval
+    ) -> Double {
+        let span = timelineEnd - timelineStart
+        guard span > 0 else { return 0 }
+        return (globalTime - timelineStart) / span
+    }
+
+    static func linearGain(fromDB db: Float) -> Float {
+        powf(10, db / 20)
+    }
+
+    static func sessionRange(trackA: LoadedTrack, trackB: LoadedTrack) -> ClosedRange<TimeInterval>? {
+        timelineRange(trackA: trackA, trackB: trackB)
     }
 
     static func sessionDuration(trackA: LoadedTrack, trackB: LoadedTrack) -> TimeInterval {
@@ -60,9 +100,5 @@ struct TransportMapping {
 
     static func clampedTransport(_ transport: TimeInterval, duration: TimeInterval) -> TimeInterval {
         min(max(0, transport), duration)
-    }
-
-    static func linearGain(fromDB db: Float) -> Float {
-        powf(10, db / 20)
     }
 }
