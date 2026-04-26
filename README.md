@@ -8,21 +8,24 @@ This README is written for someone working on the repo. It covers project layout
 
 The app currently supports:
 
-- Loading local audio files into Track A and Track B
-- Dragging files onto the Track A / Track B header areas
+- Loading one or two local audio files through a single Open control
+- Dragging files onto a specific track row to replace that row
+- Dragging files elsewhere in the window to use the shared Open assignment rules
+- Placeholder waveform lanes for each loaded track
+- Signed global timeline playback with a playhead over the waveform lanes
+- Independent offset adjustment for Track A and Track B
+- Independent gain trim per track through the track settings popup
 - Importing the current selection from Music.app
 - Loading one selected Music track into the clicked side
 - Loading two selected Music tracks into A and B, ordered by Music's current view order
 - Shared transport playback with only one track audible at a time
 - Switching playback between A and B during playback
 - Seeking across the full session range
-- Independent gain trim per track
-- Manual offset adjustment for Track B
 - Silence on a track when the current transport position falls outside that track's valid range
 
 Out of scope at the moment:
 
-- Waveforms
+- Real waveform extraction and caching
 - Loudness analysis
 - Automatic alignment
 - Session persistence
@@ -124,8 +127,9 @@ TrackSwitch/
 
 Current transport behavior:
 
-- The progress bar is based on the union of the loaded track ranges, not just their overlap.
-- If one track is shorter, playback continues to the end of the longer session range.
+- The progress timeline is based on the union of loaded track ranges and the global 0:00 point.
+- Negative offsets extend the visible timeline before 0:00.
+- Positive offsets create leading empty space before the shifted track starts.
 - If you switch to a track that is currently out of range, that side remains silent until transport re-enters its valid window.
 
 ### File Loading
@@ -151,8 +155,9 @@ Current transport behavior:
 
 ### Loading Audio
 
-- Use `Load Track A` or `Load Track B` to import local files.
-- Drag a compatible audio file onto the Track A or Track B header area.
+- Use `Open` to import one or two local files.
+- Drag a compatible audio file onto a specific track row to replace that row.
+- Drag files elsewhere in the window to use the shared Open assignment rules.
 - Use `Load Selected from Music` to import the current Music.app selection.
 
 Music import rules:
@@ -171,8 +176,8 @@ Music import rules:
 
 ### Gain And Offset Controls
 
-- Both tracks have gain controls.
-- Track B also has offset controls.
+- Both tracks have offset controls.
+- Each track's settings popup contains gain trim.
 - Sliders and numeric fields stay in sync.
 - Numeric fields support arrow-key stepping:
   - gain: `Up/Down = 1 dB`, `Shift+Up/Down = 10 dB`
@@ -185,13 +190,22 @@ Music import rules:
 
 Useful spot checks after changing playback or UI behavior:
 
-1. Load a single file and confirm play/seek/stop work.
-2. Load both tracks and confirm `Switch Playback` changes the audible side without restarting transport.
-3. Load two tracks with different durations and confirm playback continues to the longer one.
-4. Toggle to the shorter track after it has ended and confirm it stays silent.
-5. Adjust Track B offset and confirm playback reschedules correctly.
-6. Use the numeric fields and confirm normal-step and large-step arrow behavior.
-7. Import one and then two tracks from Music and confirm assignment and validation rules.
+1. Confirm the top transport shows `Open`, dropdown, play/pause, rewind, switch, and signed time readout.
+2. Use `Open` with one file and confirm it fills Track A.
+3. Use `Open` with a second single file and confirm it fills Track B.
+4. Use `Open` with a third single file and confirm it replaces the active track.
+5. Use `Open` with two files and confirm they load into Track A and Track B.
+6. Use `Open` with more than two files and confirm the app shows an inline error.
+7. Confirm placeholder waveform lanes render for loaded tracks.
+8. Confirm positive offset creates leading blank space.
+9. Confirm negative offset extends the visible timeline left of zero.
+10. Confirm the playhead line spans both waveform lanes.
+11. Click and drag in a waveform lane and confirm it seeks.
+12. Click the track info area and confirm it changes the active track.
+13. Confirm the gear popup contains gain only.
+14. Confirm offset controls are visible for both tracks.
+15. Drop a file on a specific track row and confirm it replaces that row.
+16. Drop files elsewhere in the window and confirm the shared assignment rules apply.
 
 ## Known Constraints
 
