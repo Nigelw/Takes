@@ -193,6 +193,22 @@ struct SessionTests {
         #expect(assignments[1].1 == second)
     }
 
+    @MainActor
+    @Test
+    func importedFilesStopAfterFirstLoadFailure() async throws {
+        let first = URL(fileURLWithPath: "/tmp/missing-first.wav")
+        let second = try makeTemporaryAudioFile(name: "second.wav")
+        defer { try? FileManager.default.removeItem(at: second.deletingLastPathComponent()) }
+
+        let controller = PlaybackController(loader: FakeAudioFileLoader(failingURLs: [first]))
+
+        await controller.loadImportedFiles([first, second])
+
+        #expect(controller.playbackError == PlaybackError.failedToOpenFile(first))
+        #expect(controller.session.trackA == nil)
+        #expect(controller.session.trackB == nil)
+    }
+
     @Test
     func replacementPreservesExistingSideSettings() {
         var oldTrack = makeTrack(name: "old.wav")
@@ -353,5 +369,41 @@ struct SessionTests {
             gainDB: 0,
             offsetSeconds: 0
         )
+    }
+
+    private func makeTemporaryAudioFile(name: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appending(path: name)
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1))
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100))
+        buffer.frameLength = 44_100
+        try file.write(from: buffer)
+        return url
+    }
+}
+
+private struct FakeAudioFileLoader: AudioFileLoading {
+    let failingURLs: Set<URL>
+
+    func loadTrackMetadata(from url: URL) throws -> LoadedTrack {
+        if failingURLs.contains(url) {
+            throw PlaybackError.failedToOpenFile(url)
+        }
+
+        let file = try AVAudioFile(forReading: url)
+        return LoadedTrack(
+            url: url,
+            displayName: url.lastPathComponent,
+            fileFormatDescription: url.pathExtension.uppercased(),
+            duration: Double(file.length) / file.processingFormat.sampleRate,
+            sampleRate: file.processingFormat.sampleRate,
+            channelCount: file.processingFormat.channelCount
+        )
+    }
+
+    func makeAudioFile(from url: URL) throws -> AVAudioFile {
+        try AVAudioFile(forReading: url)
     }
 }

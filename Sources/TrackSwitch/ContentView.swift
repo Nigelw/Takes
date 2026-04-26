@@ -78,8 +78,6 @@ struct ContentView: View {
     @ObservedObject var controller: PlaybackController
 
     @State private var importingTracks = false
-    @State private var gainPopoverSide: TrackSide?
-    @State private var sliderPosition = 0.0
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
     @State private var dropTargetSide: TrackSide?
@@ -110,15 +108,11 @@ struct ContentView: View {
             handleImport(result)
         }
         .onAppear {
-            sliderPosition = controller.session.transportPosition
             setupKeyMonitor()
         }
         .onDisappear {
             keyMonitor?.stop()
             mouseMonitor?.stop()
-        }
-        .onChange(of: controller.session.transportPosition) { _, newValue in
-            sliderPosition = newValue
         }
     }
 

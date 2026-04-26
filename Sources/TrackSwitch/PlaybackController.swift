@@ -34,6 +34,41 @@ final class PlaybackController: ObservableObject {
 
     func loadTrack(_ side: TrackSide, from url: URL) async {
         do {
+            try loadTrackOrThrow(side, from: url)
+        } catch let error as PlaybackError {
+            playbackError = error
+        } catch {
+            playbackError = .failedToOpenFile(url)
+        }
+    }
+
+    func loadImportedFiles(_ urls: [URL]) async {
+        do {
+            let assignments = try Self.importAssignments(for: urls, in: session)
+
+            for (side, url) in assignments {
+                try loadTrackOrThrow(side, from: url)
+            }
+        } catch let error as PlaybackError {
+            playbackError = error
+        } catch {
+            playbackError = .failedToOpenFile(urls.first ?? URL(fileURLWithPath: ""))
+        }
+    }
+
+    func loadSelectedLibraryTracks() async {
+        do {
+            let urls = try libraryTrackSelector.selectedTrackURLs()
+            await loadImportedFiles(urls)
+        } catch let error as PlaybackError {
+            playbackError = error
+        } catch {
+            playbackError = .librarySelectionFailed("Could not load the selected track from Music.")
+        }
+    }
+
+    private func loadTrackOrThrow(_ side: TrackSide, from url: URL) throws {
+        do {
             stop()
             let metadata = try loader.loadTrackMetadata(from: url)
             let file = try loader.makeAudioFile(from: url)
@@ -57,34 +92,9 @@ final class PlaybackController: ObservableObject {
             recalculateSessionDuration(preferZero: true)
             applyAudibility()
         } catch let error as PlaybackError {
-            playbackError = error
+            throw error
         } catch {
-            playbackError = .failedToOpenFile(url)
-        }
-    }
-
-    func loadImportedFiles(_ urls: [URL]) async {
-        do {
-            let assignments = try Self.importAssignments(for: urls, in: session)
-
-            for (side, url) in assignments {
-                await loadTrack(side, from: url)
-            }
-        } catch let error as PlaybackError {
-            playbackError = error
-        } catch {
-            playbackError = .failedToOpenFile(urls.first ?? URL(fileURLWithPath: ""))
-        }
-    }
-
-    func loadSelectedLibraryTracks() async {
-        do {
-            let urls = try libraryTrackSelector.selectedTrackURLs()
-            await loadImportedFiles(urls)
-        } catch let error as PlaybackError {
-            playbackError = error
-        } catch {
-            playbackError = .librarySelectionFailed("Could not load the selected track from Music.")
+            throw PlaybackError.failedToOpenFile(url)
         }
     }
 
