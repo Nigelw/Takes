@@ -58,6 +58,7 @@ struct NumericControlEditState {
 }
 
 struct NumericControlFocusPolicy {
+    @MainActor
     static func shouldClearEditingFocus(firstResponder: NSResponder?, clickedView: NSView?) -> Bool {
         guard firstResponder is NSTextView else { return false }
         guard let clickedView else { return true }
@@ -101,6 +102,9 @@ struct ContentView: View {
         }
         .padding(20)
         .frame(minWidth: 860, minHeight: 540)
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
+            loadDroppedURLs(from: providers, side: nil)
+        }
         .fileImporter(
             isPresented: $importingTracks,
             allowedContentTypes: [.audio],
@@ -236,7 +240,7 @@ struct ContentView: View {
                     controller.selectActiveTrack(side)
                 }
                 .onDrop(of: [UTType.fileURL.identifier], isTargeted: dropBinding(for: side)) { providers in
-                    handleDrop(providers: providers, side: side)
+                    loadDroppedURLs(from: providers, side: side)
                 }
 
             waveformLane(side: side, track: track)
@@ -431,21 +435,6 @@ struct ContentView: View {
         )
     }
 
-    private func handleDrop(providers: [NSItemProvider], side: TrackSide) -> Bool {
-        guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) else {
-            return false
-        }
-
-        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-            guard let url = extractDroppedFileURL(from: item) else { return }
-            Task { @MainActor in
-                await controller.loadTrack(side, from: url)
-            }
-        }
-
-        return true
-    }
-
     private func setupKeyMonitor() {
         let monitor = KeyMonitor { event in
             if let window = NSApp.keyWindow, window.firstResponder is NSTextView {
@@ -491,6 +480,41 @@ struct ContentView: View {
         }
         clickMonitor.start()
         mouseMonitor = clickMonitor
+    }
+
+    private func loadDroppedURLs(from providers: [NSItemProvider], side: TrackSide?) -> Bool {
+        let fileProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard !fileProviders.isEmpty else { return false }
+
+        var urls: [URL] = []
+        let group = DispatchGroup()
+
+        for provider in fileProviders {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                let url = extractDroppedFileURL(from: item)
+                DispatchQueue.main.async {
+                    if let url {
+                        urls.append(url)
+                    }
+                    group.leave()
+                }
+            }
+        }
+
+        group.notify(queue: .main) {
+            Task { @MainActor in
+                if let side, urls.count == 1 {
+                    await controller.loadTrack(side, from: urls[0])
+                } else if side != nil, urls.count > 1 {
+                    controller.setPlaybackError(.tooManyImportFiles)
+                } else {
+                    await controller.loadImportedFiles(urls)
+                }
+            }
+        }
+
+        return true
     }
 }
 

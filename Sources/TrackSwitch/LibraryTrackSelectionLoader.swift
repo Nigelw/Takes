@@ -11,7 +11,7 @@ struct LibraryTrackSelectionLoader: LibraryTrackSelecting {
     tell application id "com.apple.Music"
         set selectedTracks to selection
         if selectedTracks is {} then error "No track is selected in Music."
-        if (count of selectedTracks) > 2 then error "Select one or two tracks in Music."
+        if (count of selectedTracks) > 2 then error "Select one or two audio files."
 
         set outputLines to {}
         repeat with selectedTrack in selectedTracks
@@ -72,7 +72,7 @@ struct LibraryTrackSelectionLoader: LibraryTrackSelecting {
         }
 
         guard entries.count <= 2 else {
-            throw PlaybackError.librarySelectionFailed("Select one or two tracks in Music.")
+            throw PlaybackError.librarySelectionFailed("Select one or two audio files.")
         }
 
         let ordered = try entries.map(parseSelectionEntry(_:)).sorted { $0.index < $1.index }

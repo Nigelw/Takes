@@ -67,6 +67,10 @@ final class PlaybackController: ObservableObject {
         }
     }
 
+    func setPlaybackError(_ error: PlaybackError) {
+        playbackError = error
+    }
+
     private func loadTrackOrThrow(_ side: TrackSide, from url: URL) throws {
         do {
             stop()

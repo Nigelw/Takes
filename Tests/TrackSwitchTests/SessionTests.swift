@@ -86,6 +86,13 @@ struct SessionTests {
     }
 
     @Test
+    func musicSelectionScriptUsesSharedTooManySelectionMessage() {
+        let script = LibraryTrackSelectionLoader.musicSelectionScript
+
+        #expect(script.contains("Select one or two audio files."))
+    }
+
+    @Test
     func infoPlistDeclaresAppleEventsUsageDescription() throws {
         let plistURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -134,7 +141,7 @@ struct SessionTests {
         3\t/tmp/c.wav
         """
 
-        #expect(throws: PlaybackError.librarySelectionFailed("Select one or two tracks in Music.")) {
+        #expect(throws: PlaybackError.librarySelectionFailed("Select one or two audio files.")) {
             try LibraryTrackSelectionLoader.parseSelectionOutput(output)
         }
     }
@@ -344,6 +351,7 @@ struct SessionTests {
     }
 
     @Test
+    @MainActor
     func numericControlFocusPolicyClearsEditingFocusOnlyForOutsideClicks() {
         let fieldEditor = NSTextView(frame: .zero)
         let container = NSView(frame: .zero)
