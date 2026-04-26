@@ -81,7 +81,7 @@ enum PlaybackError: LocalizedError, Equatable {
 
 extension TimeInterval {
     var formattedTimestamp: String {
-        abs(self).formattedUnsignedTimestamp
+        formattedUnsignedTimestamp
     }
 
     var formattedSignedTimestamp: String {

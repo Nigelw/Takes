@@ -266,7 +266,7 @@ struct ContentView: View {
                                 get: { Double(offsetMs) },
                                 set: { controller.setOffset(side, seconds: Double(Int($0.rounded())) / 1000) }
                             ),
-                            range: -5000...5000,
+                            range: -300_000...300_000,
                             resetValue: 0
                         )
                         .frame(maxWidth: .infinity)
