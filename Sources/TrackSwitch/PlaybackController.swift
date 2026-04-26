@@ -63,14 +63,24 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    func loadSelectedLibraryTrack(_ side: TrackSide) async {
+    func loadImportedFiles(_ urls: [URL]) async {
         do {
-            let urls = try libraryTrackSelector.selectedTrackURLs()
             let assignments = try Self.importAssignments(for: urls, in: session)
 
-            for (assignedSide, url) in assignments {
-                await loadTrack(assignedSide, from: url)
+            for (side, url) in assignments {
+                await loadTrack(side, from: url)
             }
+        } catch let error as PlaybackError {
+            playbackError = error
+        } catch {
+            playbackError = .failedToOpenFile(urls.first ?? URL(fileURLWithPath: ""))
+        }
+    }
+
+    func loadSelectedLibraryTracks() async {
+        do {
+            let urls = try libraryTrackSelector.selectedTrackURLs()
+            await loadImportedFiles(urls)
         } catch let error as PlaybackError {
             playbackError = error
         } catch {

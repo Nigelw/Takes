@@ -77,18 +77,16 @@ struct NumericControlFocusPolicy {
 struct ContentView: View {
     @ObservedObject var controller: PlaybackController
 
-    @State private var importingTrack = false
-    @State private var pendingImportSide: TrackSide?
+    @State private var importingTracks = false
+    @State private var gainPopoverSide: TrackSide?
     @State private var sliderPosition = 0.0
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
     @State private var dropTargetSide: TrackSide?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            headerSection
-            transportSection
-            controlsSection
+        VStack(alignment: .leading, spacing: 14) {
+            transportBar
             if let warning = controller.overlapWarning {
                 Text(warning)
                     .font(.callout)
@@ -99,11 +97,16 @@ struct ContentView: View {
                     .font(.callout)
                     .foregroundStyle(.red)
             }
-            Spacer()
+            trackTimelineSection
+            Spacer(minLength: 0)
         }
         .padding(20)
-        .frame(minWidth: 760, minHeight: 520)
-        .fileImporter(isPresented: $importingTrack, allowedContentTypes: [.audio]) { result in
+        .frame(minWidth: 860, minHeight: 540)
+        .fileImporter(
+            isPresented: $importingTracks,
+            allowedContentTypes: [.audio],
+            allowsMultipleSelection: true
+        ) { result in
             handleImport(result)
         }
         .onAppear {
@@ -119,20 +122,67 @@ struct ContentView: View {
         }
     }
 
-    private var headerSection: some View {
-        HStack(alignment: .top, spacing: 16) {
-            trackHeader(side: .a, track: controller.session.trackA) {
-                pendingImportSide = .a
-                importingTrack = true
+    private var transportBar: some View {
+        HStack(spacing: 10) {
+            Button("Open") {
+                importingTracks = true
             }
-            trackHeader(side: .b, track: controller.session.trackB) {
-                pendingImportSide = .b
-                importingTrack = true
+
+            Menu {
+                Button("Load Selected from Music") {
+                    Task { await controller.loadSelectedLibraryTracks() }
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .accessibilityLabel("Import Options")
             }
+            .menuStyle(.borderlessButton)
+
+            Divider()
+                .frame(height: 22)
+
+            Button(controller.session.isPlaying ? "Pause" : "Play") {
+                controller.session.isPlaying ? controller.pause() : controller.play()
+            }
+            .keyboardShortcut(.space, modifiers: [])
+            .disabled(!controller.session.isPlayable)
+
+            Button("Rewind") {
+                controller.seek(to: controller.session.timelineStart)
+            }
+            .disabled(!controller.session.isPlayable)
+
+            Button("Switch Playback") {
+                controller.toggleActiveTrack()
+            }
+            .keyboardShortcut("x", modifiers: [])
+            .disabled(!controller.session.canToggleComparison)
+
+            Spacer()
+
+            Text("\(controller.session.transportPosition.formattedSignedTimestamp) / \(controller.session.timelineEnd.formattedSignedTimestamp)")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var trackTimelineSection: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            headerSection
+            controlsSection
         }
     }
 
-    private func trackHeader(side: TrackSide, track: LoadedTrack?, action: @escaping () -> Void) -> some View {
+    private var headerSection: some View {
+        HStack(alignment: .top, spacing: 16) {
+            trackHeader(side: .a, track: controller.session.trackA)
+            trackHeader(side: .b, track: controller.session.trackB)
+        }
+    }
+
+    private func trackHeader(side: TrackSide, track: LoadedTrack?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(side.title)
@@ -155,12 +205,6 @@ struct ContentView: View {
                 Text("No file loaded")
                     .foregroundStyle(.secondary)
             }
-            Button("Load \(side.title)", action: action)
-            Button("Load Selected from Music") {
-                Task {
-                    await controller.loadSelectedLibraryTrack(side)
-                }
-            }
             Text("Drop audio file here")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -171,51 +215,6 @@ struct ContentView: View {
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: dropBinding(for: side)) { providers in
             handleDrop(providers: providers, side: side)
         }
-    }
-
-    private var transportSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                Button(controller.session.isPlaying ? "Pause" : "Play") {
-                    controller.session.isPlaying ? controller.pause() : controller.play()
-                }
-                .keyboardShortcut(.space, modifiers: [])
-                .disabled(!controller.session.isPlayable)
-
-                Button("Rewind") {
-                    controller.seek(to: 0)
-                }
-                .disabled(!controller.session.isPlayable)
-
-                Button("Switch Playback") {
-                    controller.toggleActiveTrack()
-                }
-                .keyboardShortcut("x", modifiers: [])
-                .disabled(!controller.session.canToggleComparison)
-
-                Spacer()
-
-                Text("\(controller.session.transportPosition.formattedTimestamp) / \(controller.session.duration.formattedTimestamp)")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-
-            Slider(
-                value: Binding(
-                    get: { sliderPosition },
-                    set: { sliderPosition = $0 }
-                ),
-                in: 0...max(controller.session.duration, 0.001),
-                onEditingChanged: { editing in
-                    if !editing {
-                        controller.seek(to: sliderPosition)
-                    }
-                }
-            )
-            .disabled(!controller.session.isPlayable)
-        }
-        .padding()
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var controlsSection: some View {
@@ -287,16 +286,13 @@ struct ContentView: View {
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private func handleImport(_ result: Result<URL, Error>) {
-        let side = pendingImportSide
-        importingTrack = false
-        pendingImportSide = nil
+    private func handleImport(_ result: Result<[URL], Error>) {
+        importingTracks = false
 
         switch result {
-        case let .success(url):
-            guard let side else { return }
+        case let .success(urls):
             Task {
-                await controller.loadTrack(side, from: url)
+                await controller.loadImportedFiles(urls)
             }
         case .failure:
             break
@@ -343,14 +339,14 @@ struct ContentView: View {
             switch event.keyCode {
             case 123:
                 if event.modifierFlags.contains(.command) {
-                    controller.seek(to: 0)
+                    controller.seek(to: controller.session.timelineStart)
                     return true
                 }
                 controller.skip(by: event.modifierFlags.contains(.shift) ? -10 : -1)
                 return true
             case 124:
                 if event.modifierFlags.contains(.command) {
-                    controller.seek(to: controller.session.duration)
+                    controller.seek(to: controller.session.timelineEnd)
                     return true
                 }
                 controller.skip(by: event.modifierFlags.contains(.shift) ? 10 : 1)
