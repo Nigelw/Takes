@@ -194,6 +194,22 @@ struct SessionTests {
     }
 
     @Test
+    func replacementPreservesExistingSideSettings() {
+        var oldTrack = makeTrack(name: "old.wav")
+        oldTrack.gainDB = -3
+        oldTrack.offsetSeconds = -12
+
+        let newTrack = PlaybackController.replacingTrackMetadata(
+            makeTrack(name: "new.wav"),
+            preservingSettingsFrom: oldTrack
+        )
+
+        #expect(newTrack.displayName == "new.wav")
+        #expect(newTrack.gainDB == -3)
+        #expect(newTrack.offsetSeconds == -12)
+    }
+
+    @Test
     func numericControlStepUsesSmallAndLargeIncrements() {
         let gainConfig = NumericControlConfiguration.gain
         let offsetConfig = NumericControlConfiguration.offset

@@ -19,7 +19,6 @@ final class PlaybackController: ObservableObject {
     private var engineConfigured = false
     private var audioFileA: AVAudioFile?
     private var audioFileB: AVAudioFile?
-    private var sessionStart: TimeInterval = 0
     private var playbackStartedAt: CFTimeInterval?
     private var playbackStartedFromTransport: TimeInterval = 0
     private var timer: Timer?
@@ -40,16 +39,13 @@ final class PlaybackController: ObservableObject {
 
             switch side {
             case .a:
-                session.trackA = metadata
+                session.trackA = Self.replacingTrackMetadata(metadata, preservingSettingsFrom: session.trackA)
                 audioFileA = file
                 if session.trackB == nil {
                     session.activeTrack = .a
                 }
             case .b:
-                var adjusted = metadata
-                adjusted.offsetSeconds = session.trackB?.offsetSeconds ?? 0
-                adjusted.gainDB = session.trackB?.gainDB ?? 0
-                session.trackB = adjusted
+                session.trackB = Self.replacingTrackMetadata(metadata, preservingSettingsFrom: session.trackB)
                 audioFileB = file
                 if session.trackA == nil {
                     session.activeTrack = .b
@@ -120,16 +116,20 @@ final class PlaybackController: ObservableObject {
         playerA.stop()
         playerB.stop()
         session.isPlaying = false
-        session.transportPosition = 0
+        session.transportPosition = session.timelineStart
         playbackStartedAt = nil
-        playbackStartedFromTransport = 0
+        playbackStartedFromTransport = session.transportPosition
         timer?.invalidate()
         applyAudibility()
     }
 
     func seek(to seconds: TimeInterval) {
         guard session.isPlayable else { return }
-        let clamped = TransportMapping.clampedTransport(seconds, duration: session.duration)
+        let clamped = TransportMapping.clampedTransport(
+            seconds,
+            timelineStart: session.timelineStart,
+            timelineEnd: session.timelineEnd
+        )
         session.transportPosition = clamped
 
         guard session.isPlaying else { return }
@@ -200,6 +200,17 @@ final class PlaybackController: ObservableObject {
         seek(to: session.transportPosition + delta)
     }
 
+    nonisolated static func replacingTrackMetadata(
+        _ metadata: LoadedTrack,
+        preservingSettingsFrom existingTrack: LoadedTrack?
+    ) -> LoadedTrack {
+        guard let existingTrack else { return metadata }
+        var adjusted = metadata
+        adjusted.offsetSeconds = existingTrack.offsetSeconds
+        adjusted.gainDB = existingTrack.gainDB
+        return adjusted
+    }
+
     nonisolated static func importAssignments(
         for urls: [URL],
         in session: ComparisonSession
@@ -248,57 +259,56 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    private func reschedulePlayers(startingAt relativeTransport: TimeInterval) throws {
-        guard session.duration > 0 else {
+    private func reschedulePlayers(startingAt globalTime: TimeInterval) throws {
+        guard session.isPlayable else {
             throw PlaybackError.schedulingFailed
         }
 
-        let transport = TransportMapping.clampedTransport(relativeTransport, duration: session.duration)
-        let absoluteTransport = TransportMapping.absoluteTransportPosition(
-            relativeTransport: transport,
-            sessionStart: sessionStart
+        let transport = TransportMapping.clampedTransport(
+            globalTime,
+            timelineStart: session.timelineStart,
+            timelineEnd: session.timelineEnd
         )
         playerA.stop()
         playerB.stop()
 
         if let trackA = session.trackA, let fileA = audioFileA {
-            scheduleTrack(
-                trackA,
-                file: fileA,
-                on: playerA,
-                atRelativeTransport: transport,
-                absoluteTransport: absoluteTransport
-            )
+            scheduleTrack(trackA, file: fileA, on: playerA, atGlobalTime: transport)
         }
 
         if let trackB = session.trackB, let fileB = audioFileB {
-            scheduleTrack(
-                trackB,
-                file: fileB,
-                on: playerB,
-                atRelativeTransport: transport,
-                absoluteTransport: absoluteTransport
-            )
+            scheduleTrack(trackB, file: fileB, on: playerB, atGlobalTime: transport)
         }
 
         session.transportPosition = transport
     }
 
     private func recalculateSessionDuration() {
-        if let trackA = session.trackA, let trackB = session.trackB {
-            guard let range = TransportMapping.sessionRange(trackA: trackA, trackB: trackB) else {
-                session.timelineStart = 0
-                session.timelineEnd = 0
-                session.transportPosition = 0
-                sessionStart = 0
-                overlapWarning = nil
-                return
-            }
+        guard let range = TransportMapping.timelineRange(trackA: session.trackA, trackB: session.trackB) else {
+            session.timelineStart = 0
+            session.timelineEnd = 0
+            session.transportPosition = 0
+            overlapWarning = nil
+            return
+        }
 
-            sessionStart = range.lowerBound
-            session.timelineStart = range.lowerBound
-            session.timelineEnd = range.upperBound
-            session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
+        session.timelineStart = range.lowerBound
+        session.timelineEnd = range.upperBound
+        session.transportPosition = TransportMapping.clampedTransport(
+            session.transportPosition,
+            timelineStart: session.timelineStart,
+            timelineEnd: session.timelineEnd
+        )
+
+        if session.transportPosition == 0 {
+            session.transportPosition = TransportMapping.clampedTransport(
+                0,
+                timelineStart: session.timelineStart,
+                timelineEnd: session.timelineEnd
+            )
+        }
+
+        if let trackA = session.trackA, let trackB = session.trackB {
             let overlapDuration = TransportMapping.validOverlapDuration(trackA: trackA, trackB: trackB)
             if overlapDuration == 0 {
                 overlapWarning = "Track A and Track B do not overlap at the current offsets."
@@ -307,42 +317,23 @@ final class PlaybackController: ObservableObject {
             } else {
                 overlapWarning = nil
             }
-            playbackError = nil
-            return
-        }
-
-        if let trackA = session.trackA {
-            sessionStart = trackA.offsetSeconds
-            session.timelineStart = trackA.offsetSeconds
-            session.timelineEnd = trackA.offsetSeconds + trackA.duration
-            session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
+        } else {
             overlapWarning = nil
-            return
         }
 
-        if let trackB = session.trackB {
-            sessionStart = trackB.offsetSeconds
-            session.timelineStart = trackB.offsetSeconds
-            session.timelineEnd = trackB.offsetSeconds + trackB.duration
-            session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
-            overlapWarning = nil
-            return
-        }
-
-        session.timelineStart = 0
-        session.timelineEnd = 0
-        sessionStart = 0
-        overlapWarning = nil
+        playbackError = nil
     }
 
     private func scheduleTrack(
         _ track: LoadedTrack,
         file: AVAudioFile,
         on player: AVAudioPlayerNode,
-        atRelativeTransport relativeTransport: TimeInterval,
-        absoluteTransport: TimeInterval
+        atGlobalTime globalTime: TimeInterval
     ) {
-        let filePosition = absoluteTransport - track.offsetSeconds
+        let filePosition = TransportMapping.filePosition(
+            forGlobalTime: globalTime,
+            offset: track.offsetSeconds
+        )
 
         if filePosition >= track.duration {
             return
@@ -409,17 +400,25 @@ final class PlaybackController: ObservableObject {
         guard session.isPlaying else { return }
         let transport = currentTransportPosition()
         session.transportPosition = transport
-        if transport >= session.duration {
+        if transport >= session.timelineEnd {
             stop()
         }
     }
 
     private func currentTransportPosition() -> TimeInterval {
         guard session.isPlaying, let playbackStartedAt else {
-            return TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
+            return TransportMapping.clampedTransport(
+                session.transportPosition,
+                timelineStart: session.timelineStart,
+                timelineEnd: session.timelineEnd
+            )
         }
 
         let elapsed = CACurrentMediaTime() - playbackStartedAt
-        return TransportMapping.clampedTransport(playbackStartedFromTransport + elapsed, duration: session.duration)
+        return TransportMapping.clampedTransport(
+            playbackStartedFromTransport + elapsed,
+            timelineStart: session.timelineStart,
+            timelineEnd: session.timelineEnd
+        )
     }
 }
