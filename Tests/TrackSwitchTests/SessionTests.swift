@@ -210,6 +210,18 @@ struct SessionTests {
     }
 
     @Test
+    func loadRecalculationPrefersZeroWhenStoppedAtPreviousNegativeStart() {
+        let position = PlaybackController.transportPositionAfterTimelineRecalculation(
+            currentPosition: -12,
+            timelineStart: -12,
+            timelineEnd: 120,
+            preferZero: true
+        )
+
+        #expect(position == 0)
+    }
+
+    @Test
     func numericControlStepUsesSmallAndLargeIncrements() {
         let gainConfig = NumericControlConfiguration.gain
         let offsetConfig = NumericControlConfiguration.offset

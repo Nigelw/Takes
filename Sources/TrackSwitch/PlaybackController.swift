@@ -53,7 +53,7 @@ final class PlaybackController: ObservableObject {
             }
 
             playbackError = nil
-            recalculateSessionDuration()
+            recalculateSessionDuration(preferZero: true)
             applyAudibility()
         } catch let error as PlaybackError {
             playbackError = error
@@ -211,6 +211,23 @@ final class PlaybackController: ObservableObject {
         return adjusted
     }
 
+    nonisolated static func transportPositionAfterTimelineRecalculation(
+        currentPosition: TimeInterval,
+        timelineStart: TimeInterval,
+        timelineEnd: TimeInterval,
+        preferZero: Bool
+    ) -> TimeInterval {
+        if preferZero, timelineStart <= 0, timelineEnd >= 0 {
+            return 0
+        }
+
+        return TransportMapping.clampedTransport(
+            currentPosition,
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd
+        )
+    }
+
     nonisolated static func importAssignments(
         for urls: [URL],
         in session: ComparisonSession
@@ -283,7 +300,7 @@ final class PlaybackController: ObservableObject {
         session.transportPosition = transport
     }
 
-    private func recalculateSessionDuration() {
+    private func recalculateSessionDuration(preferZero: Bool = false) {
         guard let range = TransportMapping.timelineRange(trackA: session.trackA, trackB: session.trackB) else {
             session.timelineStart = 0
             session.timelineEnd = 0
@@ -294,19 +311,12 @@ final class PlaybackController: ObservableObject {
 
         session.timelineStart = range.lowerBound
         session.timelineEnd = range.upperBound
-        session.transportPosition = TransportMapping.clampedTransport(
-            session.transportPosition,
+        session.transportPosition = Self.transportPositionAfterTimelineRecalculation(
+            currentPosition: session.transportPosition,
             timelineStart: session.timelineStart,
-            timelineEnd: session.timelineEnd
+            timelineEnd: session.timelineEnd,
+            preferZero: preferZero || session.transportPosition == 0
         )
-
-        if session.transportPosition == 0 {
-            session.transportPosition = TransportMapping.clampedTransport(
-                0,
-                timelineStart: session.timelineStart,
-                timelineEnd: session.timelineEnd
-            )
-        }
 
         if let trackA = session.trackA, let trackB = session.trackB {
             let overlapDuration = TransportMapping.validOverlapDuration(trackA: trackA, trackB: trackB)
