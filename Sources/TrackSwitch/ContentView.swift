@@ -167,6 +167,18 @@ struct ContentView: View {
         max(controller.session.timelineEnd - controller.session.timelineStart, 0.001)
     }
 
+    private var trackRowHeight: CGFloat {
+        124
+    }
+
+    private var trackTimelineDividerHeight: CGFloat {
+        1
+    }
+
+    private var trackTimelineHeight: CGFloat {
+        trackRowHeight * 2 + trackTimelineDividerHeight
+    }
+
     private func globalTime(atX x: CGFloat, width: CGFloat) -> TimeInterval {
         guard width > 0 else { return controller.session.timelineStart }
         let normalized = min(max(Double(x / width), 0), 1)
@@ -189,34 +201,36 @@ struct ContentView: View {
             let waveformWidth = max(proxy.size.width - infoWidth, 1)
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
-                    trackRow(side: .a, track: controller.session.trackA, infoWidth: infoWidth, waveformWidth: waveformWidth)
+                    trackRow(side: .a, track: controller.session.trackA, infoWidth: infoWidth)
                     Divider()
-                    trackRow(side: .b, track: controller.session.trackB, infoWidth: infoWidth, waveformWidth: waveformWidth)
+                        .frame(height: trackTimelineDividerHeight)
+                    trackRow(side: .b, track: controller.session.trackB, infoWidth: infoWidth)
                 }
                 .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 if controller.session.isPlayable {
                     Rectangle()
                         .fill(.blue)
-                        .frame(width: 2)
-                        .offset(x: infoWidth + xPosition(for: controller.session.transportPosition, width: waveformWidth))
-                        .padding(.vertical, 8)
+                        .frame(width: 2, height: trackTimelineHeight - 16)
+                        .offset(
+                            x: infoWidth + xPosition(for: controller.session.transportPosition, width: waveformWidth),
+                            y: 8
+                        )
                 }
             }
         }
-        .frame(minHeight: 260)
+        .frame(height: trackTimelineHeight)
     }
 
     private func trackRow(
         side: TrackSide,
         track: LoadedTrack?,
-        infoWidth: CGFloat,
-        waveformWidth: CGFloat
+        infoWidth: CGFloat
     ) -> some View {
         HStack(spacing: 0) {
             trackInfoArea(side: side, track: track)
-                .frame(width: infoWidth, alignment: .leading)
-                .frame(minHeight: 124, alignment: .leading)
+                .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
+                .background(backgroundStyle(for: side))
                 .contentShape(Rectangle())
                 .onTapGesture {
                     controller.selectActiveTrack(side)
@@ -225,9 +239,11 @@ struct ContentView: View {
                     handleDrop(providers: providers, side: side)
                 }
 
-            waveformLane(side: side, track: track, width: waveformWidth)
-                .frame(maxWidth: .infinity, minHeight: 124)
+            waveformLane(side: side, track: track)
+                .frame(maxWidth: .infinity)
+                .frame(height: trackRowHeight)
         }
+        .frame(height: trackRowHeight)
     }
 
     private func trackInfoArea(side: TrackSide, track: LoadedTrack?) -> some View {
@@ -262,7 +278,6 @@ struct ContentView: View {
             offsetControl(side: side, track: track)
         }
         .padding(12)
-        .background(backgroundStyle(for: side))
     }
 
     private func gainButton(side: TrackSide, track: LoadedTrack?) -> some View {
@@ -334,7 +349,7 @@ struct ContentView: View {
         }
     }
 
-    private func waveformLane(side: TrackSide, track: LoadedTrack?, width: CGFloat) -> some View {
+    private func waveformLane(side: TrackSide, track: LoadedTrack?) -> some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Rectangle()
