@@ -178,6 +178,17 @@ final class PlaybackController: ObservableObject {
         applyAudibility()
     }
 
+    func selectActiveTrack(_ side: TrackSide) {
+        switch side {
+        case .a:
+            guard session.trackA != nil else { return }
+        case .b:
+            guard session.trackB != nil else { return }
+        }
+        session.activeTrack = side
+        applyAudibility()
+    }
+
     func setGain(_ side: TrackSide, db: Float) {
         switch side {
         case .a:

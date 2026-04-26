@@ -81,6 +81,7 @@ struct ContentView: View {
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
     @State private var dropTargetSide: TrackSide?
+    @State private var gainPopoverSide: TrackSide?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -162,21 +163,74 @@ struct ContentView: View {
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
+    private var timelineSpan: TimeInterval {
+        max(controller.session.timelineEnd - controller.session.timelineStart, 0.001)
+    }
+
+    private func globalTime(atX x: CGFloat, width: CGFloat) -> TimeInterval {
+        guard width > 0 else { return controller.session.timelineStart }
+        let normalized = min(max(Double(x / width), 0), 1)
+        return controller.session.timelineStart + normalized * timelineSpan
+    }
+
+    private func xPosition(for globalTime: TimeInterval, width: CGFloat) -> CGFloat {
+        CGFloat(
+            TransportMapping.normalizedPosition(
+                globalTime: globalTime,
+                timelineStart: controller.session.timelineStart,
+                timelineEnd: controller.session.timelineEnd
+            )
+        ) * width
+    }
+
     private var trackTimelineSection: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            headerSection
-            controlsSection
+        GeometryReader { proxy in
+            let infoWidth: CGFloat = 240
+            let waveformWidth = max(proxy.size.width - infoWidth, 1)
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    trackRow(side: .a, track: controller.session.trackA, infoWidth: infoWidth, waveformWidth: waveformWidth)
+                    Divider()
+                    trackRow(side: .b, track: controller.session.trackB, infoWidth: infoWidth, waveformWidth: waveformWidth)
+                }
+                .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                if controller.session.isPlayable {
+                    Rectangle()
+                        .fill(.blue)
+                        .frame(width: 2)
+                        .offset(x: infoWidth + xPosition(for: controller.session.transportPosition, width: waveformWidth))
+                        .padding(.vertical, 8)
+                }
+            }
+        }
+        .frame(minHeight: 260)
+    }
+
+    private func trackRow(
+        side: TrackSide,
+        track: LoadedTrack?,
+        infoWidth: CGFloat,
+        waveformWidth: CGFloat
+    ) -> some View {
+        HStack(spacing: 0) {
+            trackInfoArea(side: side, track: track)
+                .frame(width: infoWidth, alignment: .leading)
+                .frame(minHeight: 124, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    controller.selectActiveTrack(side)
+                }
+                .onDrop(of: [UTType.fileURL.identifier], isTargeted: dropBinding(for: side)) { providers in
+                    handleDrop(providers: providers, side: side)
+                }
+
+            waveformLane(side: side, track: track, width: waveformWidth)
+                .frame(maxWidth: .infinity, minHeight: 124)
         }
     }
 
-    private var headerSection: some View {
-        HStack(alignment: .top, spacing: 16) {
-            trackHeader(side: .a, track: controller.session.trackA)
-            trackHeader(side: .b, track: controller.session.trackB)
-        }
-    }
-
-    private func trackHeader(side: TrackSide, track: LoadedTrack?) -> some View {
+    private func trackInfoArea(side: TrackSide, track: LoadedTrack?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(side.title)
@@ -184,100 +238,153 @@ struct ContentView: View {
                 if controller.session.activeTrack == side {
                     Text("Active")
                         .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
                         .background(.blue.opacity(0.15), in: Capsule())
                 }
+                Spacer()
+                gainButton(side: side, track: track)
             }
+
             if let track {
                 Text(track.displayName)
-                    .font(.title3.weight(.medium))
+                    .font(.callout.weight(.medium))
                     .lineLimit(1)
                 Text(track.metadataSummary)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             } else {
                 Text("No file loaded")
                     .foregroundStyle(.secondary)
             }
-            Text("Drop audio file here")
+
+            offsetControl(side: side, track: track)
+        }
+        .padding(12)
+        .background(backgroundStyle(for: side))
+    }
+
+    private func gainButton(side: TrackSide, track: LoadedTrack?) -> some View {
+        Button {
+            gainPopoverSide = side
+        } label: {
+            Image(systemName: "gearshape")
+                .accessibilityLabel("\(side.title) Settings")
+        }
+        .buttonStyle(.borderless)
+        .disabled(track == nil)
+        .popover(
+            isPresented: Binding(
+                get: { gainPopoverSide == side },
+                set: { isPresented in
+                    gainPopoverSide = isPresented ? side : nil
+                }
+            ),
+            arrowEdge: .trailing
+        ) {
+            gainPopoverContent(side: side, track: track)
+                .padding()
+                .frame(width: 300)
+        }
+    }
+
+    private func gainPopoverContent(side: TrackSide, track: LoadedTrack?) -> some View {
+        let gainValue = Int((track?.gainDB ?? 0).rounded())
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("\(side.title) Gain")
+                .font(.headline)
+            Text("\(gainValue) dB")
+                .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                ResettableSlider(
+                    value: Binding(
+                        get: { Double(gainValue) },
+                        set: { controller.setGain(side, db: Float(Int($0.rounded()))) }
+                    ),
+                    range: -24...24,
+                    resetValue: 0
+                )
+                NumericControlRow(
+                    value: Binding(
+                        get: { gainValue },
+                        set: { controller.setGain(side, db: Float($0)) }
+                    ),
+                    configuration: .gain
+                )
+            }
+            .disabled(track == nil)
+        }
+    }
+
+    private func offsetControl(side: TrackSide, track: LoadedTrack?) -> some View {
+        let offsetMs = Int(((track?.offsetSeconds ?? 0) * 1000).rounded())
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("Offset \(offsetMs) ms")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundStyle(for: side), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: dropBinding(for: side)) { providers in
-            handleDrop(providers: providers, side: side)
-        }
-    }
-
-    private var controlsSection: some View {
-        HStack(alignment: .top, spacing: 16) {
-            gainCard(side: .a, track: controller.session.trackA, showOffset: false)
-            gainCard(side: .b, track: controller.session.trackB, showOffset: true)
+            NumericControlRow(
+                value: Binding(
+                    get: { offsetMs },
+                    set: { controller.setOffset(side, seconds: Double($0) / 1000) }
+                ),
+                configuration: .offset
+            )
+            .disabled(track == nil)
         }
     }
 
-    private func gainCard(side: TrackSide, track: LoadedTrack?, showOffset: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(side.title)
-                .font(.headline)
+    private func waveformLane(side: TrackSide, track: LoadedTrack?, width: CGFloat) -> some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(.background.opacity(0.01))
 
-            VStack(alignment: .leading, spacing: 6) {
-                let gainValue = Int((track?.gainDB ?? 0).rounded())
-                Text("Gain \(gainValue) dB")
-                    .foregroundStyle(.secondary)
-                HStack(alignment: .center, spacing: 10) {
-                    ResettableSlider(
-                        value: Binding(
-                            get: { Double(gainValue) },
-                            set: { controller.setGain(side, db: Float(Int($0.rounded()))) }
-                        ),
-                        range: -24...24,
-                        resetValue: 0
-                    )
-                    .frame(maxWidth: .infinity)
-                    NumericControlRow(
-                        value: Binding(
-                            get: { gainValue },
-                            set: { controller.setGain(side, db: Float($0)) }
-                        ),
-                        configuration: .gain
-                    )
-                }
-                .disabled(track == nil)
-            }
-
-            if showOffset {
-                VStack(alignment: .leading, spacing: 6) {
-                    let offsetMs = Int(((track?.offsetSeconds ?? 0) * 1000).rounded())
-                    Text("Offset \(offsetMs) ms")
+                if let track {
+                    placeholderWaveform(for: side)
+                        .frame(
+                            width: max(CGFloat(track.duration / timelineSpan) * proxy.size.width, 1),
+                            height: 58
+                        )
+                        .offset(
+                            x: xPosition(for: track.offsetSeconds, width: proxy.size.width)
+                        )
+                        .foregroundStyle(side == .a ? .blue.opacity(0.55) : .green.opacity(0.55))
+                } else {
+                    Text("Drop audio file here")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                    HStack(alignment: .center, spacing: 10) {
-                        ResettableSlider(
-                            value: Binding(
-                                get: { Double(offsetMs) },
-                                set: { controller.setOffset(side, seconds: Double(Int($0.rounded())) / 1000) }
-                            ),
-                            range: -300_000...300_000,
-                            resetValue: 0
-                        )
-                        .frame(maxWidth: .infinity)
-                        NumericControlRow(
-                            value: Binding(
-                                get: { offsetMs },
-                                set: { controller.setOffset(side, seconds: Double($0) / 1000) }
-                            ),
-                            configuration: .offset
-                        )
-                    }
-                    .disabled(track == nil)
+                        .padding(.leading, 16)
                 }
+
+                Rectangle()
+                    .fill(.secondary.opacity(0.25))
+                    .frame(width: 1)
+                    .offset(x: xPosition(for: 0, width: proxy.size.width))
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        controller.seek(to: globalTime(atX: value.location.x, width: proxy.size.width))
+                    }
+            )
+        }
+    }
+
+    private func placeholderWaveform(for side: TrackSide) -> some View {
+        Canvas { context, size in
+            let barCount = 96
+            let barWidth = max(size.width / CGFloat(barCount * 2), 1)
+            for index in 0..<barCount {
+                let phase = Double(index) * 0.37 + (side == .a ? 0 : 0.8)
+                let amplitude = 0.25 + 0.7 * abs(sin(phase) * cos(phase * 0.43))
+                let height = size.height * amplitude
+                let x = CGFloat(index) * size.width / CGFloat(barCount)
+                let rect = CGRect(x: x, y: (size.height - height) / 2, width: barWidth, height: height)
+                context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .foreground)
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
