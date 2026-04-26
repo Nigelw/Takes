@@ -486,23 +486,22 @@ struct ContentView: View {
         let fileProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
         guard !fileProviders.isEmpty else { return false }
 
-        var urls: [URL] = []
+        var urlsByProvider = Array<URL?>(repeating: nil, count: fileProviders.count)
         let group = DispatchGroup()
 
-        for provider in fileProviders {
+        for (index, provider) in fileProviders.enumerated() {
             group.enter()
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
                 let url = extractDroppedFileURL(from: item)
                 DispatchQueue.main.async {
-                    if let url {
-                        urls.append(url)
-                    }
+                    urlsByProvider[index] = url
                     group.leave()
                 }
             }
         }
 
         group.notify(queue: .main) {
+            let urls = urlsByProvider.compactMap(\.self)
             Task { @MainActor in
                 if let side, urls.count == 1 {
                     await controller.loadTrack(side, from: urls[0])
