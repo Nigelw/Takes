@@ -239,15 +239,15 @@ struct ContentView: View {
                 .onTapGesture {
                     controller.selectActiveTrack(side)
                 }
-                .onDrop(of: [UTType.fileURL.identifier], isTargeted: dropBinding(for: side)) { providers in
-                    loadDroppedURLs(from: providers, side: side)
-                }
 
             waveformLane(side: side, track: track)
                 .frame(maxWidth: .infinity)
                 .frame(height: trackRowHeight)
         }
         .frame(height: trackRowHeight)
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: dropBinding(for: side)) { providers in
+            loadDroppedURLs(from: providers, side: side)
+        }
     }
 
     private func trackInfoArea(side: TrackSide, track: LoadedTrack?) -> some View {
@@ -503,10 +503,10 @@ struct ContentView: View {
         group.notify(queue: .main) {
             let urls = urlsByProvider.compactMap(\.self)
             Task { @MainActor in
-                if let side, urls.count == 1 {
-                    await controller.loadTrack(side, from: urls[0])
-                } else if side != nil, urls.count > 1 {
+                if side != nil, fileProviders.count > 1 {
                     controller.setPlaybackError(.tooManyImportFiles)
+                } else if let side, urls.count == 1 {
+                    await controller.loadTrack(side, from: urls[0])
                 } else {
                     await controller.loadImportedFiles(urls)
                 }
