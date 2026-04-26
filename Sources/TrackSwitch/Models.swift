@@ -31,10 +31,15 @@ struct ComparisonSession: Equatable {
     var activeTrack: TrackSide = .a
     var isPlaying = false
     var transportPosition: TimeInterval = 0
-    var duration: TimeInterval = 0
+    var timelineStart: TimeInterval = 0
+    var timelineEnd: TimeInterval = 0
+
+    var duration: TimeInterval {
+        max(0, timelineEnd - timelineStart)
+    }
 
     var isPlayable: Bool {
-        (trackA != nil || trackB != nil) && duration > 0
+        (trackA != nil || trackB != nil) && timelineEnd > timelineStart
     }
 
     var canToggleComparison: Bool {
@@ -50,6 +55,7 @@ enum PlaybackError: LocalizedError, Equatable {
     case schedulingFailed
     case noValidOverlap
     case librarySelectionFailed(String)
+    case tooManyImportFiles
 
     var errorDescription: String? {
         switch self {
@@ -67,12 +73,23 @@ enum PlaybackError: LocalizedError, Equatable {
             "The current offsets leave no valid overlap between the two tracks."
         case let .librarySelectionFailed(message):
             message
+        case .tooManyImportFiles:
+            "Select one or two audio files."
         }
     }
 }
 
 extension TimeInterval {
     var formattedTimestamp: String {
+        abs(self).formattedUnsignedTimestamp
+    }
+
+    var formattedSignedTimestamp: String {
+        let prefix = self < 0 ? "-" : ""
+        return prefix + abs(self).formattedUnsignedTimestamp
+    }
+
+    private var formattedUnsignedTimestamp: String {
         guard self.isFinite else { return "--:--" }
         let rounded = Int(max(0, self.rounded()))
         let hours = rounded / 3600

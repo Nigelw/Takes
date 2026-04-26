@@ -8,7 +8,7 @@ struct NumericControlConfiguration {
     let suffix: String
 
     static let gain = NumericControlConfiguration(range: -24...24, step: 1, largeStep: 10, suffix: "dB")
-    static let offset = NumericControlConfiguration(range: -5000...5000, step: 10, largeStep: 100, suffix: "ms")
+    static let offset = NumericControlConfiguration(range: -300_000...300_000, step: 10, largeStep: 100, suffix: "ms")
 
     func clamped(_ value: Int) -> Int {
         min(max(value, range.lowerBound), range.upperBound)

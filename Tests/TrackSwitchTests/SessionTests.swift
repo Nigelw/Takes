@@ -12,12 +12,12 @@ struct SessionTests {
         #expect(!session.canToggleComparison)
 
         session.trackA = makeTrack(name: "a.wav")
-        session.duration = 12
+        session.timelineEnd = 12
         #expect(session.isPlayable)
         #expect(!session.canToggleComparison)
 
         session.trackB = makeTrack(name: "b.wav")
-        session.duration = 12
+        session.timelineEnd = 12
         #expect(session.isPlayable)
         #expect(session.canToggleComparison)
     }
@@ -27,10 +27,31 @@ struct SessionTests {
         var session = ComparisonSession()
         session.trackA = makeTrack(name: "a.wav")
         session.trackB = makeTrack(name: "b.wav")
-        session.duration = 11
+        session.timelineEnd = 11
 
         #expect(session.isPlayable)
         #expect(session.canToggleComparison)
+    }
+
+    @Test
+    func sessionUsesSignedTimelineBoundsForPlaybackReadiness() {
+        var session = ComparisonSession()
+        #expect(!session.isPlayable)
+
+        session.trackA = makeTrack(name: "a.wav")
+        session.timelineStart = -4
+        session.timelineEnd = 120
+        session.transportPosition = -4
+
+        #expect(session.isPlayable)
+        #expect(session.duration == 124)
+    }
+
+    @Test
+    func signedTimestampFormatsNegativeTimes() {
+        #expect(TimeInterval(-12).formattedSignedTimestamp == "-00:12")
+        #expect(TimeInterval(12).formattedSignedTimestamp == "00:12")
+        #expect(TimeInterval(-3723).formattedSignedTimestamp == "-1:02:03")
     }
 
     @Test
@@ -61,6 +82,7 @@ struct SessionTests {
     @Test
     func infoPlistDeclaresAppleEventsUsageDescription() throws {
         let plistURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appending(path: "Config")
@@ -112,22 +134,51 @@ struct SessionTests {
     }
 
     @Test
-    func libraryAssignmentsKeepSingleSelectionOnClickedSide() throws {
-        let url = URL(fileURLWithPath: "/tmp/example.wav")
+    func importAssignmentsUseSharedOpenRules() throws {
+        var session = ComparisonSession()
+        let first = URL(fileURLWithPath: "/tmp/first.wav")
+        let second = URL(fileURLWithPath: "/tmp/second.wav")
+        let third = URL(fileURLWithPath: "/tmp/third.wav")
 
-        let assignments = try PlaybackController.libraryAssignments(for: [url], clickedSide: .b)
+        let firstAssignments = try PlaybackController.importAssignments(for: [first], in: session)
+        #expect(firstAssignments.map(\.0) == [.a])
+        #expect(firstAssignments.map(\.1) == [first])
 
-        #expect(assignments.count == 1)
-        #expect(assignments[0].0 == .b)
-        #expect(assignments[0].1 == url)
+        session.trackA = makeTrack(name: "a.wav")
+        let secondAssignments = try PlaybackController.importAssignments(for: [second], in: session)
+        #expect(secondAssignments.map(\.0) == [.b])
+        #expect(secondAssignments.map(\.1) == [second])
+
+        session.trackB = makeTrack(name: "b.wav")
+        session.activeTrack = .b
+        let thirdAssignments = try PlaybackController.importAssignments(for: [third], in: session)
+        #expect(thirdAssignments.map(\.0) == [.b])
+        #expect(thirdAssignments.map(\.1) == [third])
+
+        let pairAssignments = try PlaybackController.importAssignments(for: [first, second], in: session)
+        #expect(pairAssignments.map(\.0) == [.a, .b])
+        #expect(pairAssignments.map(\.1) == [first, second])
     }
 
     @Test
-    func libraryAssignmentsLoadTwoSelectionsIntoTrackAThenTrackB() throws {
+    func importAssignmentsRejectMoreThanTwoFiles() {
+        let urls = [
+            URL(fileURLWithPath: "/tmp/a.wav"),
+            URL(fileURLWithPath: "/tmp/b.wav"),
+            URL(fileURLWithPath: "/tmp/c.wav")
+        ]
+
+        #expect(throws: PlaybackError.tooManyImportFiles) {
+            try PlaybackController.importAssignments(for: urls, in: ComparisonSession())
+        }
+    }
+
+    @Test
+    func importAssignmentsLoadTwoSelectionsIntoTrackAThenTrackB() throws {
         let first = URL(fileURLWithPath: "/tmp/first.wav")
         let second = URL(fileURLWithPath: "/tmp/second.wav")
 
-        let assignments = try PlaybackController.libraryAssignments(for: [first, second], clickedSide: .b)
+        let assignments = try PlaybackController.importAssignments(for: [first, second], in: ComparisonSession())
 
         #expect(assignments.count == 2)
         #expect(assignments[0].0 == .a)
@@ -154,8 +205,18 @@ struct SessionTests {
 
         #expect(gainConfig.steppedValue(from: 20, direction: 1, largeStep: true) == 24)
         #expect(gainConfig.steppedValue(from: -20, direction: -1, largeStep: true) == -24)
-        #expect(offsetConfig.steppedValue(from: 4950, direction: 1, largeStep: true) == 5000)
-        #expect(offsetConfig.steppedValue(from: -4950, direction: -1, largeStep: true) == -5000)
+        #expect(offsetConfig.steppedValue(from: 299_950, direction: 1, largeStep: true) == 300_000)
+        #expect(offsetConfig.steppedValue(from: -299_950, direction: -1, largeStep: true) == -300_000)
+    }
+
+    @Test
+    func offsetRangeExpandsToFiveMinutes() {
+        let offsetConfig = NumericControlConfiguration.offset
+
+        #expect(offsetConfig.clamped(300_001) == 300_000)
+        #expect(offsetConfig.clamped(-300_001) == -300_000)
+        #expect(offsetConfig.steppedValue(from: 299_950, direction: 1, largeStep: true) == 300_000)
+        #expect(offsetConfig.steppedValue(from: -299_950, direction: -1, largeStep: true) == -300_000)
     }
 
     @Test

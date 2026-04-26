@@ -69,7 +69,7 @@ final class PlaybackController: ObservableObject {
     func loadSelectedLibraryTrack(_ side: TrackSide) async {
         do {
             let urls = try libraryTrackSelector.selectedTrackURLs()
-            let assignments = try Self.libraryAssignments(for: urls, clickedSide: side)
+            let assignments = try Self.importAssignments(for: urls, in: session)
 
             for (assignedSide, url) in assignments {
                 await loadTrack(assignedSide, from: url)
@@ -200,17 +200,23 @@ final class PlaybackController: ObservableObject {
         seek(to: session.transportPosition + delta)
     }
 
-    nonisolated static func libraryAssignments(
+    nonisolated static func importAssignments(
         for urls: [URL],
-        clickedSide: TrackSide
+        in session: ComparisonSession
     ) throws -> [(TrackSide, URL)] {
         switch urls.count {
         case 1:
-            [(clickedSide, urls[0])]
+            if session.trackA == nil {
+                return [(.a, urls[0])]
+            }
+            if session.trackB == nil {
+                return [(.b, urls[0])]
+            }
+            return [(session.activeTrack, urls[0])]
         case 2:
-            [(.a, urls[0]), (.b, urls[1])]
+            return [(.a, urls[0]), (.b, urls[1])]
         default:
-            throw PlaybackError.librarySelectionFailed("Select one or two tracks in Music.")
+            throw PlaybackError.tooManyImportFiles
         }
     }
 
@@ -281,7 +287,8 @@ final class PlaybackController: ObservableObject {
     private func recalculateSessionDuration() {
         if let trackA = session.trackA, let trackB = session.trackB {
             guard let range = TransportMapping.sessionRange(trackA: trackA, trackB: trackB) else {
-                session.duration = 0
+                session.timelineStart = 0
+                session.timelineEnd = 0
                 session.transportPosition = 0
                 sessionStart = 0
                 overlapWarning = nil
@@ -289,7 +296,8 @@ final class PlaybackController: ObservableObject {
             }
 
             sessionStart = range.lowerBound
-            session.duration = range.upperBound - range.lowerBound
+            session.timelineStart = range.lowerBound
+            session.timelineEnd = range.upperBound
             session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
             let overlapDuration = TransportMapping.validOverlapDuration(trackA: trackA, trackB: trackB)
             if overlapDuration == 0 {
@@ -305,7 +313,8 @@ final class PlaybackController: ObservableObject {
 
         if let trackA = session.trackA {
             sessionStart = trackA.offsetSeconds
-            session.duration = trackA.duration
+            session.timelineStart = trackA.offsetSeconds
+            session.timelineEnd = trackA.offsetSeconds + trackA.duration
             session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
             overlapWarning = nil
             return
@@ -313,13 +322,15 @@ final class PlaybackController: ObservableObject {
 
         if let trackB = session.trackB {
             sessionStart = trackB.offsetSeconds
-            session.duration = trackB.duration
+            session.timelineStart = trackB.offsetSeconds
+            session.timelineEnd = trackB.offsetSeconds + trackB.duration
             session.transportPosition = TransportMapping.clampedTransport(session.transportPosition, duration: session.duration)
             overlapWarning = nil
             return
         }
 
-        session.duration = 0
+        session.timelineStart = 0
+        session.timelineEnd = 0
         sessionStart = 0
         overlapWarning = nil
     }
