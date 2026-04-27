@@ -490,6 +490,11 @@ struct SessionTests {
     }
 
     @Test
+    func endOfPlaybackPositionStopsAtTimelineEnd() {
+        #expect(PlaybackController.transportPositionAtNaturalEnd(timelineEnd: 12.5) == 12.5)
+    }
+
+    @Test
     func silenceSchedulingSplitsLongDurationsIntoBoundedChunks() {
         let chunks = PlaybackController.silenceChunkDurations(duration: 12.5, maximumChunkDuration: 5)
 

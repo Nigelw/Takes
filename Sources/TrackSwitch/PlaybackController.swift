@@ -8,22 +8,23 @@ final class PlaybackController: ObservableObject {
 
     @Published private(set) var session = ComparisonSession()
     @Published private(set) var playbackError: PlaybackError?
-    @Published private(set) var overlapWarning: String?
 
     private let loader: AudioFileLoading
     private let libraryTrackSelector: LibraryTrackSelecting
     private let engine = AVAudioEngine()
-    private let playerA = AVAudioPlayerNode()
-    private let playerB = AVAudioPlayerNode()
-    private let mixerA = AVAudioMixerNode()
-    private let mixerB = AVAudioMixerNode()
     nonisolated private static let maximumSilenceBufferDuration: TimeInterval = 5
 
     private var engineConfigured = false
-    private var audioFilesByTrackID: [SessionTrack.ID: AVAudioFile] = [:]
+    private var runtimeTracksByID: [SessionTrack.ID: RuntimeTrack] = [:]
     private var playbackStartedAt: CFTimeInterval?
     private var playbackStartedFromTransport: TimeInterval = 0
     private var timer: Timer?
+
+    private struct RuntimeTrack {
+        let file: AVAudioFile
+        let player: AVAudioPlayerNode
+        let mixer: AVAudioMixerNode
+    }
 
     private struct PreparedTrackLoad {
         let metadata: LoadedTrack
@@ -208,10 +209,11 @@ final class PlaybackController: ObservableObject {
                 preservingSettingsFrom: session.trackA
             )
             if let previousID {
-                audioFilesByTrackID[previousID] = nil
+                detachRuntimeTrack(for: previousID)
             }
             if let id = session.trackAID {
-                audioFilesByTrackID[id] = preparedLoad.file
+                configureEngine()
+                attachRuntimeTrack(for: id, file: preparedLoad.file)
             }
             if session.trackB == nil {
                 session.activeTrack = .a
@@ -223,10 +225,11 @@ final class PlaybackController: ObservableObject {
                 preservingSettingsFrom: session.trackB
             )
             if let previousID {
-                audioFilesByTrackID[previousID] = nil
+                detachRuntimeTrack(for: previousID)
             }
             if let id = session.trackBID {
-                audioFilesByTrackID[id] = preparedLoad.file
+                configureEngine()
+                attachRuntimeTrack(for: id, file: preparedLoad.file)
             }
             if session.trackA == nil {
                 session.activeTrack = .b
@@ -237,7 +240,8 @@ final class PlaybackController: ObservableObject {
     private func appendPreparedTrackLoad(_ preparedLoad: PreparedTrackLoad) {
         let sessionTrack = SessionTrack(loadedTrack: preparedLoad.metadata)
         session.tracks.append(sessionTrack)
-        audioFilesByTrackID[sessionTrack.id] = preparedLoad.file
+        configureEngine()
+        attachRuntimeTrack(for: sessionTrack.id, file: preparedLoad.file)
         if session.activeTrackID == nil {
             session.activeTrackID = sessionTrack.id
         }
@@ -271,8 +275,9 @@ final class PlaybackController: ObservableObject {
     func pause() {
         guard session.isPlaying else { return }
         session.transportPosition = currentTransportPosition()
-        playerA.pause()
-        playerB.pause()
+        for runtime in runtimeTracksInSessionOrder() {
+            runtime.player.pause()
+        }
         session.isPlaying = false
         playbackStartedAt = nil
         playbackStartedFromTransport = session.transportPosition
@@ -280,8 +285,9 @@ final class PlaybackController: ObservableObject {
     }
 
     func stop() {
-        playerA.stop()
-        playerB.stop()
+        for runtime in runtimeTracksInSessionOrder() {
+            runtime.player.stop()
+        }
         session.isPlaying = false
         session.transportPosition = session.timelineStart
         playbackStartedAt = nil
@@ -341,7 +347,8 @@ final class PlaybackController: ObservableObject {
             let resumePosition = wasPlaying ? currentTransportPosition() : nil
 
             session.tracks[index].loadedTrack = preparedLoad.metadata
-            audioFilesByTrackID[trackID] = preparedLoad.file
+            configureEngine()
+            attachRuntimeTrack(for: trackID, file: preparedLoad.file)
             finishTrackLoading(preferZero: !wasPlaying)
 
             guard wasPlaying, let resumePosition else { return }
@@ -365,7 +372,7 @@ final class PlaybackController: ObservableObject {
         }
 
         session.tracks.remove(at: removedIndex)
-        audioFilesByTrackID[trackID] = nil
+        detachRuntimeTrack(for: trackID)
 
         if wasActive {
             if session.tracks.indices.contains(removedIndex) {
@@ -468,21 +475,37 @@ final class PlaybackController: ObservableObject {
         return chunks
     }
 
+    nonisolated static func transportPositionAtNaturalEnd(timelineEnd: TimeInterval) -> TimeInterval {
+        timelineEnd
+    }
+
     private func configureEngine() {
         guard !engineConfigured else { return }
 
-        engine.attach(playerA)
-        engine.attach(playerB)
-        engine.attach(mixerA)
-        engine.attach(mixerB)
-
-        engine.connect(playerA, to: mixerA, format: nil)
-        engine.connect(playerB, to: mixerB, format: nil)
-        engine.connect(mixerA, to: engine.mainMixerNode, format: nil)
-        engine.connect(mixerB, to: engine.mainMixerNode, format: nil)
-
         engineConfigured = true
         applyAudibility()
+    }
+
+    private func attachRuntimeTrack(for trackID: SessionTrack.ID, file: AVAudioFile) {
+        detachRuntimeTrack(for: trackID)
+
+        let player = AVAudioPlayerNode()
+        let mixer = AVAudioMixerNode()
+
+        engine.attach(player)
+        engine.attach(mixer)
+        engine.connect(player, to: mixer, format: nil)
+        engine.connect(mixer, to: engine.mainMixerNode, format: nil)
+
+        runtimeTracksByID[trackID] = RuntimeTrack(file: file, player: player, mixer: mixer)
+        applyAudibility()
+    }
+
+    private func detachRuntimeTrack(for trackID: SessionTrack.ID) {
+        guard let runtime = runtimeTracksByID.removeValue(forKey: trackID) else { return }
+        runtime.player.stop()
+        engine.detach(runtime.player)
+        engine.detach(runtime.mixer)
     }
 
     private func ensureEngineRunning() throws {
@@ -506,32 +529,25 @@ final class PlaybackController: ObservableObject {
             timelineStart: session.timelineStart,
             timelineEnd: session.timelineEnd
         )
-        playerA.stop()
-        playerB.stop()
 
-        if let trackA = session.trackA,
-           let trackAID = trackID(for: .a),
-           let fileA = audioFilesByTrackID[trackAID] {
-            scheduleTrack(trackA, file: fileA, on: playerA, atGlobalTime: transport)
-        }
-
-        if let trackB = session.trackB,
-           let trackBID = trackID(for: .b),
-           let fileB = audioFilesByTrackID[trackBID] {
-            scheduleTrack(trackB, file: fileB, on: playerB, atGlobalTime: transport)
+        for sessionTrack in session.tracks {
+            guard let runtime = runtimeTracksByID[sessionTrack.id] else { continue }
+            runtime.player.stop()
+            scheduleTrack(
+                sessionTrack.loadedTrack,
+                file: runtime.file,
+                on: runtime.player,
+                atGlobalTime: transport
+            )
         }
 
         session.transportPosition = transport
     }
 
     private func startScheduledPlayers() {
-        if let trackAID = trackID(for: .a),
-           audioFilesByTrackID[trackAID] != nil {
-            playerA.play()
-        }
-        if let trackBID = trackID(for: .b),
-           audioFilesByTrackID[trackBID] != nil {
-            playerB.play()
+        guard session.isPlayable else { return }
+        for runtime in runtimeTracksInSessionOrder() {
+            runtime.player.play()
         }
     }
 
@@ -540,7 +556,6 @@ final class PlaybackController: ObservableObject {
             session.timelineStart = 0
             session.timelineEnd = 0
             session.transportPosition = 0
-            overlapWarning = nil
             return
         }
 
@@ -552,19 +567,6 @@ final class PlaybackController: ObservableObject {
             timelineEnd: session.timelineEnd,
             preferZero: preferZero || session.transportPosition == 0
         )
-
-        if let trackA = session.trackA, let trackB = session.trackB {
-            let overlapDuration = TransportMapping.validOverlapDuration(trackA: trackA, trackB: trackB)
-            if overlapDuration == 0 {
-                overlapWarning = "Track A and Track B do not overlap at the current offsets."
-            } else if overlapDuration < min(trackA.duration, trackB.duration) {
-                overlapWarning = "Offsets reduce the shared compare range to \(overlapDuration.formattedTimestamp)."
-            } else {
-                overlapWarning = nil
-            }
-        } else {
-            overlapWarning = nil
-        }
 
         playbackError = nil
     }
@@ -625,13 +627,15 @@ final class PlaybackController: ObservableObject {
     private func applyAudibility() {
         guard engineConfigured else { return }
 
-        let gainA = TransportMapping.linearGain(fromDB: session.trackA?.gainDB ?? 0)
-        let gainB = TransportMapping.linearGain(fromDB: session.trackB?.gainDB ?? 0)
-        let canPlayA = session.trackA != nil
-        let canPlayB = session.trackB != nil
+        for sessionTrack in session.tracks {
+            guard let runtime = runtimeTracksByID[sessionTrack.id] else { continue }
+            let gain = TransportMapping.linearGain(fromDB: sessionTrack.loadedTrack.gainDB)
+            runtime.mixer.outputVolume = session.activeTrackID == sessionTrack.id ? gain : 0
+        }
+    }
 
-        mixerA.outputVolume = canPlayA && (session.activeTrack == .a || !canPlayB) ? gainA : 0
-        mixerB.outputVolume = canPlayB && (session.activeTrack == .b || !canPlayA) ? gainB : 0
+    private func runtimeTracksInSessionOrder() -> [RuntimeTrack] {
+        session.tracks.compactMap { runtimeTracksByID[$0.id] }
     }
 
     private func trackID(for side: TrackSide) -> SessionTrack.ID? {
@@ -657,7 +661,15 @@ final class PlaybackController: ObservableObject {
         let transport = currentTransportPosition()
         session.transportPosition = transport
         if transport >= session.timelineEnd {
-            stop()
+            for runtime in runtimeTracksInSessionOrder() {
+                runtime.player.stop()
+            }
+            session.isPlaying = false
+            session.transportPosition = Self.transportPositionAtNaturalEnd(timelineEnd: session.timelineEnd)
+            playbackStartedAt = nil
+            playbackStartedFromTransport = session.transportPosition
+            timer?.invalidate()
+            applyAudibility()
         }
     }
 

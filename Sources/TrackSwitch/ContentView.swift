@@ -87,11 +87,6 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             transportBar
-            if let warning = controller.overlapWarning {
-                Text(warning)
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-            }
             if let error = controller.playbackError {
                 Text(error.localizedDescription)
                     .font(.callout)
