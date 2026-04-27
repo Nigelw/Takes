@@ -116,10 +116,11 @@ struct SessionTests {
     }
 
     @Test
-    func musicSelectionScriptUsesSharedTooManySelectionMessage() {
+    func musicSelectionScriptDoesNotRejectMoreThanTwoTracks() {
         let script = LibraryTrackSelectionLoader.musicSelectionScript
 
-        #expect(script.contains("Select one or two audio files."))
+        #expect(!script.contains("Select one or two audio files."))
+        #expect(!script.contains("(count of selectedTracks) > 2"))
     }
 
     @Test
@@ -164,16 +165,30 @@ struct SessionTests {
     }
 
     @Test
-    func musicSelectionParsingRejectsMoreThanTwoTracks() {
+    func musicSelectionParsingSortsManyTracksByViewOrder() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+        let thirdURL = tempDirectory.appending(path: UUID().uuidString + ".m4a")
+        let firstURL = tempDirectory.appending(path: UUID().uuidString + ".mp3")
+        let secondURL = tempDirectory.appending(path: UUID().uuidString + ".wav")
+
+        FileManager.default.createFile(atPath: thirdURL.path, contents: Data())
+        FileManager.default.createFile(atPath: firstURL.path, contents: Data())
+        FileManager.default.createFile(atPath: secondURL.path, contents: Data())
+        defer {
+            try? FileManager.default.removeItem(at: thirdURL)
+            try? FileManager.default.removeItem(at: firstURL)
+            try? FileManager.default.removeItem(at: secondURL)
+        }
+
         let output = """
-        1\t/tmp/a.wav
-        2\t/tmp/b.wav
-        3\t/tmp/c.wav
+        9\t\(thirdURL.path)
+        2\t\(firstURL.path)
+        5\t\(secondURL.path)
         """
 
-        #expect(throws: PlaybackError.librarySelectionFailed("Select one or two audio files.")) {
-            try LibraryTrackSelectionLoader.parseSelectionOutput(output)
-        }
+        let urls = try LibraryTrackSelectionLoader.parseSelectionOutput(output)
+
+        #expect(urls == [firstURL, secondURL, thirdURL])
     }
 
     @Test
