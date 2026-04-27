@@ -18,6 +18,10 @@ struct TransportMapping {
         return lower...upper
     }
 
+    static func timelineRange(trackA: LoadedTrack?, trackB: LoadedTrack?) -> ClosedRange<TimeInterval>? {
+        timelineRange(tracks: [trackA, trackB].compactMap { $0 })
+    }
+
     static func overlapRange(trackA: LoadedTrack, trackB: LoadedTrack) -> ClosedRange<TimeInterval>? {
         let a = transportBounds(duration: trackA.duration, offset: trackA.offsetSeconds)
         let b = transportBounds(duration: trackB.duration, offset: trackB.offsetSeconds)
