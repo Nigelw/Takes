@@ -24,6 +24,12 @@ final class PlaybackController: ObservableObject {
     private var playbackStartedFromTransport: TimeInterval = 0
     private var timer: Timer?
 
+    private struct PreparedTrackLoad {
+        let side: TrackSide
+        let metadata: LoadedTrack
+        let file: AVAudioFile
+    }
+
     init(
         loader: AudioFileLoading = AudioFileLoader(),
         libraryTrackSelector: LibraryTrackSelecting = LibraryTrackSelectionLoader()
@@ -45,10 +51,13 @@ final class PlaybackController: ObservableObject {
     func loadImportedFiles(_ urls: [URL]) async {
         do {
             let assignments = try Self.importAssignments(for: urls, in: session)
-
-            for (side, url) in assignments {
-                try loadTrackOrThrow(side, from: url)
+            let preparedLoads = try assignments.map { side, url in
+                try prepareTrackLoad(side, from: url)
             }
+
+            stop()
+            preparedLoads.forEach(applyPreparedTrackLoad)
+            finishTrackLoading()
         } catch let error as PlaybackError {
             playbackError = error
         } catch {
@@ -73,33 +82,50 @@ final class PlaybackController: ObservableObject {
 
     private func loadTrackOrThrow(_ side: TrackSide, from url: URL) throws {
         do {
+            let preparedLoad = try prepareTrackLoad(side, from: url)
             stop()
-            let metadata = try loader.loadTrackMetadata(from: url)
-            let file = try loader.makeAudioFile(from: url)
-
-            switch side {
-            case .a:
-                session.trackA = Self.replacingTrackMetadata(metadata, preservingSettingsFrom: session.trackA)
-                audioFileA = file
-                if session.trackB == nil {
-                    session.activeTrack = .a
-                }
-            case .b:
-                session.trackB = Self.replacingTrackMetadata(metadata, preservingSettingsFrom: session.trackB)
-                audioFileB = file
-                if session.trackA == nil {
-                    session.activeTrack = .b
-                }
-            }
-
-            playbackError = nil
-            recalculateSessionDuration(preferZero: true)
-            applyAudibility()
+            applyPreparedTrackLoad(preparedLoad)
+            finishTrackLoading()
         } catch let error as PlaybackError {
             throw error
         } catch {
             throw PlaybackError.failedToOpenFile(url)
         }
+    }
+
+    private func prepareTrackLoad(_ side: TrackSide, from url: URL) throws -> PreparedTrackLoad {
+        let metadata = try loader.loadTrackMetadata(from: url)
+        let file = try loader.makeAudioFile(from: url)
+        return PreparedTrackLoad(side: side, metadata: metadata, file: file)
+    }
+
+    private func applyPreparedTrackLoad(_ preparedLoad: PreparedTrackLoad) {
+        switch preparedLoad.side {
+        case .a:
+            session.trackA = Self.replacingTrackMetadata(
+                preparedLoad.metadata,
+                preservingSettingsFrom: session.trackA
+            )
+            audioFileA = preparedLoad.file
+            if session.trackB == nil {
+                session.activeTrack = .a
+            }
+        case .b:
+            session.trackB = Self.replacingTrackMetadata(
+                preparedLoad.metadata,
+                preservingSettingsFrom: session.trackB
+            )
+            audioFileB = preparedLoad.file
+            if session.trackA == nil {
+                session.activeTrack = .b
+            }
+        }
+    }
+
+    private func finishTrackLoading() {
+        playbackError = nil
+        recalculateSessionDuration(preferZero: true)
+        applyAudibility()
     }
 
     func play() {

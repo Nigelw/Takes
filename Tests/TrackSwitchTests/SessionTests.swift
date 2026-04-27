@@ -216,6 +216,22 @@ struct SessionTests {
         #expect(controller.session.trackB == nil)
     }
 
+    @MainActor
+    @Test
+    func importedFilesDoNotPartiallyApplyWhenSecondLoadFails() async throws {
+        let first = try makeTemporaryAudioFile(name: "first.wav")
+        let second = URL(fileURLWithPath: "/tmp/missing-second.wav")
+        defer { try? FileManager.default.removeItem(at: first.deletingLastPathComponent()) }
+
+        let controller = PlaybackController(loader: FakeAudioFileLoader(failingURLs: [second]))
+
+        await controller.loadImportedFiles([first, second])
+
+        #expect(controller.playbackError == PlaybackError.failedToOpenFile(second))
+        #expect(controller.session.trackA == nil)
+        #expect(controller.session.trackB == nil)
+    }
+
     @Test
     func replacementPreservesExistingSideSettings() {
         var oldTrack = makeTrack(name: "old.wav")

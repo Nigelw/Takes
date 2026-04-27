@@ -172,7 +172,7 @@ Music import rules:
 - `Space`: play/pause
 - `X`: switch playback between Track A and Track B
 - `Left` / `Right`: seek by 1 second
-- `Shift+Left` / `Shift+Right`: seek by 5 seconds
+- `Shift+Left` / `Shift+Right`: seek by 10 seconds
 
 ### Gain And Offset Controls
 
