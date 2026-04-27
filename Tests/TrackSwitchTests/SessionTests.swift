@@ -257,6 +257,76 @@ struct SessionTests {
         #expect(controller.playbackError?.localizedDescription.contains("track-32.wav") == true)
     }
 
+    @MainActor
+    @Test
+    func importedFilesReportFailuresAndTrackCapSkipsTogether() async throws {
+        let existingURLs = try (0..<30).map { index in
+            try makeTemporaryAudioFile(name: "existing-\(index).wav")
+        }
+        let importURLs = try (0..<3).map { index in
+            try makeTemporaryAudioFile(name: "incoming-\(index).wav")
+        }
+        let missing = URL(fileURLWithPath: "/tmp/missing-mixed.wav")
+        defer {
+            for url in existingURLs + importURLs {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController(loader: FakeAudioFileLoader(failingURLs: [missing]))
+        await controller.loadImportedFiles(existingURLs)
+
+        await controller.loadImportedFiles([missing] + importURLs)
+
+        #expect(controller.session.tracks.count == PlaybackController.maximumTrackCount)
+        #expect(controller.session.tracks.map { $0.loadedTrack.displayName }.suffix(2) == ["incoming-0.wav", "incoming-1.wav"])
+        #expect(controller.playbackError?.localizedDescription.contains("missing-mixed.wav") == true)
+        #expect(controller.playbackError?.localizedDescription.contains("TrackSwitch currently supports up to 32 loaded tracks.") == true)
+        #expect(controller.playbackError?.localizedDescription.contains("incoming-2.wav") == true)
+    }
+
+    @MainActor
+    @Test
+    func timelineRecalculationIncludesThirdAppendedTrack() async throws {
+        let urls = try (0..<3).map { index in
+            try makeTemporaryAudioFile(name: "timeline-\(index).wav")
+        }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+        let thirdID = try #require(controller.session.tracks.last?.id)
+
+        controller.setOffset(thirdID, seconds: 10)
+
+        #expect(controller.session.timelineEnd == 11)
+    }
+
+    @MainActor
+    @Test
+    func importedFilesAppendWhilePlayingPreservesPlaybackStateAndPosition() async throws {
+        let first = try makeTemporaryAudioFile(name: "playing-first.wav")
+        let second = try makeTemporaryAudioFile(name: "playing-second.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([first])
+        controller.play()
+        controller.seek(to: 0.5)
+
+        await controller.loadImportedFiles([second])
+
+        #expect(controller.session.isPlaying == true)
+        #expect(controller.session.transportPosition == 0.5)
+    }
+
     @Test
     func loadRecalculationPrefersZeroWhenStoppedAtPreviousNegativeStart() {
         let position = PlaybackController.transportPositionAfterTimelineRecalculation(

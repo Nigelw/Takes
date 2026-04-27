@@ -269,6 +269,7 @@ enum PlaybackError: LocalizedError, Equatable {
     case librarySelectionFailed(String)
     case importFailures([ImportFailure])
     case trackLimitExceeded(limit: Int, skippedFileNames: [String])
+    case importSummary(failures: [ImportFailure], skippedFileNames: [String], limit: Int)
     case tooManyImportFiles
 
     var errorDescription: String? {
@@ -293,9 +294,32 @@ enum PlaybackError: LocalizedError, Equatable {
         case let .trackLimitExceeded(limit, skippedFileNames):
             let skipped = skippedFileNames.joined(separator: "\n")
             return "TrackSwitch currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)"
+        case let .importSummary(failures, skippedFileNames, limit):
+            return Self.importSummaryDescription(
+                failures: failures,
+                skippedFileNames: skippedFileNames,
+                limit: limit
+            )
         case .tooManyImportFiles:
             return "Select one or two audio files."
         }
+    }
+
+    private static func importSummaryDescription(
+        failures: [ImportFailure],
+        skippedFileNames: [String],
+        limit: Int
+    ) -> String {
+        var sections: [String] = []
+        if !failures.isEmpty {
+            let details = failures.map { "\($0.fileName): \($0.message)" }.joined(separator: "\n")
+            sections.append("Some files could not be loaded.\n\(details)")
+        }
+        if !skippedFileNames.isEmpty {
+            let skipped = skippedFileNames.joined(separator: "\n")
+            sections.append("TrackSwitch currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)")
+        }
+        return sections.joined(separator: "\n")
     }
 }
 

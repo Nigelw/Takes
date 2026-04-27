@@ -51,6 +51,8 @@ final class PlaybackController: ObservableObject {
     func loadImportedFiles(_ urls: [URL]) async {
         guard !urls.isEmpty else { return }
 
+        let wasPlaying = session.isPlaying
+        let resumePosition = session.transportPosition
         var preparedLoads: [PreparedTrackLoad] = []
         var failures: [ImportFailure] = []
         var skippedFileNames: [String] = []
@@ -71,15 +73,33 @@ final class PlaybackController: ObservableObject {
         }
 
         if !preparedLoads.isEmpty {
-            stop()
             preparedLoads.forEach(appendPreparedTrackLoad)
-            finishTrackLoading()
+            finishTrackLoading(preferZero: !wasPlaying)
+            if wasPlaying {
+                session.isPlaying = true
+                session.transportPosition = TransportMapping.clampedTransport(
+                    resumePosition,
+                    timelineStart: session.timelineStart,
+                    timelineEnd: session.timelineEnd
+                )
+                playbackStartedFromTransport = session.transportPosition
+                playbackStartedAt = CACurrentMediaTime()
+            }
         }
 
-        if !failures.isEmpty {
+        switch (failures.isEmpty, skippedFileNames.isEmpty) {
+        case (false, false):
+            playbackError = .importSummary(
+                failures: failures,
+                skippedFileNames: skippedFileNames,
+                limit: Self.maximumTrackCount
+            )
+        case (false, true):
             playbackError = .importFailures(failures)
-        } else if !skippedFileNames.isEmpty {
+        case (true, false):
             playbackError = .trackLimitExceeded(limit: Self.maximumTrackCount, skippedFileNames: skippedFileNames)
+        case (true, true):
+            break
         }
     }
 
@@ -161,9 +181,9 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    private func finishTrackLoading() {
+    private func finishTrackLoading(preferZero: Bool = true) {
         playbackError = nil
-        recalculateSessionDuration(preferZero: true)
+        recalculateSessionDuration(preferZero: preferZero)
         applyAudibility()
     }
 
@@ -400,7 +420,7 @@ final class PlaybackController: ObservableObject {
     }
 
     private func recalculateSessionDuration(preferZero: Bool = false) {
-        guard let range = TransportMapping.timelineRange(trackA: session.trackA, trackB: session.trackB) else {
+        guard let range = TransportMapping.timelineRange(tracks: session.tracks.map(\.loadedTrack)) else {
             session.timelineStart = 0
             session.timelineEnd = 0
             session.transportPosition = 0
