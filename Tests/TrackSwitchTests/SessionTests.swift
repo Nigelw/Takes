@@ -191,106 +191,70 @@ struct SessionTests {
         #expect(urls == [firstURL, secondURL, thirdURL])
     }
 
-    @Test
-    func importAssignmentsUseSharedOpenRules() throws {
-        var session = ComparisonSession()
-        let first = URL(fileURLWithPath: "/tmp/first.wav")
-        let second = URL(fileURLWithPath: "/tmp/second.wav")
-        let third = URL(fileURLWithPath: "/tmp/third.wav")
-
-        let firstAssignments = try PlaybackController.importAssignments(for: [first], in: session)
-        #expect(firstAssignments.map(\.0) == [.a])
-        #expect(firstAssignments.map(\.1) == [first])
-
-        session.trackA = makeTrack(name: "a.wav")
-        let secondAssignments = try PlaybackController.importAssignments(for: [second], in: session)
-        #expect(secondAssignments.map(\.0) == [.b])
-        #expect(secondAssignments.map(\.1) == [second])
-
-        session.trackB = makeTrack(name: "b.wav")
-        session.activeTrack = .b
-        let thirdAssignments = try PlaybackController.importAssignments(for: [third], in: session)
-        #expect(thirdAssignments.map(\.0) == [.b])
-        #expect(thirdAssignments.map(\.1) == [third])
-
-        let pairAssignments = try PlaybackController.importAssignments(for: [first, second], in: session)
-        #expect(pairAssignments.map(\.0) == [.a, .b])
-        #expect(pairAssignments.map(\.1) == [first, second])
-    }
-
-    @Test
-    func importAssignmentsRejectMoreThanTwoFiles() {
-        let urls = [
-            URL(fileURLWithPath: "/tmp/a.wav"),
-            URL(fileURLWithPath: "/tmp/b.wav"),
-            URL(fileURLWithPath: "/tmp/c.wav")
-        ]
-
-        #expect(throws: PlaybackError.tooManyImportFiles) {
-            try PlaybackController.importAssignments(for: urls, in: ComparisonSession())
-        }
-    }
-
-    @Test
-    func importAssignmentsLoadTwoSelectionsIntoTrackAThenTrackB() throws {
-        let first = URL(fileURLWithPath: "/tmp/first.wav")
-        let second = URL(fileURLWithPath: "/tmp/second.wav")
-
-        let assignments = try PlaybackController.importAssignments(for: [first, second], in: ComparisonSession())
-
-        #expect(assignments.count == 2)
-        #expect(assignments[0].0 == .a)
-        #expect(assignments[0].1 == first)
-        #expect(assignments[1].0 == .b)
-        #expect(assignments[1].1 == second)
-    }
-
     @MainActor
     @Test
-    func importedFilesStopAfterFirstLoadFailure() async throws {
-        let first = URL(fileURLWithPath: "/tmp/missing-first.wav")
-        let second = try makeTemporaryAudioFile(name: "second.wav")
-        defer { try? FileManager.default.removeItem(at: second.deletingLastPathComponent()) }
-
-        let controller = PlaybackController(loader: FakeAudioFileLoader(failingURLs: [first]))
-
-        await controller.loadImportedFiles([first, second])
-
-        #expect(controller.playbackError == PlaybackError.failedToOpenFile(first))
-        #expect(controller.session.trackA == nil)
-        #expect(controller.session.trackB == nil)
-    }
-
-    @MainActor
-    @Test
-    func importedFilesDoNotPartiallyApplyWhenSecondLoadFails() async throws {
+    func importedFilesAppendSuccessesAndReportFailures() async throws {
         let first = try makeTemporaryAudioFile(name: "first.wav")
-        let second = URL(fileURLWithPath: "/tmp/missing-second.wav")
-        defer { try? FileManager.default.removeItem(at: first.deletingLastPathComponent()) }
+        let missing = URL(fileURLWithPath: "/tmp/missing-second.wav")
+        let third = try makeTemporaryAudioFile(name: "third.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: third.deletingLastPathComponent())
+        }
 
-        let controller = PlaybackController(loader: FakeAudioFileLoader(failingURLs: [second]))
+        let controller = PlaybackController(loader: FakeAudioFileLoader(failingURLs: [missing]))
 
-        await controller.loadImportedFiles([first, second])
+        await controller.loadImportedFiles([first, missing, third])
 
-        #expect(controller.playbackError == PlaybackError.failedToOpenFile(second))
-        #expect(controller.session.trackA == nil)
-        #expect(controller.session.trackB == nil)
+        #expect(controller.session.tracks.map { $0.loadedTrack.displayName } == ["first.wav", "third.wav"])
+        #expect(controller.session.activeTrackID == controller.session.tracks.first?.id)
+        #expect(controller.playbackError?.localizedDescription.contains("missing-second.wav") == true)
     }
 
+    @MainActor
     @Test
-    func replacementPreservesExistingSideSettings() {
-        var oldTrack = makeTrack(name: "old.wav")
-        oldTrack.gainDB = -3
-        oldTrack.offsetSeconds = -12
+    func importedFilesAppendToExistingTracksAndPreserveSettings() async throws {
+        let first = try makeTemporaryAudioFile(name: "first.wav")
+        let second = try makeTemporaryAudioFile(name: "second.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
 
-        let newTrack = PlaybackController.replacingTrackMetadata(
-            makeTrack(name: "new.wav"),
-            preservingSettingsFrom: oldTrack
-        )
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([first])
+        let existingID = try #require(controller.session.tracks.first?.id)
+        controller.setGain(existingID, db: -6)
+        controller.setOffset(existingID, seconds: 1.25)
 
-        #expect(newTrack.displayName == "new.wav")
-        #expect(newTrack.gainDB == -3)
-        #expect(newTrack.offsetSeconds == -12)
+        await controller.loadImportedFiles([second])
+
+        #expect(controller.session.tracks.count == 2)
+        #expect(controller.session.tracks[0].id == existingID)
+        #expect(controller.session.tracks[0].loadedTrack.gainDB == -6)
+        #expect(controller.session.tracks[0].loadedTrack.offsetSeconds == 1.25)
+        #expect(controller.session.tracks[1].loadedTrack.displayName == "second.wav")
+    }
+
+    @MainActor
+    @Test
+    func importedFilesRespectThirtyTwoTrackCap() async throws {
+        let urls = try (0..<33).map { index in
+            try makeTemporaryAudioFile(name: "track-\(index).wav")
+        }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+
+        await controller.loadImportedFiles(urls)
+
+        #expect(controller.session.tracks.count == PlaybackController.maximumTrackCount)
+        #expect(controller.playbackError?.localizedDescription.contains("TrackSwitch currently supports up to 32 loaded tracks.") == true)
+        #expect(controller.playbackError?.localizedDescription.contains("track-32.wav") == true)
     }
 
     @Test

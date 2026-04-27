@@ -90,6 +90,10 @@ struct ComparisonSession: Equatable {
         }
     }
 
+    var trackAID: SessionTrack.ID? {
+        slotID(for: .a)
+    }
+
     var trackB: LoadedTrack? {
         get {
             track(for: .b)
@@ -97,6 +101,10 @@ struct ComparisonSession: Equatable {
         set {
             setTrack(newValue, for: .b)
         }
+    }
+
+    var trackBID: SessionTrack.ID? {
+        slotID(for: .b)
     }
 
     var activeTrack: TrackSide {
@@ -241,6 +249,16 @@ struct ComparisonSession: Equatable {
     }
 }
 
+struct ImportFailure: Equatable {
+    let fileName: String
+    let message: String
+
+    init(url: URL, message: String) {
+        fileName = url.lastPathComponent.ifEmpty(url.path)
+        self.message = message
+    }
+}
+
 enum PlaybackError: LocalizedError, Equatable {
     case unsupportedFormat(URL)
     case failedToOpenFile(URL)
@@ -249,27 +267,41 @@ enum PlaybackError: LocalizedError, Equatable {
     case schedulingFailed
     case noValidOverlap
     case librarySelectionFailed(String)
+    case importFailures([ImportFailure])
+    case trackLimitExceeded(limit: Int, skippedFileNames: [String])
     case tooManyImportFiles
 
     var errorDescription: String? {
         switch self {
         case let .unsupportedFormat(url):
-            "Unsupported audio format: \(url.lastPathComponent)"
+            return "Unsupported audio format: \(url.lastPathComponent)"
         case let .failedToOpenFile(url):
-            "Could not open file: \(url.lastPathComponent)"
+            return "Could not open file: \(url.lastPathComponent)"
         case .invalidSeekPosition:
-            "Seek position is outside the valid compare range."
+            return "Seek position is outside the valid compare range."
         case .engineStartFailed:
-            "Audio engine failed to start."
+            return "Audio engine failed to start."
         case .schedulingFailed:
-            "Audio playback could not be scheduled."
+            return "Audio playback could not be scheduled."
         case .noValidOverlap:
-            "The current offsets leave no valid overlap between the two tracks."
+            return "The current offsets leave no valid overlap between the two tracks."
         case let .librarySelectionFailed(message):
-            message
+            return message
+        case let .importFailures(failures):
+            let details = failures.map { "\($0.fileName): \($0.message)" }.joined(separator: "\n")
+            return "Some files could not be loaded.\n\(details)"
+        case let .trackLimitExceeded(limit, skippedFileNames):
+            let skipped = skippedFileNames.joined(separator: "\n")
+            return "TrackSwitch currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)"
         case .tooManyImportFiles:
-            "Select one or two audio files."
+            return "Select one or two audio files."
         }
+    }
+}
+
+extension String {
+    func ifEmpty(_ fallback: String) -> String {
+        isEmpty ? fallback : self
     }
 }
 

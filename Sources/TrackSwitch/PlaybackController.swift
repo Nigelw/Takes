@@ -4,6 +4,8 @@ import Foundation
 
 @MainActor
 final class PlaybackController: ObservableObject {
+    static let maximumTrackCount = 32
+
     @Published private(set) var session = ComparisonSession()
     @Published private(set) var playbackError: PlaybackError?
     @Published private(set) var overlapWarning: String?
@@ -18,14 +20,12 @@ final class PlaybackController: ObservableObject {
     nonisolated private static let maximumSilenceBufferDuration: TimeInterval = 5
 
     private var engineConfigured = false
-    private var audioFileA: AVAudioFile?
-    private var audioFileB: AVAudioFile?
+    private var audioFilesByTrackID: [SessionTrack.ID: AVAudioFile] = [:]
     private var playbackStartedAt: CFTimeInterval?
     private var playbackStartedFromTransport: TimeInterval = 0
     private var timer: Timer?
 
     private struct PreparedTrackLoad {
-        let side: TrackSide
         let metadata: LoadedTrack
         let file: AVAudioFile
     }
@@ -49,19 +49,37 @@ final class PlaybackController: ObservableObject {
     }
 
     func loadImportedFiles(_ urls: [URL]) async {
-        do {
-            let assignments = try Self.importAssignments(for: urls, in: session)
-            let preparedLoads = try assignments.map { side, url in
-                try prepareTrackLoad(side, from: url)
+        guard !urls.isEmpty else { return }
+
+        var preparedLoads: [PreparedTrackLoad] = []
+        var failures: [ImportFailure] = []
+        var skippedFileNames: [String] = []
+
+        for url in urls {
+            guard session.tracks.count + preparedLoads.count < Self.maximumTrackCount else {
+                skippedFileNames.append(url.lastPathComponent.ifEmpty(url.path))
+                continue
             }
 
+            do {
+                preparedLoads.append(try prepareTrackLoad(from: url))
+            } catch let error as PlaybackError {
+                failures.append(ImportFailure(url: url, message: error.localizedDescription))
+            } catch {
+                failures.append(ImportFailure(url: url, message: PlaybackError.failedToOpenFile(url).localizedDescription))
+            }
+        }
+
+        if !preparedLoads.isEmpty {
             stop()
-            preparedLoads.forEach(applyPreparedTrackLoad)
+            preparedLoads.forEach(appendPreparedTrackLoad)
             finishTrackLoading()
-        } catch let error as PlaybackError {
-            playbackError = error
-        } catch {
-            playbackError = .failedToOpenFile(urls.first ?? URL(fileURLWithPath: ""))
+        }
+
+        if !failures.isEmpty {
+            playbackError = .importFailures(failures)
+        } else if !skippedFileNames.isEmpty {
+            playbackError = .trackLimitExceeded(limit: Self.maximumTrackCount, skippedFileNames: skippedFileNames)
         }
     }
 
@@ -82,9 +100,9 @@ final class PlaybackController: ObservableObject {
 
     private func loadTrackOrThrow(_ side: TrackSide, from url: URL) throws {
         do {
-            let preparedLoad = try prepareTrackLoad(side, from: url)
+            let preparedLoad = try prepareTrackLoad(from: url)
             stop()
-            applyPreparedTrackLoad(preparedLoad)
+            applyPreparedTrackLoad(preparedLoad, to: side)
             finishTrackLoading()
         } catch let error as PlaybackError {
             throw error
@@ -93,32 +111,53 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    private func prepareTrackLoad(_ side: TrackSide, from url: URL) throws -> PreparedTrackLoad {
+    private func prepareTrackLoad(from url: URL) throws -> PreparedTrackLoad {
         let metadata = try loader.loadTrackMetadata(from: url)
         let file = try loader.makeAudioFile(from: url)
-        return PreparedTrackLoad(side: side, metadata: metadata, file: file)
+        return PreparedTrackLoad(metadata: metadata, file: file)
     }
 
-    private func applyPreparedTrackLoad(_ preparedLoad: PreparedTrackLoad) {
-        switch preparedLoad.side {
+    private func applyPreparedTrackLoad(_ preparedLoad: PreparedTrackLoad, to side: TrackSide) {
+        switch side {
         case .a:
+            let previousID = session.trackAID
             session.trackA = Self.replacingTrackMetadata(
                 preparedLoad.metadata,
                 preservingSettingsFrom: session.trackA
             )
-            audioFileA = preparedLoad.file
+            if let previousID {
+                audioFilesByTrackID[previousID] = nil
+            }
+            if let id = session.trackAID {
+                audioFilesByTrackID[id] = preparedLoad.file
+            }
             if session.trackB == nil {
                 session.activeTrack = .a
             }
         case .b:
+            let previousID = session.trackBID
             session.trackB = Self.replacingTrackMetadata(
                 preparedLoad.metadata,
                 preservingSettingsFrom: session.trackB
             )
-            audioFileB = preparedLoad.file
+            if let previousID {
+                audioFilesByTrackID[previousID] = nil
+            }
+            if let id = session.trackBID {
+                audioFilesByTrackID[id] = preparedLoad.file
+            }
             if session.trackA == nil {
                 session.activeTrack = .b
             }
+        }
+    }
+
+    private func appendPreparedTrackLoad(_ preparedLoad: PreparedTrackLoad) {
+        let sessionTrack = SessionTrack(loadedTrack: preparedLoad.metadata)
+        session.tracks.append(sessionTrack)
+        audioFilesByTrackID[sessionTrack.id] = preparedLoad.file
+        if session.activeTrackID == nil {
+            session.activeTrackID = sessionTrack.id
         }
     }
 
@@ -134,12 +173,7 @@ final class PlaybackController: ObservableObject {
         do {
             try ensureEngineRunning()
             try reschedulePlayers(startingAt: session.transportPosition)
-            if audioFileA != nil {
-                playerA.play()
-            }
-            if audioFileB != nil {
-                playerB.play()
-            }
+            startScheduledPlayers()
             session.isPlaying = true
             playbackStartedFromTransport = session.transportPosition
             playbackStartedAt = CACurrentMediaTime()
@@ -186,12 +220,7 @@ final class PlaybackController: ObservableObject {
         guard session.isPlaying else { return }
         do {
             try reschedulePlayers(startingAt: clamped)
-            if audioFileA != nil {
-                playerA.play()
-            }
-            if audioFileB != nil {
-                playerB.play()
-            }
+            startScheduledPlayers()
             playbackStartedFromTransport = clamped
             playbackStartedAt = CACurrentMediaTime()
             applyAudibility()
@@ -219,35 +248,22 @@ final class PlaybackController: ObservableObject {
         applyAudibility()
     }
 
-    func setGain(_ side: TrackSide, db: Float) {
-        switch side {
-        case .a:
-            session.trackA?.gainDB = db
-        case .b:
-            session.trackB?.gainDB = db
-        }
+    func setGain(_ trackID: SessionTrack.ID, db: Float) {
+        guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        session.tracks[index].loadedTrack.gainDB = db
         applyAudibility()
     }
 
-    func setOffset(_ side: TrackSide, seconds: TimeInterval) {
-        switch side {
-        case .a:
-            session.trackA?.offsetSeconds = seconds
-        case .b:
-            session.trackB?.offsetSeconds = seconds
-        }
+    func setOffset(_ trackID: SessionTrack.ID, seconds: TimeInterval) {
+        guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        session.tracks[index].loadedTrack.offsetSeconds = seconds
 
         recalculateSessionDuration()
 
         guard session.isPlaying else { return }
         do {
             try reschedulePlayers(startingAt: session.transportPosition)
-            if audioFileA != nil {
-                playerA.play()
-            }
-            if audioFileB != nil {
-                playerB.play()
-            }
+            startScheduledPlayers()
             playbackStartedFromTransport = session.transportPosition
             playbackStartedAt = CACurrentMediaTime()
             applyAudibility()
@@ -256,6 +272,16 @@ final class PlaybackController: ObservableObject {
         } catch {
             playbackError = .schedulingFailed
         }
+    }
+
+    func setGain(_ side: TrackSide, db: Float) {
+        guard let trackID = trackID(for: side) else { return }
+        setGain(trackID, db: db)
+    }
+
+    func setOffset(_ side: TrackSide, seconds: TimeInterval) {
+        guard let trackID = trackID(for: side) else { return }
+        setOffset(trackID, seconds: seconds)
     }
 
     func skip(by delta: TimeInterval) {
@@ -306,26 +332,6 @@ final class PlaybackController: ObservableObject {
         return chunks
     }
 
-    nonisolated static func importAssignments(
-        for urls: [URL],
-        in session: ComparisonSession
-    ) throws -> [(TrackSide, URL)] {
-        switch urls.count {
-        case 1:
-            if session.trackA == nil {
-                return [(.a, urls[0])]
-            }
-            if session.trackB == nil {
-                return [(.b, urls[0])]
-            }
-            return [(session.activeTrack, urls[0])]
-        case 2:
-            return [(.a, urls[0]), (.b, urls[1])]
-        default:
-            throw PlaybackError.tooManyImportFiles
-        }
-    }
-
     private func configureEngine() {
         guard !engineConfigured else { return }
 
@@ -367,15 +373,30 @@ final class PlaybackController: ObservableObject {
         playerA.stop()
         playerB.stop()
 
-        if let trackA = session.trackA, let fileA = audioFileA {
+        if let trackA = session.trackA,
+           let trackAID = trackID(for: .a),
+           let fileA = audioFilesByTrackID[trackAID] {
             scheduleTrack(trackA, file: fileA, on: playerA, atGlobalTime: transport)
         }
 
-        if let trackB = session.trackB, let fileB = audioFileB {
+        if let trackB = session.trackB,
+           let trackBID = trackID(for: .b),
+           let fileB = audioFilesByTrackID[trackBID] {
             scheduleTrack(trackB, file: fileB, on: playerB, atGlobalTime: transport)
         }
 
         session.transportPosition = transport
+    }
+
+    private func startScheduledPlayers() {
+        if let trackAID = trackID(for: .a),
+           audioFilesByTrackID[trackAID] != nil {
+            playerA.play()
+        }
+        if let trackBID = trackID(for: .b),
+           audioFilesByTrackID[trackBID] != nil {
+            playerB.play()
+        }
     }
 
     private func recalculateSessionDuration(preferZero: Bool = false) {
@@ -475,6 +496,15 @@ final class PlaybackController: ObservableObject {
 
         mixerA.outputVolume = canPlayA && (session.activeTrack == .a || !canPlayB) ? gainA : 0
         mixerB.outputVolume = canPlayB && (session.activeTrack == .b || !canPlayA) ? gainB : 0
+    }
+
+    private func trackID(for side: TrackSide) -> SessionTrack.ID? {
+        switch side {
+        case .a:
+            session.trackAID
+        case .b:
+            session.trackBID
+        }
     }
 
     private func startTimer() {

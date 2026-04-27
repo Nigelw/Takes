@@ -43,9 +43,3 @@ struct AudioFileLoader: AudioFileLoading {
         url.pathExtension.uppercased().ifEmpty("Audio")
     }
 }
-
-private extension String {
-    func ifEmpty(_ fallback: String) -> String {
-        isEmpty ? fallback : self
-    }
-}
