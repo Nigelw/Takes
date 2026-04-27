@@ -140,6 +140,31 @@ final class PlaybackController: ObservableObject {
         applyAudibility()
     }
 
+    private func restorePlaybackAfterTrackMutation(at resumePosition: TimeInterval) {
+        let restoredPosition = TransportMapping.clampedTransport(
+            resumePosition,
+            timelineStart: session.timelineStart,
+            timelineEnd: session.timelineEnd
+        )
+        session.transportPosition = restoredPosition
+
+        do {
+            if engineConfigured {
+                try reschedulePlayers(startingAt: restoredPosition)
+                startScheduledPlayers()
+            }
+            session.isPlaying = true
+            playbackStartedFromTransport = session.transportPosition
+            playbackStartedAt = CACurrentMediaTime()
+            startTimer()
+            applyAudibility()
+        } catch let error as PlaybackError {
+            failImportPlaybackResume(with: error, at: restoredPosition)
+        } catch {
+            failImportPlaybackResume(with: .schedulingFailed, at: restoredPosition)
+        }
+    }
+
     func loadSelectedLibraryTracks() async {
         do {
             let urls = try libraryTrackSelector.selectedTrackURLs()
@@ -289,20 +314,74 @@ final class PlaybackController: ObservableObject {
     }
 
     func toggleActiveTrack() {
-        guard session.canToggleComparison else { return }
-        session.activeTrack = session.activeTrack == .a ? .b : .a
+        guard session.canSwitchPlayback else { return }
+        let currentIndex = session.activeTrackIndex ?? -1
+        let nextIndex = currentIndex + 1 < session.tracks.count ? currentIndex + 1 : 0
+        session.activeTrackID = session.tracks[nextIndex].id
+        applyAudibility()
+    }
+
+    func selectActiveTrack(_ trackID: SessionTrack.ID) {
+        guard session.tracks.contains(where: { $0.id == trackID }) else { return }
+        session.activeTrackID = trackID
         applyAudibility()
     }
 
     func selectActiveTrack(_ side: TrackSide) {
-        switch side {
-        case .a:
-            guard session.trackA != nil else { return }
-        case .b:
-            guard session.trackB != nil else { return }
+        guard let trackID = trackID(for: side) else { return }
+        selectActiveTrack(trackID)
+    }
+
+    func replaceTrack(_ trackID: SessionTrack.ID, with url: URL) async {
+        guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+
+        do {
+            let preparedLoad = try prepareTrackLoad(from: url)
+            let wasPlaying = session.isPlaying
+            let resumePosition = wasPlaying ? currentTransportPosition() : nil
+
+            session.tracks[index].loadedTrack = preparedLoad.metadata
+            audioFilesByTrackID[trackID] = preparedLoad.file
+            finishTrackLoading(preferZero: !wasPlaying)
+
+            guard wasPlaying, let resumePosition else { return }
+            restorePlaybackAfterTrackMutation(at: resumePosition)
+        } catch let error as PlaybackError {
+            playbackError = error
+        } catch {
+            playbackError = .failedToOpenFile(url)
         }
-        session.activeTrack = side
-        applyAudibility()
+    }
+
+    func removeTrack(_ trackID: SessionTrack.ID) {
+        guard let removedIndex = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+
+        let wasPlaying = session.isPlaying
+        let wasActive = session.activeTrackID == trackID
+        let resumePosition = wasPlaying ? currentTransportPosition() : nil
+
+        if wasActive {
+            pause()
+        }
+
+        session.tracks.remove(at: removedIndex)
+        audioFilesByTrackID[trackID] = nil
+
+        if wasActive {
+            if session.tracks.indices.contains(removedIndex) {
+                session.activeTrackID = session.tracks[removedIndex].id
+            } else {
+                session.activeTrackID = session.tracks.last?.id
+            }
+        }
+
+        recalculateSessionDuration()
+
+        if wasPlaying, !wasActive, let resumePosition {
+            restorePlaybackAfterTrackMutation(at: resumePosition)
+        } else {
+            applyAudibility()
+        }
     }
 
     func setGain(_ trackID: SessionTrack.ID, db: Float) {

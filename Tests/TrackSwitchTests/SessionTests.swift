@@ -308,6 +308,105 @@ struct SessionTests {
 
     @MainActor
     @Test
+    func switchPlaybackCyclesThroughTrackOrderAndWraps() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+
+        let ids = controller.session.tracks.map(\.id)
+        #expect(controller.session.activeTrackID == ids[0])
+
+        controller.toggleActiveTrack()
+        #expect(controller.session.activeTrackID == ids[1])
+
+        controller.toggleActiveTrack()
+        #expect(controller.session.activeTrackID == ids[2])
+
+        controller.toggleActiveTrack()
+        #expect(controller.session.activeTrackID == ids[0])
+    }
+
+    @MainActor
+    @Test
+    func removingActiveTrackPausesAndSelectsNextOrPrevious() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+        let ids = controller.session.tracks.map(\.id)
+        controller.selectActiveTrack(ids[1])
+        controller.play()
+
+        controller.removeTrack(ids[1])
+
+        #expect(!controller.session.isPlaying)
+        #expect(controller.session.activeTrackID == ids[2])
+
+        controller.play()
+        controller.removeTrack(ids[2])
+
+        #expect(!controller.session.isPlaying)
+        #expect(controller.session.activeTrackID == ids[0])
+    }
+
+    @MainActor
+    @Test
+    func removingFinalTrackClearsActiveSelectionAndTimeline() async throws {
+        let url = try makeTemporaryAudioFile(name: "only.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+        let id = try #require(controller.session.tracks.first?.id)
+
+        controller.removeTrack(id)
+
+        #expect(controller.session.tracks.isEmpty)
+        #expect(controller.session.activeTrackID == nil)
+        #expect(controller.session.timelineStart == 0)
+        #expect(controller.session.timelineEnd == 0)
+        #expect(controller.session.transportPosition == 0)
+    }
+
+    @MainActor
+    @Test
+    func replacingTrackResetsGainAndOffsetButKeepsRowActive() async throws {
+        let first = try makeTemporaryAudioFile(name: "first.wav")
+        let replacement = try makeTemporaryAudioFile(name: "replacement.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: replacement.deletingLastPathComponent())
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([first])
+        let id = try #require(controller.session.tracks.first?.id)
+        controller.setGain(id, db: -12)
+        controller.setOffset(id, seconds: 2)
+
+        await controller.replaceTrack(id, with: replacement)
+
+        #expect(controller.session.tracks.count == 1)
+        #expect(controller.session.tracks[0].id == id)
+        #expect(controller.session.tracks[0].loadedTrack.displayName == "replacement.wav")
+        #expect(controller.session.tracks[0].loadedTrack.gainDB == 0)
+        #expect(controller.session.tracks[0].loadedTrack.offsetSeconds == 0)
+        #expect(controller.session.activeTrackID == id)
+    }
+
+    @MainActor
+    @Test
     func importedFilesAppendWhilePlayingPreservesPlaybackStateAndPosition() async throws {
         let first = try makeTemporaryAudioFile(name: "playing-first.wav")
         let second = try makeTemporaryAudioFile(name: "playing-second.wav")
