@@ -118,7 +118,7 @@ struct ComparisonSession: Equatable {
     }
 
     var canToggleComparison: Bool {
-        canSwitchPlayback
+        trackA != nil && trackB != nil
     }
 
     private func track(for side: TrackSide) -> LoadedTrack? {
@@ -134,15 +134,7 @@ struct ComparisonSession: Equatable {
                let index = tracks.firstIndex(where: { $0.id == id }) {
                 tracks[index].loadedTrack = loadedTrack
             } else {
-                let slotIndex = Self.index(for: side)
-                if tracks.indices.contains(slotIndex), !isTrackAssignedToCompatibilitySlot(tracks[slotIndex].id) {
-                    setSlotID(tracks[slotIndex].id, for: side)
-                    tracks[slotIndex].loadedTrack = loadedTrack
-                } else {
-                    let sessionTrack = SessionTrack(loadedTrack: loadedTrack)
-                    tracks.append(sessionTrack)
-                    setSlotID(sessionTrack.id, for: side)
-                }
+                insertTrack(loadedTrack, for: side)
             }
 
             if activeTrackID == nil {
@@ -159,33 +151,57 @@ struct ComparisonSession: Equatable {
     }
 
     private func slotID(for side: TrackSide) -> SessionTrack.ID? {
-        switch side {
-        case .a:
-            return trackASlotID ?? fallbackSlotID(for: .a)
-        case .b:
-            return trackBSlotID ?? fallbackSlotID(for: .b)
+        if hasStaleCompatibilitySlot {
+            return fallbackSlotID(for: side, respectingStoredSlots: false)
         }
+        return validStoredSlotID(for: side) ?? fallbackSlotID(for: side)
+    }
+
+    private var hasStaleCompatibilitySlot: Bool {
+        isStaleSlotID(trackASlotID) || isStaleSlotID(trackBSlotID)
+    }
+
+    private func isStaleSlotID(_ id: SessionTrack.ID?) -> Bool {
+        guard let id else { return false }
+        return !tracks.contains { $0.id == id }
+    }
+
+    private func validStoredSlotID(for side: TrackSide) -> SessionTrack.ID? {
+        let storedID: SessionTrack.ID? = switch side {
+        case .a:
+            trackASlotID
+        case .b:
+            trackBSlotID
+        }
+
+        guard let storedID,
+              tracks.contains(where: { $0.id == storedID })
+        else { return nil }
+        return storedID
     }
 
     private func fallbackSlotID(for side: TrackSide) -> SessionTrack.ID? {
+        fallbackSlotID(for: side, respectingStoredSlots: true)
+    }
+
+    private func fallbackSlotID(for side: TrackSide, respectingStoredSlots: Bool) -> SessionTrack.ID? {
         let index = Self.index(for: side)
         guard tracks.indices.contains(index) else { return nil }
         let id = tracks[index].id
-        guard !isTrackAssignedToOtherCompatibilitySlot(id, side: side) else { return nil }
+        guard !respectingStoredSlots || validStoredSlotID(for: oppositeSide(of: side)) != id else { return nil }
         return id
     }
 
-    private func isTrackAssignedToCompatibilitySlot(_ id: SessionTrack.ID) -> Bool {
-        trackASlotID == id || trackBSlotID == id
-    }
-
-    private func isTrackAssignedToOtherCompatibilitySlot(_ id: SessionTrack.ID, side: TrackSide) -> Bool {
+    private mutating func insertTrack(_ loadedTrack: LoadedTrack, for side: TrackSide) {
+        let sessionTrack = SessionTrack(loadedTrack: loadedTrack)
         switch side {
         case .a:
-            return trackBSlotID == id
+            tracks.insert(sessionTrack, at: 0)
         case .b:
-            return trackASlotID == id
+            let insertionIndex = trackA == nil ? tracks.count : min(1, tracks.count)
+            tracks.insert(sessionTrack, at: insertionIndex)
         }
+        setSlotID(sessionTrack.id, for: side)
     }
 
     private mutating func setSlotID(_ id: SessionTrack.ID, for side: TrackSide) {
@@ -203,6 +219,15 @@ struct ComparisonSession: Equatable {
             trackASlotID = nil
         case .b:
             trackBSlotID = nil
+        }
+    }
+
+    private func oppositeSide(of side: TrackSide) -> TrackSide {
+        switch side {
+        case .a:
+            return .b
+        case .b:
+            return .a
         }
     }
 
