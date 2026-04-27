@@ -324,7 +324,34 @@ struct SessionTests {
         await controller.loadImportedFiles([second])
 
         #expect(controller.session.isPlaying == true)
-        #expect(controller.session.transportPosition == 0.5)
+        #expect(controller.session.transportPosition >= 0.5)
+    }
+
+    @MainActor
+    @Test
+    func importedFilesAppendWhilePlayingUsesCurrentTransportAfterSlowImport() async throws {
+        let first = try makeTemporaryAudioFile(name: "slow-playing-first.wav")
+        let second = try makeTemporaryAudioFile(name: "slow-playing-second.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
+
+        let controller = PlaybackController(
+            loader: FakeAudioFileLoader(
+                failingURLs: [],
+                delayedMetadataURLs: [second],
+                metadataDelay: 0.2
+            )
+        )
+        await controller.loadImportedFiles([first])
+        controller.play()
+        controller.seek(to: 0.25)
+
+        await controller.loadImportedFiles([second])
+
+        #expect(controller.session.isPlaying == true)
+        #expect(controller.session.transportPosition > 0.25)
     }
 
     @Test
@@ -489,10 +516,15 @@ struct SessionTests {
 
 private struct FakeAudioFileLoader: AudioFileLoading {
     let failingURLs: Set<URL>
+    var delayedMetadataURLs: Set<URL> = []
+    var metadataDelay: TimeInterval = 0
 
     func loadTrackMetadata(from url: URL) throws -> LoadedTrack {
         if failingURLs.contains(url) {
             throw PlaybackError.failedToOpenFile(url)
+        }
+        if delayedMetadataURLs.contains(url) {
+            Thread.sleep(forTimeInterval: metadataDelay)
         }
 
         let file = try AVAudioFile(forReading: url)

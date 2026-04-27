@@ -52,7 +52,6 @@ final class PlaybackController: ObservableObject {
         guard !urls.isEmpty else { return }
 
         let wasPlaying = session.isPlaying
-        let resumePosition = session.transportPosition
         var preparedLoads: [PreparedTrackLoad] = []
         var failures: [ImportFailure] = []
         var skippedFileNames: [String] = []
@@ -72,18 +71,16 @@ final class PlaybackController: ObservableObject {
             }
         }
 
+        var resumePosition: TimeInterval?
+        if wasPlaying, !preparedLoads.isEmpty {
+            resumePosition = currentTransportPosition()
+        }
+
         if !preparedLoads.isEmpty {
             preparedLoads.forEach(appendPreparedTrackLoad)
             finishTrackLoading(preferZero: !wasPlaying)
-            if wasPlaying {
-                session.isPlaying = true
-                session.transportPosition = TransportMapping.clampedTransport(
-                    resumePosition,
-                    timelineStart: session.timelineStart,
-                    timelineEnd: session.timelineEnd
-                )
-                playbackStartedFromTransport = session.transportPosition
-                playbackStartedAt = CACurrentMediaTime()
+            if let resumePosition, !restorePlaybackAfterImportAppend(at: resumePosition) {
+                return
             }
         }
 
@@ -101,6 +98,46 @@ final class PlaybackController: ObservableObject {
         case (true, true):
             break
         }
+    }
+
+    @discardableResult
+    private func restorePlaybackAfterImportAppend(at resumePosition: TimeInterval) -> Bool {
+        let restoredPosition = TransportMapping.clampedTransport(
+            resumePosition,
+            timelineStart: session.timelineStart,
+            timelineEnd: session.timelineEnd
+        )
+        session.transportPosition = restoredPosition
+
+        if engineConfigured {
+            do {
+                try reschedulePlayers(startingAt: restoredPosition)
+                startScheduledPlayers()
+            } catch let error as PlaybackError {
+                failImportPlaybackResume(with: error, at: restoredPosition)
+                return false
+            } catch {
+                failImportPlaybackResume(with: .schedulingFailed, at: restoredPosition)
+                return false
+            }
+        }
+
+        session.isPlaying = true
+        playbackStartedFromTransport = session.transportPosition
+        playbackStartedAt = CACurrentMediaTime()
+        startTimer()
+        applyAudibility()
+        return true
+    }
+
+    private func failImportPlaybackResume(with error: PlaybackError, at restoredPosition: TimeInterval) {
+        session.isPlaying = false
+        session.transportPosition = restoredPosition
+        playbackStartedAt = nil
+        playbackStartedFromTransport = restoredPosition
+        timer?.invalidate()
+        playbackError = error
+        applyAudibility()
     }
 
     func loadSelectedLibraryTracks() async {
