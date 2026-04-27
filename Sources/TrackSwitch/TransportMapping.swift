@@ -5,10 +5,9 @@ struct TransportMapping {
         offset...(offset + duration)
     }
 
-    static func timelineRange(trackA: LoadedTrack?, trackB: LoadedTrack?) -> ClosedRange<TimeInterval>? {
-        let ranges = [trackA, trackB].compactMap { track -> ClosedRange<TimeInterval>? in
-            guard let track else { return nil }
-            return transportBounds(duration: track.duration, offset: track.offsetSeconds)
+    static func timelineRange(tracks: [LoadedTrack]) -> ClosedRange<TimeInterval>? {
+        let ranges = tracks.map { track in
+            transportBounds(duration: track.duration, offset: track.offsetSeconds)
         }
 
         guard !ranges.isEmpty else { return nil }

@@ -6,39 +6,34 @@ import Testing
 
 struct SessionTests {
     @Test
-    func sessionReadinessRequiresTwoTracksAndOverlap() {
+    func sessionReadinessUsesOrderedTracks() {
         var session = ComparisonSession()
         #expect(!session.isPlayable)
-        #expect(!session.canToggleComparison)
+        #expect(!session.canSwitchPlayback)
+        #expect(session.activeTrackID == nil)
 
-        session.trackA = makeTrack(name: "a.wav")
+        let first = SessionTrack(loadedTrack: makeTrack(name: "a.wav"))
+        session.tracks = [first]
+        session.activeTrackID = first.id
         session.timelineEnd = 12
-        #expect(session.isPlayable)
-        #expect(!session.canToggleComparison)
-
-        session.trackB = makeTrack(name: "b.wav")
-        session.timelineEnd = 12
-        #expect(session.isPlayable)
-        #expect(session.canToggleComparison)
-    }
-
-    @Test
-    func sessionRemainsPlayableWithSingleTrackOrNoOverlapAsLongAsDurationExists() {
-        var session = ComparisonSession()
-        session.trackA = makeTrack(name: "a.wav")
-        session.trackB = makeTrack(name: "b.wav")
-        session.timelineEnd = 11
 
         #expect(session.isPlayable)
-        #expect(session.canToggleComparison)
+        #expect(!session.canSwitchPlayback)
+        #expect(session.activeTrackID == first.id)
+
+        let second = SessionTrack(loadedTrack: makeTrack(name: "b.wav"))
+        session.tracks.append(second)
+
+        #expect(session.isPlayable)
+        #expect(session.canSwitchPlayback)
     }
 
     @Test
     func sessionUsesSignedTimelineBoundsForPlaybackReadiness() {
-        var session = ComparisonSession()
+        let first = SessionTrack(loadedTrack: makeTrack(name: "a.wav"))
+        var session = ComparisonSession(tracks: [first], activeTrackID: first.id)
         #expect(!session.isPlayable)
 
-        session.trackA = makeTrack(name: "a.wav")
         session.timelineStart = -4
         session.timelineEnd = 120
         session.transportPosition = -4

@@ -1,14 +1,6 @@
 import AVFoundation
 import Foundation
 
-enum TrackSide: String, CaseIterable, Identifiable {
-    case a = "A"
-    case b = "B"
-
-    var id: String { rawValue }
-    var title: String { "Track \(rawValue)" }
-}
-
 struct LoadedTrack: Equatable {
     let url: URL
     let displayName: String
@@ -25,10 +17,19 @@ struct LoadedTrack: Equatable {
     }
 }
 
+struct SessionTrack: Identifiable, Equatable {
+    let id: UUID
+    var loadedTrack: LoadedTrack
+
+    init(id: UUID = UUID(), loadedTrack: LoadedTrack) {
+        self.id = id
+        self.loadedTrack = loadedTrack
+    }
+}
+
 struct ComparisonSession: Equatable {
-    var trackA: LoadedTrack?
-    var trackB: LoadedTrack?
-    var activeTrack: TrackSide = .a
+    var tracks: [SessionTrack] = []
+    var activeTrackID: SessionTrack.ID?
     var isPlaying = false
     var transportPosition: TimeInterval = 0
     var timelineStart: TimeInterval = 0
@@ -39,11 +40,16 @@ struct ComparisonSession: Equatable {
     }
 
     var isPlayable: Bool {
-        (trackA != nil || trackB != nil) && timelineEnd > timelineStart
+        !tracks.isEmpty && timelineEnd > timelineStart
     }
 
-    var canToggleComparison: Bool {
-        trackA != nil && trackB != nil
+    var canSwitchPlayback: Bool {
+        tracks.count >= 2
+    }
+
+    var activeTrackIndex: Int? {
+        guard let activeTrackID else { return nil }
+        return tracks.firstIndex { $0.id == activeTrackID }
     }
 }
 

@@ -7,32 +7,27 @@ struct TransportMappingTests {
     func timelineRangeIncludesZeroAndLoadedTrackRangeForSingleTrack() throws {
         let track = makeTrack(duration: 10, offset: 6)
 
-        let range = try #require(TransportMapping.timelineRange(trackA: track, trackB: nil))
+        let range = try #require(TransportMapping.timelineRange(tracks: [track]))
 
         #expect(range.lowerBound == 0)
         #expect(range.upperBound == 16)
     }
 
     @Test
-    func timelineRangeExpandsBelowZeroForNegativeOffsets() throws {
-        let trackA = makeTrack(duration: 10, offset: 0)
-        let trackB = makeTrack(duration: 8, offset: -12)
+    func timelineRangeExpandsBelowZeroForNegativeOffsetsAcrossManyTracks() throws {
+        let first = makeTrack(duration: 10, offset: 0)
+        let second = makeTrack(duration: 8, offset: -12)
+        let third = makeTrack(duration: 4, offset: 20)
 
-        let range = try #require(TransportMapping.timelineRange(trackA: trackA, trackB: trackB))
+        let range = try #require(TransportMapping.timelineRange(tracks: [first, second, third]))
 
         #expect(range.lowerBound == -12)
-        #expect(range.upperBound == 10)
+        #expect(range.upperBound == 24)
     }
 
     @Test
-    func timelineRangeCoversPositiveGapsBetweenTracks() throws {
-        let trackA = makeTrack(duration: 5, offset: 0)
-        let trackB = makeTrack(duration: 5, offset: 6)
-
-        let range = try #require(TransportMapping.timelineRange(trackA: trackA, trackB: trackB))
-
-        #expect(range.lowerBound == 0)
-        #expect(range.upperBound == 11)
+    func timelineRangeReturnsNilWithoutTracks() {
+        #expect(TransportMapping.timelineRange(tracks: []) == nil)
     }
 
     @Test
