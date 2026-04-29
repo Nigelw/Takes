@@ -333,13 +333,39 @@ struct SessionTests {
         let ids = controller.session.tracks.map(\.id)
         #expect(controller.session.activeTrackID == ids[0])
 
-        controller.toggleActiveTrack()
+        controller.selectNextTrack()
         #expect(controller.session.activeTrackID == ids[1])
 
-        controller.toggleActiveTrack()
+        controller.selectNextTrack()
         #expect(controller.session.activeTrackID == ids[2])
 
-        controller.toggleActiveTrack()
+        controller.selectNextTrack()
+        #expect(controller.session.activeTrackID == ids[0])
+    }
+
+    @MainActor
+    @Test
+    func switchPlaybackCanCycleToPreviousTrackAndWraps() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+
+        let ids = controller.session.tracks.map(\.id)
+        #expect(controller.session.activeTrackID == ids[0])
+
+        controller.selectPreviousTrack()
+        #expect(controller.session.activeTrackID == ids[2])
+
+        controller.selectPreviousTrack()
+        #expect(controller.session.activeTrackID == ids[1])
+
+        controller.selectPreviousTrack()
         #expect(controller.session.activeTrackID == ids[0])
     }
 

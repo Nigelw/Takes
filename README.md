@@ -169,7 +169,8 @@ Music import rules:
 ### Playback
 
 - `Space`: play/pause
-- `X`: switch playback through loaded tracks in list order
+- `X`: switch playback to the next loaded track in list order
+- `Shift+X`: switch playback to the previous loaded track in list order
 - `Left` / `Right`: seek by 1 second
 - `Shift+Left` / `Shift+Right`: seek by 10 seconds
 

@@ -26,12 +26,6 @@ struct TrackSwitchApp: App {
                 .keyboardShortcut(.space, modifiers: [])
                 .disabled(!controller.session.isPlayable)
 
-                Button("Switch Track") {
-                    controller.toggleActiveTrack()
-                }
-                .keyboardShortcut("x", modifiers: [])
-                .disabled(!controller.session.canSwitchPlayback)
-
                 Button("Rewind") {
                     controller.seek(to: controller.session.timelineStart)
                 }
@@ -40,28 +34,42 @@ struct TrackSwitchApp: App {
 
                 Divider()
 
-                Button("Seek Backward 1s") {
-                    controller.skip(by: -1)
+                Button("Switch Track") {
+                    controller.selectNextTrack()
                 }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-                .disabled(!controller.session.isPlayable)
+                .keyboardShortcut("x", modifiers: [])
+                .disabled(!controller.session.canSwitchPlayback)
 
-                Button("Seek Forward 1s") {
+                Button("Switch to Previous Track") {
+                    controller.selectPreviousTrack()
+                }
+                .keyboardShortcut("x", modifiers: [.shift])
+                .disabled(!controller.session.canSwitchPlayback)
+
+                Divider()
+
+                Button("Fast Forward 1s") {
                     controller.skip(by: 1)
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 .disabled(!controller.session.isPlayable)
 
-                Button("Seek Backward 10s") {
-                    controller.skip(by: -10)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [.shift])
-                .disabled(!controller.session.isPlayable)
-
-                Button("Seek Forward 10s") {
+                Button("Fast Forward 10s") {
                     controller.skip(by: 10)
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [.shift])
+                .disabled(!controller.session.isPlayable)
+
+                Button("Rewind 1s") {
+                    controller.skip(by: -1)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .disabled(!controller.session.isPlayable)
+
+                Button("Rewind 10s") {
+                    controller.skip(by: -10)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.shift])
                 .disabled(!controller.session.isPlayable)
             }
         }

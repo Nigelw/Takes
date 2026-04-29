@@ -263,11 +263,19 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    func toggleActiveTrack() {
+    func selectNextTrack() {
         guard session.canSwitchPlayback else { return }
         let currentIndex = session.activeTrackIndex ?? -1
         let nextIndex = currentIndex + 1 < session.tracks.count ? currentIndex + 1 : 0
         session.activeTrackID = session.tracks[nextIndex].id
+        applyAudibility()
+    }
+
+    func selectPreviousTrack() {
+        guard session.canSwitchPlayback else { return }
+        let currentIndex = session.activeTrackIndex ?? 0
+        let previousIndex = currentIndex > 0 ? currentIndex - 1 : session.tracks.count - 1
+        session.activeTrackID = session.tracks[previousIndex].id
         applyAudibility()
     }
 

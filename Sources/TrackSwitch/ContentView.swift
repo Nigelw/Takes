@@ -146,8 +146,8 @@ struct ContentView: View {
             }
             .disabled(!controller.session.isPlayable)
 
-            Button("Switch Playback") {
-                controller.toggleActiveTrack()
+            Button("Switch Track") {
+                controller.selectNextTrack()
             }
             .keyboardShortcut("x", modifiers: [])
             .disabled(!controller.session.canSwitchPlayback)
@@ -496,7 +496,11 @@ struct ContentView: View {
                 controller.skip(by: event.modifierFlags.contains(.shift) ? 10 : 1)
                 return true
             case 7:
-                controller.toggleActiveTrack()
+                if event.modifierFlags.contains(.shift) {
+                    controller.selectPreviousTrack()
+                } else {
+                    controller.selectNextTrack()
+                }
                 return true
             default:
                 return false
