@@ -291,6 +291,9 @@ struct ContentView: View {
                 }
                 Spacer()
                 Button {
+                    if gainPopoverTrackID == sessionTrack.id {
+                        gainPopoverTrackID = nil
+                    }
                     controller.removeTrack(sessionTrack.id)
                 } label: {
                     Image(systemName: "trash")
@@ -462,7 +465,11 @@ struct ContentView: View {
         Binding(
             get: { dropTargetTrackID == trackID },
             set: { isTargeted in
-                dropTargetTrackID = isTargeted ? trackID : nil
+                if isTargeted {
+                    dropTargetTrackID = trackID
+                } else if dropTargetTrackID == trackID {
+                    dropTargetTrackID = nil
+                }
             }
         )
     }

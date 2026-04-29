@@ -1,14 +1,6 @@
 import AVFoundation
 import Foundation
 
-enum TrackSide: String, CaseIterable, Identifiable {
-    case a = "A"
-    case b = "B"
-
-    var id: String { rawValue }
-    var title: String { "Track \(rawValue)" }
-}
-
 struct LoadedTrack: Equatable {
     let url: URL
     let displayName: String
@@ -38,9 +30,6 @@ struct SessionTrack: Identifiable, Equatable {
 struct ComparisonSession: Equatable {
     var tracks: [SessionTrack] = []
     var activeTrackID: SessionTrack.ID?
-    private var trackASlotID: SessionTrack.ID?
-    private var trackBSlotID: SessionTrack.ID?
-    private var activeTrackSideFallback: TrackSide = .a
     var isPlaying = false
     var transportPosition: TimeInterval = 0
     var timelineStart: TimeInterval = 0
@@ -56,8 +45,6 @@ struct ComparisonSession: Equatable {
     ) {
         self.tracks = tracks
         self.activeTrackID = activeTrackID
-        self.trackASlotID = tracks.indices.contains(0) ? tracks[0].id : nil
-        self.trackBSlotID = tracks.indices.contains(1) ? tracks[1].id : nil
         self.isPlaying = isPlaying
         self.transportPosition = transportPosition
         self.timelineStart = timelineStart
@@ -80,173 +67,6 @@ struct ComparisonSession: Equatable {
         guard let activeTrackID else { return nil }
         return tracks.firstIndex { $0.id == activeTrackID }
     }
-
-    var trackA: LoadedTrack? {
-        get {
-            track(for: .a)
-        }
-        set {
-            setTrack(newValue, for: .a)
-        }
-    }
-
-    var trackAID: SessionTrack.ID? {
-        slotID(for: .a)
-    }
-
-    var trackB: LoadedTrack? {
-        get {
-            track(for: .b)
-        }
-        set {
-            setTrack(newValue, for: .b)
-        }
-    }
-
-    var trackBID: SessionTrack.ID? {
-        slotID(for: .b)
-    }
-
-    var activeTrack: TrackSide {
-        get {
-            if activeTrackID == slotID(for: .a) {
-                return .a
-            }
-            if activeTrackID == slotID(for: .b) {
-                return .b
-            }
-            return activeTrackSideFallback
-        }
-        set {
-            activeTrackSideFallback = newValue
-            if let id = slotID(for: newValue) {
-                activeTrackID = id
-            }
-        }
-    }
-
-    var canToggleComparison: Bool {
-        trackA != nil && trackB != nil
-    }
-
-    private func track(for side: TrackSide) -> LoadedTrack? {
-        guard let id = slotID(for: side),
-              let index = tracks.firstIndex(where: { $0.id == id })
-        else { return nil }
-        return tracks[index].loadedTrack
-    }
-
-    private mutating func setTrack(_ loadedTrack: LoadedTrack?, for side: TrackSide) {
-        if let loadedTrack {
-            if let id = slotID(for: side),
-               let index = tracks.firstIndex(where: { $0.id == id }) {
-                tracks[index].loadedTrack = loadedTrack
-            } else {
-                insertTrack(loadedTrack, for: side)
-            }
-
-            if activeTrackID == nil {
-                activeTrackID = slotID(for: side)
-            }
-        } else if let id = slotID(for: side),
-                  let index = tracks.firstIndex(where: { $0.id == id }) {
-            tracks.remove(at: index)
-            clearSlotID(for: side)
-            if activeTrackID == id {
-                activeTrackID = tracks.first?.id
-            }
-        }
-    }
-
-    private func slotID(for side: TrackSide) -> SessionTrack.ID? {
-        if hasStaleCompatibilitySlot {
-            return fallbackSlotID(for: side, respectingStoredSlots: false)
-        }
-        return validStoredSlotID(for: side) ?? fallbackSlotID(for: side)
-    }
-
-    private var hasStaleCompatibilitySlot: Bool {
-        isStaleSlotID(trackASlotID) || isStaleSlotID(trackBSlotID)
-    }
-
-    private func isStaleSlotID(_ id: SessionTrack.ID?) -> Bool {
-        guard let id else { return false }
-        return !tracks.contains { $0.id == id }
-    }
-
-    private func validStoredSlotID(for side: TrackSide) -> SessionTrack.ID? {
-        let storedID: SessionTrack.ID? = switch side {
-        case .a:
-            trackASlotID
-        case .b:
-            trackBSlotID
-        }
-
-        guard let storedID,
-              tracks.contains(where: { $0.id == storedID })
-        else { return nil }
-        return storedID
-    }
-
-    private func fallbackSlotID(for side: TrackSide) -> SessionTrack.ID? {
-        fallbackSlotID(for: side, respectingStoredSlots: true)
-    }
-
-    private func fallbackSlotID(for side: TrackSide, respectingStoredSlots: Bool) -> SessionTrack.ID? {
-        let index = Self.index(for: side)
-        guard tracks.indices.contains(index) else { return nil }
-        let id = tracks[index].id
-        guard !respectingStoredSlots || validStoredSlotID(for: oppositeSide(of: side)) != id else { return nil }
-        return id
-    }
-
-    private mutating func insertTrack(_ loadedTrack: LoadedTrack, for side: TrackSide) {
-        let sessionTrack = SessionTrack(loadedTrack: loadedTrack)
-        switch side {
-        case .a:
-            tracks.insert(sessionTrack, at: 0)
-        case .b:
-            let insertionIndex = trackA == nil ? tracks.count : min(1, tracks.count)
-            tracks.insert(sessionTrack, at: insertionIndex)
-        }
-        setSlotID(sessionTrack.id, for: side)
-    }
-
-    private mutating func setSlotID(_ id: SessionTrack.ID, for side: TrackSide) {
-        switch side {
-        case .a:
-            trackASlotID = id
-        case .b:
-            trackBSlotID = id
-        }
-    }
-
-    private mutating func clearSlotID(for side: TrackSide) {
-        switch side {
-        case .a:
-            trackASlotID = nil
-        case .b:
-            trackBSlotID = nil
-        }
-    }
-
-    private func oppositeSide(of side: TrackSide) -> TrackSide {
-        switch side {
-        case .a:
-            return .b
-        case .b:
-            return .a
-        }
-    }
-
-    private static func index(for side: TrackSide) -> Int {
-        switch side {
-        case .a:
-            return 0
-        case .b:
-            return 1
-        }
-    }
 }
 
 struct ImportFailure: Equatable {
@@ -265,12 +85,10 @@ enum PlaybackError: LocalizedError, Equatable {
     case invalidSeekPosition
     case engineStartFailed
     case schedulingFailed
-    case noValidOverlap
     case librarySelectionFailed(String)
     case importFailures([ImportFailure])
     case trackLimitExceeded(limit: Int, skippedFileNames: [String])
     case importSummary(failures: [ImportFailure], skippedFileNames: [String], limit: Int)
-    case tooManyImportFiles
 
     var errorDescription: String? {
         switch self {
@@ -284,8 +102,6 @@ enum PlaybackError: LocalizedError, Equatable {
             return "Audio engine failed to start."
         case .schedulingFailed:
             return "Audio playback could not be scheduled."
-        case .noValidOverlap:
-            return "The current offsets leave no valid overlap between the two tracks."
         case let .librarySelectionFailed(message):
             return message
         case let .importFailures(failures):
@@ -300,8 +116,6 @@ enum PlaybackError: LocalizedError, Equatable {
                 skippedFileNames: skippedFileNames,
                 limit: limit
             )
-        case .tooManyImportFiles:
-            return "Select one or two audio files."
         }
     }
 

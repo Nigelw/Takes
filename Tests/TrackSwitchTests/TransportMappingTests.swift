@@ -38,7 +38,7 @@ struct TransportMappingTests {
     }
 
     @Test
-    func trackAudibilityUsesSignedGlobalTime() {
+    func audibilityUsesSignedGlobalTime() {
         let track = makeTrack(duration: 5, offset: -2)
 
         #expect(!TransportMapping.isTrackAudible(track, atGlobalTime: -2.01))

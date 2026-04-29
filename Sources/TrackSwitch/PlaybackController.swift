@@ -39,16 +39,6 @@ final class PlaybackController: ObservableObject {
         self.libraryTrackSelector = libraryTrackSelector
     }
 
-    func loadTrack(_ side: TrackSide, from url: URL) async {
-        do {
-            try loadTrackOrThrow(side, from: url)
-        } catch let error as PlaybackError {
-            playbackError = error
-        } catch {
-            playbackError = .failedToOpenFile(url)
-        }
-    }
-
     func loadImportedFiles(_ urls: [URL]) async {
         guard !urls.isEmpty else { return }
 
@@ -181,60 +171,10 @@ final class PlaybackController: ObservableObject {
         playbackError = error
     }
 
-    private func loadTrackOrThrow(_ side: TrackSide, from url: URL) throws {
-        do {
-            let preparedLoad = try prepareTrackLoad(from: url)
-            stop()
-            applyPreparedTrackLoad(preparedLoad, to: side)
-            finishTrackLoading()
-        } catch let error as PlaybackError {
-            throw error
-        } catch {
-            throw PlaybackError.failedToOpenFile(url)
-        }
-    }
-
     private func prepareTrackLoad(from url: URL) throws -> PreparedTrackLoad {
         let metadata = try loader.loadTrackMetadata(from: url)
         let file = try loader.makeAudioFile(from: url)
         return PreparedTrackLoad(metadata: metadata, file: file)
-    }
-
-    private func applyPreparedTrackLoad(_ preparedLoad: PreparedTrackLoad, to side: TrackSide) {
-        switch side {
-        case .a:
-            let previousID = session.trackAID
-            session.trackA = Self.replacingTrackMetadata(
-                preparedLoad.metadata,
-                preservingSettingsFrom: session.trackA
-            )
-            if let previousID {
-                detachRuntimeTrack(for: previousID)
-            }
-            if let id = session.trackAID {
-                configureEngine()
-                attachRuntimeTrack(for: id, file: preparedLoad.file)
-            }
-            if session.trackB == nil {
-                session.activeTrack = .a
-            }
-        case .b:
-            let previousID = session.trackBID
-            session.trackB = Self.replacingTrackMetadata(
-                preparedLoad.metadata,
-                preservingSettingsFrom: session.trackB
-            )
-            if let previousID {
-                detachRuntimeTrack(for: previousID)
-            }
-            if let id = session.trackBID {
-                configureEngine()
-                attachRuntimeTrack(for: id, file: preparedLoad.file)
-            }
-            if session.trackA == nil {
-                session.activeTrack = .b
-            }
-        }
     }
 
     private func appendPreparedTrackLoad(_ preparedLoad: PreparedTrackLoad) {
@@ -333,11 +273,6 @@ final class PlaybackController: ObservableObject {
         applyAudibility()
     }
 
-    func selectActiveTrack(_ side: TrackSide) {
-        guard let trackID = trackID(for: side) else { return }
-        selectActiveTrack(trackID)
-    }
-
     func replaceTrack(_ trackID: SessionTrack.ID, with url: URL) async {
         guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
 
@@ -417,29 +352,8 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    func setGain(_ side: TrackSide, db: Float) {
-        guard let trackID = trackID(for: side) else { return }
-        setGain(trackID, db: db)
-    }
-
-    func setOffset(_ side: TrackSide, seconds: TimeInterval) {
-        guard let trackID = trackID(for: side) else { return }
-        setOffset(trackID, seconds: seconds)
-    }
-
     func skip(by delta: TimeInterval) {
         seek(to: session.transportPosition + delta)
-    }
-
-    nonisolated static func replacingTrackMetadata(
-        _ metadata: LoadedTrack,
-        preservingSettingsFrom existingTrack: LoadedTrack?
-    ) -> LoadedTrack {
-        guard let existingTrack else { return metadata }
-        var adjusted = metadata
-        adjusted.offsetSeconds = existingTrack.offsetSeconds
-        adjusted.gainDB = existingTrack.gainDB
-        return adjusted
     }
 
     nonisolated static func transportPositionAfterTimelineRecalculation(
@@ -636,15 +550,6 @@ final class PlaybackController: ObservableObject {
 
     private func runtimeTracksInSessionOrder() -> [RuntimeTrack] {
         session.tracks.compactMap { runtimeTracksByID[$0.id] }
-    }
-
-    private func trackID(for side: TrackSide) -> SessionTrack.ID? {
-        switch side {
-        case .a:
-            session.trackAID
-        case .b:
-            session.trackBID
-        }
     }
 
     private func startTimer() {

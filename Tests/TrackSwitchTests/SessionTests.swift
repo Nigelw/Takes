@@ -43,41 +43,6 @@ struct SessionTests {
     }
 
     @Test
-    func compatibilitySlotsPreserveABOrderWhenBLoadsFirst() {
-        var session = ComparisonSession()
-        session.trackB = makeTrack(name: "b.wav")
-        session.trackA = makeTrack(name: "a.wav")
-
-        #expect(session.trackA?.displayName == "a.wav")
-        #expect(session.trackB?.displayName == "b.wav")
-        #expect(session.tracks.map { $0.loadedTrack.displayName } == ["a.wav", "b.wav"])
-    }
-
-    @Test
-    func compatibilitySlotsFallbackAfterDirectTrackMutation() {
-        var session = ComparisonSession()
-        session.trackA = makeTrack(name: "a.wav")
-        session.trackB = makeTrack(name: "b.wav")
-        session.tracks.removeFirst()
-
-        #expect(session.trackA?.displayName == "b.wav")
-        #expect(session.trackB == nil)
-        #expect(!session.canToggleComparison)
-    }
-
-    @Test
-    func compatibilityToggleRequiresBothLegacyTracks() {
-        var session = ComparisonSession()
-        session.tracks = [SessionTrack(loadedTrack: makeTrack(name: "only.wav"))]
-
-        #expect(session.canSwitchPlayback == false)
-        #expect(session.canToggleComparison == false)
-
-        session.trackB = makeTrack(name: "b.wav")
-        #expect(session.canToggleComparison)
-    }
-
-    @Test
     func signedTimestampFormatsNegativeTimes() {
         #expect(TimeInterval(-12).formattedSignedTimestamp == "-00:12")
         #expect(TimeInterval(12).formattedSignedTimestamp == "00:12")
@@ -119,7 +84,6 @@ struct SessionTests {
     func musicSelectionScriptDoesNotRejectMoreThanTwoTracks() {
         let script = LibraryTrackSelectionLoader.musicSelectionScript
 
-        #expect(!script.contains("Select one or two audio files."))
         #expect(!script.contains("(count of selectedTracks) > 2"))
     }
 

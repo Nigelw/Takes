@@ -30,7 +30,7 @@ struct TrackSwitchApp: App {
                     controller.toggleActiveTrack()
                 }
                 .keyboardShortcut("x", modifiers: [])
-                .disabled(!controller.session.canToggleComparison)
+                .disabled(!controller.session.canSwitchPlayback)
 
                 Button("Rewind") {
                     controller.seek(to: 0)

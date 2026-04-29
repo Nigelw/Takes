@@ -18,24 +18,6 @@ struct TransportMapping {
         return lower...upper
     }
 
-    static func timelineRange(trackA: LoadedTrack?, trackB: LoadedTrack?) -> ClosedRange<TimeInterval>? {
-        timelineRange(tracks: [trackA, trackB].compactMap { $0 })
-    }
-
-    static func overlapRange(trackA: LoadedTrack, trackB: LoadedTrack) -> ClosedRange<TimeInterval>? {
-        let a = transportBounds(duration: trackA.duration, offset: trackA.offsetSeconds)
-        let b = transportBounds(duration: trackB.duration, offset: trackB.offsetSeconds)
-        let lower = max(a.lowerBound, b.lowerBound)
-        let upper = min(a.upperBound, b.upperBound)
-        guard upper > lower else { return nil }
-        return lower...upper
-    }
-
-    static func validOverlapDuration(trackA: LoadedTrack, trackB: LoadedTrack) -> TimeInterval {
-        guard let range = overlapRange(trackA: trackA, trackB: trackB) else { return 0 }
-        return range.upperBound - range.lowerBound
-    }
-
     static func filePosition(forGlobalTime globalTime: TimeInterval, offset: TimeInterval) -> TimeInterval {
         globalTime - offset
     }
