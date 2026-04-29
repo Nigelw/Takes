@@ -81,8 +81,8 @@ struct ContentView: View {
     @State private var importingTracks = false
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
-    @State private var dropTargetSide: TrackSide?
-    @State private var gainPopoverSide: TrackSide?
+    @State private var dropTargetTrackID: SessionTrack.ID?
+    @State private var gainPopoverTrackID: SessionTrack.ID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -98,7 +98,7 @@ struct ContentView: View {
         .padding(20)
         .frame(minWidth: 860, minHeight: 540)
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
-            loadDroppedURLs(from: providers, side: nil)
+            loadDroppedURLs(from: providers, targetTrackID: nil)
         }
         .fileImporter(
             isPresented: $importingTracks,
@@ -150,7 +150,7 @@ struct ContentView: View {
                 controller.toggleActiveTrack()
             }
             .keyboardShortcut("x", modifiers: [])
-            .disabled(!controller.session.canToggleComparison)
+            .disabled(!controller.session.canSwitchPlayback)
 
             Spacer()
 
@@ -175,7 +175,9 @@ struct ContentView: View {
     }
 
     private var trackTimelineHeight: CGFloat {
-        trackRowHeight * 2 + trackTimelineDividerHeight
+        let rowCount = max(controller.session.tracks.count, 1)
+        let dividerCount = max(rowCount - 1, 0)
+        return trackRowHeight * CGFloat(rowCount) + trackTimelineDividerHeight * CGFloat(dividerCount)
     }
 
     private func globalTime(atX x: CGFloat, width: CGFloat) -> TimeInterval {
@@ -198,59 +200,89 @@ struct ContentView: View {
         GeometryReader { proxy in
             let infoWidth: CGFloat = 240
             let waveformWidth = max(proxy.size.width - infoWidth, 1)
-            ZStack(alignment: .topLeading) {
-                VStack(spacing: 0) {
-                    trackRow(side: .a, track: controller.session.trackA, infoWidth: infoWidth)
-                    Divider()
-                        .frame(height: trackTimelineDividerHeight)
-                    trackRow(side: .b, track: controller.session.trackB, infoWidth: infoWidth)
-                }
-                .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            ScrollView(.vertical) {
+                ZStack(alignment: .topLeading) {
+                    VStack(spacing: 0) {
+                        if controller.session.tracks.isEmpty {
+                            emptyTrackRow(infoWidth: infoWidth)
+                        } else {
+                            ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
+                                trackRow(index: index, sessionTrack: sessionTrack, infoWidth: infoWidth)
+                                if index < controller.session.tracks.count - 1 {
+                                    Divider()
+                                        .frame(height: trackTimelineDividerHeight)
+                                }
+                            }
+                        }
+                    }
+                    .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                if controller.session.isPlayable {
-                    Rectangle()
-                        .fill(.blue)
-                        .frame(width: 2, height: trackTimelineHeight - 16)
-                        .offset(
-                            x: infoWidth + xPosition(for: controller.session.transportPosition, width: waveformWidth),
-                            y: 8
-                        )
+                    if controller.session.isPlayable {
+                        Rectangle()
+                            .fill(.blue)
+                            .frame(width: 2, height: trackTimelineHeight - 16)
+                            .offset(
+                                x: infoWidth + xPosition(for: controller.session.transportPosition, width: waveformWidth),
+                                y: 8
+                            )
+                    }
                 }
+                .frame(width: proxy.size.width)
             }
         }
-        .frame(height: trackTimelineHeight)
+        .frame(height: min(trackTimelineHeight, 420))
     }
 
     private func trackRow(
-        side: TrackSide,
-        track: LoadedTrack?,
+        index: Int,
+        sessionTrack: SessionTrack,
         infoWidth: CGFloat
     ) -> some View {
         HStack(spacing: 0) {
-            trackInfoArea(side: side, track: track)
+            trackInfoArea(index: index, sessionTrack: sessionTrack)
                 .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
-                .background(backgroundStyle(for: side))
+                .background(backgroundStyle(for: sessionTrack.id))
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    controller.selectActiveTrack(side)
+                    controller.selectActiveTrack(sessionTrack.id)
                 }
 
-            waveformLane(side: side, track: track)
+            waveformLane(index: index, sessionTrack: sessionTrack)
                 .frame(maxWidth: .infinity)
                 .frame(height: trackRowHeight)
         }
         .frame(height: trackRowHeight)
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: dropBinding(for: side)) { providers in
-            loadDroppedURLs(from: providers, side: side)
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: dropBinding(for: sessionTrack.id)) { providers in
+            loadDroppedURLs(from: providers, targetTrackID: sessionTrack.id)
         }
     }
 
-    private func trackInfoArea(side: TrackSide, track: LoadedTrack?) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(side.title)
+    private func emptyTrackRow(infoWidth: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Track 1")
                     .font(.headline)
-                if controller.session.activeTrack == side {
+                Text("No file loaded")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
+            .background(.quaternary.opacity(0.4))
+
+            waveformLane(index: 0, sessionTrack: nil)
+                .frame(maxWidth: .infinity)
+                .frame(height: trackRowHeight)
+        }
+        .frame(height: trackRowHeight)
+    }
+
+    private func trackInfoArea(index: Int, sessionTrack: SessionTrack) -> some View {
+        let track = sessionTrack.loadedTrack
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Track \(index + 1)")
+                    .font(.headline)
+                if controller.session.activeTrackID == sessionTrack.id {
                     Text("Active")
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 7)
@@ -258,55 +290,57 @@ struct ContentView: View {
                         .background(.blue.opacity(0.15), in: Capsule())
                 }
                 Spacer()
-                gainButton(side: side, track: track)
+                Button {
+                    controller.removeTrack(sessionTrack.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .accessibilityLabel("Remove Track \(index + 1)")
+                }
+                .buttonStyle(.borderless)
+
+                gainButton(sessionTrack: sessionTrack)
             }
 
-            if let track {
-                Text(track.displayName)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                Text(track.metadataSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            } else {
-                Text("No file loaded")
-                    .foregroundStyle(.secondary)
-            }
+            Text(track.displayName)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+            Text(track.metadataSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
 
-            offsetControl(side: side, track: track)
+            offsetControl(sessionTrack: sessionTrack)
         }
         .padding(12)
     }
 
-    private func gainButton(side: TrackSide, track: LoadedTrack?) -> some View {
+    private func gainButton(sessionTrack: SessionTrack) -> some View {
         Button {
-            gainPopoverSide = side
+            gainPopoverTrackID = sessionTrack.id
         } label: {
             Image(systemName: "gearshape")
-                .accessibilityLabel("\(side.title) Settings")
+                .accessibilityLabel("\(sessionTrack.loadedTrack.displayName) Settings")
         }
         .buttonStyle(.borderless)
-        .disabled(track == nil)
         .popover(
             isPresented: Binding(
-                get: { gainPopoverSide == side },
+                get: { gainPopoverTrackID == sessionTrack.id },
                 set: { isPresented in
-                    gainPopoverSide = isPresented ? side : nil
+                    gainPopoverTrackID = isPresented ? sessionTrack.id : nil
                 }
             ),
             arrowEdge: .trailing
         ) {
-            gainPopoverContent(side: side, track: track)
+            gainPopoverContent(sessionTrack: sessionTrack)
                 .padding()
                 .frame(width: 300)
         }
     }
 
-    private func gainPopoverContent(side: TrackSide, track: LoadedTrack?) -> some View {
-        let gainValue = Int((track?.gainDB ?? 0).rounded())
+    private func gainPopoverContent(sessionTrack: SessionTrack) -> some View {
+        let gainValue = Int(sessionTrack.loadedTrack.gainDB.rounded())
         return VStack(alignment: .leading, spacing: 10) {
-            Text("\(side.title) Gain")
+            Text("Track Gain")
                 .font(.headline)
             Text("\(gainValue) dB")
                 .foregroundStyle(.secondary)
@@ -314,7 +348,7 @@ struct ContentView: View {
                 ResettableSlider(
                     value: Binding(
                         get: { Double(gainValue) },
-                        set: { controller.setGain(side, db: Float(Int($0.rounded()))) }
+                        set: { controller.setGain(sessionTrack.id, db: Float(Int($0.rounded()))) }
                     ),
                     range: -24...24,
                     resetValue: 0
@@ -322,17 +356,16 @@ struct ContentView: View {
                 NumericControlRow(
                     value: Binding(
                         get: { gainValue },
-                        set: { controller.setGain(side, db: Float($0)) }
+                        set: { controller.setGain(sessionTrack.id, db: Float($0)) }
                     ),
                     configuration: .gain
                 )
             }
-            .disabled(track == nil)
         }
     }
 
-    private func offsetControl(side: TrackSide, track: LoadedTrack?) -> some View {
-        let offsetMs = Int(((track?.offsetSeconds ?? 0) * 1000).rounded())
+    private func offsetControl(sessionTrack: SessionTrack) -> some View {
+        let offsetMs = Int((sessionTrack.loadedTrack.offsetSeconds * 1000).rounded())
         return VStack(alignment: .leading, spacing: 4) {
             Text("Offset \(offsetMs) ms")
                 .font(.caption)
@@ -340,22 +373,21 @@ struct ContentView: View {
             NumericControlRow(
                 value: Binding(
                     get: { offsetMs },
-                    set: { controller.setOffset(side, seconds: Double($0) / 1000) }
+                    set: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) }
                 ),
                 configuration: .offset
             )
-            .disabled(track == nil)
         }
     }
 
-    private func waveformLane(side: TrackSide, track: LoadedTrack?) -> some View {
+    private func waveformLane(index: Int, sessionTrack: SessionTrack?) -> some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Rectangle()
                     .fill(.background.opacity(0.01))
 
-                if let track {
-                    placeholderWaveform(for: side)
+                if let track = sessionTrack?.loadedTrack {
+                    placeholderWaveform(index: index)
                         .frame(
                             width: max(CGFloat(track.duration / timelineSpan) * proxy.size.width, 1),
                             height: 58
@@ -363,7 +395,7 @@ struct ContentView: View {
                         .offset(
                             x: xPosition(for: track.offsetSeconds, width: proxy.size.width)
                         )
-                        .foregroundStyle(side == .a ? .blue.opacity(0.55) : .green.opacity(0.55))
+                        .foregroundStyle(trackColor(index: index).opacity(0.55))
                 } else {
                     Text("Drop audio file here")
                         .font(.caption)
@@ -386,19 +418,24 @@ struct ContentView: View {
         }
     }
 
-    private func placeholderWaveform(for side: TrackSide) -> some View {
+    private func placeholderWaveform(index trackIndex: Int) -> some View {
         Canvas { context, size in
             let barCount = 96
             let barWidth = max(size.width / CGFloat(barCount * 2), 1)
-            for index in 0..<barCount {
-                let phase = Double(index) * 0.37 + (side == .a ? 0 : 0.8)
+            for barIndex in 0..<barCount {
+                let phase = Double(barIndex) * 0.37 + Double(trackIndex % 7) * 0.4
                 let amplitude = 0.25 + 0.7 * abs(sin(phase) * cos(phase * 0.43))
                 let height = size.height * amplitude
-                let x = CGFloat(index) * size.width / CGFloat(barCount)
+                let x = CGFloat(barIndex) * size.width / CGFloat(barCount)
                 let rect = CGRect(x: x, y: (size.height - height) / 2, width: barWidth, height: height)
                 context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .foreground)
             }
         }
+    }
+
+    private func trackColor(index: Int) -> Color {
+        let colors: [Color] = [.blue, .green, .orange, .purple, .pink, .teal]
+        return colors[index % colors.count]
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
@@ -414,18 +451,18 @@ struct ContentView: View {
         }
     }
 
-    private func backgroundStyle(for side: TrackSide) -> some ShapeStyle {
-        if dropTargetSide == side {
+    private func backgroundStyle(for trackID: SessionTrack.ID) -> some ShapeStyle {
+        if dropTargetTrackID == trackID {
             return AnyShapeStyle(.blue.opacity(0.16))
         }
         return AnyShapeStyle(.quaternary.opacity(0.4))
     }
 
-    private func dropBinding(for side: TrackSide) -> Binding<Bool> {
+    private func dropBinding(for trackID: SessionTrack.ID) -> Binding<Bool> {
         Binding(
-            get: { dropTargetSide == side },
+            get: { dropTargetTrackID == trackID },
             set: { isTargeted in
-                dropTargetSide = isTargeted ? side : nil
+                dropTargetTrackID = isTargeted ? trackID : nil
             }
         )
     }
@@ -477,7 +514,7 @@ struct ContentView: View {
         mouseMonitor = clickMonitor
     }
 
-    private func loadDroppedURLs(from providers: [NSItemProvider], side: TrackSide?) -> Bool {
+    private func loadDroppedURLs(from providers: [NSItemProvider], targetTrackID: SessionTrack.ID?) -> Bool {
         let fileProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
         guard !fileProviders.isEmpty else { return false }
 
@@ -498,10 +535,8 @@ struct ContentView: View {
         group.notify(queue: .main) {
             let urls = urlsByProvider.compactMap(\.self)
             Task { @MainActor in
-                if side != nil, fileProviders.count > 1 {
-                    controller.setPlaybackError(.tooManyImportFiles)
-                } else if let side, urls.count == 1 {
-                    await controller.loadTrack(side, from: urls[0])
+                if let targetTrackID, urls.count == 1 {
+                    await controller.replaceTrack(targetTrackID, with: urls[0])
                 } else {
                     await controller.loadImportedFiles(urls)
                 }
