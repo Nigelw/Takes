@@ -1,6 +1,6 @@
 # TrackSwitch
 
-TrackSwitch is a native macOS app for comparing two versions of the same audio track. It keeps both tracks aligned on a shared transport timeline and lets you switch playback between them instantly so you can evaluate mastering differences at the same point in the song.
+TrackSwitch is a native macOS app for comparing multiple versions of the same audio track. It keeps loaded tracks aligned on a shared transport timeline and lets you switch playback between them instantly so you can evaluate mastering differences at the same point in the song.
 
 This README is written for someone working on the repo. It covers project layout, how to build and run the app, the core playback model, and a brief operator guide for manual testing.
 
@@ -8,18 +8,17 @@ This README is written for someone working on the repo. It covers project layout
 
 The app currently supports:
 
-- Loading one or two local audio files through a single Open control
+- Loading up to 32 local audio files through a single Open control
 - Dragging files onto a specific track row to replace that row
-- Dragging files elsewhere in the window to use the shared Open assignment rules
+- Dragging files elsewhere in the window to append to the track list
 - Placeholder waveform lanes for each loaded track
 - Signed global timeline playback with a playhead over the waveform lanes
-- Independent offset adjustment for Track A and Track B
+- Independent offset adjustment for each loaded track
 - Independent gain trim per track through the track settings popup
 - Importing the current selection from Music.app
-- Loading one selected Music track through the shared Open assignment rules
-- Loading two selected Music tracks into A and B, ordered by Music's current view order
+- Loading one or more selected Music tracks, ordered by Music's current view order
 - Shared transport playback with only one track audible at a time
-- Switching playback between A and B during playback
+- Switching playback through loaded tracks in list order during playback
 - Seeking across the full session range
 - Silence on a track when the current transport position falls outside that track's valid range
 
@@ -110,17 +109,16 @@ TrackSwitch/
 
 - `PlaybackController.swift` is the main coordinator for loading files, tracking session state, running the transport, scheduling playback, and updating audibility.
 - Playback uses a single `AVAudioEngine` with:
-  - two `AVAudioPlayerNode`s
-  - two per-track mixer nodes
-- Both tracks are scheduled against the same transport model.
-- Only one track is audible at a time by muting the inactive track's mixer output.
+  - one `AVAudioPlayerNode` per loaded track
+  - one per-track mixer node per loaded track
+- All loaded tracks are scheduled against the same transport model.
+- Only the active track is audible at a time by muting the inactive tracks' mixer output.
 
 ### Transport Model
 
-- `Models.swift` defines `LoadedTrack`, `ComparisonSession`, `TrackSide`, and `PlaybackError`.
+- `Models.swift` defines `LoadedTrack`, `SessionTrack`, `ComparisonSession`, and `PlaybackError`.
 - `TransportMapping.swift` contains the pure transport math:
   - signed timeline bounds and range
-  - overlap range
   - transport-to-file position mapping
   - audibility checks
   - dB-to-linear gain conversion
@@ -130,7 +128,7 @@ Current transport behavior:
 - The progress timeline is based on the union of loaded track ranges and the global 0:00 point.
 - Negative offsets extend the visible timeline before 0:00.
 - Positive offsets create leading empty space before the shifted track starts.
-- If you switch to a track that is currently out of range, that side remains silent until transport re-enters its valid window.
+- If you switch to a track that is currently out of range, playback remains silent until transport re-enters that track's valid window.
 
 ### File Loading
 
@@ -145,38 +143,39 @@ Current transport behavior:
 ## Important Behavior Notes
 
 - Playback is allowed with only one loaded track.
-- Switching playback requires both tracks to be loaded.
-- Each track keeps its own gain and offset values when you replace its file.
+- Switching playback requires at least two loaded tracks.
+- Replacing a track row resets that row's gain and offset values.
+- Removing a track preserves the remaining tracks' gain and offset values.
 - Music import requires Automation permission to control Music.
 - The app includes `NSAppleEventsUsageDescription` for that permission prompt.
-- If more than two tracks are selected in Music, the import should fail with a user-facing error.
+- If more tracks are imported than the session cap allows, TrackSwitch loads available slots and reports skipped files.
 
 ## Brief Operator Guide
 
 ### Loading Audio
 
-- Use `Open` to import one or two local files.
+- Use `Open` to append one or more local files.
 - Drag a compatible audio file onto a specific track row to replace that row.
-- Drag files elsewhere in the window to use the shared Open assignment rules.
+- Drag files elsewhere in the window to append them to the track list.
 - Use `Load Selected from Music` to import the current Music.app selection.
 
 Music import rules:
 
-- If one track is selected, it uses the shared assignment rules: fill Track A if empty, then Track B if empty, otherwise replace the active track.
-- If two tracks are selected, they load into Track A and Track B based on Music's playlist/library view order.
-- If the selection contains more than two tracks, the app shows an error.
+- Selected tracks append to the current track list.
+- Multiple selected tracks load based on Music's playlist/library view order.
+- TrackSwitch supports up to 32 loaded tracks and reports any skipped files.
 - The selected Music items must be local files on disk.
 
 ### Playback
 
 - `Space`: play/pause
-- `X`: switch playback between Track A and Track B
+- `X`: switch playback through loaded tracks in list order
 - `Left` / `Right`: seek by 1 second
 - `Shift+Left` / `Shift+Right`: seek by 10 seconds
 
 ### Gain And Offset Controls
 
-- Both tracks have offset controls.
+- Each loaded track has an offset control.
 - Each track's settings popup contains gain trim.
 - Sliders and numeric fields stay in sync.
 - Numeric fields support arrow-key stepping:
@@ -191,21 +190,24 @@ Music import rules:
 Useful spot checks after changing playback or UI behavior:
 
 1. Confirm the top transport shows `Open`, dropdown, play/pause, rewind, switch, and signed time readout.
-2. Use `Open` with one file and confirm it fills Track A.
-3. Use `Open` with a second single file and confirm it fills Track B.
-4. Use `Open` with a third single file and confirm it replaces the active track.
-5. Use `Open` with two files and confirm they load into Track A and Track B.
-6. Use `Open` with more than two files and confirm the app shows an inline error.
+2. Use `Open` with one file and confirm it creates Track 1 and makes it active.
+3. Use `Open` with additional files and confirm they append in order.
+4. Use `Open` with more than 32 files and confirm the app loads available slots and reports skipped files.
+5. Use a mixed valid/invalid import and confirm successful files append while failures are reported together.
+6. Confirm `Switch Playback` is disabled with one loaded track and cycles through three or more tracks in row order.
 7. Confirm placeholder waveform lanes render for loaded tracks.
 8. Confirm positive offset creates leading blank space.
 9. Confirm negative offset extends the visible timeline left of zero.
-10. Confirm the playhead line spans both waveform lanes.
+10. Confirm the playhead line spans the visible track lanes.
 11. Click and drag in a waveform lane and confirm it seeks.
 12. Click the track info area and confirm it changes the active track.
 13. Confirm the gear popup contains gain only.
-14. Confirm offset controls are visible for both tracks.
+14. Confirm offset controls are visible for each loaded track.
 15. Drop a file on a specific track row and confirm it replaces that row.
-16. Drop files elsewhere in the window and confirm the shared assignment rules apply.
+16. Drop multiple files on a row and confirm they append instead of replacing.
+17. Drop files elsewhere in the window and confirm they append.
+18. Remove a non-active track during playback and confirm playback continues.
+19. Remove the active track and confirm playback pauses and selects the next track, or previous if the removed track was last.
 
 ## Known Constraints
 
