@@ -40,11 +40,15 @@ final class PlaybackController: ObservableObject {
     }
 
     func loadImportedFiles(_ urls: [URL]) async {
-        guard !urls.isEmpty else { return }
+        await loadImportedFiles(urls, additionalFailures: [])
+    }
+
+    private func loadImportedFiles(_ urls: [URL], additionalFailures: [ImportFailure]) async {
+        guard !urls.isEmpty || !additionalFailures.isEmpty else { return }
 
         let wasPlaying = session.isPlaying
         var preparedLoads: [PreparedTrackLoad] = []
-        var failures: [ImportFailure] = []
+        var failures = additionalFailures
         var skippedFileNames: [String] = []
 
         for url in urls {
@@ -158,8 +162,8 @@ final class PlaybackController: ObservableObject {
 
     func loadSelectedLibraryTracks() async {
         do {
-            let urls = try libraryTrackSelector.selectedTrackURLs()
-            await loadImportedFiles(urls)
+            let selection = try libraryTrackSelector.selectedTracks()
+            await loadImportedFiles(selection.urls, additionalFailures: selection.failures)
         } catch let error as PlaybackError {
             playbackError = error
         } catch {

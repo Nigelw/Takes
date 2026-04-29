@@ -33,7 +33,7 @@ struct TrackSwitchApp: App {
                 .disabled(!controller.session.canSwitchPlayback)
 
                 Button("Rewind") {
-                    controller.seek(to: 0)
+                    controller.seek(to: controller.session.timelineStart)
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [.command])
                 .disabled(!controller.session.isPlayable)

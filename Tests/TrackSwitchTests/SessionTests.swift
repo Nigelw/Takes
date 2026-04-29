@@ -85,6 +85,7 @@ struct SessionTests {
         let script = LibraryTrackSelectionLoader.musicSelectionScript
 
         #expect(!script.contains("(count of selectedTracks) > 2"))
+        #expect(script.contains("\"ERROR\""))
     }
 
     @Test
@@ -153,6 +154,52 @@ struct SessionTests {
         let urls = try LibraryTrackSelectionLoader.parseSelectionOutput(output)
 
         #expect(urls == [firstURL, secondURL, thirdURL])
+    }
+
+    @Test
+    func musicSelectionParsingReturnsFailuresWithValidTracks() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+        let validURL = tempDirectory.appending(path: UUID().uuidString + ".mp3")
+        let missingURL = tempDirectory.appending(path: UUID().uuidString + ".wav")
+
+        FileManager.default.createFile(atPath: validURL.path, contents: Data())
+        defer {
+            try? FileManager.default.removeItem(at: validURL)
+        }
+
+        let output = """
+        3\tOK\t\(missingURL.path)
+        1\tOK\t\(validURL.path)
+        2\tERROR\tThe selected Music track is not a local file.
+        """
+
+        let selection = try LibraryTrackSelectionLoader.parseSelection(output)
+
+        #expect(selection.urls == [validURL])
+        #expect(selection.failures.count == 2)
+        #expect(selection.failures.map(\.fileName).contains("Music item 2"))
+        #expect(selection.failures.map(\.fileName).contains(missingURL.lastPathComponent))
+    }
+
+    @MainActor
+    @Test
+    func musicSelectionLoadsValidTracksAndReportsSelectionFailures() async throws {
+        let validURL = try makeTemporaryAudioFile(name: "valid.wav")
+        defer { try? FileManager.default.removeItem(at: validURL.deletingLastPathComponent()) }
+
+        let controller = PlaybackController(
+            libraryTrackSelector: FakeLibraryTrackSelector(
+                selection: LibraryTrackSelection(
+                    urls: [validURL],
+                    failures: [ImportFailure(fileName: "Cloud Track", message: "The selected Music track is not a local file.")]
+                )
+            )
+        )
+
+        await controller.loadSelectedLibraryTracks()
+
+        #expect(controller.session.tracks.map { $0.loadedTrack.displayName } == ["valid.wav"])
+        #expect(controller.playbackError?.localizedDescription.contains("Cloud Track") == true)
     }
 
     @MainActor
@@ -608,5 +655,13 @@ private struct FakeAudioFileLoader: AudioFileLoading {
 
     func makeAudioFile(from url: URL) throws -> AVAudioFile {
         try AVAudioFile(forReading: url)
+    }
+}
+
+private struct FakeLibraryTrackSelector: LibraryTrackSelecting {
+    let selection: LibraryTrackSelection
+
+    func selectedTracks() throws -> LibraryTrackSelection {
+        selection
     }
 }

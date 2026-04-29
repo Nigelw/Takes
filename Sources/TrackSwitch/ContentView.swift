@@ -542,7 +542,7 @@ struct ContentView: View {
         group.notify(queue: .main) {
             let urls = urlsByProvider.compactMap(\.self)
             Task { @MainActor in
-                if let targetTrackID, urls.count == 1 {
+                if let targetTrackID, fileProviders.count == 1, urls.count == 1 {
                     await controller.replaceTrack(targetTrackID, with: urls[0])
                 } else {
                     await controller.loadImportedFiles(urls)

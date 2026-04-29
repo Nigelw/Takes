@@ -73,6 +73,11 @@ struct ImportFailure: Equatable {
     let fileName: String
     let message: String
 
+    init(fileName: String, message: String) {
+        self.fileName = fileName.ifEmpty("Unknown file")
+        self.message = message
+    }
+
     init(url: URL, message: String) {
         fileName = url.lastPathComponent.ifEmpty(url.path)
         self.message = message

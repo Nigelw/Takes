@@ -2,7 +2,12 @@ import AppKit
 import Foundation
 
 protocol LibraryTrackSelecting {
-    func selectedTrackURLs() throws -> [URL]
+    func selectedTracks() throws -> LibraryTrackSelection
+}
+
+struct LibraryTrackSelection: Equatable {
+    let urls: [URL]
+    let failures: [ImportFailure]
 }
 
 struct LibraryTrackSelectionLoader: LibraryTrackSelecting {
@@ -14,13 +19,17 @@ struct LibraryTrackSelectionLoader: LibraryTrackSelecting {
 
         set outputLines to {}
         repeat with selectedTrack in selectedTracks
+            set trackIndex to index of selectedTrack as text
             try
                 set trackLocation to location of selectedTrack
             on error
-                error "The selected Music track is not a local file."
+                set end of outputLines to (trackIndex & tab & "ERROR" & tab & "The selected Music track is not a local file.")
+                set trackLocation to missing value
             end try
 
-            set end of outputLines to ((index of selectedTrack as text) & tab & POSIX path of trackLocation)
+            if trackLocation is not missing value then
+                set end of outputLines to (trackIndex & tab & "OK" & tab & POSIX path of trackLocation)
+            end if
         end repeat
 
         set previousDelimiters to AppleScript's text item delimiters
@@ -32,7 +41,7 @@ struct LibraryTrackSelectionLoader: LibraryTrackSelecting {
     return outputText
     """
 
-    func selectedTrackURLs() throws -> [URL] {
+    func selectedTracks() throws -> LibraryTrackSelection {
         guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.musicBundleIdentifier) != nil else {
             throw PlaybackError.librarySelectionFailed("Music.app is required to use this button.")
         }
@@ -56,10 +65,14 @@ struct LibraryTrackSelectionLoader: LibraryTrackSelecting {
             throw PlaybackError.librarySelectionFailed("Music did not return a local file path.")
         }
 
-        return try Self.parseSelectionOutput(output)
+        return try Self.parseSelection(output)
     }
 
     static func parseSelectionOutput(_ output: String) throws -> [URL] {
+        try parseSelection(output).urls
+    }
+
+    static func parseSelection(_ output: String) throws -> LibraryTrackSelection {
         let entries = output
             .split(whereSeparator: \.isNewline)
             .map(String.init)
@@ -71,28 +84,71 @@ struct LibraryTrackSelectionLoader: LibraryTrackSelecting {
         }
 
         let ordered = try entries.map(parseSelectionEntry(_:)).sorted { $0.index < $1.index }
-        return ordered.map { $0.url }
+        return LibraryTrackSelection(
+            urls: ordered.compactMap(\.url),
+            failures: ordered.compactMap(\.failure)
+        )
     }
 
-    private static func parseSelectionEntry(_ entry: String) throws -> (index: Int, url: URL) {
-        let components = entry.split(separator: "\t", maxSplits: 1).map(String.init)
+    private static func parseSelectionEntry(_ entry: String) throws -> (index: Int, url: URL?, failure: ImportFailure?) {
+        let components = entry.split(separator: "\t", maxSplits: 2).map(String.init)
         guard
-            components.count == 2,
+            components.count >= 2,
             let index = Int(components[0].trimmingCharacters(in: .whitespacesAndNewlines))
         else {
             throw PlaybackError.librarySelectionFailed("Could not read the selected track order from Music.")
         }
 
-        let path = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        if components.count == 3 {
+            return try parseTaggedSelectionEntry(index: index, status: components[1], value: components[2])
+        }
+
+        return parsePathSelectionEntry(index: index, path: components[1])
+    }
+
+    private static func parseTaggedSelectionEntry(
+        index: Int,
+        status: String,
+        value: String
+    ) throws -> (index: Int, url: URL?, failure: ImportFailure?) {
+        let trimmedStatus = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch trimmedStatus {
+        case "OK":
+            return parsePathSelectionEntry(index: index, path: trimmedValue)
+        case "ERROR":
+            return (
+                index,
+                nil,
+                ImportFailure(fileName: "Music item \(index)", message: trimmedValue.ifEmpty("The selected Music track is not a local file."))
+            )
+        default:
+            throw PlaybackError.librarySelectionFailed("Could not read the selected track status from Music.")
+        }
+    }
+
+    private static func parsePathSelectionEntry(
+        index: Int,
+        path: String
+    ) -> (index: Int, url: URL?, failure: ImportFailure?) {
+        let path = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else {
-            throw PlaybackError.librarySelectionFailed("Music did not return a local file path.")
+            return (
+                index,
+                nil,
+                ImportFailure(fileName: "Music item \(index)", message: "Music did not return a local file path.")
+            )
         }
 
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw PlaybackError.librarySelectionFailed("The selected track path does not exist on disk.")
+            return (
+                index,
+                nil,
+                ImportFailure(url: url, message: "The selected track path does not exist on disk.")
+            )
         }
 
-        return (index, url)
+        return (index, url, nil)
     }
 }
