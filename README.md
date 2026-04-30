@@ -154,10 +154,10 @@ Current transport behavior:
 
 ### Loading Audio
 
-- Use `Open` to append one or more local files.
+- Use the `+` menu above the track info area and choose `Open...` to append one or more local files.
 - Drag a compatible audio file onto a specific track row to replace that row.
 - Drag files elsewhere in the window to append them to the track list.
-- Use `Load Selected from Music` to import the current Music.app selection.
+- Use the `+` menu above the track info area and choose `Get Apple Music Selection` to import the current Music.app selection.
 
 Music import rules:
 
@@ -190,25 +190,26 @@ Music import rules:
 
 Useful spot checks after changing playback or UI behavior:
 
-1. Confirm the top transport shows `Open`, dropdown, play/pause, rewind, switch, and signed time readout.
-2. Use `Open` with one file and confirm it creates Track 1 and makes it active.
-3. Use `Open` with additional files and confirm they append in order.
-4. Use `Open` with more than 32 files and confirm the app loads available slots and reports skipped files.
-5. Use a mixed valid/invalid import and confirm successful files append while failures are reported together.
-6. Confirm `Switch Playback` is disabled with one loaded track and cycles through three or more tracks in row order.
-7. Confirm placeholder waveform lanes render for loaded tracks.
-8. Confirm positive offset creates leading blank space.
-9. Confirm negative offset extends the visible timeline left of zero.
-10. Confirm the playhead line spans the visible track lanes.
-11. Click and drag in a waveform lane and confirm it seeks.
-12. Click the track info area and confirm it changes the active track.
-13. Confirm the gear popup contains gain only.
-14. Confirm offset controls are visible for each loaded track.
-15. Drop a file on a specific track row and confirm it replaces that row.
-16. Drop multiple files on a row and confirm they append instead of replacing.
-17. Drop files elsewhere in the window and confirm they append.
-18. Remove a non-active track during playback and confirm playback continues.
-19. Remove the active track and confirm playback pauses and selects the next track, or previous if the removed track was last.
+1. Confirm the top transport shows play/pause, rewind, switch, and signed time readout.
+2. Confirm the `+` menu above the track info area contains `Open...` and `Get Apple Music Selection`.
+3. Use `Open...` with one file and confirm it creates Track 1 and makes it active.
+4. Use `Open...` with additional files and confirm they append in order.
+5. Use `Open...` with more than 32 files and confirm the app loads available slots and reports skipped files.
+6. Use a mixed valid/invalid import and confirm successful files append while failures are reported together.
+7. Confirm `Switch Playback` is disabled with one loaded track and cycles through three or more tracks in row order.
+8. Confirm placeholder waveform lanes render for loaded tracks.
+9. Confirm positive offset creates leading blank space.
+10. Confirm negative offset extends the visible timeline left of zero.
+11. Confirm the playhead line spans the visible track lanes.
+12. Click and drag in a waveform lane and confirm it seeks.
+13. Click the track info area and confirm it changes the active track.
+14. Confirm the gear popup contains gain only.
+15. Confirm offset controls are visible for each loaded track.
+16. Drop a file on a specific track row and confirm it replaces that row.
+17. Drop multiple files on a row and confirm they append instead of replacing.
+18. Drop files elsewhere in the window and confirm they append.
+19. Remove a non-active track during playback and confirm playback continues.
+20. Remove the active track and confirm playback pauses and selects the next track, or previous if the removed track was last.
 
 ## Known Constraints
 

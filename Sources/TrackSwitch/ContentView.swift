@@ -108,6 +108,27 @@ struct TrackReorderInsertionTarget: Equatable {
     let placement: TrackReorderInsertionPlacement
 }
 
+enum ImportActionMenuItem: CaseIterable {
+    case open
+    case musicSelection
+
+    var title: String {
+        switch self {
+        case .open:
+            "Open..."
+        case .musicSelection:
+            "Get Apple Music Selection"
+        }
+    }
+}
+
+enum ImportActionControlMetrics {
+    static let controlWidth: CGFloat = 86
+    static let controlHeight: CGFloat = 34
+    static let primaryButtonWidth: CGFloat = 48
+    static let menuButtonWidth: CGFloat = 37
+}
+
 struct ContentView: View {
     @ObservedObject var controller: PlaybackController
 
@@ -153,23 +174,6 @@ struct ContentView: View {
 
     private var transportBar: some View {
         HStack(spacing: 10) {
-            Button("Open") {
-                importingTracks = true
-            }
-
-            Menu {
-                Button("Load Selected from Music") {
-                    Task { await controller.loadSelectedLibraryTracks() }
-                }
-            } label: {
-                Image(systemName: "chevron.down")
-                    .accessibilityLabel("Import Options")
-            }
-            .menuStyle(.borderlessButton)
-
-            Divider()
-                .frame(height: 22)
-
             Button(controller.session.isPlaying ? "Pause" : "Play") {
                 controller.session.isPlaying ? controller.pause() : controller.play()
             }
@@ -203,6 +207,14 @@ struct ContentView: View {
         124
     }
 
+    private var trackInfoWidth: CGFloat {
+        240
+    }
+
+    private var trackHeaderHeight: CGFloat {
+        34
+    }
+
     private var trackTimelineDividerHeight: CGFloat {
         1
     }
@@ -231,39 +243,97 @@ struct ContentView: View {
 
     private var trackTimelineSection: some View {
         GeometryReader { proxy in
-            let infoWidth: CGFloat = 240
-            let waveformWidth = max(proxy.size.width - infoWidth, 1)
-            ScrollView(.vertical) {
-                ZStack(alignment: .topLeading) {
-                    VStack(spacing: 0) {
-                        if controller.session.tracks.isEmpty {
-                            emptyTrackRow(infoWidth: infoWidth)
-                        } else {
-                            ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
-                                trackRow(index: index, sessionTrack: sessionTrack, infoWidth: infoWidth)
-                                if index < controller.session.tracks.count - 1 {
-                                    Divider()
-                                        .frame(height: trackTimelineDividerHeight)
+            let waveformWidth = max(proxy.size.width - trackInfoWidth, 1)
+            VStack(alignment: .leading, spacing: 8) {
+                trackTimelineHeader
+                    .frame(width: proxy.size.width, height: trackHeaderHeight)
+
+                ScrollView(.vertical) {
+                    ZStack(alignment: .topLeading) {
+                        VStack(spacing: 0) {
+                            if controller.session.tracks.isEmpty {
+                                emptyTrackRow(infoWidth: trackInfoWidth)
+                            } else {
+                                ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
+                                    trackRow(index: index, sessionTrack: sessionTrack, infoWidth: trackInfoWidth)
+                                    if index < controller.session.tracks.count - 1 {
+                                        Divider()
+                                            .frame(height: trackTimelineDividerHeight)
+                                    }
                                 }
                             }
                         }
-                    }
-                    .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                    if controller.session.isPlayable {
-                        Rectangle()
-                            .fill(.blue)
-                            .frame(width: 2, height: trackTimelineHeight - 16)
-                            .offset(
-                                x: infoWidth + xPosition(for: controller.session.transportPosition, width: waveformWidth),
-                                y: 8
-                            )
+                        if controller.session.isPlayable {
+                            Rectangle()
+                                .fill(.blue)
+                                .frame(width: 2, height: trackTimelineHeight - 16)
+                                .offset(
+                                    x: trackInfoWidth + xPosition(for: controller.session.transportPosition, width: waveformWidth),
+                                    y: 8
+                                )
+                        }
                     }
+                    .frame(width: proxy.size.width)
                 }
-                .frame(width: proxy.size.width)
             }
         }
-        .frame(height: min(trackTimelineHeight, 420))
+        .frame(height: trackHeaderHeight + 8 + min(trackTimelineHeight, 420))
+    }
+
+    private var trackTimelineHeader: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Button {
+                    performImportAction(.open)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(
+                            width: ImportActionControlMetrics.primaryButtonWidth,
+                            height: ImportActionControlMetrics.controlHeight
+                        )
+                        .contentShape(Rectangle())
+                        .accessibilityLabel(ImportActionMenuItem.open.title)
+                }
+                .buttonStyle(.plain)
+                .help(ImportActionMenuItem.open.title)
+
+                Divider()
+                    .frame(height: ImportActionControlMetrics.controlHeight)
+
+                Menu {
+                    ForEach(ImportActionMenuItem.allCases, id: \.self) { item in
+                        Button(item.title) {
+                            performImportAction(item)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(
+                            width: ImportActionControlMetrics.menuButtonWidth,
+                            height: ImportActionControlMetrics.controlHeight
+                        )
+                        .contentShape(Rectangle())
+                        .accessibilityLabel("Open Track Menu")
+                }
+                .menuStyle(.borderlessButton)
+                .help("Open Track Menu")
+            }
+            .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
+            .background(.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(.separator, lineWidth: 1)
+            )
+            .padding(.leading, 8)
+            .frame(width: trackInfoWidth, alignment: .leading)
+
+            Spacer(minLength: 0)
+        }
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func trackRow(
@@ -507,6 +577,15 @@ struct ContentView: View {
             }
         case .failure:
             break
+        }
+    }
+
+    private func performImportAction(_ item: ImportActionMenuItem) {
+        switch item {
+        case .open:
+            importingTracks = true
+        case .musicSelection:
+            Task { await controller.loadSelectedLibraryTracks() }
         }
     }
 
