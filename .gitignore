@@ -8,6 +8,7 @@ DerivedData/
 .codex/
 mockups/
 .superpowers/
+Tests/Audio/*
 
 *.xcuserstate
 xcuserdata/
