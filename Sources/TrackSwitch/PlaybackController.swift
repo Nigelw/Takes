@@ -285,6 +285,26 @@ final class PlaybackController: ObservableObject {
         applyAudibility()
     }
 
+    func reorderTrack(_ trackID: SessionTrack.ID, before destinationTrackID: SessionTrack.ID?) {
+        guard let sourceIndex = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        guard destinationTrackID != trackID else { return }
+
+        let movedTrack = session.tracks.remove(at: sourceIndex)
+        let destinationIndex: Int
+        if let destinationTrackID {
+            guard let targetIndex = session.tracks.firstIndex(where: { $0.id == destinationTrackID }) else {
+                session.tracks.insert(movedTrack, at: sourceIndex)
+                return
+            }
+            destinationIndex = targetIndex
+        } else {
+            destinationIndex = session.tracks.endIndex
+        }
+
+        session.tracks.insert(movedTrack, at: destinationIndex)
+        applyAudibility()
+    }
+
     func replaceTrack(_ trackID: SessionTrack.ID, with url: URL) async {
         guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
 

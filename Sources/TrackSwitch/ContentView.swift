@@ -90,6 +90,10 @@ enum TrackDropHighlight: Equatable {
     }
 }
 
+enum TrackReorderDrag {
+    static let contentType = UTType.plainText
+}
+
 struct ContentView: View {
     @ObservedObject var controller: PlaybackController
 
@@ -257,6 +261,22 @@ struct ContentView: View {
                 .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
                 .background(backgroundStyle(for: sessionTrack.id))
                 .contentShape(Rectangle())
+                .onDrag {
+                    trackReorderProvider(for: sessionTrack.id)
+                }
+                .onDrop(
+                    of: [TrackReorderDrag.contentType.identifier, UTType.fileURL.identifier],
+                    delegate: TrackInfoDropDelegate(
+                        controller: controller,
+                        targetTrackID: sessionTrack.id,
+                        rowHeight: trackRowHeight,
+                        dropTargetTrackID: $dropTargetTrackID,
+                        destinationAfterTargetTrackID: {
+                            destinationTrackID(after: sessionTrack.id)
+                        },
+                        loadDroppedURLs: loadDroppedURLs
+                    )
+                )
                 .onTapGesture {
                     controller.selectActiveTrack(sessionTrack.id)
                 }
@@ -266,9 +286,6 @@ struct ContentView: View {
                 .frame(height: trackRowHeight)
         }
         .frame(height: trackRowHeight)
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: dropBinding(for: sessionTrack.id)) { providers in
-            loadDroppedURLs(from: providers, targetTrackID: sessionTrack.id)
-        }
     }
 
     private func emptyTrackRow(infoWidth: CGFloat) -> some View {
@@ -482,17 +499,28 @@ struct ContentView: View {
         return AnyShapeStyle(.quaternary.opacity(0.4))
     }
 
-    private func dropBinding(for trackID: SessionTrack.ID) -> Binding<Bool> {
-        Binding(
-            get: { dropTargetTrackID == trackID },
-            set: { isTargeted in
-                if isTargeted {
-                    dropTargetTrackID = trackID
-                } else if dropTargetTrackID == trackID {
-                    dropTargetTrackID = nil
-                }
-            }
-        )
+    private func trackReorderProvider(for trackID: SessionTrack.ID) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: TrackReorderDrag.contentType.identifier,
+            visibility: .ownProcess
+        ) { completion in
+            completion(Data(trackID.uuidString.utf8), nil)
+            return nil
+        }
+        return provider
+    }
+
+    private func destinationTrackID(after trackID: SessionTrack.ID) -> SessionTrack.ID? {
+        guard let index = controller.session.tracks.firstIndex(where: { $0.id == trackID }) else {
+            return nil
+        }
+
+        let nextIndex = controller.session.tracks.index(after: index)
+        guard controller.session.tracks.indices.contains(nextIndex) else {
+            return nil
+        }
+        return controller.session.tracks[nextIndex].id
     }
 
     private func setupKeyMonitor() {
@@ -592,6 +620,67 @@ struct ContentView: View {
         }
 
         return true
+    }
+}
+
+private struct TrackInfoDropDelegate: DropDelegate {
+    @ObservedObject var controller: PlaybackController
+    let targetTrackID: SessionTrack.ID
+    let rowHeight: CGFloat
+    @Binding var dropTargetTrackID: SessionTrack.ID?
+    let destinationAfterTargetTrackID: () -> SessionTrack.ID?
+    let loadDroppedURLs: ([NSItemProvider], SessionTrack.ID?) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier])
+            || info.hasItemsConforming(to: [UTType.fileURL.identifier])
+    }
+
+    func dropEntered(info: DropInfo) {
+        dropTargetTrackID = targetTrackID
+    }
+
+    func dropExited(info: DropInfo) {
+        if dropTargetTrackID == targetTrackID {
+            dropTargetTrackID = nil
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        if info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier]) {
+            return DropProposal(operation: .move)
+        }
+        if info.hasItemsConforming(to: [UTType.fileURL.identifier]) {
+            return DropProposal(operation: .copy)
+        }
+        return nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        if let provider = info.itemProviders(for: [TrackReorderDrag.contentType.identifier]).first {
+            let dropAfterTarget = info.location.y > rowHeight / 2
+            provider.loadDataRepresentation(forTypeIdentifier: TrackReorderDrag.contentType.identifier) { data, _ in
+                guard let data,
+                      let uuidString = String(data: data, encoding: .utf8),
+                      let movedTrackID = UUID(uuidString: uuidString)
+                else { return }
+
+                Task { @MainActor in
+                    let destinationTrackID = dropAfterTarget ? destinationAfterTargetTrackID() : targetTrackID
+                    controller.reorderTrack(movedTrackID, before: destinationTrackID)
+                    if dropTargetTrackID == targetTrackID {
+                        dropTargetTrackID = nil
+                    }
+                }
+            }
+            return true
+        }
+
+        let handled = loadDroppedURLs(info.itemProviders(for: [UTType.fileURL.identifier]), targetTrackID)
+        if dropTargetTrackID == targetTrackID {
+            dropTargetTrackID = nil
+        }
+        return handled
     }
 }
 
