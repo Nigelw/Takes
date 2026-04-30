@@ -17,4 +17,10 @@ struct TrackDropHighlightTests {
     func trackReorderDragUsesDeclaredSystemType() {
         #expect(TrackReorderDrag.contentType == .plainText)
     }
+
+    @Test
+    func trackReorderInsertionPlacementUsesDropLocation() {
+        #expect(TrackReorderInsertionPlacement.location(y: 10, rowHeight: 100) == .before)
+        #expect(TrackReorderInsertionPlacement.location(y: 60, rowHeight: 100) == .after)
+    }
 }

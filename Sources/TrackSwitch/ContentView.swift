@@ -94,6 +94,20 @@ enum TrackReorderDrag {
     static let contentType = UTType.plainText
 }
 
+enum TrackReorderInsertionPlacement: Equatable {
+    case before
+    case after
+
+    static func location(y: CGFloat, rowHeight: CGFloat) -> TrackReorderInsertionPlacement {
+        y <= rowHeight / 2 ? .before : .after
+    }
+}
+
+struct TrackReorderInsertionTarget: Equatable {
+    let trackID: SessionTrack.ID
+    let placement: TrackReorderInsertionPlacement
+}
+
 struct ContentView: View {
     @ObservedObject var controller: PlaybackController
 
@@ -101,6 +115,7 @@ struct ContentView: View {
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
     @State private var dropTargetTrackID: SessionTrack.ID?
+    @State private var reorderInsertionTarget: TrackReorderInsertionTarget?
     @State private var emptyTrackIsDropTargeted = false
     @State private var gainPopoverTrackID: SessionTrack.ID?
 
@@ -261,6 +276,12 @@ struct ContentView: View {
                 .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
                 .background(backgroundStyle(for: sessionTrack.id))
                 .contentShape(Rectangle())
+                .overlay(alignment: .top) {
+                    reorderInsertionIndicator(for: sessionTrack.id, placement: .before)
+                }
+                .overlay(alignment: .bottom) {
+                    reorderInsertionIndicator(for: sessionTrack.id, placement: .after)
+                }
                 .onDrag {
                     trackReorderProvider(for: sessionTrack.id)
                 }
@@ -271,6 +292,7 @@ struct ContentView: View {
                         targetTrackID: sessionTrack.id,
                         rowHeight: trackRowHeight,
                         dropTargetTrackID: $dropTargetTrackID,
+                        reorderInsertionTarget: $reorderInsertionTarget,
                         destinationAfterTargetTrackID: {
                             destinationTrackID(after: sessionTrack.id)
                         },
@@ -523,6 +545,21 @@ struct ContentView: View {
         return controller.session.tracks[nextIndex].id
     }
 
+    @ViewBuilder
+    private func reorderInsertionIndicator(
+        for trackID: SessionTrack.ID,
+        placement: TrackReorderInsertionPlacement
+    ) -> some View {
+        if reorderInsertionTarget == TrackReorderInsertionTarget(trackID: trackID, placement: placement) {
+            Capsule()
+                .fill(.blue)
+                .frame(height: 3)
+                .padding(.horizontal, 10)
+                .shadow(color: .blue.opacity(0.25), radius: 2, y: 1)
+                .accessibilityHidden(true)
+        }
+    }
+
     private func setupKeyMonitor() {
         let monitor = KeyMonitor { event in
             if !GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSApp.keyWindow?.firstResponder) {
@@ -628,6 +665,7 @@ private struct TrackInfoDropDelegate: DropDelegate {
     let targetTrackID: SessionTrack.ID
     let rowHeight: CGFloat
     @Binding var dropTargetTrackID: SessionTrack.ID?
+    @Binding var reorderInsertionTarget: TrackReorderInsertionTarget?
     let destinationAfterTargetTrackID: () -> SessionTrack.ID?
     let loadDroppedURLs: ([NSItemProvider], SessionTrack.ID?) -> Bool
 
@@ -637,20 +675,26 @@ private struct TrackInfoDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
-        dropTargetTrackID = targetTrackID
+        updateDropFeedback(info: info)
     }
 
     func dropExited(info: DropInfo) {
         if dropTargetTrackID == targetTrackID {
             dropTargetTrackID = nil
         }
+        if reorderInsertionTarget?.trackID == targetTrackID {
+            reorderInsertionTarget = nil
+        }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         if info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier]) {
+            updateReorderInsertionTarget(info: info)
             return DropProposal(operation: .move)
         }
         if info.hasItemsConforming(to: [UTType.fileURL.identifier]) {
+            dropTargetTrackID = targetTrackID
+            reorderInsertionTarget = nil
             return DropProposal(operation: .copy)
         }
         return nil
@@ -658,29 +702,56 @@ private struct TrackInfoDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         if let provider = info.itemProviders(for: [TrackReorderDrag.contentType.identifier]).first {
-            let dropAfterTarget = info.location.y > rowHeight / 2
+            let placement = TrackReorderInsertionPlacement.location(y: info.location.y, rowHeight: rowHeight)
             provider.loadDataRepresentation(forTypeIdentifier: TrackReorderDrag.contentType.identifier) { data, _ in
                 guard let data,
                       let uuidString = String(data: data, encoding: .utf8),
                       let movedTrackID = UUID(uuidString: uuidString)
-                else { return }
+                else {
+                    Task { @MainActor in
+                        clearDropFeedback()
+                    }
+                    return
+                }
 
                 Task { @MainActor in
-                    let destinationTrackID = dropAfterTarget ? destinationAfterTargetTrackID() : targetTrackID
+                    let destinationTrackID = placement == .after ? destinationAfterTargetTrackID() : targetTrackID
                     controller.reorderTrack(movedTrackID, before: destinationTrackID)
-                    if dropTargetTrackID == targetTrackID {
-                        dropTargetTrackID = nil
-                    }
+                    clearDropFeedback()
                 }
             }
             return true
         }
 
         let handled = loadDroppedURLs(info.itemProviders(for: [UTType.fileURL.identifier]), targetTrackID)
+        clearDropFeedback()
+        return handled
+    }
+
+    private func updateDropFeedback(info: DropInfo) {
+        if info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier]) {
+            updateReorderInsertionTarget(info: info)
+        } else if info.hasItemsConforming(to: [UTType.fileURL.identifier]) {
+            dropTargetTrackID = targetTrackID
+            reorderInsertionTarget = nil
+        }
+    }
+
+    private func updateReorderInsertionTarget(info: DropInfo) {
+        dropTargetTrackID = nil
+        reorderInsertionTarget = TrackReorderInsertionTarget(
+            trackID: targetTrackID,
+            placement: TrackReorderInsertionPlacement.location(y: info.location.y, rowHeight: rowHeight)
+        )
+    }
+
+    private func clearDropFeedback() {
         if dropTargetTrackID == targetTrackID {
             dropTargetTrackID = nil
         }
-        return handled
+        if reorderInsertionTarget?.trackID == targetTrackID {
+            reorderInsertionTarget = nil
+        }
     }
 }
 
