@@ -48,25 +48,25 @@ struct TrackSwitchApp: App {
 
                 Divider()
 
-                Button("Fast Forward 1s") {
+                Button("Skip Forward 1s") {
                     controller.skip(by: 1)
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 .disabled(!controller.session.isPlayable)
 
-                Button("Fast Forward 10s") {
+                Button("Skip Forward 10s") {
                     controller.skip(by: 10)
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [.shift])
                 .disabled(!controller.session.isPlayable)
 
-                Button("Rewind 1s") {
+                Button("Skip Backward 1s") {
                     controller.skip(by: -1)
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [])
                 .disabled(!controller.session.isPlayable)
 
-                Button("Rewind 10s") {
+                Button("Skip Backward 10s") {
                     controller.skip(by: -10)
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [.shift])
