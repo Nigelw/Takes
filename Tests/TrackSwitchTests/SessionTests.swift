@@ -629,6 +629,13 @@ struct SessionTests {
         #expect(NumericControlFocusPolicy.shouldClearEditingFocus(firstResponder: fieldEditor, clickedView: nil) == true)
     }
 
+    @Test
+    func globalShortcutsAreDisabledWhileTextInputIsFocused() {
+        #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: nil) == true)
+        #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSView(frame: .zero)) == true)
+        #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSTextView(frame: .zero)) == false)
+    }
+
     private func makeTrack(name: String) -> LoadedTrack {
         LoadedTrack(
             url: URL(fileURLWithPath: "/tmp/\(name)"),

@@ -75,6 +75,12 @@ struct NumericControlFocusPolicy {
     }
 }
 
+struct GlobalShortcutFocusPolicy {
+    static func shouldHandleGlobalShortcut(firstResponder: NSResponder?) -> Bool {
+        !(firstResponder is NSTextView)
+    }
+}
+
 enum TrackDropHighlight: Equatable {
     case normal
     case dropTarget
@@ -148,7 +154,6 @@ struct ContentView: View {
             Button(controller.session.isPlaying ? "Pause" : "Play") {
                 controller.session.isPlaying ? controller.pause() : controller.play()
             }
-            .keyboardShortcut(.space, modifiers: [])
             .disabled(!controller.session.isPlayable)
 
             Button("Rewind") {
@@ -159,7 +164,6 @@ struct ContentView: View {
             Button("Switch Track") {
                 controller.selectNextTrack()
             }
-            .keyboardShortcut("x", modifiers: [])
             .disabled(!controller.session.canSwitchPlayback)
 
             Spacer()
@@ -493,11 +497,21 @@ struct ContentView: View {
 
     private func setupKeyMonitor() {
         let monitor = KeyMonitor { event in
-            if let window = NSApp.keyWindow, window.firstResponder is NSTextView {
+            if !GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSApp.keyWindow?.firstResponder) {
                 return false
             }
 
             switch event.keyCode {
+            case 49:
+                guard !event.modifierFlags.contains(.command),
+                      !event.modifierFlags.contains(.control),
+                      !event.modifierFlags.contains(.option),
+                      controller.session.isPlayable
+                else {
+                    return false
+                }
+                controller.session.isPlaying ? controller.pause() : controller.play()
+                return true
             case 123:
                 if event.modifierFlags.contains(.command) {
                     controller.seek(to: controller.session.timelineStart)
@@ -513,6 +527,12 @@ struct ContentView: View {
                 controller.skip(by: event.modifierFlags.contains(.shift) ? 10 : 1)
                 return true
             case 7:
+                guard !event.modifierFlags.contains(.command),
+                      !event.modifierFlags.contains(.control),
+                      !event.modifierFlags.contains(.option)
+                else {
+                    return false
+                }
                 if event.modifierFlags.contains(.shift) {
                     controller.selectPreviousTrack()
                 } else {
