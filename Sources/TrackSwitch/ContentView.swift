@@ -75,6 +75,15 @@ struct NumericControlFocusPolicy {
     }
 }
 
+enum TrackDropHighlight: Equatable {
+    case normal
+    case dropTarget
+
+    static func empty(isTargeted: Bool) -> TrackDropHighlight {
+        isTargeted ? .dropTarget : .normal
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var controller: PlaybackController
 
@@ -82,6 +91,7 @@ struct ContentView: View {
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
     @State private var dropTargetTrackID: SessionTrack.ID?
+    @State private var emptyTrackIsDropTargeted = false
     @State private var gainPopoverTrackID: SessionTrack.ID?
 
     var body: some View {
@@ -267,13 +277,16 @@ struct ContentView: View {
             }
             .padding(12)
             .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
-            .background(.quaternary.opacity(0.4))
+            .background(backgroundStyle(for: TrackDropHighlight.empty(isTargeted: emptyTrackIsDropTargeted)))
 
             waveformLane(index: 0, sessionTrack: nil)
                 .frame(maxWidth: .infinity)
                 .frame(height: trackRowHeight)
         }
         .frame(height: trackRowHeight)
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $emptyTrackIsDropTargeted) { providers in
+            loadDroppedURLs(from: providers, targetTrackID: nil)
+        }
     }
 
     private func trackInfoArea(index: Int, sessionTrack: SessionTrack) -> some View {
@@ -455,7 +468,11 @@ struct ContentView: View {
     }
 
     private func backgroundStyle(for trackID: SessionTrack.ID) -> some ShapeStyle {
-        if dropTargetTrackID == trackID {
+        backgroundStyle(for: dropTargetTrackID == trackID ? .dropTarget : .normal)
+    }
+
+    private func backgroundStyle(for highlight: TrackDropHighlight) -> some ShapeStyle {
+        if highlight == .dropTarget {
             return AnyShapeStyle(.blue.opacity(0.16))
         }
         return AnyShapeStyle(.quaternary.opacity(0.4))

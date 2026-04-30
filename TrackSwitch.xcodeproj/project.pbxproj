@@ -18,6 +18,7 @@
 		A10000000000000000000029 /* Assets/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* Assets/Assets.xcassets */; };
 		A10000000000000000000031 /* SessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* SessionTests.swift */; };
 		A10000000000000000000032 /* TransportMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* TransportMappingTests.swift */; };
+		A10000000000000000000033 /* TrackDropHighlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001D /* TrackDropHighlightTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,6 +46,7 @@
 		A1000000000000000000001A /* TrackSwitch-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "TrackSwitch-Info.plist"; sourceTree = "<group>"; };
 		A1000000000000000000001B /* LibraryTrackSelectionLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryTrackSelectionLoader.swift; sourceTree = "<group>"; };
 		A1000000000000000000001C /* Assets/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets/Assets.xcassets; sourceTree = "<group>"; };
+		A1000000000000000000001D /* TrackDropHighlightTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackDropHighlightTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -128,6 +130,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000018 /* SessionTests.swift */,
+				A1000000000000000000001D /* TrackDropHighlightTests.swift */,
 				A10000000000000000000019 /* TransportMappingTests.swift */,
 			);
 			path = TrackSwitchTests;
@@ -249,6 +252,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000031 /* SessionTests.swift in Sources */,
+				A10000000000000000000033 /* TrackDropHighlightTests.swift in Sources */,
 				A10000000000000000000032 /* TransportMappingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
