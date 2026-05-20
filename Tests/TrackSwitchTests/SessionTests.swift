@@ -50,6 +50,54 @@ struct SessionTests {
     }
 
     @Test
+    func timelineMarkersUseReadableIntervalsAcrossTheTimeline() {
+        let markers = TimelineHeaderMarker.markers(
+            timelineStart: 0,
+            timelineEnd: 125,
+            targetMarkerCount: 6
+        )
+
+        #expect(markers.map(\.label) == ["00:00", "00:30", "01:00", "01:30", "02:00"])
+        #expect(markers.map(\.time) == [0, 30, 60, 90, 120])
+    }
+
+    @Test
+    func timelineMarkersIncludeSignedNegativeTimes() {
+        let markers = TimelineHeaderMarker.markers(
+            timelineStart: -12,
+            timelineEnd: 44,
+            targetMarkerCount: 5
+        )
+
+        #expect(markers.map(\.label) == ["-00:10", "00:00", "00:10", "00:20", "00:30", "00:40"])
+        #expect(markers.map(\.time) == [-10, 0, 10, 20, 30, 40])
+    }
+
+    @Test
+    func timelineMarkerLabelsAreInsetToTheRightOfTickMarks() {
+        #expect(TimelineHeaderMarker.labelLeadingPadding == 8)
+    }
+
+    @Test
+    func timelineMarkerLabelsHideWhenTheyWouldOverflowTheRightEdge() {
+        let visibleLayout = TimelineHeaderLabelLayout.leading(
+            tickX: 40,
+            labelWidth: 52,
+            rulerWidth: 120
+        )
+        let overflowingLayout = TimelineHeaderLabelLayout.leading(
+            tickX: 108,
+            labelWidth: 52,
+            rulerWidth: 120
+        )
+
+        #expect(visibleLayout.x == 48)
+        #expect(visibleLayout.isVisible)
+        #expect(overflowingLayout.x == 116)
+        #expect(!overflowingLayout.isVisible)
+    }
+
+    @Test
     func unsignedTimestampClampsNegativeTimes() {
         #expect(TimeInterval(-12).formattedTimestamp == "00:00")
         #expect(TimeInterval(12).formattedTimestamp == "00:12")

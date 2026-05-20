@@ -215,6 +215,10 @@ struct ContentView: View {
         34
     }
 
+    private var timelineHeaderTargetMarkerCount: Int {
+        7
+    }
+
     private var trackTimelineDividerHeight: CGFloat {
         1
     }
@@ -245,7 +249,7 @@ struct ContentView: View {
         GeometryReader { proxy in
             let waveformWidth = max(proxy.size.width - trackInfoWidth, 1)
             VStack(alignment: .leading, spacing: 8) {
-                trackTimelineHeader
+                trackTimelineHeader(waveformWidth: waveformWidth)
                     .frame(width: proxy.size.width, height: trackHeaderHeight)
 
                 ScrollView(.vertical) {
@@ -282,7 +286,7 @@ struct ContentView: View {
         .frame(height: trackHeaderHeight + 8 + min(trackTimelineHeight, 420))
     }
 
-    private var trackTimelineHeader: some View {
+    private func trackTimelineHeader(waveformWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 0) {
                 Button {
@@ -331,9 +335,66 @@ struct ContentView: View {
             .padding(.leading, 8)
             .frame(width: trackInfoWidth, alignment: .leading)
 
-            Spacer(minLength: 0)
+            timelineHeaderRuler(width: waveformWidth)
+                .frame(maxWidth: .infinity)
         }
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func timelineHeaderRuler(width: CGFloat) -> some View {
+        let markers = TimelineHeaderMarker.markers(
+            timelineStart: controller.session.timelineStart,
+            timelineEnd: controller.session.timelineEnd,
+            targetMarkerCount: timelineHeaderTargetMarkerCount
+        )
+
+        return ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(.background.opacity(0.01))
+
+            if markers.isEmpty {
+                Text("00:00")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 8)
+                    .frame(maxHeight: .infinity, alignment: .center)
+            } else {
+                ForEach(markers, id: \.time) { marker in
+                    timelineHeaderMarker(marker, width: width)
+                }
+            }
+        }
+        .clipped()
+        .accessibilityLabel("Timeline")
+    }
+
+    private func timelineHeaderMarker(_ marker: TimelineHeaderMarker, width: CGFloat) -> some View {
+        let tickX = xPosition(for: marker.time, width: width)
+        let labelWidth: CGFloat = 52
+        let labelLayout = TimelineHeaderLabelLayout.leading(
+            tickX: Double(tickX),
+            labelWidth: Double(labelWidth),
+            rulerWidth: Double(width)
+        )
+
+        return ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(.secondary.opacity(0.45))
+                .frame(width: 1, height: 9)
+                .offset(x: tickX)
+
+            if labelLayout.isVisible {
+                Text(marker.label)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(width: labelWidth, alignment: .leading)
+                    .offset(x: CGFloat(labelLayout.x), y: 11)
+            }
+        }
+        .frame(width: width, height: ImportActionControlMetrics.controlHeight, alignment: .topLeading)
+        .accessibilityLabel(marker.label)
     }
 
     private func trackRow(

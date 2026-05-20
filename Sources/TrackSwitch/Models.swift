@@ -69,6 +69,80 @@ struct ComparisonSession: Equatable {
     }
 }
 
+struct TimelineHeaderMarker: Equatable {
+    let time: TimeInterval
+    let label: String
+
+    static let labelLeadingPadding: Double = 8
+
+    static func markers(
+        timelineStart: TimeInterval,
+        timelineEnd: TimeInterval,
+        targetMarkerCount: Int
+    ) -> [TimelineHeaderMarker] {
+        let span = timelineEnd - timelineStart
+        guard span > 0, targetMarkerCount > 0 else { return [] }
+
+        let interval = readableInterval(for: span / Double(targetMarkerCount))
+        guard interval > 0 else { return [] }
+
+        let firstTick = ceil(timelineStart / interval) * interval
+        var time = firstTick
+        var markers: [TimelineHeaderMarker] = []
+
+        while time <= timelineEnd + 0.0001 {
+            markers.append(TimelineHeaderMarker(time: time, label: time.formattedSignedTimestamp))
+            time += interval
+        }
+
+        return markers
+    }
+
+    private static func readableInterval(for rawInterval: TimeInterval) -> TimeInterval {
+        guard rawInterval.isFinite, rawInterval > 0 else { return 1 }
+
+        let baseIntervals: [TimeInterval] = [1, 2, 5, 10, 30]
+        var scale: TimeInterval = 1
+
+        while scale * 30 < rawInterval {
+            scale *= 60
+        }
+
+        if scale > 1 {
+            for multiplier in baseIntervals {
+                let candidate = multiplier * scale
+                if candidate >= rawInterval {
+                    return candidate
+                }
+            }
+        }
+
+        if rawInterval <= 12 {
+            return 10
+        }
+
+        return baseIntervals.first { $0 >= rawInterval } ?? 30
+    }
+}
+
+struct TimelineHeaderLabelLayout: Equatable {
+    let x: Double
+    let isVisible: Bool
+
+    static func leading(
+        tickX: Double,
+        labelWidth: Double,
+        rulerWidth: Double,
+        leadingPadding: Double = TimelineHeaderMarker.labelLeadingPadding
+    ) -> TimelineHeaderLabelLayout {
+        let labelX = tickX + leadingPadding
+        return TimelineHeaderLabelLayout(
+            x: labelX,
+            isVisible: labelX + labelWidth <= rulerWidth
+        )
+    }
+}
+
 struct ImportFailure: Equatable {
     let fileName: String
     let message: String
