@@ -1,10 +1,50 @@
 import AppKit
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    @Published private(set) var pendingOpenFileURLs: [URL] = []
+    private var consumedLaunchFileArguments = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        queueOpenedFiles([filename])
+        return true
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        queueOpenedFiles(filenames)
+        sender.reply(toOpenOrPrint: .success)
+    }
+
+    func clearPendingOpenFileURLs() {
+        pendingOpenFileURLs = []
+    }
+
+    func consumeLaunchFileArguments(from arguments: [String] = CommandLine.arguments) -> [URL] {
+        guard !consumedLaunchFileArguments else { return [] }
+        consumedLaunchFileArguments = true
+        return LaunchFileArguments.audioFileURLs(from: arguments)
+    }
+
+    private func queueOpenedFiles(_ filenames: [String]) {
+        pendingOpenFileURLs.append(contentsOf: filenames.map { URL(fileURLWithPath: $0) })
+    }
+}
+
+enum LaunchFileArguments {
+    static func audioFileURLs(from arguments: [String]) -> [URL] {
+        arguments.dropFirst().compactMap { argument in
+            guard !argument.hasPrefix("-") else { return nil }
+
+            let url = URL(fileURLWithPath: argument)
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return url
+        }
     }
 }
 
@@ -16,7 +56,20 @@ struct TrackSwitchApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(controller: controller)
+                .task {
+                    let urls = appDelegate.consumeLaunchFileArguments()
+                    guard !urls.isEmpty else { return }
+                    await controller.loadImportedFiles(urls)
+                }
+                .onReceive(appDelegate.$pendingOpenFileURLs) { urls in
+                    guard !urls.isEmpty else { return }
+                    Task {
+                        await controller.loadImportedFiles(urls)
+                        appDelegate.clearPendingOpenFileURLs()
+                    }
+                }
         }
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .commands {
             CommandMenu("Controls") {

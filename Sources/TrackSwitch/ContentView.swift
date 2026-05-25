@@ -123,10 +123,138 @@ enum ImportActionMenuItem: CaseIterable {
 }
 
 enum ImportActionControlMetrics {
-    static let controlWidth: CGFloat = 86
+    static let controlWidth: CGFloat = 118
     static let controlHeight: CGFloat = 34
-    static let primaryButtonWidth: CGFloat = 48
-    static let menuButtonWidth: CGFloat = 37
+    static let primaryButtonWidth: CGFloat = 84
+    static let menuButtonWidth: CGFloat = 33
+}
+
+enum TrackInfoLayoutMetrics {
+    static let infoWidth: CGFloat = 300
+    static let horizontalPadding: CGFloat = 16
+    static let numberButtonWidth: CGFloat = 28
+    static let numberToContentSpacing: CGFloat = 16
+    static let controlSpacing: CGFloat = 16
+}
+
+enum NumericControlMetrics {
+    static let leadingPadding: CGFloat = 7
+    static let stepperWidth: CGFloat = 20
+    static let controlHeight: CGFloat = 28
+    static let fieldHeight: CGFloat = 26
+    static let offsetValueWidth: CGFloat = 50
+    static let offsetSuffixWidth: CGFloat = 20
+    static let gainValueWidth: CGFloat = 42
+    static let gainSuffixWidth: CGFloat = 24
+
+    static let offsetControlWidth = leadingPadding + offsetValueWidth + offsetSuffixWidth + stepperWidth
+    static let gainControlWidth = leadingPadding + gainValueWidth + gainSuffixWidth + stepperWidth
+}
+
+enum TransportControlMetrics {
+    static let buttonWidth: CGFloat = 40
+    static let buttonHeight: CGFloat = 32
+    static let iconSize: CGFloat = 14
+    static let buttonSpacing: CGFloat = 24
+    static let cornerRadius: CGFloat = 7
+}
+
+enum TrackSwitchStyle {
+    static let accent = Color(red: 0.05, green: 0.66, blue: 1.0)
+    static let activeStroke = Color(red: 0.03, green: 0.58, blue: 0.96)
+    static let dropStroke = Color(red: 0.36, green: 0.72, blue: 1.0)
+    static let waveformActive = Color(red: 0.0, green: 0.55, blue: 1.0).opacity(0.88)
+    static let waveformInactive = Color.white.opacity(0.36)
+    static let primaryText = Color.white.opacity(0.88)
+    static let secondaryText = Color.white.opacity(0.58)
+    static let hairline = Color.white.opacity(0.13)
+    static let rulerTick = Color.white.opacity(0.30)
+    static let zeroLine = Color.white.opacity(0.16)
+    static let windowBackground = LinearGradient(
+        colors: [
+            Color(red: 0.06, green: 0.075, blue: 0.08),
+            Color(red: 0.015, green: 0.023, blue: 0.026)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+    static let toolbarBackground = LinearGradient(
+        colors: [
+            Color(red: 0.10, green: 0.115, blue: 0.12),
+            Color(red: 0.045, green: 0.055, blue: 0.06)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+    static let headerBackground = LinearGradient(
+        colors: [
+            Color(red: 0.08, green: 0.095, blue: 0.10),
+            Color(red: 0.045, green: 0.055, blue: 0.06)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+    static let timelineBackground = Color(red: 0.02, green: 0.031, blue: 0.034)
+    static let rowBackground = Color(red: 0.055, green: 0.067, blue: 0.07)
+    static let activeRowBackground = LinearGradient(
+        colors: [
+            Color(red: 0.02, green: 0.16, blue: 0.23).opacity(0.88),
+            Color(red: 0.01, green: 0.09, blue: 0.13).opacity(0.88)
+        ],
+        startPoint: .leading,
+        endPoint: .trailing
+    )
+    static let displayBackground = LinearGradient(
+        colors: [
+            Color.black.opacity(0.88),
+            Color(red: 0.02, green: 0.027, blue: 0.03).opacity(0.94)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+    static let controlBackground = LinearGradient(
+        colors: [
+            Color.white.opacity(0.12),
+            Color.black.opacity(0.24)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+    static let controlStroke = Color.white.opacity(0.18)
+    static let transportControlBackground = LinearGradient(
+        colors: [
+            Color.white.opacity(0.065),
+            Color.black.opacity(0.20)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+    static let activeTransportControlBackground = LinearGradient(
+        colors: [
+            Color(red: 0.015, green: 0.18, blue: 0.29),
+            Color(red: 0.008, green: 0.075, blue: 0.12)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+    static let transportControlStroke = Color.white.opacity(0.12)
+    static let numberBackground = LinearGradient(
+        colors: [
+            Color.white.opacity(0.11),
+            Color.black.opacity(0.22)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+    static let activeNumberBackground = LinearGradient(
+        colors: [
+            Color(red: 0.02, green: 0.35, blue: 0.55),
+            Color(red: 0.01, green: 0.14, blue: 0.22)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+    static let activeNumberText = Color(red: 0.32, green: 0.86, blue: 1.0)
 }
 
 struct ContentView: View {
@@ -138,21 +266,24 @@ struct ContentView: View {
     @State private var dropTargetTrackID: SessionTrack.ID?
     @State private var reorderInsertionTarget: TrackReorderInsertionTarget?
     @State private var emptyTrackIsDropTargeted = false
-    @State private var gainPopoverTrackID: SessionTrack.ID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
             transportBar
             if let error = controller.playbackError {
                 Text(error.localizedDescription)
                     .font(.callout)
                     .foregroundStyle(.red)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
             }
             trackTimelineSection
             Spacer(minLength: 0)
         }
-        .padding(20)
-        .frame(minWidth: 860, minHeight: 540)
+        .background(TrackSwitchStyle.windowBackground)
+        .background(WindowChromeConfigurator())
+        .ignoresSafeArea(.container, edges: .top)
+        .frame(minWidth: 980, minHeight: 620)
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
             loadDroppedURLs(from: providers, targetTrackID: nil)
         }
@@ -173,30 +304,107 @@ struct ContentView: View {
     }
 
     private var transportBar: some View {
-        HStack(spacing: 10) {
-            Button(controller.session.isPlaying ? "Pause" : "Play") {
-                controller.session.isPlaying ? controller.pause() : controller.play()
+        ZStack(alignment: .top) {
+            HStack {
+                Spacer()
+                Text("TrackSwitch")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(TrackSwitchStyle.primaryText.opacity(0.72))
+                    .padding(.top, 0)
+                    .offset(y: -4)
+                Spacer()
             }
-            .disabled(!controller.session.isPlayable)
+            .allowsHitTesting(false)
 
-            Button("Rewind") {
-                controller.seek(to: controller.session.timelineStart)
+            HStack(spacing: TransportControlMetrics.buttonSpacing) {
+                Spacer(minLength: 0)
+
+                transportButton(
+                    systemName: "backward.fill",
+                    title: "Rewind",
+                    isProminent: false,
+                    isEnabled: controller.session.isPlayable
+                ) {
+                    controller.seek(to: controller.session.timelineStart)
+                }
+
+                transportButton(
+                    systemName: controller.session.isPlaying ? "pause.fill" : "play.fill",
+                    title: controller.session.isPlaying ? "Pause" : "Play",
+                    isProminent: true,
+                    isEnabled: controller.session.isPlayable
+                ) {
+                    controller.session.isPlaying ? controller.pause() : controller.play()
+                }
+
+                transportButton(
+                    systemName: "forward.end.fill",
+                    title: "Switch",
+                    isProminent: false,
+                    isEnabled: controller.session.canSwitchPlayback
+                ) {
+                    controller.selectNextTrack()
+                }
+
+                timeDisplay
+                    .padding(.horizontal, 22)
+
+                Spacer(minLength: 0)
             }
-            .disabled(!controller.session.isPlayable)
-
-            Button("Switch Track") {
-                controller.selectNextTrack()
-            }
-            .disabled(!controller.session.canSwitchPlayback)
-
-            Spacer()
-
-            Text("\(controller.session.transportPosition.formattedSignedTimestamp) / \(controller.session.timelineEnd.formattedSignedTimestamp)")
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
+            .padding(.top, 42)
+            .padding(.horizontal, 28)
         }
-        .padding()
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .frame(height: 116)
+        .background(TrackSwitchStyle.toolbarBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(TrackSwitchStyle.hairline)
+                .frame(height: 1)
+        }
+    }
+
+    private func transportButton(
+        systemName: String,
+        title: String,
+        isProminent: Bool,
+        isEnabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: TransportControlMetrics.iconSize, weight: .bold))
+                .foregroundStyle(isProminent ? TrackSwitchStyle.accent : TrackSwitchStyle.primaryText)
+                .frame(width: TransportControlMetrics.buttonWidth, height: TransportControlMetrics.buttonHeight)
+                .background(
+                    isProminent ? TrackSwitchStyle.activeTransportControlBackground : TrackSwitchStyle.transportControlBackground,
+                    in: RoundedRectangle(cornerRadius: TransportControlMetrics.cornerRadius, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: TransportControlMetrics.cornerRadius, style: .continuous)
+                        .stroke(isProminent ? TrackSwitchStyle.accent.opacity(0.52) : TrackSwitchStyle.transportControlStroke, lineWidth: 1)
+                }
+                .accessibilityLabel(title)
+            }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
+    }
+
+    private var timeDisplay: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 9) {
+            Text(controller.session.transportPosition.formattedSignedTimestamp)
+                .font(.system(size: 31, weight: .regular, design: .monospaced))
+                .foregroundStyle(TrackSwitchStyle.primaryText)
+            Text("/")
+                .font(.system(size: 20, weight: .regular, design: .monospaced))
+                .foregroundStyle(TrackSwitchStyle.secondaryText)
+            Text(controller.session.timelineEnd.formattedSignedTimestamp)
+                .font(.system(size: 20, weight: .regular, design: .monospaced))
+                .foregroundStyle(TrackSwitchStyle.secondaryText)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 12)
+        .background(TrackSwitchStyle.displayBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var timelineSpan: TimeInterval {
@@ -208,11 +416,11 @@ struct ContentView: View {
     }
 
     private var trackInfoWidth: CGFloat {
-        240
+        TrackInfoLayoutMetrics.infoWidth
     }
 
     private var trackHeaderHeight: CGFloat {
-        34
+        44
     }
 
     private var timelineHeaderTargetMarkerCount: Int {
@@ -248,7 +456,7 @@ struct ContentView: View {
     private var trackTimelineSection: some View {
         GeometryReader { proxy in
             let waveformWidth = max(proxy.size.width - trackInfoWidth, 1)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
                 trackTimelineHeader(waveformWidth: waveformWidth)
                     .frame(width: proxy.size.width, height: trackHeaderHeight)
 
@@ -267,15 +475,15 @@ struct ContentView: View {
                                 }
                             }
                         }
-                        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .background(TrackSwitchStyle.timelineBackground)
 
                         if controller.session.isPlayable {
                             Rectangle()
-                                .fill(.blue)
-                                .frame(width: 2, height: trackTimelineHeight - 16)
+                                .fill(TrackSwitchStyle.accent)
+                                .frame(width: 2, height: trackTimelineHeight - 10)
                                 .offset(
                                     x: trackInfoWidth + xPosition(for: controller.session.transportPosition, width: waveformWidth),
-                                    y: 8
+                                    y: 5
                                 )
                         }
                     }
@@ -283,7 +491,7 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(height: trackHeaderHeight + 8 + min(trackTimelineHeight, 420))
+        .frame(height: trackHeaderHeight + min(trackTimelineHeight, 520))
     }
 
     private func trackTimelineHeader(waveformWidth: CGFloat) -> some View {
@@ -292,14 +500,18 @@ struct ContentView: View {
                 Button {
                     performImportAction(.open)
                 } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(
-                            width: ImportActionControlMetrics.primaryButtonWidth,
-                            height: ImportActionControlMetrics.controlHeight
-                        )
-                        .contentShape(Rectangle())
-                        .accessibilityLabel(ImportActionMenuItem.open.title)
+                    HStack(spacing: 9) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 18, weight: .semibold))
+                        Text("Import")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .frame(
+                        width: ImportActionControlMetrics.primaryButtonWidth,
+                        height: ImportActionControlMetrics.controlHeight
+                    )
+                    .contentShape(Rectangle())
+                    .accessibilityLabel(ImportActionMenuItem.open.title)
                 }
                 .buttonStyle(.plain)
                 .help(ImportActionMenuItem.open.title)
@@ -324,21 +536,33 @@ struct ContentView: View {
                         .accessibilityLabel("Open Track Menu")
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
                 .help("Open Track Menu")
             }
             .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
-            .background(.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .foregroundStyle(TrackSwitchStyle.primaryText)
+            .background(TrackSwitchStyle.controlBackground, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(.separator, lineWidth: 1)
+                    .stroke(TrackSwitchStyle.controlStroke, lineWidth: 1)
             )
-            .padding(.leading, 8)
+            .padding(.leading, 20)
             .frame(width: trackInfoWidth, alignment: .leading)
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(TrackSwitchStyle.hairline)
+                    .frame(width: 1)
+            }
 
             timelineHeaderRuler(width: waveformWidth)
                 .frame(maxWidth: .infinity)
         }
-        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(TrackSwitchStyle.headerBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(TrackSwitchStyle.hairline)
+                .frame(height: 1)
+        }
     }
 
     private func timelineHeaderRuler(width: CGFloat) -> some View {
@@ -350,12 +574,12 @@ struct ContentView: View {
 
         return ZStack(alignment: .topLeading) {
             Rectangle()
-                .fill(.background.opacity(0.01))
+                .fill(.clear)
 
             if markers.isEmpty {
                 Text("00:00")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(TrackSwitchStyle.secondaryText)
                     .padding(.leading, 8)
                     .frame(maxHeight: .infinity, alignment: .center)
             } else {
@@ -379,21 +603,21 @@ struct ContentView: View {
 
         return ZStack(alignment: .topLeading) {
             Rectangle()
-                .fill(.secondary.opacity(0.45))
-                .frame(width: 1, height: 9)
+                .fill(TrackSwitchStyle.rulerTick)
+                .frame(width: 1, height: 8)
                 .offset(x: tickX)
 
             if labelLayout.isVisible {
                 Text(marker.label)
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(TrackSwitchStyle.primaryText.opacity(0.86))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .frame(width: labelWidth, alignment: .leading)
                     .offset(x: CGFloat(labelLayout.x), y: 11)
             }
         }
-        .frame(width: width, height: ImportActionControlMetrics.controlHeight, alignment: .topLeading)
+        .frame(width: width, height: trackHeaderHeight, alignment: .topLeading)
         .accessibilityLabel(marker.label)
     }
 
@@ -402,10 +626,11 @@ struct ContentView: View {
         sessionTrack: SessionTrack,
         infoWidth: CGFloat
     ) -> some View {
-        HStack(spacing: 0) {
-            trackInfoArea(index: index, sessionTrack: sessionTrack)
+        let isActive = controller.session.activeTrackID == sessionTrack.id
+        let isDropTarget = dropTargetTrackID == sessionTrack.id
+        return HStack(spacing: 0) {
+            trackInfoArea(index: index, sessionTrack: sessionTrack, isActive: isActive)
                 .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
-                .background(backgroundStyle(for: sessionTrack.id))
                 .contentShape(Rectangle())
                 .overlay(alignment: .top) {
                     reorderInsertionIndicator(for: sessionTrack.id, placement: .before)
@@ -433,12 +658,24 @@ struct ContentView: View {
                 .onTapGesture {
                     controller.selectActiveTrack(sessionTrack.id)
                 }
+                .overlay(alignment: .trailing) {
+                    Rectangle()
+                        .fill(TrackSwitchStyle.hairline)
+                        .frame(width: 1)
+                }
 
-            waveformLane(index: index, sessionTrack: sessionTrack)
+            waveformLane(index: index, sessionTrack: sessionTrack, isActive: isActive)
                 .frame(maxWidth: .infinity)
                 .frame(height: trackRowHeight)
         }
         .frame(height: trackRowHeight)
+        .background(rowBackground(isActive: isActive, isDropTarget: isDropTarget))
+        .overlay {
+            if isActive || isDropTarget {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(isDropTarget ? TrackSwitchStyle.dropStroke : TrackSwitchStyle.activeStroke, lineWidth: 1.25)
+            }
+        }
     }
 
     private func emptyTrackRow(infoWidth: CGFloat) -> some View {
@@ -451,150 +688,147 @@ struct ContentView: View {
             }
             .padding(12)
             .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
-            .background(backgroundStyle(for: TrackDropHighlight.empty(isTargeted: emptyTrackIsDropTargeted)))
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(TrackSwitchStyle.hairline)
+                    .frame(width: 1)
+            }
 
-            waveformLane(index: 0, sessionTrack: nil)
+            waveformLane(index: 0, sessionTrack: nil, isActive: false)
                 .frame(maxWidth: .infinity)
                 .frame(height: trackRowHeight)
         }
         .frame(height: trackRowHeight)
+        .background(backgroundStyle(for: TrackDropHighlight.empty(isTargeted: emptyTrackIsDropTargeted)))
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $emptyTrackIsDropTargeted) { providers in
             loadDroppedURLs(from: providers, targetTrackID: nil)
         }
     }
 
-    private func trackInfoArea(index: Int, sessionTrack: SessionTrack) -> some View {
+    private func trackInfoArea(index: Int, sessionTrack: SessionTrack, isActive: Bool) -> some View {
         let track = sessionTrack.loadedTrack
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Track \(index + 1)")
-                    .font(.headline)
-                if controller.session.activeTrackID == sessionTrack.id {
-                    Text("Active")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(.blue.opacity(0.15), in: Capsule())
-                }
-                Spacer()
-                Button {
-                    if gainPopoverTrackID == sessionTrack.id {
-                        gainPopoverTrackID = nil
+        return HStack(alignment: .top, spacing: TrackInfoLayoutMetrics.numberToContentSpacing) {
+            trackNumberButton(index: index, isActive: isActive)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(track.displayName)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(TrackSwitchStyle.primaryText)
+                            .lineLimit(1)
+                        Text(track.metadataSummary)
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(TrackSwitchStyle.secondaryText)
+                            .lineLimit(1)
                     }
-                    controller.removeTrack(sessionTrack.id)
-                } label: {
-                    Image(systemName: "trash")
-                        .accessibilityLabel("Remove Track \(index + 1)")
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        controller.removeTrack(sessionTrack.id)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(TrackSwitchStyle.secondaryText)
+                            .frame(width: 30, height: 30)
+                            .accessibilityLabel("Remove Track \(index + 1)")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove Track \(index + 1)")
                 }
-                .buttonStyle(.borderless)
 
-                gainButton(sessionTrack: sessionTrack)
-            }
-
-            Text(track.displayName)
-                .font(.callout.weight(.medium))
-                .lineLimit(1)
-            Text(track.metadataSummary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            offsetControl(sessionTrack: sessionTrack)
-        }
-        .padding(12)
-    }
-
-    private func gainButton(sessionTrack: SessionTrack) -> some View {
-        Button {
-            gainPopoverTrackID = sessionTrack.id
-        } label: {
-            Image(systemName: "gearshape")
-                .accessibilityLabel("\(sessionTrack.loadedTrack.displayName) Settings")
-        }
-        .buttonStyle(.borderless)
-        .popover(
-            isPresented: Binding(
-                get: { gainPopoverTrackID == sessionTrack.id },
-                set: { isPresented in
-                    gainPopoverTrackID = isPresented ? sessionTrack.id : nil
+                HStack(spacing: TrackInfoLayoutMetrics.controlSpacing) {
+                    offsetControl(sessionTrack: sessionTrack)
+                    gainControl(sessionTrack: sessionTrack)
                 }
-            ),
-            arrowEdge: .trailing
-        ) {
-            gainPopoverContent(sessionTrack: sessionTrack)
-                .padding()
-                .frame(width: 300)
-        }
-    }
-
-    private func gainPopoverContent(sessionTrack: SessionTrack) -> some View {
-        let gainValue = Int(sessionTrack.loadedTrack.gainDB.rounded())
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Track Gain")
-                .font(.headline)
-            Text("\(gainValue) dB")
-                .foregroundStyle(.secondary)
-            HStack(spacing: 10) {
-                ResettableSlider(
-                    value: Binding(
-                        get: { Double(gainValue) },
-                        set: { controller.setGain(sessionTrack.id, db: Float(Int($0.rounded()))) }
-                    ),
-                    range: -24...24,
-                    resetValue: 0
-                )
-                NumericControlRow(
-                    value: Binding(
-                        get: { gainValue },
-                        set: { controller.setGain(sessionTrack.id, db: Float($0)) }
-                    ),
-                    configuration: .gain
-                )
             }
         }
+        .padding(.horizontal, TrackInfoLayoutMetrics.horizontalPadding)
+        .padding(.vertical, 14)
+    }
+
+    private func trackNumberButton(index: Int, isActive: Bool) -> some View {
+        Text("\(index + 1)")
+            .font(.system(size: 14, weight: .medium, design: .rounded))
+            .foregroundStyle(isActive ? TrackSwitchStyle.activeNumberText : TrackSwitchStyle.primaryText)
+            .frame(width: TrackInfoLayoutMetrics.numberButtonWidth, height: TrackInfoLayoutMetrics.numberButtonWidth)
+            .background(
+                isActive ? TrackSwitchStyle.activeNumberBackground : TrackSwitchStyle.numberBackground,
+                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(isActive ? TrackSwitchStyle.activeStroke : TrackSwitchStyle.controlStroke, lineWidth: 1)
+            }
     }
 
     private func offsetControl(sessionTrack: SessionTrack) -> some View {
         let offsetMs = Int((sessionTrack.loadedTrack.offsetSeconds * 1000).rounded())
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("Offset \(offsetMs) ms")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        return compactControl(
+            title: "Offset",
+            value: Binding(
+                get: { offsetMs },
+                set: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) }
+            ),
+            configuration: .offset
+        )
+    }
+
+    private func gainControl(sessionTrack: SessionTrack) -> some View {
+        let gainValue = Int(sessionTrack.loadedTrack.gainDB.rounded())
+        return compactControl(
+            title: "Gain",
+            value: Binding(
+                get: { gainValue },
+                set: { controller.setGain(sessionTrack.id, db: Float($0)) }
+            ),
+            configuration: .gain
+        )
+    }
+
+    private func compactControl(
+        title: String,
+        value: Binding<Int>,
+        configuration: NumericControlConfiguration
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(TrackSwitchStyle.secondaryText)
             NumericControlRow(
-                value: Binding(
-                    get: { offsetMs },
-                    set: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) }
-                ),
-                configuration: .offset
+                value: value,
+                configuration: configuration
             )
         }
     }
 
-    private func waveformLane(index: Int, sessionTrack: SessionTrack?) -> some View {
+    private func waveformLane(index: Int, sessionTrack: SessionTrack?, isActive: Bool) -> some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Rectangle()
-                    .fill(.background.opacity(0.01))
+                    .fill(.clear)
 
                 if let track = sessionTrack?.loadedTrack {
                     placeholderWaveform(index: index)
                         .frame(
                             width: max(CGFloat(track.duration / timelineSpan) * proxy.size.width, 1),
-                            height: 58
+                            height: isActive ? 68 : 56
                         )
                         .offset(
                             x: xPosition(for: track.offsetSeconds, width: proxy.size.width)
                         )
-                        .foregroundStyle(trackColor(index: index).opacity(0.55))
+                        .foregroundStyle(isActive ? TrackSwitchStyle.waveformActive : TrackSwitchStyle.waveformInactive)
                 } else {
                     Text("Drop audio file here")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(TrackSwitchStyle.secondaryText)
                         .padding(.leading, 16)
                 }
 
                 Rectangle()
-                    .fill(.secondary.opacity(0.25))
+                    .fill(TrackSwitchStyle.zeroLine)
                     .frame(width: 1)
                     .offset(x: xPosition(for: 0, width: proxy.size.width))
             }
@@ -621,11 +855,6 @@ struct ContentView: View {
                 context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .foreground)
             }
         }
-    }
-
-    private func trackColor(index: Int) -> Color {
-        let colors: [Color] = [.blue, .green, .orange, .purple, .pink, .teal]
-        return colors[index % colors.count]
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
@@ -656,9 +885,16 @@ struct ContentView: View {
 
     private func backgroundStyle(for highlight: TrackDropHighlight) -> some ShapeStyle {
         if highlight == .dropTarget {
-            return AnyShapeStyle(.blue.opacity(0.16))
+            return AnyShapeStyle(TrackSwitchStyle.activeRowBackground)
         }
-        return AnyShapeStyle(.quaternary.opacity(0.4))
+        return AnyShapeStyle(TrackSwitchStyle.rowBackground)
+    }
+
+    private func rowBackground(isActive: Bool, isDropTarget: Bool) -> some ShapeStyle {
+        if isActive || isDropTarget {
+            return AnyShapeStyle(TrackSwitchStyle.activeRowBackground)
+        }
+        return AnyShapeStyle(TrackSwitchStyle.rowBackground)
     }
 
     private func trackReorderProvider(for trackID: SessionTrack.ID) -> NSItemProvider {
@@ -900,44 +1136,56 @@ private struct NumericControlRow: View {
     let configuration: NumericControlConfiguration
 
     var body: some View {
-        HStack(spacing: 6) {
-            Button {
-                value = configuration.steppedValue(
-                    from: value,
-                    direction: -1,
-                    largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
-                )
-            } label: {
-                Image(systemName: "minus")
-            }
-            .buttonStyle(.bordered)
-
+        HStack(spacing: 0) {
             IntegerInputField(value: $value, configuration: configuration)
-                .frame(width: 70)
+                .frame(
+                    width: configuration.suffix == "ms" ? NumericControlMetrics.offsetValueWidth : NumericControlMetrics.gainValueWidth,
+                    height: NumericControlMetrics.fieldHeight
+                )
 
             Text(configuration.suffix)
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .leading)
-
-            Button {
-                value = configuration.steppedValue(
-                    from: value,
-                    direction: 1,
-                    largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(TrackSwitchStyle.secondaryText)
+                .frame(
+                    width: configuration.suffix == "ms" ? NumericControlMetrics.offsetSuffixWidth : NumericControlMetrics.gainSuffixWidth,
+                    alignment: .leading
                 )
-            } label: {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(.bordered)
 
-            Button {
-                value = 0
-            } label: {
-                Label("Reset", systemImage: "arrow.counterclockwise")
+            VStack(spacing: 0) {
+                stepButton(systemName: "chevron.up", direction: 1)
+                Rectangle()
+                    .fill(TrackSwitchStyle.hairline)
+                    .frame(height: 1)
+                stepButton(systemName: "chevron.down", direction: -1)
             }
-            .buttonStyle(.bordered)
+            .frame(width: NumericControlMetrics.stepperWidth, height: NumericControlMetrics.fieldHeight)
+            .background(Color.black.opacity(0.20))
+        }
+        .padding(.leading, NumericControlMetrics.leadingPadding)
+        .frame(height: NumericControlMetrics.controlHeight)
+        .background(TrackSwitchStyle.controlBackground, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(TrackSwitchStyle.controlStroke, lineWidth: 1)
         }
     }
+
+    private func stepButton(systemName: String, direction: Int) -> some View {
+        Button {
+            value = configuration.steppedValue(
+                from: value,
+                direction: direction,
+                largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
+            )
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(TrackSwitchStyle.secondaryText)
+                .frame(width: NumericControlMetrics.stepperWidth, height: NumericControlMetrics.fieldHeight / 2)
+        }
+        .buttonStyle(.plain)
+    }
+
 }
 
 private struct IntegerInputField: NSViewRepresentable {
@@ -951,8 +1199,11 @@ private struct IntegerInputField: NSViewRepresentable {
     func makeNSView(context: Context) -> NSTextField {
         let textField = NSTextField(frame: .zero)
         textField.alignment = .right
-        textField.isBordered = true
+        textField.isBordered = false
+        textField.drawsBackground = false
         textField.focusRingType = .default
+        textField.textColor = NSColor.white.withAlphaComponent(0.88)
+        textField.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         textField.delegate = context.coordinator
         textField.stringValue = "\(value)"
         return textField
@@ -1104,66 +1355,27 @@ private struct IntegerInputField: NSViewRepresentable {
     }
 }
 
-private struct ResettableSlider: NSViewRepresentable {
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-    let resetValue: Double
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(value: $value)
+private struct WindowChromeConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            configure(window: view.window)
+        }
+        return view
     }
 
-    func makeNSView(context: Context) -> DoubleClickResetSlider {
-        let slider = DoubleClickResetSlider(value: value, minValue: range.lowerBound, maxValue: range.upperBound, target: context.coordinator, action: #selector(Coordinator.valueChanged(_:)))
-        slider.doubleActionHandler = {
-            context.coordinator.reset(to: resetValue)
-        }
-        return slider
-    }
-
-    func updateNSView(_ nsView: DoubleClickResetSlider, context: Context) {
-        nsView.minValue = range.lowerBound
-        nsView.maxValue = range.upperBound
-        if nsView.doubleValue != value {
-            nsView.doubleValue = value
-        }
-        nsView.doubleActionHandler = {
-            context.coordinator.reset(to: resetValue)
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            configure(window: nsView.window)
         }
     }
 
-    final class Coordinator: NSObject {
-        @Binding private var value: Double
-
-        init(value: Binding<Double>) {
-            _value = value
-        }
-
-        @MainActor
-        @objc func valueChanged(_ sender: NSSlider) {
-            value = sender.doubleValue
-        }
-
-        @MainActor
-        func reset(to resetValue: Double) {
-            value = resetValue
-        }
-    }
-}
-
-private final class DoubleClickResetSlider: NSSlider {
-    var doubleActionHandler: (() -> Void)?
-
-    override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 2 {
-            let resetValue = min(max(0, minValue), maxValue)
-            doubleValue = resetValue
-            doubleActionHandler?()
-            sendAction(action, to: target)
-            return
-        }
-
-        super.mouseDown(with: event)
+    private func configure(window: NSWindow?) {
+        guard let window else { return }
+        window.styleMask.insert(.fullSizeContentView)
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
     }
 }
 

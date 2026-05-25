@@ -30,10 +30,32 @@ struct TrackDropHighlightTests {
     }
 
     @Test
-    func importActionControlUsesCompactSplitButtonMetrics() {
-        #expect(ImportActionControlMetrics.controlWidth == 86)
+    func importActionControlUsesHeaderSplitButtonMetrics() {
+        #expect(ImportActionControlMetrics.controlWidth == 118)
         #expect(ImportActionControlMetrics.controlHeight == 34)
-        #expect(ImportActionControlMetrics.primaryButtonWidth == 48)
-        #expect(ImportActionControlMetrics.menuButtonWidth == 37)
+        #expect(ImportActionControlMetrics.primaryButtonWidth == 84)
+        #expect(ImportActionControlMetrics.menuButtonWidth == 33)
+    }
+
+    @Test
+    func compactTrackControlsFitWithinTrackInfoColumn() {
+        let availableControlWidth = TrackInfoLayoutMetrics.infoWidth
+            - TrackInfoLayoutMetrics.horizontalPadding * 2
+            - TrackInfoLayoutMetrics.numberButtonWidth
+            - TrackInfoLayoutMetrics.numberToContentSpacing
+
+        let requiredControlWidth = NumericControlMetrics.offsetControlWidth
+            + TrackInfoLayoutMetrics.controlSpacing
+            + NumericControlMetrics.gainControlWidth
+
+        #expect(requiredControlWidth <= availableControlWidth)
+    }
+
+    @Test
+    func transportButtonsUseMockupScale() {
+        #expect(TransportControlMetrics.buttonWidth == 40)
+        #expect(TransportControlMetrics.buttonHeight == 32)
+        #expect(TransportControlMetrics.iconSize == 14)
+        #expect(TransportControlMetrics.buttonSpacing == 24)
     }
 }
