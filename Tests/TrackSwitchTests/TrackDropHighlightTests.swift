@@ -53,9 +53,17 @@ struct TrackDropHighlightTests {
 
     @Test
     func transportButtonsUseMockupScale() {
-        #expect(TransportControlMetrics.buttonWidth == 40)
-        #expect(TransportControlMetrics.buttonHeight == 32)
-        #expect(TransportControlMetrics.iconSize == 14)
-        #expect(TransportControlMetrics.buttonSpacing == 24)
+        #expect(TransportControlMetrics.buttonWidth == 72)
+        #expect(TransportControlMetrics.buttonHeight == 52)
+        #expect(TransportControlMetrics.buttonSpacing == 28)
+        #expect(TransportControlMetrics.cornerRadius == 10)
+    }
+
+    @Test
+    func transportButtonsResolveGeneratedAssetNames() {
+        #expect(TransportControlAssetName.name(for: .rewind, state: .normal) == "PlaybackControlRewindNormal")
+        #expect(TransportControlAssetName.name(for: .play, state: .active) == "PlaybackControlPlayActive")
+        #expect(TransportControlAssetName.name(for: .pause, state: .activePressed) == "PlaybackControlPauseActivePressed")
+        #expect(TransportControlAssetName.name(for: .trackSwitch, state: .disabled) == "PlaybackControlSwitchDisabled")
     }
 }

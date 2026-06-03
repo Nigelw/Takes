@@ -152,11 +152,62 @@ enum NumericControlMetrics {
 }
 
 enum TransportControlMetrics {
-    static let buttonWidth: CGFloat = 40
-    static let buttonHeight: CGFloat = 32
-    static let iconSize: CGFloat = 14
-    static let buttonSpacing: CGFloat = 24
-    static let cornerRadius: CGFloat = 7
+    static let buttonWidth: CGFloat = 72
+    static let buttonHeight: CGFloat = 52
+    static let buttonSpacing: CGFloat = 28
+    static let cornerRadius: CGFloat = 10
+}
+
+enum TransportControlAsset {
+    case rewind
+    case play
+    case pause
+    case trackSwitch
+
+    var componentName: String {
+        switch self {
+        case .rewind:
+            "Rewind"
+        case .play:
+            "Play"
+        case .pause:
+            "Pause"
+        case .trackSwitch:
+            "Switch"
+        }
+    }
+}
+
+enum TransportControlAssetState {
+    case normal
+    case hover
+    case pressed
+    case active
+    case activePressed
+    case disabled
+
+    var suffix: String {
+        switch self {
+        case .normal:
+            "Normal"
+        case .hover:
+            "Hover"
+        case .pressed:
+            "Pressed"
+        case .active:
+            "Active"
+        case .activePressed:
+            "ActivePressed"
+        case .disabled:
+            "Disabled"
+        }
+    }
+}
+
+enum TransportControlAssetName {
+    static func name(for asset: TransportControlAsset, state: TransportControlAssetState) -> String {
+        "PlaybackControl\(asset.componentName)\(state.suffix)"
+    }
 }
 
 enum TrackSwitchStyle {
@@ -319,28 +370,28 @@ struct ContentView: View {
             HStack(spacing: TransportControlMetrics.buttonSpacing) {
                 Spacer(minLength: 0)
 
-                transportButton(
-                    systemName: "backward.fill",
+                TransportAssetButton(
+                    asset: .rewind,
                     title: "Rewind",
-                    isProminent: false,
+                    isActive: false,
                     isEnabled: controller.session.isPlayable
                 ) {
                     controller.seek(to: controller.session.timelineStart)
                 }
 
-                transportButton(
-                    systemName: controller.session.isPlaying ? "pause.fill" : "play.fill",
+                TransportAssetButton(
+                    asset: controller.session.isPlaying ? .pause : .play,
                     title: controller.session.isPlaying ? "Pause" : "Play",
-                    isProminent: true,
+                    isActive: true,
                     isEnabled: controller.session.isPlayable
                 ) {
                     controller.session.isPlaying ? controller.pause() : controller.play()
                 }
 
-                transportButton(
-                    systemName: "forward.end.fill",
+                TransportAssetButton(
+                    asset: .trackSwitch,
                     title: "Switch",
-                    isProminent: false,
+                    isActive: false,
                     isEnabled: controller.session.canSwitchPlayback
                 ) {
                     controller.selectNextTrack()
@@ -361,33 +412,6 @@ struct ContentView: View {
                 .fill(TrackSwitchStyle.hairline)
                 .frame(height: 1)
         }
-    }
-
-    private func transportButton(
-        systemName: String,
-        title: String,
-        isProminent: Bool,
-        isEnabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: TransportControlMetrics.iconSize, weight: .bold))
-                .foregroundStyle(isProminent ? TrackSwitchStyle.accent : TrackSwitchStyle.primaryText)
-                .frame(width: TransportControlMetrics.buttonWidth, height: TransportControlMetrics.buttonHeight)
-                .background(
-                    isProminent ? TrackSwitchStyle.activeTransportControlBackground : TrackSwitchStyle.transportControlBackground,
-                    in: RoundedRectangle(cornerRadius: TransportControlMetrics.cornerRadius, style: .continuous)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: TransportControlMetrics.cornerRadius, style: .continuous)
-                        .stroke(isProminent ? TrackSwitchStyle.accent.opacity(0.52) : TrackSwitchStyle.transportControlStroke, lineWidth: 1)
-                }
-                .accessibilityLabel(title)
-            }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.45)
     }
 
     private var timeDisplay: some View {
@@ -1033,6 +1057,68 @@ struct ContentView: View {
         }
 
         return true
+    }
+}
+
+struct TransportAssetButton: View {
+    let asset: TransportControlAsset
+    let title: String
+    let isActive: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Color.clear
+                .frame(width: TransportControlMetrics.buttonWidth, height: TransportControlMetrics.buttonHeight)
+        }
+        .buttonStyle(
+            TransportAssetButtonStyle(
+                asset: asset,
+                isActive: isActive,
+                isEnabled: isEnabled,
+                isHovering: isHovering
+            )
+        )
+        .disabled(!isEnabled)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .accessibilityLabel(title)
+    }
+}
+
+struct TransportAssetButtonStyle: ButtonStyle {
+    let asset: TransportControlAsset
+    let isActive: Bool
+    let isEnabled: Bool
+    let isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        Image(assetName(isPressed: configuration.isPressed))
+            .resizable()
+            .interpolation(.high)
+            .frame(width: TransportControlMetrics.buttonWidth, height: TransportControlMetrics.buttonHeight)
+            .contentShape(RoundedRectangle(cornerRadius: TransportControlMetrics.cornerRadius, style: .continuous))
+    }
+
+    private func assetName(isPressed: Bool) -> String {
+        let state: TransportControlAssetState
+        if !isEnabled {
+            state = .disabled
+        } else if isPressed {
+            state = isActive ? .activePressed : .pressed
+        } else if isActive {
+            state = .active
+        } else if isHovering {
+            state = .hover
+        } else {
+            state = .normal
+        }
+
+        return TransportControlAssetName.name(for: asset, state: state)
     }
 }
 
