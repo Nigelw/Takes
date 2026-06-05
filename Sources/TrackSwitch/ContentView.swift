@@ -236,9 +236,9 @@ struct ContentView: View {
             }
             .disabled(!controller.session.isPlayable)
 
-            Button("Rewind") {
-                controller.seek(to: controller.session.timelineStart)
-            }
+//            Button("Rewind") {
+//                controller.seek(to: controller.session.timelineStart)
+//            }
             .disabled(!controller.session.isPlayable)
 
             Button("Switch Track") {

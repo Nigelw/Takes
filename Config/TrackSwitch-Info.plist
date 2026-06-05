@@ -26,6 +26,7 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>public.audio</string>
+				<string>public.folder</string>
 			</array>
 		</dict>
 	</array>

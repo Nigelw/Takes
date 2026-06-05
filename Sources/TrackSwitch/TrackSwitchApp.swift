@@ -1,5 +1,46 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
+
+enum AppOpenedURLResolver {
+    static func audioFileURLs(from urls: [URL], fileManager: FileManager = .default) -> [URL] {
+        urls.flatMap { url in
+            if isDirectory(url, fileManager: fileManager) {
+                return audioFileURLs(in: url, fileManager: fileManager)
+            }
+            return isAudioFile(url) ? [url] : []
+        }
+    }
+
+    private static func audioFileURLs(in directoryURL: URL, fileManager: FileManager) -> [URL] {
+        guard let enumerator = fileManager.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: []
+        ) else {
+            return []
+        }
+
+        return enumerator
+            .compactMap { $0 as? URL }
+            .filter { isRegularFile($0, fileManager: fileManager) && isAudioFile($0) }
+            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
+    private static func isDirectory(_ url: URL, fileManager: FileManager) -> Bool {
+        var isDirectory: ObjCBool = false
+        return fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
+    private static func isRegularFile(_ url: URL, fileManager: FileManager) -> Bool {
+        (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+    }
+
+    private static func isAudioFile(_ url: URL) -> Bool {
+        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+        return type.conforms(to: .audio)
+    }
+}
 
 @MainActor
 final class AppFileOpenRouter {
@@ -17,14 +58,15 @@ final class AppFileOpenRouter {
     }
 
     func open(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
+        let audioFileURLs = AppOpenedURLResolver.audioFileURLs(from: urls)
+        guard !audioFileURLs.isEmpty else { return }
 
         guard let handler else {
-            pendingURLBatches.append(urls)
+            pendingURLBatches.append(audioFileURLs)
             return
         }
 
-        handler(urls)
+        handler(audioFileURLs)
     }
 }
 
@@ -64,7 +106,7 @@ struct TrackSwitchApp: App {
         .commands {
             FileCommands()
 
-            CommandMenu("Controls") {
+            CommandMenu("Playback") {
                 Button(controller.session.isPlaying ? "Pause" : "Play") {
                     controller.session.isPlaying ? controller.pause() : controller.play()
                 }
@@ -127,6 +169,7 @@ private struct FileCommands: Commands {
             Button(ImportActionMenuItem.musicSelection.title) {
                 openFileCommandState?.openAppleMusicSelection()
             }
+            .keyboardShortcut("m", modifiers: [.shift, .command])
             .disabled(openFileCommandState == nil)
         }
     }

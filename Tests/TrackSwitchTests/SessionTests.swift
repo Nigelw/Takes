@@ -166,7 +166,7 @@ struct SessionTests {
     }
 
     @Test
-    func infoPlistDeclaresAudioDocumentSupportForAppIconDrops() throws {
+    func infoPlistDeclaresAudioAndFolderDocumentSupportForAppIconDrops() throws {
         let plistURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -184,6 +184,7 @@ struct SessionTests {
         }
 
         #expect(supportedTypes.contains("public.audio"))
+        #expect(supportedTypes.contains("public.folder"))
     }
 
     @Test
