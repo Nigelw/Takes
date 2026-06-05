@@ -97,6 +97,17 @@ struct SessionTests {
         #expect(!overflowingLayout.isVisible)
     }
 
+    @MainActor
+    @Test
+    func playbackErrorCanBeClearedAfterPresentation() {
+        let controller = PlaybackController()
+
+        controller.setPlaybackError(.engineStartFailed)
+        controller.clearPlaybackError()
+
+        #expect(controller.playbackError == nil)
+    }
+
     @Test
     func unsignedTimestampClampsNegativeTimes() {
         #expect(TimeInterval(-12).formattedTimestamp == "00:00")

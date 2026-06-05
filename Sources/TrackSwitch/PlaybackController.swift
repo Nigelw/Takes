@@ -175,6 +175,10 @@ final class PlaybackController: ObservableObject {
         playbackError = error
     }
 
+    func clearPlaybackError() {
+        playbackError = nil
+    }
+
     private func prepareTrackLoad(from url: URL) throws -> PreparedTrackLoad {
         let metadata = try loader.loadTrackMetadata(from: url)
         let file = try loader.makeAudioFile(from: url)

@@ -143,16 +143,29 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             transportBar
-            if let error = controller.playbackError {
-                Text(error.localizedDescription)
-                    .font(.callout)
-                    .foregroundStyle(.red)
-            }
+                .fixedSize(horizontal: false, vertical: true)
             trackTimelineSection
-            Spacer(minLength: 0)
+                .frame(maxHeight: .infinity)
         }
         .padding(20)
         .frame(minWidth: 860, minHeight: 540)
+        .alert(
+            "TrackSwitch Error",
+            isPresented: Binding(
+                get: { controller.playbackError != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        controller.clearPlaybackError()
+                    }
+                }
+            )
+        ) {
+            Button("OK") {
+                controller.clearPlaybackError()
+            }
+        } message: {
+            Text(controller.playbackError?.localizedDescription ?? "")
+        }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
             loadDroppedURLs(from: providers, targetTrackID: nil)
         }
@@ -281,9 +294,10 @@ struct ContentView: View {
                     }
                     .frame(width: proxy.size.width)
                 }
+                .frame(maxHeight: .infinity)
             }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
         }
-        .frame(height: trackHeaderHeight + 8 + min(trackTimelineHeight, 420))
     }
 
     private func trackTimelineHeader(waveformWidth: CGFloat) -> some View {
