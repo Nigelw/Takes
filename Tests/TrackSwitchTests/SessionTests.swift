@@ -140,6 +140,38 @@ struct SessionTests {
     }
 
     @Test
+    func windowPolicyAllowsOneTrackRowAtMinimumHeight() {
+        #expect(TrackSwitchWindowPolicy.minimumContentHeight == TrackSwitchWindowPolicy.contentHeight(displayingTrackRows: 1))
+    }
+
+    @Test
+    func windowPolicyDefaultsToTwoVisibleTrackRows() {
+        #expect(TrackSwitchWindowPolicy.defaultContentHeight == TrackSwitchWindowPolicy.contentHeight(displayingTrackRows: 2))
+    }
+
+    @Test
+    func windowPolicyAddsChromeToDefaultWindowHeight() {
+        #expect(TrackSwitchWindowPolicy.defaultWindowHeight == TrackSwitchWindowPolicy.defaultContentHeight + TrackSwitchWindowPolicy.windowChromeHeight)
+        #expect(TrackSwitchWindowPolicy.defaultWindowHeight > TrackSwitchWindowPolicy.defaultContentHeight)
+    }
+
+    @Test
+    func windowPolicyUsesNarrowerMinimumWidthThanDefaultWidth() {
+        #expect(TrackSwitchWindowPolicy.minimumContentWidth == 430)
+        #expect(TrackSwitchWindowPolicy.defaultWindowWidth > TrackSwitchWindowPolicy.minimumContentWidth)
+    }
+
+    @Test
+    func windowPolicyClearsSavedMainWindowFrame() {
+        let defaults = UserDefaults(suiteName: "TrackSwitchWindowPolicyTests-\(UUID().uuidString)")!
+        defaults.set("10 20 900 568 0 0 1512 944", forKey: TrackSwitchWindowPolicy.mainWindowFrameAutosaveName)
+
+        TrackSwitchWindowPolicy.clearSavedMainWindowFrame(defaults: defaults)
+
+        #expect(defaults.string(forKey: TrackSwitchWindowPolicy.mainWindowFrameAutosaveName) == nil)
+    }
+
+    @Test
     func musicSelectionScriptDoesNotRejectMoreThanTwoTracks() {
         let script = LibraryTrackSelectionLoader.musicSelectionScript
 

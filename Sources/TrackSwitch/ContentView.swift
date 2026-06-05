@@ -173,6 +173,7 @@ struct ContentView: View {
     @State private var reorderInsertionTarget: TrackReorderInsertionTarget?
     @State private var emptyTrackIsDropTargeted = false
     @State private var gainPopoverTrackID: SessionTrack.ID?
+    @State private var didConfigureMainWindow = false
 
     init(controller: PlaybackController) {
         self.controller = controller
@@ -191,7 +192,17 @@ struct ContentView: View {
                 .frame(maxHeight: .infinity)
         }
         .padding(20)
-        .frame(minWidth: 860, minHeight: 540)
+        .frame(
+            minWidth: TrackSwitchWindowPolicy.minimumContentWidth,
+            minHeight: TrackSwitchWindowPolicy.minimumContentHeight
+        )
+        .background {
+            MainWindowConfigurationView { window in
+                guard !didConfigureMainWindow else { return }
+                didConfigureMainWindow = true
+                TrackSwitchWindowPolicy.configureMainWindow(window)
+            }
+        }
         .alert(
             "TrackSwitch Error",
             isPresented: Binding(
@@ -261,7 +272,7 @@ struct ContentView: View {
     }
 
     private var trackRowHeight: CGFloat {
-        124
+        TrackSwitchWindowPolicy.trackRowHeight
     }
 
     private var trackInfoWidth: CGFloat {
@@ -269,7 +280,7 @@ struct ContentView: View {
     }
 
     private var trackHeaderHeight: CGFloat {
-        34
+        TrackSwitchWindowPolicy.trackTimelineHeaderHeight
     }
 
     private var timelineHeaderTargetMarkerCount: Int {
@@ -277,13 +288,11 @@ struct ContentView: View {
     }
 
     private var trackTimelineDividerHeight: CGFloat {
-        1
+        TrackSwitchWindowPolicy.trackTimelineDividerHeight
     }
 
     private var trackTimelineHeight: CGFloat {
-        let rowCount = max(controller.session.tracks.count, 1)
-        let dividerCount = max(rowCount - 1, 0)
-        return trackRowHeight * CGFloat(rowCount) + trackTimelineDividerHeight * CGFloat(dividerCount)
+        TrackSwitchWindowPolicy.trackTimelineHeight(displayingTrackRows: controller.session.tracks.count)
     }
 
     private func globalTime(atX x: CGFloat, width: CGFloat) -> TimeInterval {
@@ -864,6 +873,27 @@ struct ContentView: View {
         }
 
         return true
+    }
+}
+
+private struct MainWindowConfigurationView: NSViewRepresentable {
+    let configure: @MainActor (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        configureWindow(for: view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        configureWindow(for: view)
+    }
+
+    private func configureWindow(for view: NSView) {
+        Task { @MainActor in
+            guard let window = view.window else { return }
+            configure(window)
+        }
     }
 }
 

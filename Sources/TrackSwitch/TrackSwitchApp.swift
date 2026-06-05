@@ -86,12 +86,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum TrackSwitchWindowPolicy {
     static let mainWindowID = "main"
     static let replacesDefaultNewItemCommands = true
+    static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
+    static let minimumContentWidth: CGFloat = 430
+    static let defaultWindowWidth: CGFloat = 860
+    static let trackRowHeight: CGFloat = 124
+    static let trackTimelineDividerHeight: CGFloat = 1
+    static let trackTimelineHeaderHeight: CGFloat = 34
+    static let contentPadding: CGFloat = 20
+    static let rootVerticalSpacing: CGFloat = 14
+    static let timelineHeaderSpacing: CGFloat = 8
+    static let transportBarReservedHeight: CGFloat = 54
+    static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
+    static let defaultContentHeight = contentHeight(displayingTrackRows: 2)
+    static let windowChromeHeight: CGFloat = 28
+    static let defaultWindowHeight = defaultContentHeight + windowChromeHeight
+    static let minimumWindowSize = CGSize(
+        width: minimumContentWidth,
+        height: minimumContentHeight + windowChromeHeight
+    )
+    static let defaultWindowSize = CGSize(
+        width: defaultWindowWidth,
+        height: defaultWindowHeight
+    )
+
+    static func trackTimelineHeight(displayingTrackRows rowCount: Int) -> CGFloat {
+        let rowCount = max(rowCount, 1)
+        let dividerCount = max(rowCount - 1, 0)
+        return trackRowHeight * CGFloat(rowCount) + trackTimelineDividerHeight * CGFloat(dividerCount)
+    }
+
+    static func contentHeight(displayingTrackRows rowCount: Int) -> CGFloat {
+        contentPadding * 2
+            + transportBarReservedHeight
+            + rootVerticalSpacing
+            + trackTimelineHeaderHeight
+            + timelineHeaderSpacing
+            + trackTimelineHeight(displayingTrackRows: rowCount)
+    }
+
+    static func clearSavedMainWindowFrame(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: mainWindowFrameAutosaveName)
+    }
+
+    @MainActor
+    static func configureMainWindow(_ window: NSWindow) {
+        window.setFrameAutosaveName("")
+        window.minSize = minimumWindowSize
+
+        let frame = window.frame
+        let defaultFrame = CGRect(
+            x: frame.minX,
+            y: frame.maxY - defaultWindowSize.height,
+            width: defaultWindowSize.width,
+            height: defaultWindowSize.height
+        )
+        window.setFrame(defaultFrame, display: true)
+    }
 }
 
 @main
 struct TrackSwitchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var controller = PlaybackController()
+
+    init() {
+        TrackSwitchWindowPolicy.clearSavedMainWindowFrame()
+    }
 
     var body: some Scene {
         Window("TrackSwitch", id: TrackSwitchWindowPolicy.mainWindowID) {
@@ -102,6 +162,10 @@ struct TrackSwitchApp: App {
                     }
                 }
         }
+        .defaultSize(
+            width: TrackSwitchWindowPolicy.defaultWindowWidth,
+            height: TrackSwitchWindowPolicy.defaultWindowHeight
+        )
         .windowResizability(.contentMinSize)
         .commands {
             FileCommands()
