@@ -50,8 +50,14 @@ final class PlaybackController: ObservableObject {
         var preparedLoads: [PreparedTrackLoad] = []
         var failures = additionalFailures
         var skippedFileNames: [String] = []
+        var importedTrackURLs = Set(session.tracks.map { Self.timelineIdentityURL(for: $0.loadedTrack.url) })
 
         for url in urls {
+            let identityURL = Self.timelineIdentityURL(for: url)
+            guard importedTrackURLs.insert(identityURL).inserted else {
+                continue
+            }
+
             guard session.tracks.count + preparedLoads.count < Self.maximumTrackCount else {
                 skippedFileNames.append(url.lastPathComponent.ifEmpty(url.path))
                 continue
@@ -93,6 +99,10 @@ final class PlaybackController: ObservableObject {
         case (true, true):
             break
         }
+    }
+
+    private static func timelineIdentityURL(for url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
     }
 
     @discardableResult

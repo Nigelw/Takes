@@ -330,6 +330,25 @@ struct SessionTests {
 
     @MainActor
     @Test
+    func importedFilesSkipFilesAlreadyInTimeline() async throws {
+        let first = try makeTemporaryAudioFile(name: "first.wav")
+        let second = try makeTemporaryAudioFile(name: "second.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([first])
+
+        await controller.loadImportedFiles([first, second, first])
+
+        #expect(controller.session.tracks.map { $0.loadedTrack.url } == [first, second])
+        #expect(controller.playbackError == nil)
+    }
+
+    @MainActor
+    @Test
     func importedFilesRespectThirtyTwoTrackCap() async throws {
         let urls = try (0..<33).map { index in
             try makeTemporaryAudioFile(name: "track-\(index).wav")
