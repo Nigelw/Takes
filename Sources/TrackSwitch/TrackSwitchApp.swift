@@ -87,8 +87,8 @@ enum TrackSwitchWindowPolicy {
     static let mainWindowID = "main"
     static let replacesDefaultNewItemCommands = true
     static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
-    static let minimumContentWidth: CGFloat = 430
-    static let defaultWindowWidth: CGFloat = 860
+    static let minimumContentWidth: CGFloat = 500
+    static let defaultWindowWidth: CGFloat = 700
     static let trackRowHeight: CGFloat = 124
     static let trackTimelineDividerHeight: CGFloat = 1
     static let trackTimelineHeaderHeight: CGFloat = 34
