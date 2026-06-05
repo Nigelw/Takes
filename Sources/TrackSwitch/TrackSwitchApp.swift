@@ -110,11 +110,13 @@ struct TrackSwitchApp: App {
                 Button(controller.session.isPlaying ? "Pause" : "Play") {
                     controller.session.isPlaying ? controller.pause() : controller.play()
                 }
+                .keyboardShortcut(.space, modifiers: [])
                 .disabled(!controller.session.isPlayable)
 
                 Button("Rewind") {
                     controller.seek(to: controller.session.timelineStart)
                 }
+                .keyboardShortcut(.leftArrow, modifiers: [.command])
                 .disabled(!controller.session.isPlayable)
 
                 Divider()
@@ -122,11 +124,13 @@ struct TrackSwitchApp: App {
                 Button("Switch Track") {
                     controller.selectNextTrack()
                 }
+                .keyboardShortcut("x", modifiers: [])
                 .disabled(!controller.session.canSwitchPlayback)
 
                 Button("Switch to Previous Track") {
                     controller.selectPreviousTrack()
                 }
+                .keyboardShortcut("x", modifiers: [.shift])
                 .disabled(!controller.session.canSwitchPlayback)
 
                 Divider()
@@ -134,21 +138,25 @@ struct TrackSwitchApp: App {
                 Button("Skip Forward 1s") {
                     controller.skip(by: 1)
                 }
+                .keyboardShortcut(.rightArrow, modifiers: [])
                 .disabled(!controller.session.isPlayable)
 
                 Button("Skip Forward 10s") {
                     controller.skip(by: 10)
                 }
+                .keyboardShortcut(.rightArrow, modifiers: [.shift])
                 .disabled(!controller.session.isPlayable)
 
                 Button("Skip Backward 1s") {
                     controller.skip(by: -1)
                 }
+                .keyboardShortcut(.leftArrow, modifiers: [])
                 .disabled(!controller.session.isPlayable)
 
                 Button("Skip Backward 10s") {
                     controller.skip(by: -10)
                 }
+                .keyboardShortcut(.leftArrow, modifiers: [.shift])
                 .disabled(!controller.session.isPlayable)
             }
         }
