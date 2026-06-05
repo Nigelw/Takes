@@ -117,7 +117,7 @@ enum ImportActionMenuItem: CaseIterable {
         case .open:
             "Open..."
         case .musicSelection:
-            "Get Apple Music Selection"
+            "Open Apple Music Selection"
         }
     }
 }
@@ -129,16 +129,59 @@ enum ImportActionControlMetrics {
     static let menuButtonWidth: CGFloat = 37
 }
 
+@MainActor
+final class OpenFileCommandState: ObservableObject {
+    @Published var isImportingTracks = false
+
+    private let loadAppleMusicSelection: @MainActor () -> Void
+
+    init(loadAppleMusicSelection: @escaping @MainActor () -> Void = {}) {
+        self.loadAppleMusicSelection = loadAppleMusicSelection
+    }
+
+    func presentOpenDialog() {
+        isImportingTracks = true
+    }
+
+    func dismissOpenDialog() {
+        isImportingTracks = false
+    }
+
+    func openAppleMusicSelection() {
+        loadAppleMusicSelection()
+    }
+}
+
+private struct OpenFileCommandStateKey: FocusedValueKey {
+    typealias Value = OpenFileCommandState
+}
+
+extension FocusedValues {
+    var openFileCommandState: OpenFileCommandState? {
+        get { self[OpenFileCommandStateKey.self] }
+        set { self[OpenFileCommandStateKey.self] = newValue }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var controller: PlaybackController
 
-    @State private var importingTracks = false
+    @StateObject private var openFileCommandState = OpenFileCommandState()
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
     @State private var dropTargetTrackID: SessionTrack.ID?
     @State private var reorderInsertionTarget: TrackReorderInsertionTarget?
     @State private var emptyTrackIsDropTargeted = false
     @State private var gainPopoverTrackID: SessionTrack.ID?
+
+    init(controller: PlaybackController) {
+        self.controller = controller
+        _openFileCommandState = StateObject(
+            wrappedValue: OpenFileCommandState {
+                Task { await controller.loadSelectedLibraryTracks() }
+            }
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -170,12 +213,13 @@ struct ContentView: View {
             loadDroppedURLs(from: providers, targetTrackID: nil)
         }
         .fileImporter(
-            isPresented: $importingTracks,
+            isPresented: $openFileCommandState.isImportingTracks,
             allowedContentTypes: [.audio],
             allowsMultipleSelection: true
         ) { result in
             handleImport(result)
         }
+        .focusedSceneValue(\.openFileCommandState, openFileCommandState)
         .onAppear {
             setupKeyMonitor()
         }
@@ -643,7 +687,7 @@ struct ContentView: View {
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
-        importingTracks = false
+        openFileCommandState.dismissOpenDialog()
 
         switch result {
         case let .success(urls):
@@ -658,9 +702,9 @@ struct ContentView: View {
     private func performImportAction(_ item: ImportActionMenuItem) {
         switch item {
         case .open:
-            importingTracks = true
+            openFileCommandState.presentOpenDialog()
         case .musicSelection:
-            Task { await controller.loadSelectedLibraryTracks() }
+            openFileCommandState.openAppleMusicSelection()
         }
     }
 

@@ -166,6 +166,27 @@ struct SessionTests {
     }
 
     @Test
+    func infoPlistDeclaresAudioDocumentSupportForAppIconDrops() throws {
+        let plistURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Config")
+            .appending(path: "TrackSwitch-Info.plist")
+
+        let data = try Data(contentsOf: plistURL)
+        let plist = try #require(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        let documentTypes = try #require(plist["CFBundleDocumentTypes"] as? [[String: Any]])
+        let supportedTypes = documentTypes.flatMap { documentType in
+            documentType["LSItemContentTypes"] as? [String] ?? []
+        }
+
+        #expect(supportedTypes.contains("public.audio"))
+    }
+
+    @Test
     func musicSelectionParsingSortsTwoTracksByViewOrder() throws {
         let tempDirectory = FileManager.default.temporaryDirectory
         let laterURL = tempDirectory.appending(path: UUID().uuidString + ".m4a")
