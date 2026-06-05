@@ -392,6 +392,15 @@ struct ContentView: View {
             )
             .padding(.leading, 8)
             .frame(width: trackInfoWidth, alignment: .leading)
+            .overlay(alignment: .trailing) {
+                Button("Clear All") {
+                    controller.clearTracks()
+                }
+                .controlSize(.small)
+                .disabled(controller.session.tracks.isEmpty)
+                .help("Clear all tracks")
+                .padding(.trailing, 8)
+            }
 
             timelineHeaderRuler(width: waveformWidth)
                 .frame(maxWidth: .infinity)

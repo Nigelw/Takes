@@ -542,6 +542,30 @@ struct SessionTests {
 
     @MainActor
     @Test
+    func clearingTracksStopsPlaybackAndResetsTimeline() async throws {
+        let first = try makeTemporaryAudioFile(name: "clear-first.wav")
+        let second = try makeTemporaryAudioFile(name: "clear-second.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([first, second])
+        controller.play()
+
+        controller.clearTracks()
+
+        #expect(controller.session.tracks.isEmpty)
+        #expect(controller.session.activeTrackID == nil)
+        #expect(controller.session.isPlaying == false)
+        #expect(controller.session.timelineStart == 0)
+        #expect(controller.session.timelineEnd == 0)
+        #expect(controller.session.transportPosition == 0)
+    }
+
+    @MainActor
+    @Test
     func replacingTrackResetsGainAndOffsetButKeepsRowActive() async throws {
         let first = try makeTemporaryAudioFile(name: "first.wav")
         let replacement = try makeTemporaryAudioFile(name: "replacement.wav")

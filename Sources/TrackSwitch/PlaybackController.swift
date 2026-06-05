@@ -362,6 +362,23 @@ final class PlaybackController: ObservableObject {
         }
     }
 
+    func clearTracks() {
+        guard !session.tracks.isEmpty else { return }
+
+        for runtime in runtimeTracksInSessionOrder() {
+            runtime.player.stop()
+        }
+        runtimeTracksByID.removeAll()
+        session.tracks.removeAll()
+        session.activeTrackID = nil
+        session.isPlaying = false
+        playbackStartedAt = nil
+        playbackStartedFromTransport = 0
+        timer?.invalidate()
+        recalculateSessionDuration()
+        applyAudibility()
+    }
+
     func setGain(_ trackID: SessionTrack.ID, db: Float) {
         guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
         session.tracks[index].loadedTrack.gainDB = db
