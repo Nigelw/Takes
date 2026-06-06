@@ -175,13 +175,16 @@ final class OpenFileCommandState: ObservableObject {
 
     private let loadAppleMusicSelection: @MainActor () -> Void
     private let loadFinderSelection: @MainActor () -> Void
+    private let clearAllTracksAction: @MainActor () -> Void
 
     init(
         loadAppleMusicSelection: @escaping @MainActor () -> Void = {},
-        loadFinderSelection: @escaping @MainActor () -> Void = {}
+        loadFinderSelection: @escaping @MainActor () -> Void = {},
+        clearAllTracks: @escaping @MainActor () -> Void = {}
     ) {
         self.loadAppleMusicSelection = loadAppleMusicSelection
         self.loadFinderSelection = loadFinderSelection
+        self.clearAllTracksAction = clearAllTracks
     }
 
     func presentOpenDialog() {
@@ -199,16 +202,29 @@ final class OpenFileCommandState: ObservableObject {
     func openFinderSelection() {
         loadFinderSelection()
     }
+
+    func clearAllTracks() {
+        clearAllTracksAction()
+    }
 }
 
 private struct OpenFileCommandStateKey: FocusedValueKey {
     typealias Value = OpenFileCommandState
 }
 
+private struct CanClearTracksKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
 extension FocusedValues {
     var openFileCommandState: OpenFileCommandState? {
         get { self[OpenFileCommandStateKey.self] }
         set { self[OpenFileCommandStateKey.self] = newValue }
+    }
+
+    var canClearTracks: Bool? {
+        get { self[CanClearTracksKey.self] }
+        set { self[CanClearTracksKey.self] = newValue }
     }
 }
 
@@ -242,6 +258,9 @@ struct ContentView: View {
                             controller.setPlaybackError(.librarySelectionFailed("Could not read the Finder selection."))
                         }
                     }
+                },
+                clearAllTracks: {
+                    controller.clearTracks()
                 }
             )
         )
@@ -294,6 +313,7 @@ struct ContentView: View {
             handleImport(result)
         }
         .focusedSceneValue(\.openFileCommandState, openFileCommandState)
+        .focusedSceneValue(\.canClearTracks, !controller.session.tracks.isEmpty)
         .onAppear {
             setupKeyMonitor()
         }

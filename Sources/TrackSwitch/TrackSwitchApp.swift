@@ -177,14 +177,6 @@ struct TrackSwitchApp: App {
                 .keyboardShortcut(.space, modifiers: [])
                 .disabled(!controller.session.isPlayable)
 
-                Button("Rewind") {
-                    controller.seek(to: controller.session.timelineStart)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [.command])
-                .disabled(!controller.session.isPlayable)
-
-                Divider()
-
                 Button("Switch Track") {
                     controller.selectNextTrack()
                 }
@@ -222,6 +214,20 @@ struct TrackSwitchApp: App {
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [.shift])
                 .disabled(!controller.session.isPlayable)
+                
+                Divider()
+                
+                Button("Jump to Beginning") {
+                    controller.seek(to: controller.session.timelineStart)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.command])
+                .disabled(!controller.session.isPlayable)
+
+                Button("Jump to End") {
+                    controller.seek(to: controller.session.timelineEnd)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [.command])
+                .disabled(!controller.session.isPlayable)
             }
         }
     }
@@ -229,6 +235,7 @@ struct TrackSwitchApp: App {
 
 private struct FileCommands: Commands {
     @FocusedValue(\.openFileCommandState) private var openFileCommandState
+    @FocusedValue(\.canClearTracks) private var canClearTracks
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -249,6 +256,14 @@ private struct FileCommands: Commands {
             }
             .keyboardShortcut("m", modifiers: [.shift, .command])
             .disabled(openFileCommandState == nil)
+
+            Divider()
+
+            Button("Clear All Tracks") {
+                openFileCommandState?.clearAllTracks()
+            }
+            .keyboardShortcut(.delete, modifiers: [.command])
+            .disabled(openFileCommandState == nil || canClearTracks != true)
         }
     }
 }

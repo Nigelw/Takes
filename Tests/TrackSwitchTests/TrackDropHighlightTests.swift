@@ -76,6 +76,19 @@ struct TrackDropHighlightTests {
         #expect(loadCount == 1)
     }
 
+    @MainActor
+    @Test
+    func openFileCommandStatePerformsClearAllTracksAction() {
+        var clearCount = 0
+        let state = OpenFileCommandState(clearAllTracks: {
+            clearCount += 1
+        })
+
+        state.clearAllTracks()
+
+        #expect(clearCount == 1)
+    }
+
     @Test
     func finderSelectionResolverReturnsAudioFileURLs() throws {
         let wav = URL(fileURLWithPath: "/tmp/selection.wav")
