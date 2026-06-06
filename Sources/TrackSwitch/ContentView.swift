@@ -808,6 +808,12 @@ struct ContentView: View {
                 return false
             }
 
+            if let hotkey = TrackNumberHotkey.hotkey(forKeyCode: event.keyCode, modifierFlags: event.modifierFlags),
+               controller.canSelectTrackForHotkey(hotkey) {
+                controller.selectTrackForHotkey(hotkey)
+                return true
+            }
+
             switch event.keyCode {
             case 49:
                 guard !event.modifierFlags.contains(.command),

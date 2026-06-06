@@ -503,6 +503,71 @@ struct SessionTests {
 
     @MainActor
     @Test
+    func numericTrackHotkeysSelectRowsOneThroughEight() async throws {
+        let urls = try (0..<8).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+
+        let ids = controller.session.tracks.map(\.id)
+
+        controller.selectTrackForHotkey(1)
+        #expect(controller.session.activeTrackID == ids[0])
+
+        controller.selectTrackForHotkey(8)
+        #expect(controller.session.activeTrackID == ids[7])
+    }
+
+    @MainActor
+    @Test
+    func numericTrackHotkeyNineSelectsLastTrackWhenMoreThanEightTracksAreLoaded() async throws {
+        let urls = try (0..<9).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+
+        let ids = controller.session.tracks.map(\.id)
+
+        controller.selectTrackForHotkey(9)
+        #expect(controller.session.activeTrackID == ids[8])
+    }
+
+    @MainActor
+    @Test
+    func numericTrackHotkeysIgnoreUnavailableRows() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+
+        let ids = controller.session.tracks.map(\.id)
+        controller.selectTrackForHotkey(2)
+        #expect(controller.session.activeTrackID == ids[1])
+
+        controller.selectTrackForHotkey(8)
+        #expect(controller.session.activeTrackID == ids[1])
+
+        controller.selectTrackForHotkey(9)
+        #expect(controller.session.activeTrackID == ids[1])
+    }
+
+    @MainActor
+    @Test
     func reorderingTracksUpdatesPlaybackCyclingOrder() async throws {
         let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
         defer {
@@ -833,6 +898,25 @@ struct SessionTests {
         #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: nil) == true)
         #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSView(frame: .zero)) == true)
         #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSTextView(frame: .zero)) == false)
+    }
+
+    @Test
+    func trackNumberHotkeyMapsTopRowAndKeypadNumberKeys() {
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 18, modifierFlags: []) == 1)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 28, modifierFlags: []) == 8)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 25, modifierFlags: []) == 9)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 83, modifierFlags: []) == 1)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 91, modifierFlags: []) == 8)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 92, modifierFlags: []) == 9)
+    }
+
+    @Test
+    func trackNumberHotkeyIgnoresModifiedNumberKeys() {
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 18, modifierFlags: .shift) == nil)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 18, modifierFlags: .command) == nil)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 18, modifierFlags: .control) == nil)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 18, modifierFlags: .option) == nil)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 29, modifierFlags: []) == nil)
     }
 
     private func makeTrack(name: String) -> LoadedTrack {

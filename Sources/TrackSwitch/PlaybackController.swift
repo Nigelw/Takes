@@ -299,6 +299,19 @@ final class PlaybackController: ObservableObject {
         applyAudibility()
     }
 
+    func canSelectTrackForHotkey(_ hotkey: Int) -> Bool {
+        guard let trackIndex = trackIndex(forHotkey: hotkey) else { return false }
+        return session.tracks.indices.contains(trackIndex)
+    }
+
+    func selectTrackForHotkey(_ hotkey: Int) {
+        guard let trackIndex = trackIndex(forHotkey: hotkey) else { return }
+        guard session.tracks.indices.contains(trackIndex) else { return }
+
+        session.activeTrackID = session.tracks[trackIndex].id
+        applyAudibility()
+    }
+
     func reorderTrack(_ trackID: SessionTrack.ID, before destinationTrackID: SessionTrack.ID?) {
         guard let sourceIndex = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
         guard destinationTrackID != trackID else { return }
@@ -613,6 +626,17 @@ final class PlaybackController: ObservableObject {
 
     private func runtimeTracksInSessionOrder() -> [RuntimeTrack] {
         session.tracks.compactMap { runtimeTracksByID[$0.id] }
+    }
+
+    private func trackIndex(forHotkey hotkey: Int) -> Int? {
+        guard (1...9).contains(hotkey) else { return nil }
+
+        if hotkey == 9 {
+            guard session.tracks.count > 8 else { return nil }
+            return session.tracks.index(before: session.tracks.endIndex)
+        }
+
+        return hotkey - 1
     }
 
     private func startTimer() {
