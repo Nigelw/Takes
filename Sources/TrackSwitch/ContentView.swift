@@ -137,6 +137,38 @@ enum ImportActionControlMetrics {
     static let menuButtonWidth: CGFloat = 37
 }
 
+enum ImportActionSplitButtonHitTesting {
+    static func segment(
+        atX x: CGFloat,
+        controlWidth: CGFloat,
+        primaryWidth: CGFloat,
+        menuWidth: CGFloat,
+        layoutDirection: NSUserInterfaceLayoutDirection
+    ) -> Int? {
+        guard x >= 0, x <= controlWidth else { return nil }
+
+        switch layoutDirection {
+        case .rightToLeft:
+            return x <= controlWidth - primaryWidth ? 1 : 0
+        default:
+            return x <= primaryWidth ? 0 : 1
+        }
+    }
+}
+
+enum ImportActionSplitButtonMenuPlacement {
+    static func origin(
+        bounds: NSRect,
+        menuWidth: CGFloat,
+        layoutDirection: NSUserInterfaceLayoutDirection,
+        isFlipped: Bool
+    ) -> NSPoint {
+        let menuX = layoutDirection == .rightToLeft ? bounds.minX : bounds.maxX - menuWidth
+        let menuY = isFlipped ? bounds.maxY : bounds.minY
+        return NSPoint(x: menuX, y: menuY)
+    }
+}
+
 @MainActor
 final class OpenFileCommandState: ObservableObject {
     @Published var isImportingTracks = false
@@ -386,57 +418,18 @@ struct ContentView: View {
 
     private func trackTimelineHeader(waveformWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Button {
-                    performImportAction(.open)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(
-                            width: ImportActionControlMetrics.primaryButtonWidth,
-                            height: ImportActionControlMetrics.controlHeight
-                        )
-                        .contentShape(Rectangle())
-                        .accessibilityLabel(ImportActionMenuItem.open.title)
-                }
-                .buttonStyle(.plain)
-                .help(ImportActionMenuItem.open.title)
-
-                Divider()
-                    .frame(height: ImportActionControlMetrics.controlHeight)
-
-                Menu {
-                    ForEach(ImportActionMenuItem.dropdownItems, id: \.self) { item in
-                        Button(item.title) {
-                            performImportAction(item)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(
-                            width: ImportActionControlMetrics.menuButtonWidth,
-                            height: ImportActionControlMetrics.controlHeight
-                        )
-                        .contentShape(Rectangle())
-                        .accessibilityLabel("Open Track Menu")
-                }
-                .menuStyle(.borderlessButton)
-                .help("Open Track Menu")
-            }
-            .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
-            .background(.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(.separator, lineWidth: 1)
+            ImportActionSplitButton(
+                dropdownItems: ImportActionMenuItem.dropdownItems,
+                performAction: performImportAction(_:)
             )
+            .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
             .padding(.leading, 8)
             .frame(width: trackInfoWidth, alignment: .leading)
             .overlay(alignment: .trailing) {
                 Button("Clear All") {
                     controller.clearTracks()
                 }
-                .controlSize(.small)
+                .controlSize(.regular)
                 .disabled(controller.session.tracks.isEmpty)
                 .help("Clear all tracks")
                 .padding(.trailing, 8)
@@ -906,6 +899,113 @@ struct ContentView: View {
         }
 
         return true
+    }
+}
+
+private struct ImportActionSplitButton: NSViewRepresentable {
+    let dropdownItems: [ImportActionMenuItem]
+    let performAction: @MainActor (ImportActionMenuItem) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(dropdownItems: dropdownItems, performAction: performAction)
+    }
+
+    func makeNSView(context: Context) -> ImmediateMenuSegmentedControl {
+        let control = ImmediateMenuSegmentedControl(
+            labels: ["", ""],
+            trackingMode: .momentary,
+            target: context.coordinator,
+            action: #selector(Coordinator.segmentPressed(_:))
+        )
+        control.primarySegmentWidth = ImportActionControlMetrics.primaryButtonWidth
+        control.menuSegmentWidth = ImportActionControlMetrics.menuButtonWidth
+        control.segmentStyle = .rounded
+        control.controlSize = .regular
+        control.setImage(NSImage(systemSymbolName: "plus", accessibilityDescription: ImportActionMenuItem.open.title), forSegment: 0)
+        control.setImage(NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Open Track Menu"), forSegment: 1)
+        control.setImageScaling(.scaleProportionallyDown, forSegment: 0)
+        control.setImageScaling(.scaleProportionallyDown, forSegment: 1)
+        control.setWidth(ImportActionControlMetrics.primaryButtonWidth, forSegment: 0)
+        control.setWidth(ImportActionControlMetrics.menuButtonWidth, forSegment: 1)
+        control.setToolTip(ImportActionMenuItem.open.title, forSegment: 0)
+        control.setToolTip("Open Track Menu", forSegment: 1)
+        control.setShowsMenuIndicator(false, forSegment: 1)
+        control.setAccessibilityLabel("Open Tracks")
+        context.coordinator.configureMenu(for: control)
+        return control
+    }
+
+    func updateNSView(_ control: ImmediateMenuSegmentedControl, context: Context) {
+        context.coordinator.dropdownItems = dropdownItems
+        context.coordinator.performAction = performAction
+        context.coordinator.configureMenu(for: control)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var dropdownItems: [ImportActionMenuItem]
+        var performAction: @MainActor (ImportActionMenuItem) -> Void
+
+        private let menu = NSMenu()
+
+        init(dropdownItems: [ImportActionMenuItem], performAction: @escaping @MainActor (ImportActionMenuItem) -> Void) {
+            self.dropdownItems = dropdownItems
+            self.performAction = performAction
+        }
+
+        func configureMenu(for control: ImmediateMenuSegmentedControl) {
+            menu.removeAllItems()
+            for item in dropdownItems {
+                let menuItem = NSMenuItem(title: item.title, action: #selector(menuItemSelected(_:)), keyEquivalent: "")
+                menuItem.target = self
+                menuItem.representedObject = item
+                menu.addItem(menuItem)
+            }
+            control.immediateMenu = menu
+        }
+
+        @objc func segmentPressed(_ sender: NSSegmentedControl) {
+            if sender.selectedSegment == 0 {
+                performAction(.open)
+            }
+        }
+
+        @objc func menuItemSelected(_ sender: NSMenuItem) {
+            guard let item = sender.representedObject as? ImportActionMenuItem else { return }
+            performAction(item)
+        }
+    }
+}
+
+private final class ImmediateMenuSegmentedControl: NSSegmentedControl {
+    var immediateMenu: NSMenu?
+    var primarySegmentWidth: CGFloat = 0
+    var menuSegmentWidth: CGFloat = 0
+
+    override func mouseDown(with event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+        let pressedSegment = ImportActionSplitButtonHitTesting.segment(
+            atX: location.x,
+            controlWidth: bounds.width,
+            primaryWidth: primarySegmentWidth,
+            menuWidth: menuSegmentWidth,
+            layoutDirection: userInterfaceLayoutDirection
+        )
+
+        guard pressedSegment == 1, let immediateMenu else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        selectedSegment = 1
+        let menuOrigin = ImportActionSplitButtonMenuPlacement.origin(
+            bounds: bounds,
+            menuWidth: menuSegmentWidth,
+            layoutDirection: userInterfaceLayoutDirection,
+            isFlipped: isFlipped
+        )
+        immediateMenu.popUp(positioning: nil, at: menuOrigin, in: self)
+        selectedSegment = -1
     }
 }
 
