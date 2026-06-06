@@ -239,6 +239,7 @@ struct ContentView: View {
     @State private var emptyTrackIsDropTargeted = false
     @State private var gainPopoverTrackID: SessionTrack.ID?
     @State private var didConfigureMainWindow = false
+    @State private var mainWindow: NSWindow?
 
     init(controller: PlaybackController) {
         self.controller = controller
@@ -280,9 +281,14 @@ struct ContentView: View {
         )
         .background {
             MainWindowConfigurationView { window in
+                mainWindow = window
                 guard !didConfigureMainWindow else { return }
                 didConfigureMainWindow = true
                 TrackSwitchWindowPolicy.configureMainWindow(window)
+                TrackSwitchWindowPolicy.resizeMainWindow(
+                    window,
+                    displayingTrackRows: controller.session.tracks.count
+                )
             }
         }
         .alert(
@@ -316,6 +322,14 @@ struct ContentView: View {
         .focusedSceneValue(\.canClearTracks, !controller.session.tracks.isEmpty)
         .onAppear {
             setupKeyMonitor()
+        }
+        .onChange(of: controller.session.tracks.count) { previousTrackCount, trackCount in
+            guard let mainWindow else { return }
+            guard TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+                previousTrackRowCount: previousTrackCount,
+                newTrackRowCount: trackCount
+            ) else { return }
+            TrackSwitchWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount)
         }
         .onDisappear {
             keyMonitor?.stop()

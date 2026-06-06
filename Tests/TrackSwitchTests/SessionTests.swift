@@ -145,14 +145,53 @@ struct SessionTests {
     }
 
     @Test
-    func windowPolicyDefaultsToTwoVisibleTrackRows() {
-        #expect(TrackSwitchWindowPolicy.defaultContentHeight == TrackSwitchWindowPolicy.contentHeight(displayingTrackRows: 2))
+    func windowPolicyDefaultsToOneVisibleTrackRow() {
+        #expect(TrackSwitchWindowPolicy.defaultContentHeight == TrackSwitchWindowPolicy.contentHeight(displayingTrackRows: 1))
     }
 
     @Test
     func windowPolicyAddsChromeToDefaultWindowHeight() {
         #expect(TrackSwitchWindowPolicy.defaultWindowHeight == TrackSwitchWindowPolicy.defaultContentHeight + TrackSwitchWindowPolicy.windowChromeHeight)
         #expect(TrackSwitchWindowPolicy.defaultWindowHeight > TrackSwitchWindowPolicy.defaultContentHeight)
+    }
+
+    @Test
+    func windowPolicyGrowsFrameDownwardForAdditionalTrackRows() {
+        let currentFrame = CGRect(x: 80, y: 700, width: 700, height: TrackSwitchWindowPolicy.defaultWindowHeight)
+        let visibleFrame = CGRect(x: 0, y: 100, width: 1200, height: 800)
+
+        let resizedFrame = TrackSwitchWindowPolicy.frame(
+            fittingTrackRows: 3,
+            currentFrame: currentFrame,
+            visibleFrame: visibleFrame
+        )
+
+        #expect(resizedFrame.maxY == currentFrame.maxY)
+        #expect(resizedFrame.height == TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 3))
+        #expect(resizedFrame.minY < currentFrame.minY)
+    }
+
+    @Test
+    func windowPolicyCapsResizedFrameAtVisibleMonitorBottom() {
+        let currentFrame = CGRect(x: 80, y: 300, width: 700, height: TrackSwitchWindowPolicy.defaultWindowHeight)
+        let visibleFrame = CGRect(x: 0, y: 260, width: 1200, height: 800)
+
+        let resizedFrame = TrackSwitchWindowPolicy.frame(
+            fittingTrackRows: 8,
+            currentFrame: currentFrame,
+            visibleFrame: visibleFrame
+        )
+
+        #expect(resizedFrame.maxY == currentFrame.maxY)
+        #expect(resizedFrame.minY == visibleFrame.minY)
+        #expect(resizedFrame.height < TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 8))
+    }
+
+    @Test
+    func windowPolicyOnlyAutoGrowsWhenTrackRowsAreAdded() {
+        #expect(TrackSwitchWindowPolicy.shouldAutoGrowWindow(previousTrackRowCount: 2, newTrackRowCount: 3))
+        #expect(!TrackSwitchWindowPolicy.shouldAutoGrowWindow(previousTrackRowCount: 6, newTrackRowCount: 5))
+        #expect(!TrackSwitchWindowPolicy.shouldAutoGrowWindow(previousTrackRowCount: 5, newTrackRowCount: 5))
     }
 
     @Test

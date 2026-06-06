@@ -97,7 +97,7 @@ enum TrackSwitchWindowPolicy {
     static let timelineHeaderSpacing: CGFloat = 8
     static let transportBarReservedHeight: CGFloat = 54
     static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
-    static let defaultContentHeight = contentHeight(displayingTrackRows: 2)
+    static let defaultContentHeight = contentHeight(displayingTrackRows: 1)
     static let windowChromeHeight: CGFloat = 28
     static let defaultWindowHeight = defaultContentHeight + windowChromeHeight
     static let minimumWindowSize = CGSize(
@@ -124,6 +124,27 @@ enum TrackSwitchWindowPolicy {
             + trackTimelineHeight(displayingTrackRows: rowCount)
     }
 
+    static func windowHeight(displayingTrackRows rowCount: Int) -> CGFloat {
+        contentHeight(displayingTrackRows: rowCount) + windowChromeHeight
+    }
+
+    static func frame(fittingTrackRows rowCount: Int, currentFrame: CGRect, visibleFrame: CGRect) -> CGRect {
+        let desiredHeight = windowHeight(displayingTrackRows: rowCount)
+        let maximumHeightBeforeMonitorBottom = max(currentFrame.maxY - visibleFrame.minY, 0)
+        let height = min(desiredHeight, maximumHeightBeforeMonitorBottom)
+
+        return CGRect(
+            x: currentFrame.minX,
+            y: currentFrame.maxY - height,
+            width: currentFrame.width,
+            height: height
+        )
+    }
+
+    static func shouldAutoGrowWindow(previousTrackRowCount: Int, newTrackRowCount: Int) -> Bool {
+        newTrackRowCount > previousTrackRowCount
+    }
+
     static func clearSavedMainWindowFrame(defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: mainWindowFrameAutosaveName)
     }
@@ -141,6 +162,19 @@ enum TrackSwitchWindowPolicy {
             height: defaultWindowSize.height
         )
         window.setFrame(defaultFrame, display: true)
+    }
+
+    @MainActor
+    static func resizeMainWindow(_ window: NSWindow, displayingTrackRows rowCount: Int) {
+        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+        let resizedFrame = frame(
+            fittingTrackRows: rowCount,
+            currentFrame: window.frame,
+            visibleFrame: visibleFrame
+        )
+
+        guard resizedFrame.height > window.frame.height + 0.5 else { return }
+        window.setFrame(resizedFrame, display: true, animate: true)
     }
 }
 
