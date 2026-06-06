@@ -110,12 +110,15 @@ struct TrackReorderInsertionTarget: Equatable {
 
 enum ImportActionMenuItem: CaseIterable {
     case open
+    case finderSelection
     case musicSelection
 
     var title: String {
         switch self {
         case .open:
             "Open..."
+        case .finderSelection:
+            "Open Finder Selection"
         case .musicSelection:
             "Open Apple Music Selection"
         }
@@ -134,9 +137,14 @@ final class OpenFileCommandState: ObservableObject {
     @Published var isImportingTracks = false
 
     private let loadAppleMusicSelection: @MainActor () -> Void
+    private let loadFinderSelection: @MainActor () -> Void
 
-    init(loadAppleMusicSelection: @escaping @MainActor () -> Void = {}) {
+    init(
+        loadAppleMusicSelection: @escaping @MainActor () -> Void = {},
+        loadFinderSelection: @escaping @MainActor () -> Void = {}
+    ) {
         self.loadAppleMusicSelection = loadAppleMusicSelection
+        self.loadFinderSelection = loadFinderSelection
     }
 
     func presentOpenDialog() {
@@ -149,6 +157,10 @@ final class OpenFileCommandState: ObservableObject {
 
     func openAppleMusicSelection() {
         loadAppleMusicSelection()
+    }
+
+    func openFinderSelection() {
+        loadFinderSelection()
     }
 }
 
@@ -178,9 +190,23 @@ struct ContentView: View {
     init(controller: PlaybackController) {
         self.controller = controller
         _openFileCommandState = StateObject(
-            wrappedValue: OpenFileCommandState {
-                Task { await controller.loadSelectedLibraryTracks() }
-            }
+            wrappedValue: OpenFileCommandState(
+                loadAppleMusicSelection: {
+                    Task { await controller.loadSelectedLibraryTracks() }
+                },
+                loadFinderSelection: {
+                    Task {
+                        do {
+                            let urls = try FinderSelectionLoader().selectedAudioFileURLs()
+                            await controller.loadImportedFiles(urls)
+                        } catch let error as PlaybackError {
+                            controller.setPlaybackError(error)
+                        } catch {
+                            controller.setPlaybackError(.librarySelectionFailed("Could not read the Finder selection."))
+                        }
+                    }
+                }
+            )
         )
     }
 
@@ -721,6 +747,8 @@ struct ContentView: View {
         switch item {
         case .open:
             openFileCommandState.presentOpenDialog()
+        case .finderSelection:
+            openFileCommandState.openFinderSelection()
         case .musicSelection:
             openFileCommandState.openAppleMusicSelection()
         }

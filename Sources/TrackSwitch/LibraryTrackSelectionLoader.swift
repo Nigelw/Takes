@@ -1,13 +1,90 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 protocol LibraryTrackSelecting {
     func selectedTracks() throws -> LibraryTrackSelection
 }
 
+protocol FinderSelectionLoading {
+    func selectedAudioFileURLs() throws -> [URL]
+}
+
 struct LibraryTrackSelection: Equatable {
     let urls: [URL]
     let failures: [ImportFailure]
+}
+
+enum FinderSelectionResolver {
+    static func audioFileURLs(from urls: [URL]) throws -> [URL] {
+        guard !urls.isEmpty else {
+            throw PlaybackError.librarySelectionFailed("Finder has no selected files.")
+        }
+
+        let audioURLs = urls.filter(isAudioFile(_:))
+        guard !audioURLs.isEmpty else {
+            throw PlaybackError.librarySelectionFailed("Finder selection does not include any audio files.")
+        }
+
+        return audioURLs
+    }
+
+    private static func isAudioFile(_ url: URL) -> Bool {
+        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+        return type.conforms(to: .audio)
+    }
+}
+
+struct FinderSelectionLoader: FinderSelectionLoading {
+    static let finderBundleIdentifier = "com.apple.finder"
+    static let finderSelectionScript = """
+    tell application id "com.apple.finder"
+        set selectedItems to selection
+        if selectedItems is {} then error "Finder has no selected files."
+
+        set outputPaths to {}
+        repeat with selectedItem in selectedItems
+            set end of outputPaths to POSIX path of (selectedItem as alias)
+        end repeat
+
+        set previousDelimiters to AppleScript's text item delimiters
+        set AppleScript's text item delimiters to linefeed
+        set outputText to outputPaths as text
+        set AppleScript's text item delimiters to previousDelimiters
+    end tell
+
+    return outputText
+    """
+
+    func selectedAudioFileURLs() throws -> [URL] {
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: Self.finderBundleIdentifier).isEmpty else {
+            throw PlaybackError.librarySelectionFailed("Finder must be open with one or more audio files selected.")
+        }
+
+        var errorInfo: NSDictionary?
+        guard let appleScript = NSAppleScript(source: Self.finderSelectionScript) else {
+            throw PlaybackError.librarySelectionFailed("Could not prepare the Finder selection script.")
+        }
+
+        let result = appleScript.executeAndReturnError(&errorInfo)
+        if let errorInfo {
+            let message = errorInfo[NSAppleScript.errorMessage] as? String
+            throw PlaybackError.librarySelectionFailed(message ?? "Could not read the Finder selection.")
+        }
+
+        guard let output = result.stringValue else {
+            throw PlaybackError.librarySelectionFailed("Finder did not return any selected files.")
+        }
+
+        let urls = output
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0) }
+
+        return try FinderSelectionResolver.audioFileURLs(from: urls)
+    }
 }
 
 struct LibraryTrackSelectionLoader: LibraryTrackSelecting {

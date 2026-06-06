@@ -26,8 +26,12 @@ struct TrackDropHighlightTests {
     }
 
     @Test
-    func importActionMenuOffersOpenAndMusicSelection() {
-        #expect(ImportActionMenuItem.allCases.map(\.title) == ["Open...", "Open Apple Music Selection"])
+    func importActionMenuOffersOpenFinderSelectionAndMusicSelection() {
+        #expect(ImportActionMenuItem.allCases.map(\.title) == [
+            "Open...",
+            "Open Finder Selection",
+            "Open Apple Music Selection"
+        ])
     }
 
     @MainActor
@@ -57,6 +61,52 @@ struct TrackDropHighlightTests {
         state.openAppleMusicSelection()
 
         #expect(loadCount == 1)
+    }
+
+    @MainActor
+    @Test
+    func openFileCommandStatePerformsFinderSelectionAction() {
+        var loadCount = 0
+        let state = OpenFileCommandState(loadFinderSelection: {
+            loadCount += 1
+        })
+
+        state.openFinderSelection()
+
+        #expect(loadCount == 1)
+    }
+
+    @Test
+    func finderSelectionResolverReturnsAudioFileURLs() throws {
+        let wav = URL(fileURLWithPath: "/tmp/selection.wav")
+        let mp3 = URL(fileURLWithPath: "/tmp/selection.mp3")
+
+        #expect(try FinderSelectionResolver.audioFileURLs(from: [wav, mp3]) == [wav, mp3])
+    }
+
+    @Test
+    func finderSelectionResolverReturnsAudioFilesFromMixedSelection() throws {
+        let wav = URL(fileURLWithPath: "/tmp/selection.wav")
+        let text = URL(fileURLWithPath: "/tmp/notes.txt")
+        let mp3 = URL(fileURLWithPath: "/tmp/selection.mp3")
+
+        #expect(try FinderSelectionResolver.audioFileURLs(from: [wav, text, mp3]) == [wav, mp3])
+    }
+
+    @Test
+    func finderSelectionResolverRejectsEmptySelection() {
+        #expect(throws: PlaybackError.librarySelectionFailed("Finder has no selected files.")) {
+            try FinderSelectionResolver.audioFileURLs(from: [])
+        }
+    }
+
+    @Test
+    func finderSelectionResolverRejectsSelectionWithNoAudioFiles() {
+        let text = URL(fileURLWithPath: "/tmp/notes.txt")
+
+        #expect(throws: PlaybackError.librarySelectionFailed("Finder selection does not include any audio files.")) {
+            try FinderSelectionResolver.audioFileURLs(from: [text])
+        }
     }
 
     @MainActor

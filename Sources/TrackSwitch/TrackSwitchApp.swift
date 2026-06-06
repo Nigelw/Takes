@@ -238,6 +238,12 @@ private struct FileCommands: Commands {
             .keyboardShortcut("o")
             .disabled(openFileCommandState == nil)
 
+            Button(ImportActionMenuItem.finderSelection.title) {
+                openFileCommandState?.openFinderSelection()
+            }
+            .keyboardShortcut("f", modifiers: [.shift, .command])
+            .disabled(openFileCommandState == nil)
+
             Button(ImportActionMenuItem.musicSelection.title) {
                 openFileCommandState?.openAppleMusicSelection()
             }
