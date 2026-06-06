@@ -154,10 +154,10 @@ Current transport behavior:
 
 ### Loading Audio
 
-- Use the `+` menu above the track info area and choose `Open...` to append one or more local files.
+- Use the `+` button above the track info area to append one or more local files.
 - Drag a compatible audio file onto a specific track row to replace that row.
 - Drag files elsewhere in the window to append them to the track list.
-- Use the `+` menu above the track info area and choose `Get Apple Music Selection` to import the current Music.app selection.
+- Use the `+` menu above the track info area and choose `Open Apple Music Selection` to import the current Music.app selection.
 
 Music import rules:
 
@@ -191,10 +191,10 @@ Music import rules:
 Useful spot checks after changing playback or UI behavior:
 
 1. Confirm the top transport shows play/pause, rewind, switch, and signed time readout.
-2. Confirm the `+` menu above the track info area contains `Open...` and `Get Apple Music Selection`.
-3. Use `Open...` with one file and confirm it creates Track 1 and makes it active.
-4. Use `Open...` with additional files and confirm they append in order.
-5. Use `Open...` with more than 32 files and confirm the app loads available slots and reports skipped files.
+2. Confirm the `+` dropdown above the track info area contains `Open Finder Selection` and `Open Apple Music Selection`.
+3. Use the `+` button with one file and confirm it creates Track 1 and makes it active.
+4. Use the `+` button with additional files and confirm they append in order.
+5. Use the `+` button with more than 32 files and confirm the app loads available slots and reports skipped files.
 6. Use a mixed valid/invalid import and confirm successful files append while failures are reported together.
 7. Confirm `Switch Playback` is disabled with one loaded track and cycles through three or more tracks in row order.
 8. Confirm placeholder waveform lanes render for loaded tracks.

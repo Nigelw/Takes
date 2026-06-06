@@ -26,9 +26,8 @@ struct TrackDropHighlightTests {
     }
 
     @Test
-    func importActionMenuOffersOpenFinderSelectionAndMusicSelection() {
-        #expect(ImportActionMenuItem.allCases.map(\.title) == [
-            "Open...",
+    func importActionMenuOffersFinderSelectionAndMusicSelection() {
+        #expect(ImportActionMenuItem.dropdownItems.map(\.title) == [
             "Open Finder Selection",
             "Open Apple Music Selection"
         ])

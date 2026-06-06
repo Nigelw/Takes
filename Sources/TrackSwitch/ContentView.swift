@@ -113,6 +113,11 @@ enum ImportActionMenuItem: CaseIterable {
     case finderSelection
     case musicSelection
 
+    static let dropdownItems: [ImportActionMenuItem] = [
+        .finderSelection,
+        .musicSelection
+    ]
+
     var title: String {
         switch self {
         case .open:
@@ -401,7 +406,7 @@ struct ContentView: View {
                     .frame(height: ImportActionControlMetrics.controlHeight)
 
                 Menu {
-                    ForEach(ImportActionMenuItem.allCases, id: \.self) { item in
+                    ForEach(ImportActionMenuItem.dropdownItems, id: \.self) { item in
                         Button(item.title) {
                             performImportAction(item)
                         }
