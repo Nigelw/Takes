@@ -9,8 +9,7 @@ This README is written for someone working on the repo. It covers project layout
 The app currently supports:
 
 - Loading up to 32 local audio files through a single Open control
-- Dragging files onto a specific track row to replace that row
-- Dragging files elsewhere in the window to append to the track list
+- Dragging files anywhere in the window to append to the track list
 - Placeholder waveform lanes for each loaded track
 - Signed global timeline playback with a playhead over the waveform lanes
 - Independent offset adjustment for each loaded track
@@ -155,8 +154,7 @@ Current transport behavior:
 ### Loading Audio
 
 - Use the `+` button above the track info area to append one or more local files.
-- Drag a compatible audio file onto a specific track row to replace that row.
-- Drag files elsewhere in the window to append them to the track list.
+- Drag files anywhere in the window to append them to the track list.
 - Use the `+` menu above the track info area and choose `Open Apple Music Selection` to import the current Music.app selection.
 
 Music import rules:
@@ -205,11 +203,10 @@ Useful spot checks after changing playback or UI behavior:
 13. Click the track info area and confirm it changes the active track.
 14. Confirm the gear popup contains gain only.
 15. Confirm offset controls are visible for each loaded track.
-16. Drop a file on a specific track row and confirm it replaces that row.
-17. Drop multiple files on a row and confirm they append instead of replacing.
-18. Drop files elsewhere in the window and confirm they append.
-19. Remove a non-active track during playback and confirm playback continues.
-20. Remove the active track and confirm playback pauses and selects the next track, or previous if the removed track was last.
+16. Drop a file anywhere in the window and confirm it appends to the track list.
+17. Drop multiple files anywhere in the window and confirm they append.
+18. Remove a non-active track during playback and confirm playback continues.
+19. Remove the active track and confirm playback pauses and selects the next track, or previous if the removed track was last.
 
 ## Known Constraints
 

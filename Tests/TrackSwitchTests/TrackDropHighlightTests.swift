@@ -21,9 +21,33 @@ struct TrackDropHighlightTests {
     }
 
     @Test
+    func trackRowDropTargetAcceptsReorderAndFileDrops() {
+        #expect(TrackRowDropTarget.acceptedContentTypeIdentifiers == [
+            TrackReorderDrag.contentType.identifier,
+            UTType.fileURL.identifier
+        ])
+    }
+
+    @Test
+    func trackRowDropKindPrioritizesFileDropsOverPlainTextReorderDrops() {
+        #expect(TrackRowDropKind.kind(hasFileURLs: true, hasReorderItems: true) == .file)
+        #expect(TrackRowDropKind.kind(hasFileURLs: true, hasReorderItems: false) == .file)
+        #expect(TrackRowDropKind.kind(hasFileURLs: false, hasReorderItems: true) == .reorder)
+        #expect(TrackRowDropKind.kind(hasFileURLs: false, hasReorderItems: false) == nil)
+    }
+
+    @Test
     func trackReorderInsertionPlacementUsesDropLocation() {
         #expect(TrackReorderInsertionPlacement.location(y: 10, rowHeight: 100) == .before)
         #expect(TrackReorderInsertionPlacement.location(y: 60, rowHeight: 100) == .after)
+    }
+
+    @Test
+    func droppedFilesAlwaysAppendRegardlessOfFormerRowTarget() {
+        let targetTrackID = UUID()
+
+        #expect(DroppedFileImportAction.action(targetTrackID: nil) == .append)
+        #expect(DroppedFileImportAction.action(targetTrackID: targetTrackID) == .append)
     }
 
     @Test
