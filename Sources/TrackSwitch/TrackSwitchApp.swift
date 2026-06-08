@@ -141,8 +141,26 @@ enum TrackSwitchWindowPolicy {
         )
     }
 
-    static func shouldAutoGrowWindow(previousTrackRowCount: Int, newTrackRowCount: Int) -> Bool {
-        newTrackRowCount > previousTrackRowCount
+    static func shouldAutoGrowWindow(
+        previousTrackRowCount: Int,
+        newTrackRowCount: Int,
+        currentWindowHeight: CGFloat
+    ) -> Bool {
+        guard newTrackRowCount > previousTrackRowCount else { return false }
+
+        let desiredHeight = windowHeight(displayingTrackRows: newTrackRowCount)
+        return desiredHeight > currentWindowHeight + 0.5
+    }
+
+    static func shouldAutoShrinkWindow(
+        previousTrackRowCount: Int,
+        newTrackRowCount: Int,
+        currentWindowHeight: CGFloat
+    ) -> Bool {
+        guard newTrackRowCount < previousTrackRowCount else { return false }
+
+        let desiredHeight = windowHeight(displayingTrackRows: newTrackRowCount)
+        return desiredHeight < currentWindowHeight - 0.5
     }
 
     static func clearSavedMainWindowFrame(defaults: UserDefaults = .standard) {
@@ -173,7 +191,7 @@ enum TrackSwitchWindowPolicy {
             visibleFrame: visibleFrame
         )
 
-        guard resizedFrame.height > window.frame.height + 0.5 else { return }
+        guard abs(resizedFrame.height - window.frame.height) > 0.5 else { return }
         window.setFrame(resizedFrame, display: true, animate: true)
     }
 }

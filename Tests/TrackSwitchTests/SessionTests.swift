@@ -189,9 +189,61 @@ struct SessionTests {
 
     @Test
     func windowPolicyOnlyAutoGrowsWhenTrackRowsAreAdded() {
-        #expect(TrackSwitchWindowPolicy.shouldAutoGrowWindow(previousTrackRowCount: 2, newTrackRowCount: 3))
-        #expect(!TrackSwitchWindowPolicy.shouldAutoGrowWindow(previousTrackRowCount: 6, newTrackRowCount: 5))
-        #expect(!TrackSwitchWindowPolicy.shouldAutoGrowWindow(previousTrackRowCount: 5, newTrackRowCount: 5))
+        let currentWindowHeight = TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 2)
+
+        #expect(TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+            previousTrackRowCount: 2,
+            newTrackRowCount: 3,
+            currentWindowHeight: currentWindowHeight
+        ))
+        #expect(!TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+            previousTrackRowCount: 6,
+            newTrackRowCount: 5,
+            currentWindowHeight: currentWindowHeight
+        ))
+        #expect(!TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+            previousTrackRowCount: 5,
+            newTrackRowCount: 5,
+            currentWindowHeight: currentWindowHeight
+        ))
+    }
+
+    @Test
+    func windowPolicyDoesNotAutoGrowWhenAddedRowsAlreadyFitCurrentWindowHeight() {
+        let currentWindowHeight = TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 4)
+
+        #expect(!TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+            previousTrackRowCount: 2,
+            newTrackRowCount: 4,
+            currentWindowHeight: currentWindowHeight
+        ))
+    }
+
+    @Test
+    func windowPolicyAutoShrinksWhenRemovedRowsFitBelowCurrentWindowHeight() {
+        let currentWindowHeight = TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 4)
+
+        #expect(TrackSwitchWindowPolicy.shouldAutoShrinkWindow(
+            previousTrackRowCount: 4,
+            newTrackRowCount: 2,
+            currentWindowHeight: currentWindowHeight
+        ))
+    }
+
+    @Test
+    func windowPolicyDoesNotAutoShrinkWhenRemainingRowsNeedCurrentWindowHeight() {
+        let currentWindowHeight = TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 4)
+
+        #expect(!TrackSwitchWindowPolicy.shouldAutoShrinkWindow(
+            previousTrackRowCount: 4,
+            newTrackRowCount: 4,
+            currentWindowHeight: currentWindowHeight
+        ))
+        #expect(!TrackSwitchWindowPolicy.shouldAutoShrinkWindow(
+            previousTrackRowCount: 5,
+            newTrackRowCount: 4,
+            currentWindowHeight: currentWindowHeight
+        ))
     }
 
     @Test

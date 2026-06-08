@@ -354,10 +354,16 @@ struct ContentView: View {
         }
         .onChange(of: controller.session.tracks.count) { previousTrackCount, trackCount in
             guard let mainWindow else { return }
-            guard TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+            let shouldResize = TrackSwitchWindowPolicy.shouldAutoGrowWindow(
                 previousTrackRowCount: previousTrackCount,
-                newTrackRowCount: trackCount
-            ) else { return }
+                newTrackRowCount: trackCount,
+                currentWindowHeight: mainWindow.frame.height
+            ) || TrackSwitchWindowPolicy.shouldAutoShrinkWindow(
+                previousTrackRowCount: previousTrackCount,
+                newTrackRowCount: trackCount,
+                currentWindowHeight: mainWindow.frame.height
+            )
+            guard shouldResize else { return }
             TrackSwitchWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount)
         }
         .onDisappear {
