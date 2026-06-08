@@ -102,6 +102,19 @@ struct TrackDropHighlightTests {
 
     @MainActor
     @Test
+    func openFileCommandStatePerformsShowActiveTrackInFinderAction() {
+        var showCount = 0
+        let state = OpenFileCommandState(showActiveTrackInFinder: {
+            showCount += 1
+        })
+
+        state.showActiveTrackInFinder()
+
+        #expect(showCount == 1)
+    }
+
+    @MainActor
+    @Test
     func openFileCommandStatePerformsClearAllTracksAction() {
         var clearCount = 0
         let state = OpenFileCommandState(clearAllTracks: {

@@ -287,6 +287,7 @@ struct TrackSwitchApp: App {
 
 private struct FileCommands: Commands {
     @FocusedValue(\.openFileCommandState) private var openFileCommandState
+    @FocusedValue(\.canShowActiveTrackInFinder) private var canShowActiveTrackInFinder
     @FocusedValue(\.canClearTracks) private var canClearTracks
 
     var body: some Commands {
@@ -308,6 +309,14 @@ private struct FileCommands: Commands {
             }
             .keyboardShortcut("m", modifiers: [.shift, .command])
             .disabled(openFileCommandState == nil)
+
+            Divider()
+
+            Button("Show in Finder") {
+                openFileCommandState?.showActiveTrackInFinder()
+            }
+            .keyboardShortcut("r", modifiers: [.shift, .command])
+            .disabled(openFileCommandState == nil || canShowActiveTrackInFinder != true)
 
             Divider()
 

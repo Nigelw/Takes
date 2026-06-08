@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -205,15 +206,18 @@ final class OpenFileCommandState: ObservableObject {
 
     private let loadAppleMusicSelection: @MainActor () -> Void
     private let loadFinderSelection: @MainActor () -> Void
+    private let showActiveTrackInFinderAction: @MainActor () -> Void
     private let clearAllTracksAction: @MainActor () -> Void
 
     init(
         loadAppleMusicSelection: @escaping @MainActor () -> Void = {},
         loadFinderSelection: @escaping @MainActor () -> Void = {},
+        showActiveTrackInFinder: @escaping @MainActor () -> Void = {},
         clearAllTracks: @escaping @MainActor () -> Void = {}
     ) {
         self.loadAppleMusicSelection = loadAppleMusicSelection
         self.loadFinderSelection = loadFinderSelection
+        self.showActiveTrackInFinderAction = showActiveTrackInFinder
         self.clearAllTracksAction = clearAllTracks
     }
 
@@ -233,6 +237,10 @@ final class OpenFileCommandState: ObservableObject {
         loadFinderSelection()
     }
 
+    func showActiveTrackInFinder() {
+        showActiveTrackInFinderAction()
+    }
+
     func clearAllTracks() {
         clearAllTracksAction()
     }
@@ -246,6 +254,10 @@ private struct CanClearTracksKey: FocusedValueKey {
     typealias Value = Bool
 }
 
+private struct CanShowActiveTrackInFinderKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
 extension FocusedValues {
     var openFileCommandState: OpenFileCommandState? {
         get { self[OpenFileCommandStateKey.self] }
@@ -255,6 +267,11 @@ extension FocusedValues {
     var canClearTracks: Bool? {
         get { self[CanClearTracksKey.self] }
         set { self[CanClearTracksKey.self] = newValue }
+    }
+
+    var canShowActiveTrackInFinder: Bool? {
+        get { self[CanShowActiveTrackInFinderKey.self] }
+        set { self[CanShowActiveTrackInFinderKey.self] = newValue }
     }
 }
 
@@ -288,6 +305,10 @@ struct ContentView: View {
                             controller.setPlaybackError(.librarySelectionFailed("Could not read the Finder selection."))
                         }
                     }
+                },
+                showActiveTrackInFinder: {
+                    guard let url = controller.session.activeTrack?.loadedTrack.url else { return }
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
                 },
                 clearAllTracks: {
                     controller.clearTracks()
@@ -348,6 +369,7 @@ struct ContentView: View {
             handleImport(result)
         }
         .focusedSceneValue(\.openFileCommandState, openFileCommandState)
+        .focusedSceneValue(\.canShowActiveTrackInFinder, controller.session.activeTrack != nil)
         .focusedSceneValue(\.canClearTracks, !controller.session.tracks.isEmpty)
         .onAppear {
             setupKeyMonitor()

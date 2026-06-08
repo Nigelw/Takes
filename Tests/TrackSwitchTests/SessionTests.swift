@@ -11,6 +11,7 @@ struct SessionTests {
         #expect(!session.isPlayable)
         #expect(!session.canSwitchPlayback)
         #expect(session.activeTrackID == nil)
+        #expect(session.activeTrack == nil)
 
         let first = SessionTrack(loadedTrack: makeTrack(name: "a.wav"))
         session.tracks = [first]
@@ -20,6 +21,7 @@ struct SessionTests {
         #expect(session.isPlayable)
         #expect(!session.canSwitchPlayback)
         #expect(session.activeTrackID == first.id)
+        #expect(session.activeTrack == first)
 
         let second = SessionTrack(loadedTrack: makeTrack(name: "b.wav"))
         session.tracks.append(second)

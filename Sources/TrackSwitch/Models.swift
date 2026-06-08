@@ -67,6 +67,11 @@ struct ComparisonSession: Equatable {
         guard let activeTrackID else { return nil }
         return tracks.firstIndex { $0.id == activeTrackID }
     }
+
+    var activeTrack: SessionTrack? {
+        guard let activeTrackIndex else { return nil }
+        return tracks[activeTrackIndex]
+    }
 }
 
 struct TimelineHeaderMarker: Equatable {
