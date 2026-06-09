@@ -1359,8 +1359,9 @@ private struct NumericControlRow: View {
             Button {
                 value = 0
             } label: {
-                Label("Reset", systemImage: "arrow.counterclockwise")
+                Image(systemName: "arrow.counterclockwise")
             }
+            .accessibilityLabel("Reset")
             .buttonStyle(.bordered)
         }
     }
