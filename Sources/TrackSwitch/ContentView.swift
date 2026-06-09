@@ -106,6 +106,30 @@ struct NumericControlEditState {
         commit(stepped)
         return stepped
     }
+
+    mutating func commitSteppedEditingText(
+        currentText: String,
+        fallbackValue: Int,
+        configuration: NumericControlConfiguration,
+        direction: Int,
+        largeStep: Bool
+    ) -> Int {
+        let textForStep: String
+        if let pendingText,
+           currentText.trimmingCharacters(in: .whitespacesAndNewlines) == "\(committedValue)" {
+            textForStep = pendingText
+        } else {
+            textForStep = currentText
+        }
+
+        updatePendingText(textForStep)
+        return commitSteppedPendingText(
+            fallbackValue: fallbackValue,
+            configuration: configuration,
+            direction: direction,
+            largeStep: largeStep
+        )
+    }
 }
 
 enum NumericControlEditingText {
@@ -116,7 +140,7 @@ enum NumericControlEditingText {
 
 enum NumericInputKeyEquivalentPolicy {
     static func routesToFieldEditor(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
-        keyCode == 123 || keyCode == 124
+        keyCode == 123 || keyCode == 124 || keyCode == 125 || keyCode == 126
     }
 
     static func routesToFieldEditor(event: NSEvent) -> Bool {
@@ -1438,7 +1462,7 @@ private struct IntegerInputField: NSViewRepresentable {
         @MainActor
         func controlTextDidChange(_ obj: Notification) {
             guard let textField = obj.object as? NSTextField else { return }
-            editState.updatePendingText(textField.stringValue)
+            editState.updatePendingText((textField.currentEditor() as? NSTextView)?.string ?? textField.stringValue)
         }
 
         func applyStep(direction: Int, largeStep: Bool) {
@@ -1469,7 +1493,7 @@ private struct IntegerInputField: NSViewRepresentable {
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             switch commandSelector {
             case #selector(NSResponder.moveUp(_:)):
-                applyStep(
+                let steppedValue = applyStep(
                     using: NumericControlEditingText.current(
                         controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
                         fieldEditorText: textView.string
@@ -1477,10 +1501,10 @@ private struct IntegerInputField: NSViewRepresentable {
                     direction: 1,
                     largeStep: false
                 )
-                updateEditingText(control: control, textView: textView)
+                updateEditingText(control: control, textView: textView, value: steppedValue)
                 return true
             case #selector(NSResponder.moveDown(_:)):
-                applyStep(
+                let steppedValue = applyStep(
                     using: NumericControlEditingText.current(
                         controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
                         fieldEditorText: textView.string
@@ -1488,10 +1512,10 @@ private struct IntegerInputField: NSViewRepresentable {
                     direction: -1,
                     largeStep: false
                 )
-                updateEditingText(control: control, textView: textView)
+                updateEditingText(control: control, textView: textView, value: steppedValue)
                 return true
             case #selector(NSResponder.moveUpAndModifySelection(_:)):
-                applyStep(
+                let steppedValue = applyStep(
                     using: NumericControlEditingText.current(
                         controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
                         fieldEditorText: textView.string
@@ -1499,10 +1523,10 @@ private struct IntegerInputField: NSViewRepresentable {
                     direction: 1,
                     largeStep: true
                 )
-                updateEditingText(control: control, textView: textView)
+                updateEditingText(control: control, textView: textView, value: steppedValue)
                 return true
             case #selector(NSResponder.moveDownAndModifySelection(_:)):
-                applyStep(
+                let steppedValue = applyStep(
                     using: NumericControlEditingText.current(
                         controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
                         fieldEditorText: textView.string
@@ -1510,7 +1534,7 @@ private struct IntegerInputField: NSViewRepresentable {
                     direction: -1,
                     largeStep: true
                 )
-                updateEditingText(control: control, textView: textView)
+                updateEditingText(control: control, textView: textView, value: steppedValue)
                 return true
             case #selector(NSResponder.insertNewline(_:)):
                 if let textField = control as? NSTextField {
@@ -1534,17 +1558,20 @@ private struct IntegerInputField: NSViewRepresentable {
             }
         }
 
-        private func applyStep(using currentText: String, direction: Int, largeStep: Bool) {
-            editState.updatePendingText(currentText)
-            value = editState.commitSteppedPendingText(
+        private func applyStep(using currentText: String, direction: Int, largeStep: Bool) -> Int {
+            let steppedValue = editState.commitSteppedEditingText(
+                currentText: currentText,
                 fallbackValue: value,
                 configuration: configuration,
                 direction: direction,
                 largeStep: largeStep
             )
+            value = steppedValue
+            return steppedValue
         }
 
-        private func updateEditingText(control: NSControl, textView: NSTextView) {
+        @MainActor
+        private func updateEditingText(control: NSControl, textView: NSTextView, value: Int) {
             let text = "\(value)"
             if let textField = control as? NSTextField {
                 textField.stringValue = text

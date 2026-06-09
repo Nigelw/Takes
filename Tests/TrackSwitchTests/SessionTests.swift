@@ -1046,6 +1046,25 @@ struct SessionTests {
     }
 
     @Test
+    func numericControlEditStateKeepsPendingTextWhenSteppingWithStaleControlText() {
+        var editState = NumericControlEditState(committedValue: 0)
+        editState.beginEditing(currentValue: 0)
+        editState.updatePendingText("20")
+
+        let stepped = editState.commitSteppedEditingText(
+            currentText: "0",
+            fallbackValue: 0,
+            configuration: .offset,
+            direction: 1,
+            largeStep: false
+        )
+
+        #expect(stepped == 30)
+        #expect(editState.committedValue == 30)
+        #expect(editState.pendingText == nil)
+    }
+
+    @Test
     func numericControlEditStateClearsPendingTextOnCancel() {
         var editState = NumericControlEditState(committedValue: 12)
         editState.beginEditing(currentValue: 12)
@@ -1085,9 +1104,15 @@ struct SessionTests {
     }
 
     @Test
+    func numericInputKeyEquivalentPolicyRoutesVerticalArrowsToTextEditing() {
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 125, modifierFlags: []) == true)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 126, modifierFlags: []) == true)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 125, modifierFlags: .shift) == true)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 126, modifierFlags: .shift) == true)
+    }
+
+    @Test
     func numericInputKeyEquivalentPolicyLeavesOtherKeysAlone() {
-        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 125, modifierFlags: []) == false)
-        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 126, modifierFlags: []) == false)
         #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 49, modifierFlags: []) == false)
         #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 7, modifierFlags: []) == false)
     }
