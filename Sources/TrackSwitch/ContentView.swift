@@ -51,6 +51,20 @@ struct NumericControlEditState {
         pendingText = nil
     }
 
+    mutating func beginEditing(
+        displayedText: String,
+        fallbackValue: Int,
+        configuration: NumericControlConfiguration
+    ) {
+        let trimmed = displayedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        beginEditing(currentValue: configuration.clamped(Int(trimmed) ?? fallbackValue))
+    }
+
+    mutating func refreshCommittedValue(_ value: Int) {
+        guard pendingText == nil else { return }
+        committedValue = value
+    }
+
     mutating func updatePendingText(_ text: String) {
         pendingText = text
     }
@@ -1356,8 +1370,11 @@ private struct IntegerInputField: NSViewRepresentable {
                 self.value = clamped
             }
         }
-        if !context.coordinator.isEditing && nsView.stringValue != "\(clamped)" {
-            nsView.stringValue = "\(clamped)"
+        if !context.coordinator.isEditing {
+            context.coordinator.refreshCommittedValue(clamped)
+            if nsView.stringValue != "\(clamped)" {
+                nsView.stringValue = "\(clamped)"
+            }
         }
     }
 
@@ -1379,7 +1396,12 @@ private struct IntegerInputField: NSViewRepresentable {
 
         @MainActor
         func controlTextDidBeginEditing(_ obj: Notification) {
-            editState.beginEditing(currentValue: value)
+            let displayedText = (obj.object as? NSTextField)?.stringValue ?? "\(value)"
+            editState.beginEditing(
+                displayedText: displayedText,
+                fallbackValue: value,
+                configuration: configuration
+            )
             isEditing = true
             isCancellingEdit = false
         }
@@ -1421,6 +1443,10 @@ private struct IntegerInputField: NSViewRepresentable {
 
         func applyStep(direction: Int, largeStep: Bool) {
             value = configuration.steppedValue(from: value, direction: direction, largeStep: largeStep)
+        }
+
+        func refreshCommittedValue(_ value: Int) {
+            editState.refreshCommittedValue(value)
         }
 
         @MainActor

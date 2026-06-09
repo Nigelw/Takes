@@ -1002,6 +1002,32 @@ struct SessionTests {
     }
 
     @Test
+    func numericControlEditStateRefreshesCommittedValueBeforeEditing() {
+        var editState = NumericControlEditState(committedValue: 0)
+
+        editState.refreshCommittedValue(12)
+        editState.beginEditing(currentValue: 12)
+        editState.updatePendingText("27")
+
+        #expect(editState.cancelledValue() == 12)
+        #expect(editState.committedValue == 12)
+    }
+
+    @Test
+    func numericControlEditStateBeginsEditingFromDisplayedTextBeforeFallbackValue() {
+        var editState = NumericControlEditState(committedValue: 12)
+
+        editState.beginEditing(
+            displayedText: "12",
+            fallbackValue: 0,
+            configuration: .offset
+        )
+        editState.updatePendingText("27")
+
+        #expect(editState.cancelledValue() == 12)
+    }
+
+    @Test
     func numericControlEditStateCommitsSteppedPendingText() {
         var editState = NumericControlEditState(committedValue: 0)
         editState.beginEditing(currentValue: 0)
