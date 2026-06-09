@@ -40,6 +40,7 @@ struct NumericControlConfiguration {
 
 struct NumericControlEditState {
     private(set) var committedValue: Int
+    private(set) var pendingText: String?
 
     init(committedValue: Int) {
         self.committedValue = committedValue
@@ -47,14 +48,68 @@ struct NumericControlEditState {
 
     mutating func beginEditing(currentValue: Int) {
         committedValue = currentValue
+        pendingText = nil
     }
 
-    func cancelledValue() -> Int {
-        committedValue
+    mutating func updatePendingText(_ text: String) {
+        pendingText = text
+    }
+
+    mutating func cancelledValue() -> Int {
+        pendingText = nil
+        return committedValue
     }
 
     mutating func commit(_ value: Int) {
         committedValue = value
+        pendingText = nil
+    }
+
+    mutating func commitPendingText(
+        fallbackValue: Int,
+        configuration: NumericControlConfiguration
+    ) -> Int {
+        guard let pendingText else { return committedValue }
+        let trimmed = pendingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed = Int(trimmed) ?? fallbackValue
+        let clamped = configuration.clamped(parsed)
+        commit(clamped)
+        return clamped
+    }
+
+    mutating func commitSteppedPendingText(
+        fallbackValue: Int,
+        configuration: NumericControlConfiguration,
+        direction: Int,
+        largeStep: Bool
+    ) -> Int {
+        let stepped = configuration.steppedValue(
+            fromText: pendingText ?? "\(fallbackValue)",
+            fallbackValue: fallbackValue,
+            direction: direction,
+            largeStep: largeStep
+        )
+        commit(stepped)
+        return stepped
+    }
+}
+
+enum NumericControlEditingText {
+    static func current(controlText: String, fieldEditorText: String?) -> String {
+        fieldEditorText ?? controlText
+    }
+}
+
+enum NumericInputKeyEquivalentPolicy {
+    static func routesToFieldEditor(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        keyCode == 123 || keyCode == 124
+    }
+
+    static func routesToFieldEditor(event: NSEvent) -> Bool {
+        routesToFieldEditor(
+            keyCode: event.keyCode,
+            modifierFlags: event.modifierFlags
+        )
     }
 }
 
@@ -78,7 +133,7 @@ struct NumericControlFocusPolicy {
 
 struct GlobalShortcutFocusPolicy {
     static func shouldHandleGlobalShortcut(firstResponder: NSResponder?) -> Bool {
-        !(firstResponder is NSTextView)
+        !(firstResponder is NSTextView || firstResponder is NSTextField)
     }
 }
 
@@ -273,6 +328,7 @@ extension FocusedValues {
         get { self[CanShowActiveTrackInFinderKey.self] }
         set { self[CanShowActiveTrackInFinderKey.self] = newValue }
     }
+
 }
 
 struct ContentView: View {
@@ -1241,7 +1297,10 @@ private struct NumericControlRow: View {
             }
             .buttonStyle(.bordered)
 
-            IntegerInputField(value: $value, configuration: configuration)
+            IntegerInputField(
+                value: $value,
+                configuration: configuration
+            )
                 .frame(width: 70)
 
             Text(configuration.suffix)
@@ -1274,11 +1333,14 @@ private struct IntegerInputField: NSViewRepresentable {
     let configuration: NumericControlConfiguration
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(value: $value, configuration: configuration)
+        Coordinator(
+            value: $value,
+            configuration: configuration
+        )
     }
 
     func makeNSView(context: Context) -> NSTextField {
-        let textField = NSTextField(frame: .zero)
+        let textField = NumericInputTextField(frame: .zero)
         textField.alignment = .right
         textField.isBordered = true
         textField.focusRingType = .default
@@ -1294,7 +1356,7 @@ private struct IntegerInputField: NSViewRepresentable {
                 self.value = clamped
             }
         }
-        if nsView.stringValue != "\(clamped)" {
+        if !context.coordinator.isEditing && nsView.stringValue != "\(clamped)" {
             nsView.stringValue = "\(clamped)"
         }
     }
@@ -1303,9 +1365,13 @@ private struct IntegerInputField: NSViewRepresentable {
         @Binding private var value: Int
         private let configuration: NumericControlConfiguration
         private var editState: NumericControlEditState
+        private(set) var isEditing = false
         private var isCancellingEdit = false
 
-        init(value: Binding<Int>, configuration: NumericControlConfiguration) {
+        init(
+            value: Binding<Int>,
+            configuration: NumericControlConfiguration
+        ) {
             _value = value
             self.configuration = configuration
             editState = NumericControlEditState(committedValue: value.wrappedValue)
@@ -1314,12 +1380,14 @@ private struct IntegerInputField: NSViewRepresentable {
         @MainActor
         func controlTextDidBeginEditing(_ obj: Notification) {
             editState.beginEditing(currentValue: value)
+            isEditing = true
             isCancellingEdit = false
         }
 
         @MainActor
         func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
             guard let textField = control as? NSTextField else { return true }
+            editState.updatePendingText(fieldEditor.string)
             if isCancellingEdit {
                 let restoredValue = editState.cancelledValue()
                 value = restoredValue
@@ -1337,18 +1405,18 @@ private struct IntegerInputField: NSViewRepresentable {
                 let restoredValue = editState.cancelledValue()
                 value = restoredValue
                 textField.stringValue = "\(restoredValue)"
+                isEditing = false
                 isCancellingEdit = false
                 return
             }
             syncValue(from: textField)
+            isEditing = false
         }
 
         @MainActor
         func controlTextDidChange(_ obj: Notification) {
             guard let textField = obj.object as? NSTextField else { return }
-            if let parsed = Int(textField.stringValue.trimmingCharacters(in: .whitespaces)) {
-                value = configuration.clamped(parsed)
-            }
+            editState.updatePendingText(textField.stringValue)
         }
 
         func applyStep(direction: Int, largeStep: Bool) {
@@ -1362,12 +1430,13 @@ private struct IntegerInputField: NSViewRepresentable {
 
         @MainActor
         private func syncValue(from textField: NSTextField, overrideText: String?) {
-            let trimmed = (overrideText ?? textField.stringValue).trimmingCharacters(in: .whitespaces)
-            let parsed = Int(trimmed) ?? value
-            let clamped = configuration.clamped(parsed)
-            value = clamped
-            editState.commit(clamped)
-            textField.stringValue = "\(clamped)"
+            editState.updatePendingText(overrideText ?? textField.stringValue)
+            let committedValue = editState.commitPendingText(
+                fallbackValue: value,
+                configuration: configuration
+            )
+            value = committedValue
+            textField.stringValue = "\(committedValue)"
         }
 
         @MainActor
@@ -1375,46 +1444,63 @@ private struct IntegerInputField: NSViewRepresentable {
             switch commandSelector {
             case #selector(NSResponder.moveUp(_:)):
                 applyStep(
-                    using: (control as? NSTextField)?.stringValue ?? "\(value)",
+                    using: NumericControlEditingText.current(
+                        controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
+                        fieldEditorText: textView.string
+                    ),
                     direction: 1,
                     largeStep: false
                 )
-                if let textField = control as? NSTextField { textField.stringValue = "\(value)" }
+                updateEditingText(control: control, textView: textView)
                 return true
             case #selector(NSResponder.moveDown(_:)):
                 applyStep(
-                    using: (control as? NSTextField)?.stringValue ?? "\(value)",
+                    using: NumericControlEditingText.current(
+                        controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
+                        fieldEditorText: textView.string
+                    ),
                     direction: -1,
                     largeStep: false
                 )
-                if let textField = control as? NSTextField { textField.stringValue = "\(value)" }
+                updateEditingText(control: control, textView: textView)
                 return true
             case #selector(NSResponder.moveUpAndModifySelection(_:)):
                 applyStep(
-                    using: (control as? NSTextField)?.stringValue ?? "\(value)",
+                    using: NumericControlEditingText.current(
+                        controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
+                        fieldEditorText: textView.string
+                    ),
                     direction: 1,
                     largeStep: true
                 )
-                if let textField = control as? NSTextField { textField.stringValue = "\(value)" }
+                updateEditingText(control: control, textView: textView)
                 return true
             case #selector(NSResponder.moveDownAndModifySelection(_:)):
                 applyStep(
-                    using: (control as? NSTextField)?.stringValue ?? "\(value)",
+                    using: NumericControlEditingText.current(
+                        controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
+                        fieldEditorText: textView.string
+                    ),
                     direction: -1,
                     largeStep: true
                 )
-                if let textField = control as? NSTextField { textField.stringValue = "\(value)" }
+                updateEditingText(control: control, textView: textView)
                 return true
             case #selector(NSResponder.insertNewline(_:)):
+                if let textField = control as? NSTextField {
+                    syncValue(from: textField, overrideText: textView.string)
+                }
                 control.window?.makeFirstResponder(nil)
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
+                isCancellingEdit = true
                 if let textField = control as? NSTextField {
                     let restoredValue = editState.cancelledValue()
                     value = restoredValue
                     textField.stringValue = "\(restoredValue)"
+                    textView.string = "\(restoredValue)"
                 }
-                isCancellingEdit = true
+                isEditing = false
                 control.window?.makeFirstResponder(nil)
                 return true
             default:
@@ -1423,12 +1509,35 @@ private struct IntegerInputField: NSViewRepresentable {
         }
 
         private func applyStep(using currentText: String, direction: Int, largeStep: Bool) {
-            value = configuration.steppedValue(
-                fromText: currentText,
+            editState.updatePendingText(currentText)
+            value = editState.commitSteppedPendingText(
                 fallbackValue: value,
+                configuration: configuration,
                 direction: direction,
                 largeStep: largeStep
             )
+        }
+
+        private func updateEditingText(control: NSControl, textView: NSTextView) {
+            let text = "\(value)"
+            if let textField = control as? NSTextField {
+                textField.stringValue = text
+            }
+            textView.string = text
+            textView.setSelectedRange(NSRange(location: text.count, length: 0))
+        }
+    }
+
+    private final class NumericInputTextField: NSTextField {
+        override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            guard NumericInputKeyEquivalentPolicy.routesToFieldEditor(event: event),
+                  let fieldEditor = currentEditor() as? NSTextView
+            else {
+                return super.performKeyEquivalent(with: event)
+            }
+
+            fieldEditor.interpretKeyEvents([event])
+            return true
         }
     }
 }

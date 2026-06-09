@@ -971,6 +971,102 @@ struct SessionTests {
     }
 
     @Test
+    func numericControlEditStateKeepsTypedTextPendingUntilCommit() {
+        var editState = NumericControlEditState(committedValue: 12)
+        editState.beginEditing(currentValue: 12)
+        editState.updatePendingText("27")
+
+        #expect(editState.committedValue == 12)
+        #expect(editState.pendingText == "27")
+
+        let committed = editState.commitPendingText(
+            fallbackValue: 12,
+            configuration: .gain
+        )
+
+        #expect(committed == 24)
+        #expect(editState.committedValue == 24)
+        #expect(editState.pendingText == nil)
+    }
+
+    @Test
+    func numericControlEditStateDoesNotOverwriteCommittedValueWithoutPendingText() {
+        var editState = NumericControlEditState(committedValue: 12)
+        editState.beginEditing(currentValue: 12)
+        editState.updatePendingText("25")
+
+        #expect(editState.commitPendingText(fallbackValue: 0, configuration: .offset) == 25)
+        #expect(editState.pendingText == nil)
+        #expect(editState.commitPendingText(fallbackValue: 0, configuration: .offset) == 25)
+        #expect(editState.committedValue == 25)
+    }
+
+    @Test
+    func numericControlEditStateCommitsSteppedPendingText() {
+        var editState = NumericControlEditState(committedValue: 0)
+        editState.beginEditing(currentValue: 0)
+        editState.updatePendingText("20")
+
+        let stepped = editState.commitSteppedPendingText(
+            fallbackValue: 0,
+            configuration: .offset,
+            direction: 1,
+            largeStep: true
+        )
+
+        #expect(stepped == 120)
+        #expect(editState.committedValue == 120)
+        #expect(editState.pendingText == nil)
+    }
+
+    @Test
+    func numericControlEditStateClearsPendingTextOnCancel() {
+        var editState = NumericControlEditState(committedValue: 12)
+        editState.beginEditing(currentValue: 12)
+        editState.updatePendingText("27")
+
+        #expect(editState.cancelledValue() == 12)
+        #expect(editState.pendingText == nil)
+        #expect(editState.committedValue == 12)
+    }
+
+    @Test
+    func numericControlEditingTextPrefersFieldEditorTextWhenPresent() {
+        #expect(
+            NumericControlEditingText.current(
+                controlText: "0",
+                fieldEditorText: "25"
+            ) == "25"
+        )
+        #expect(
+            NumericControlEditingText.current(
+                controlText: "25",
+                fieldEditorText: nil
+            ) == "25"
+        )
+    }
+
+    @Test
+    func numericInputKeyEquivalentPolicyRoutesHorizontalArrowsToTextEditing() {
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 123, modifierFlags: []) == true)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 124, modifierFlags: []) == true)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 123, modifierFlags: .shift) == true)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 124, modifierFlags: .shift) == true)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 123, modifierFlags: .command) == true)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 124, modifierFlags: .command) == true)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 123, modifierFlags: [.command, .shift]) == true)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 124, modifierFlags: [.command, .shift]) == true)
+    }
+
+    @Test
+    func numericInputKeyEquivalentPolicyLeavesOtherKeysAlone() {
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 125, modifierFlags: []) == false)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 126, modifierFlags: []) == false)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 49, modifierFlags: []) == false)
+        #expect(NumericInputKeyEquivalentPolicy.routesToFieldEditor(keyCode: 7, modifierFlags: []) == false)
+    }
+
+    @Test
     @MainActor
     func numericControlFocusPolicyClearsEditingFocusOnlyForOutsideClicks() {
         let fieldEditor = NSTextView(frame: .zero)
@@ -987,9 +1083,11 @@ struct SessionTests {
     }
 
     @Test
+    @MainActor
     func globalShortcutsAreDisabledWhileTextInputIsFocused() {
         #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: nil) == true)
         #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSView(frame: .zero)) == true)
+        #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSTextField(frame: .zero)) == false)
         #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSTextView(frame: .zero)) == false)
     }
 
