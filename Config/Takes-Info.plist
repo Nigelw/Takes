@@ -40,5 +40,7 @@
 	<string>Takes needs to get the current selection from Finder and Apple Music.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUPublicEDKey</key>
+	<string>ScIZIKYjEYLihl6SRoq6RNAPtLSyZmOykANUpE6xklg=</string>
 </dict>
 </plist>
