@@ -2,51 +2,51 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace TrackSwitch's fixed two-track model with an ordered, capped list of up to 32 loaded tracks that can be appended, removed, replaced, and switched instantly by UI order.
+**Goal:** Replace Takes's fixed two-track model with an ordered, capped list of up to 32 loaded tracks that can be appended, removed, replaced, and switched instantly by UI order.
 
 **Architecture:** Move session state from `trackA`/`trackB` to `tracks: [SessionTrack]` plus `activeTrackID`. Generalize timeline math to operate on N tracks, then refactor `PlaybackController` to keep runtime audio nodes keyed by stable track ID. Update SwiftUI last so it renders the new ordered model and calls the new controller APIs.
 
-**Tech Stack:** Swift, SwiftUI, AppKit drag/drop bridging, AVFoundation `AVAudioEngine`, Swift Testing, Xcode scheme `TrackSwitch`.
+**Tech Stack:** Swift, SwiftUI, AppKit drag/drop bridging, AVFoundation `AVAudioEngine`, Swift Testing, Xcode scheme `Takes`.
 
 ---
 
 ## File Structure
 
-- Modify `Sources/TrackSwitch/Models.swift`
+- Modify `Sources/Takes/Models.swift`
   - Add `SessionTrack`.
   - Replace fixed `trackA`, `trackB`, and `TrackSide` session state with an ordered collection.
   - Replace `tooManyImportFiles` with capped/best-effort import error cases.
-- Modify `Sources/TrackSwitch/TransportMapping.swift`
+- Modify `Sources/Takes/TransportMapping.swift`
   - Add N-track `timelineRange(tracks:)`.
   - Keep compatibility helpers only as temporary shims if needed during the refactor.
-- Modify `Sources/TrackSwitch/LibraryTrackSelectionLoader.swift`
+- Modify `Sources/Takes/LibraryTrackSelectionLoader.swift`
   - Remove the two-track selection cap.
   - Keep Music view-order parsing.
-- Modify `Sources/TrackSwitch/PlaybackController.swift`
+- Modify `Sources/Takes/PlaybackController.swift`
   - Replace fixed player/mixer/file properties with `runtimeTracksByID`.
   - Implement append, row replacement, removal, active-track cycling, cap enforcement, and best-effort batch import.
   - Remove overlap warning state.
-- Modify `Sources/TrackSwitch/ContentView.swift`
+- Modify `Sources/Takes/ContentView.swift`
   - Render dynamic rows from `session.tracks`.
   - Use row IDs for active selection, gain, offset, row replacement, and removal.
   - Add scrollable track list and empty drop target.
-- Modify `Tests/TrackSwitchTests/TransportMappingTests.swift`
+- Modify `Tests/TakesTests/TransportMappingTests.swift`
   - Update timeline tests to N-track helpers.
-- Modify `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify `Tests/TakesTests/SessionTests.swift`
   - Replace A/B session/import tests with ordered-track tests.
   - Update Music selection tests.
 
 ## Task 1: Model And Timeline Foundation
 
 **Files:**
-- Modify: `Sources/TrackSwitch/Models.swift`
-- Modify: `Sources/TrackSwitch/TransportMapping.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
-- Test: `Tests/TrackSwitchTests/TransportMappingTests.swift`
+- Modify: `Sources/Takes/Models.swift`
+- Modify: `Sources/Takes/TransportMapping.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
+- Test: `Tests/TakesTests/TransportMappingTests.swift`
 
 - [ ] **Step 1: Replace readiness tests with ordered-track expectations**
 
-In `Tests/TrackSwitchTests/SessionTests.swift`, replace `sessionReadinessRequiresTwoTracksAndOverlap`, `sessionRemainsPlayableWithSingleTrackOrNoOverlapAsLongAsDurationExists`, and `sessionUsesSignedTimelineBoundsForPlaybackReadiness` with:
+In `Tests/TakesTests/SessionTests.swift`, replace `sessionReadinessRequiresTwoTracksAndOverlap`, `sessionRemainsPlayableWithSingleTrackOrNoOverlapAsLongAsDurationExists`, and `sessionUsesSignedTimelineBoundsForPlaybackReadiness` with:
 
 ```swift
 @Test
@@ -89,7 +89,7 @@ func sessionUsesSignedTimelineBoundsForPlaybackReadiness() {
 
 - [ ] **Step 2: Replace two-track timeline tests with N-track timeline tests**
 
-In `Tests/TrackSwitchTests/TransportMappingTests.swift`, replace the three `timelineRange...` tests with:
+In `Tests/TakesTests/TransportMappingTests.swift`, replace the three `timelineRange...` tests with:
 
 ```swift
 @Test
@@ -125,14 +125,14 @@ func timelineRangeReturnsNilWithoutTracks() {
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/sessionReadinessUsesOrderedTracks -only-testing:TrackSwitchTests/SessionTests/sessionUsesSignedTimelineBoundsForPlaybackReadiness -only-testing:TrackSwitchTests/TransportMappingTests/timelineRangeIncludesZeroAndLoadedTrackRangeForSingleTrack -only-testing:TrackSwitchTests/TransportMappingTests/timelineRangeExpandsBelowZeroForNegativeOffsetsAcrossManyTracks -only-testing:TrackSwitchTests/TransportMappingTests/timelineRangeReturnsNilWithoutTracks
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/sessionReadinessUsesOrderedTracks -only-testing:TakesTests/SessionTests/sessionUsesSignedTimelineBoundsForPlaybackReadiness -only-testing:TakesTests/TransportMappingTests/timelineRangeIncludesZeroAndLoadedTrackRangeForSingleTrack -only-testing:TakesTests/TransportMappingTests/timelineRangeExpandsBelowZeroForNegativeOffsetsAcrossManyTracks -only-testing:TakesTests/TransportMappingTests/timelineRangeReturnsNilWithoutTracks
 ```
 
 Expected: fail to compile because `SessionTrack`, `tracks`, `activeTrackID`, `canSwitchPlayback`, and `TransportMapping.timelineRange(tracks:)` do not exist yet.
 
 - [ ] **Step 4: Implement ordered session model**
 
-In `Sources/TrackSwitch/Models.swift`, remove `TrackSide` and replace `ComparisonSession` with:
+In `Sources/Takes/Models.swift`, remove `TrackSide` and replace `ComparisonSession` with:
 
 ```swift
 struct SessionTrack: Identifiable, Equatable {
@@ -176,7 +176,7 @@ Keep `LoadedTrack`, `PlaybackError`, and `TimeInterval` formatting in the same f
 
 - [ ] **Step 5: Implement N-track timeline helper**
 
-In `Sources/TrackSwitch/TransportMapping.swift`, replace `timelineRange(trackA:trackB:)` with:
+In `Sources/Takes/TransportMapping.swift`, replace `timelineRange(trackA:trackB:)` with:
 
 ```swift
 static func timelineRange(tracks: [LoadedTrack]) -> ClosedRange<TimeInterval>? {
@@ -200,7 +200,7 @@ Leave `overlapRange` and `validOverlapDuration` in place only if old tests or co
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/sessionReadinessUsesOrderedTracks -only-testing:TrackSwitchTests/SessionTests/sessionUsesSignedTimelineBoundsForPlaybackReadiness -only-testing:TrackSwitchTests/TransportMappingTests/timelineRangeIncludesZeroAndLoadedTrackRangeForSingleTrack -only-testing:TrackSwitchTests/TransportMappingTests/timelineRangeExpandsBelowZeroForNegativeOffsetsAcrossManyTracks -only-testing:TrackSwitchTests/TransportMappingTests/timelineRangeReturnsNilWithoutTracks
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/sessionReadinessUsesOrderedTracks -only-testing:TakesTests/SessionTests/sessionUsesSignedTimelineBoundsForPlaybackReadiness -only-testing:TakesTests/TransportMappingTests/timelineRangeIncludesZeroAndLoadedTrackRangeForSingleTrack -only-testing:TakesTests/TransportMappingTests/timelineRangeExpandsBelowZeroForNegativeOffsetsAcrossManyTracks -only-testing:TakesTests/TransportMappingTests/timelineRangeReturnsNilWithoutTracks
 ```
 
 Expected: the new tests pass after remaining compile errors from A/B references in unrelated source files are fixed in later tasks. If the full target cannot compile yet because `PlaybackController` and `ContentView` still reference `TrackSide`, proceed to Task 3 before expecting a green build.
@@ -208,19 +208,19 @@ Expected: the new tests pass after remaining compile errors from A/B references 
 - [ ] **Step 7: Commit the model and timeline foundation**
 
 ```bash
-git add Sources/TrackSwitch/Models.swift Sources/TrackSwitch/TransportMapping.swift Tests/TrackSwitchTests/SessionTests.swift Tests/TrackSwitchTests/TransportMappingTests.swift
+git add Sources/Takes/Models.swift Sources/Takes/TransportMapping.swift Tests/TakesTests/SessionTests.swift Tests/TakesTests/TransportMappingTests.swift
 git commit -m "Refactor session model for ordered tracks"
 ```
 
 ## Task 2: Music Selection Allows More Than Two Tracks
 
 **Files:**
-- Modify: `Sources/TrackSwitch/LibraryTrackSelectionLoader.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/LibraryTrackSelectionLoader.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Replace Music two-track cap tests**
 
-In `Tests/TrackSwitchTests/SessionTests.swift`, replace `musicSelectionScriptUsesSharedTooManySelectionMessage` and `musicSelectionParsingRejectsMoreThanTwoTracks` with:
+In `Tests/TakesTests/SessionTests.swift`, replace `musicSelectionScriptUsesSharedTooManySelectionMessage` and `musicSelectionParsingRejectsMoreThanTwoTracks` with:
 
 ```swift
 @Test
@@ -264,14 +264,14 @@ func musicSelectionParsingSortsManyTracksByViewOrder() throws {
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/musicSelectionScriptDoesNotRejectMoreThanTwoTracks -only-testing:TrackSwitchTests/SessionTests/musicSelectionParsingSortsManyTracksByViewOrder
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/musicSelectionScriptDoesNotRejectMoreThanTwoTracks -only-testing:TakesTests/SessionTests/musicSelectionParsingSortsManyTracksByViewOrder
 ```
 
 Expected: fail because the AppleScript and parser still reject selections above two tracks.
 
 - [ ] **Step 3: Remove Music selection cap**
 
-In `Sources/TrackSwitch/LibraryTrackSelectionLoader.swift`, delete this AppleScript line:
+In `Sources/Takes/LibraryTrackSelectionLoader.swift`, delete this AppleScript line:
 
 ```applescript
 if (count of selectedTracks) > 2 then error "Select one or two audio files."
@@ -292,7 +292,7 @@ Keep the existing `entries.isEmpty` guard and sorted parse behavior.
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/musicSelectionScriptDoesNotRejectMoreThanTwoTracks -only-testing:TrackSwitchTests/SessionTests/musicSelectionParsingSortsManyTracksByViewOrder
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/musicSelectionScriptDoesNotRejectMoreThanTwoTracks -only-testing:TakesTests/SessionTests/musicSelectionParsingSortsManyTracksByViewOrder
 ```
 
 Expected: pass.
@@ -300,20 +300,20 @@ Expected: pass.
 - [ ] **Step 5: Commit Music selection update**
 
 ```bash
-git add Sources/TrackSwitch/LibraryTrackSelectionLoader.swift Tests/TrackSwitchTests/SessionTests.swift
+git add Sources/Takes/LibraryTrackSelectionLoader.swift Tests/TakesTests/SessionTests.swift
 git commit -m "Allow Music selection to return many tracks"
 ```
 
 ## Task 3: Import Result And Ordered Append Semantics
 
 **Files:**
-- Modify: `Sources/TrackSwitch/Models.swift`
-- Modify: `Sources/TrackSwitch/PlaybackController.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/Models.swift`
+- Modify: `Sources/Takes/PlaybackController.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Add best-effort import tests**
 
-In `Tests/TrackSwitchTests/SessionTests.swift`, replace `importAssignmentsUseSharedOpenRules`, `importAssignmentsRejectMoreThanTwoFiles`, `importAssignmentsLoadTwoSelectionsIntoTrackAThenTrackB`, `importedFilesStopAfterFirstLoadFailure`, `importedFilesDoNotPartiallyApplyWhenSecondLoadFails`, and `replacementPreservesExistingSideSettings` with:
+In `Tests/TakesTests/SessionTests.swift`, replace `importAssignmentsUseSharedOpenRules`, `importAssignmentsRejectMoreThanTwoFiles`, `importAssignmentsLoadTwoSelectionsIntoTrackAThenTrackB`, `importedFilesStopAfterFirstLoadFailure`, `importedFilesDoNotPartiallyApplyWhenSecondLoadFails`, and `replacementPreservesExistingSideSettings` with:
 
 ```swift
 @MainActor
@@ -378,7 +378,7 @@ func importedFilesRespectThirtyTwoTrackCap() async throws {
     await controller.loadImportedFiles(urls)
 
     #expect(controller.session.tracks.count == PlaybackController.maximumTrackCount)
-    #expect(controller.playbackError?.localizedDescription.contains("TrackSwitch currently supports up to 32 loaded tracks.") == true)
+    #expect(controller.playbackError?.localizedDescription.contains("Takes currently supports up to 32 loaded tracks.") == true)
     #expect(controller.playbackError?.localizedDescription.contains("track-32.wav") == true)
 }
 ```
@@ -388,14 +388,14 @@ func importedFilesRespectThirtyTwoTrackCap() async throws {
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/importedFilesAppendSuccessesAndReportFailures -only-testing:TrackSwitchTests/SessionTests/importedFilesAppendToExistingTracksAndPreserveSettings -only-testing:TrackSwitchTests/SessionTests/importedFilesRespectThirtyTwoTrackCap
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/importedFilesAppendSuccessesAndReportFailures -only-testing:TakesTests/SessionTests/importedFilesAppendToExistingTracksAndPreserveSettings -only-testing:TakesTests/SessionTests/importedFilesRespectThirtyTwoTrackCap
 ```
 
 Expected: fail to compile because `setGain`/`setOffset` still use `TrackSide`, `maximumTrackCount` does not exist, and `loadImportedFiles` is still atomic.
 
 - [ ] **Step 3: Add grouped import error model**
 
-In `Sources/TrackSwitch/Models.swift`, add this before `PlaybackError`:
+In `Sources/Takes/Models.swift`, add this before `PlaybackError`:
 
 ```swift
 struct ImportFailure: Equatable {
@@ -424,14 +424,14 @@ case let .importFailures(failures):
     return "Some files could not be loaded.\n\(details)"
 case let .trackLimitExceeded(limit, skippedFileNames):
     let skipped = skippedFileNames.joined(separator: "\n")
-    return "TrackSwitch currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)"
+    return "Takes currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)"
 ```
 
 Move the existing private `String.ifEmpty(_:)` extension from `AudioFileLoader.swift` into `Models.swift` as an internal file-private extension so `ImportFailure` and `AudioFileLoader` can both use the same behavior. Remove the duplicate extension from `AudioFileLoader.swift`.
 
 - [ ] **Step 4: Refactor controller append APIs without dynamic runtime nodes yet**
 
-In `Sources/TrackSwitch/PlaybackController.swift`, add:
+In `Sources/Takes/PlaybackController.swift`, add:
 
 ```swift
 static let maximumTrackCount = 32
@@ -529,7 +529,7 @@ Do not finish dynamic player/mixer runtime in this task; Task 5 handles that. Th
 
 - [ ] **Step 5: Replace gain and offset signatures by track ID**
 
-In `Sources/TrackSwitch/PlaybackController.swift`, replace `setGain(_ side: TrackSide, db: Float)` with:
+In `Sources/Takes/PlaybackController.swift`, replace `setGain(_ side: TrackSide, db: Float)` with:
 
 ```swift
 func setGain(_ trackID: SessionTrack.ID, db: Float) {
@@ -576,7 +576,7 @@ private func startScheduledPlayers() {
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/importedFilesAppendSuccessesAndReportFailures -only-testing:TrackSwitchTests/SessionTests/importedFilesAppendToExistingTracksAndPreserveSettings -only-testing:TrackSwitchTests/SessionTests/importedFilesRespectThirtyTwoTrackCap
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/importedFilesAppendSuccessesAndReportFailures -only-testing:TakesTests/SessionTests/importedFilesAppendToExistingTracksAndPreserveSettings -only-testing:TakesTests/SessionTests/importedFilesRespectThirtyTwoTrackCap
 ```
 
 Expected: these may still fail to compile until Task 4 and Task 5 remove remaining side-based controller references. Do not commit broken code unless executing this plan in a branch where intermediate compile failures are acceptable; otherwise complete Tasks 4 and 5 before the commit.
@@ -584,12 +584,12 @@ Expected: these may still fail to compile until Task 4 and Task 5 remove remaini
 ## Task 4: Active Selection, Switching, Replacement, And Removal
 
 **Files:**
-- Modify: `Sources/TrackSwitch/PlaybackController.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/PlaybackController.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Add active selection and removal tests**
 
-In `Tests/TrackSwitchTests/SessionTests.swift`, add:
+In `Tests/TakesTests/SessionTests.swift`, add:
 
 ```swift
 @MainActor
@@ -697,14 +697,14 @@ func replacingTrackResetsGainAndOffsetButKeepsRowActive() async throws {
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/switchPlaybackCyclesThroughTrackOrderAndWraps -only-testing:TrackSwitchTests/SessionTests/removingActiveTrackPausesAndSelectsNextOrPrevious -only-testing:TrackSwitchTests/SessionTests/removingFinalTrackClearsActiveSelectionAndTimeline -only-testing:TrackSwitchTests/SessionTests/replacingTrackResetsGainAndOffsetButKeepsRowActive
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/switchPlaybackCyclesThroughTrackOrderAndWraps -only-testing:TakesTests/SessionTests/removingActiveTrackPausesAndSelectsNextOrPrevious -only-testing:TakesTests/SessionTests/removingFinalTrackClearsActiveSelectionAndTimeline -only-testing:TakesTests/SessionTests/replacingTrackResetsGainAndOffsetButKeepsRowActive
 ```
 
 Expected: fail because ID-based selection, removal, and replacement APIs do not exist.
 
 - [ ] **Step 3: Implement ID-based active selection**
 
-In `Sources/TrackSwitch/PlaybackController.swift`, replace `toggleActiveTrack()` and `selectActiveTrack(_:)` with:
+In `Sources/Takes/PlaybackController.swift`, replace `toggleActiveTrack()` and `selectActiveTrack(_:)` with:
 
 ```swift
 func toggleActiveTrack() {
@@ -724,7 +724,7 @@ func selectActiveTrack(_ trackID: SessionTrack.ID) {
 
 - [ ] **Step 4: Implement replacement**
 
-In `Sources/TrackSwitch/PlaybackController.swift`, add:
+In `Sources/Takes/PlaybackController.swift`, add:
 
 ```swift
 func replaceTrack(_ trackID: SessionTrack.ID, with url: URL) async {
@@ -762,7 +762,7 @@ This resets gain and offset because `preparedLoad.metadata` is used directly and
 
 - [ ] **Step 5: Implement removal**
 
-In `Sources/TrackSwitch/PlaybackController.swift`, add:
+In `Sources/Takes/PlaybackController.swift`, add:
 
 ```swift
 func removeTrack(_ trackID: SessionTrack.ID) {
@@ -801,7 +801,7 @@ Task 5 will extend this to detach runtime nodes.
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/switchPlaybackCyclesThroughTrackOrderAndWraps -only-testing:TrackSwitchTests/SessionTests/removingActiveTrackPausesAndSelectsNextOrPrevious -only-testing:TrackSwitchTests/SessionTests/removingFinalTrackClearsActiveSelectionAndTimeline -only-testing:TrackSwitchTests/SessionTests/replacingTrackResetsGainAndOffsetButKeepsRowActive
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/switchPlaybackCyclesThroughTrackOrderAndWraps -only-testing:TakesTests/SessionTests/removingActiveTrackPausesAndSelectsNextOrPrevious -only-testing:TakesTests/SessionTests/removingFinalTrackClearsActiveSelectionAndTimeline -only-testing:TakesTests/SessionTests/replacingTrackResetsGainAndOffsetButKeepsRowActive
 ```
 
 Expected: pass once remaining compile errors from dynamic playback are resolved in Task 5.
@@ -809,12 +809,12 @@ Expected: pass once remaining compile errors from dynamic playback are resolved 
 ## Task 5: Dynamic Playback Runtime
 
 **Files:**
-- Modify: `Sources/TrackSwitch/PlaybackController.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/PlaybackController.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Add natural end behavior test for pure helper**
 
-In `Tests/TrackSwitchTests/SessionTests.swift`, add:
+In `Tests/TakesTests/SessionTests.swift`, add:
 
 ```swift
 @Test
@@ -828,14 +828,14 @@ func endOfPlaybackPositionStopsAtTimelineEnd() {
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/endOfPlaybackPositionStopsAtTimelineEnd
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/endOfPlaybackPositionStopsAtTimelineEnd
 ```
 
 Expected: fail because `transportPositionAtNaturalEnd(timelineEnd:)` does not exist.
 
 - [ ] **Step 3: Add dynamic runtime type and storage**
 
-In `Sources/TrackSwitch/PlaybackController.swift`, remove `playerA`, `playerB`, `mixerA`, `mixerB`, `audioFileA`, `audioFileB`, and `audioFilesByTrackID`.
+In `Sources/Takes/PlaybackController.swift`, remove `playerA`, `playerB`, `mixerA`, `mixerB`, `audioFileA`, `audioFileB`, and `audioFilesByTrackID`.
 
 Add:
 
@@ -1060,7 +1060,7 @@ private func refreshTransportTick() {
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests -only-testing:TrackSwitchTests/TransportMappingTests
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests -only-testing:TakesTests/TransportMappingTests
 ```
 
 Expected: tests pass after remaining A/B references in tests and source are removed. If `ContentView` compile errors remain, complete Task 6 before committing.
@@ -1068,19 +1068,19 @@ Expected: tests pass after remaining A/B references in tests and source are remo
 - [ ] **Step 11: Commit dynamic playback runtime**
 
 ```bash
-git add Sources/TrackSwitch/PlaybackController.swift Sources/TrackSwitch/Models.swift Sources/TrackSwitch/TransportMapping.swift Tests/TrackSwitchTests/SessionTests.swift Tests/TrackSwitchTests/TransportMappingTests.swift
+git add Sources/Takes/PlaybackController.swift Sources/Takes/Models.swift Sources/Takes/TransportMapping.swift Tests/TakesTests/SessionTests.swift Tests/TakesTests/TransportMappingTests.swift
 git commit -m "Support dynamic playback tracks"
 ```
 
 ## Task 6: Dynamic SwiftUI Track List
 
 **Files:**
-- Modify: `Sources/TrackSwitch/ContentView.swift`
+- Modify: `Sources/Takes/ContentView.swift`
 - Test: compile with `xcodebuild test`
 
 - [ ] **Step 1: Replace side-based UI state**
 
-In `Sources/TrackSwitch/ContentView.swift`, replace:
+In `Sources/Takes/ContentView.swift`, replace:
 
 ```swift
 @State private var dropTargetSide: TrackSide?
@@ -1482,7 +1482,7 @@ private func loadDroppedURLs(from providers: [NSItemProvider], targetTrackID: Se
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch
+xcodebuild test -scheme Takes
 ```
 
 Expected: all tests pass. Fix any remaining references to `TrackSide`, `trackA`, `trackB`, `canToggleComparison`, or `overlapWarning`.
@@ -1490,19 +1490,19 @@ Expected: all tests pass. Fix any remaining references to `TrackSide`, `trackA`,
 - [ ] **Step 12: Commit dynamic UI list**
 
 ```bash
-git add Sources/TrackSwitch/ContentView.swift Sources/TrackSwitch/PlaybackController.swift Tests/TrackSwitchTests/SessionTests.swift
+git add Sources/Takes/ContentView.swift Sources/Takes/PlaybackController.swift Tests/TakesTests/SessionTests.swift
 git commit -m "Render dynamic track list"
 ```
 
 ## Task 7: Final Cleanup And Verification
 
 **Files:**
-- Modify as needed: `Sources/TrackSwitch/Models.swift`
-- Modify as needed: `Sources/TrackSwitch/PlaybackController.swift`
-- Modify as needed: `Sources/TrackSwitch/TransportMapping.swift`
-- Modify as needed: `Sources/TrackSwitch/ContentView.swift`
-- Modify as needed: `Tests/TrackSwitchTests/SessionTests.swift`
-- Modify as needed: `Tests/TrackSwitchTests/TransportMappingTests.swift`
+- Modify as needed: `Sources/Takes/Models.swift`
+- Modify as needed: `Sources/Takes/PlaybackController.swift`
+- Modify as needed: `Sources/Takes/TransportMapping.swift`
+- Modify as needed: `Sources/Takes/ContentView.swift`
+- Modify as needed: `Tests/TakesTests/SessionTests.swift`
+- Modify as needed: `Tests/TakesTests/TransportMappingTests.swift`
 
 - [ ] **Step 1: Search for obsolete A/B and overlap symbols**
 
@@ -1529,7 +1529,7 @@ Expected: no matches unless `overlapRange` and `validOverlapDuration` are intent
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch
+xcodebuild test -scheme Takes
 ```
 
 Expected: `** TEST SUCCEEDED **`.
@@ -1539,7 +1539,7 @@ Expected: `** TEST SUCCEEDED **`.
 Run:
 
 ```bash
-xcodebuild build -scheme TrackSwitch
+xcodebuild build -scheme Takes
 ```
 
 Expected: `** BUILD SUCCEEDED **`.
@@ -1566,7 +1566,7 @@ Run the app from Xcode or with the built product and verify:
 - [ ] **Step 6: Commit final cleanup**
 
 ```bash
-git add Sources/TrackSwitch/Models.swift Sources/TrackSwitch/PlaybackController.swift Sources/TrackSwitch/TransportMapping.swift Sources/TrackSwitch/ContentView.swift Sources/TrackSwitch/LibraryTrackSelectionLoader.swift Tests/TrackSwitchTests/SessionTests.swift Tests/TrackSwitchTests/TransportMappingTests.swift
+git add Sources/Takes/Models.swift Sources/Takes/PlaybackController.swift Sources/Takes/TransportMapping.swift Sources/Takes/ContentView.swift Sources/Takes/LibraryTrackSelectionLoader.swift Tests/TakesTests/SessionTests.swift Tests/TakesTests/TransportMappingTests.swift
 git commit -m "Finish arbitrary track count support"
 ```
 

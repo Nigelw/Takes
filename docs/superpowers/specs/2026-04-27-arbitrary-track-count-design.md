@@ -1,8 +1,8 @@
-# TrackSwitch Arbitrary Track Count Design
+# Takes Arbitrary Track Count Design
 
 ## Context
 
-TrackSwitch currently has a fixed two-track comparison model. The UI has already moved toward a vertical track list with a shared timeline, but the underlying session, import, playback, and tests still assume Track A and Track B.
+Takes currently has a fixed two-track comparison model. The UI has already moved toward a vertical track list with a shared timeline, but the underlying session, import, playback, and tests still assume Track A and Track B.
 
 This feature removes the two-file limit and allows users to load, remove, and switch between an ordered list of tracks. The first release should keep the model intentionally simple: tracks are ordered by load order, reordering is out of scope, and the app enforces a conservative cap of 32 loaded tracks.
 
@@ -83,16 +83,16 @@ The 32-track cap is an app-level guard for the initial release. It avoids unboun
 Suggested cap error text:
 
 ```text
-TrackSwitch currently supports up to 32 loaded tracks.
+Takes currently supports up to 32 loaded tracks.
 ```
 
 The summarized import error should include enough detail to act on, such as the display names of failed or skipped files. The UI can continue using the existing inline error area for this release; a modal alert is not required by the spec.
 
 ## Music Selection
 
-Music selection should allow more than two local-file tracks, up to the remaining TrackSwitch capacity.
+Music selection should allow more than two local-file tracks, up to the remaining Takes capacity.
 
-The AppleScript should keep returning each selected track's Music view index and POSIX path so TrackSwitch can preserve Music's selection order. Parsing should continue sorting by Music index before appending.
+The AppleScript should keep returning each selected track's Music view index and POSIX path so Takes can preserve Music's selection order. Parsing should continue sorting by Music index before appending.
 
 Music-specific failure cases remain:
 
@@ -233,13 +233,13 @@ Batch import errors should be grouped. A successful best-effort import may still
 
 Likely code areas:
 
-- `Sources/TrackSwitch/Models.swift` for ordered session state and track identity.
-- `Sources/TrackSwitch/PlaybackController.swift` for import, removal, active selection, runtime audio resources, scheduling, and audibility.
-- `Sources/TrackSwitch/TransportMapping.swift` for N-track timeline range helpers.
-- `Sources/TrackSwitch/ContentView.swift` for rendering a dynamic list, row replacement, removal, and import/drop behavior.
-- `Sources/TrackSwitch/LibraryTrackSelectionLoader.swift` for removing the two-track Music selection limit.
-- `Tests/TrackSwitchTests/SessionTests.swift` for session/import/removal behavior.
-- `Tests/TrackSwitchTests/TransportMappingTests.swift` for N-track timeline math.
+- `Sources/Takes/Models.swift` for ordered session state and track identity.
+- `Sources/Takes/PlaybackController.swift` for import, removal, active selection, runtime audio resources, scheduling, and audibility.
+- `Sources/Takes/TransportMapping.swift` for N-track timeline range helpers.
+- `Sources/Takes/ContentView.swift` for rendering a dynamic list, row replacement, removal, and import/drop behavior.
+- `Sources/Takes/LibraryTrackSelectionLoader.swift` for removing the two-track Music selection limit.
+- `Tests/TakesTests/SessionTests.swift` for session/import/removal behavior.
+- `Tests/TakesTests/TransportMappingTests.swift` for N-track timeline math.
 
 The implementation should preserve the existing SwiftUI/AppKit bridging patterns for numeric controls and keep unrelated visual polish out of scope.
 

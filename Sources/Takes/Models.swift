@@ -193,7 +193,7 @@ enum PlaybackError: LocalizedError, Equatable {
             return "Some files could not be loaded.\n\(details)"
         case let .trackLimitExceeded(limit, skippedFileNames):
             let skipped = skippedFileNames.joined(separator: "\n")
-            return "TrackSwitch currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)"
+            return "Takes currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)"
         case let .importSummary(failures, skippedFileNames, limit):
             return Self.importSummaryDescription(
                 failures: failures,
@@ -215,7 +215,7 @@ enum PlaybackError: LocalizedError, Equatable {
         }
         if !skippedFileNames.isEmpty {
             let skipped = skippedFileNames.joined(separator: "\n")
-            sections.append("TrackSwitch currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)")
+            sections.append("Takes currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)")
         }
         return sections.joined(separator: "\n")
     }

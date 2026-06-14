@@ -1,12 +1,12 @@
-# TrackSwitch
+# Takes
 
 <p align="center">
-  <img src="website/icon.png" alt="TrackSwitch app icon" width="128">
+  <img src="website/icon.png" alt="Takes app icon" width="128">
 </p>
 
-TrackSwitch is a native macOS app for comparing multiple versions of the same audio track. It keeps loaded tracks aligned on a shared transport timeline and lets you switch playback between them instantly so you can evaluate mastering differences at the same point in the song.
+Takes is a native macOS app for comparing multiple versions of the same audio track. It keeps loaded tracks aligned on a shared transport timeline and lets you switch playback between them instantly so you can evaluate mastering differences at the same point in the song.
 
-![TrackSwitch main UI](website/screenshot.jpg)
+![Takes main UI](website/screenshot.jpg)
 
 This README is written for someone working on the repo. It covers project layout, how to build and run the app, the core playback model, and a brief operator guide for manual testing.
 
@@ -48,19 +48,19 @@ The project is an Xcode app project, not a Swift package.
 Open the project:
 
 ```bash
-open /Users/Nigel/Developer/TrackSwitch/TrackSwitch.xcodeproj
+open Takes.xcodeproj
 ```
 
 In Xcode:
 
-1. Select the `TrackSwitch` scheme.
+1. Select the `Takes` scheme.
 2. Select `My Mac` as the run destination.
 3. Press `Cmd-R`.
 
 The app bundle produced by local builds typically ends up under:
 
 ```text
-/Users/Nigel/Developer/TrackSwitch/.derived-data/Build/Products/Debug/TrackSwitch.app
+.derived-data/Build/Products/Debug/Takes.app
 ```
 
 ## Build And Test
@@ -68,13 +68,13 @@ The app bundle produced by local builds typically ends up under:
 Build:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data build
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data build
 ```
 
 Compile the app and test targets:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data build-for-testing
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data build-for-testing
 ```
 
 Notes:
@@ -85,29 +85,29 @@ Notes:
 ## Repo Layout
 
 ```text
-TrackSwitch/
+Takes/
 ├── Config/
-│   └── TrackSwitch-Info.plist
-├── Sources/TrackSwitch/
+│   └── Takes-Info.plist
+├── Sources/Takes/
 │   ├── AudioFileLoader.swift
 │   ├── ContentView.swift
 │   ├── KeyMonitor.swift
 │   ├── LibraryTrackSelectionLoader.swift
 │   ├── Models.swift
 │   ├── PlaybackController.swift
-│   ├── TrackSwitchApp.swift
+│   ├── TakesApp.swift
 │   └── TransportMapping.swift
-├── Tests/TrackSwitchTests/
+├── Tests/TakesTests/
 │   ├── SessionTests.swift
 │   └── TransportMappingTests.swift
-└── TrackSwitch.xcodeproj/
+└── Takes.xcodeproj/
 ```
 
 ## Architecture Overview
 
 ### UI
 
-- `TrackSwitchApp.swift` creates the app window.
+- `TakesApp.swift` creates the app window.
 - `ContentView.swift` contains the SwiftUI interface, file importers, drag-and-drop handling, keyboard shortcut monitoring, and the gain/offset control UI.
 
 ### Playback
@@ -153,7 +153,7 @@ Current transport behavior:
 - Removing a track preserves the remaining tracks' gain and offset values.
 - Music import requires Automation permission to control Music.
 - The app includes `NSAppleEventsUsageDescription` for that permission prompt.
-- If more tracks are imported than the session cap allows, TrackSwitch loads available slots and reports skipped files.
+- If more tracks are imported than the session cap allows, Takes loads available slots and reports skipped files.
 
 ## Brief Operator Guide
 
@@ -167,7 +167,7 @@ Music import rules:
 
 - Selected tracks append to the current track list.
 - Multiple selected tracks load based on Music's playlist/library view order.
-- TrackSwitch supports up to 32 loaded tracks and reports any skipped files.
+- Takes supports up to 32 loaded tracks and reports any skipped files.
 - The selected Music items must be local files on disk.
 
 ### Playback

@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A10000000000000000000041"
-               BuildableName = "TrackSwitch.app"
-               BlueprintName = "TrackSwitch"
-               ReferencedContainer = "container:TrackSwitch.xcodeproj">
+               BuildableName = "Takes.app"
+               BlueprintName = "Takes"
+               ReferencedContainer = "container:Takes.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -36,9 +36,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A10000000000000000000042"
-               BuildableName = "TrackSwitchTests.xctest"
-               BlueprintName = "TrackSwitchTests"
-               ReferencedContainer = "container:TrackSwitch.xcodeproj">
+               BuildableName = "TakesTests.xctest"
+               BlueprintName = "TakesTests"
+               ReferencedContainer = "container:Takes.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -58,9 +58,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000041"
-            BuildableName = "TrackSwitch.app"
-            BlueprintName = "TrackSwitch"
-            ReferencedContainer = "container:TrackSwitch.xcodeproj">
+            BuildableName = "Takes.app"
+            BlueprintName = "Takes"
+            ReferencedContainer = "container:Takes.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -75,9 +75,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000041"
-            BuildableName = "TrackSwitch.app"
-            BlueprintName = "TrackSwitch"
-            ReferencedContainer = "container:TrackSwitch.xcodeproj">
+            BuildableName = "Takes.app"
+            BlueprintName = "Takes"
+            ReferencedContainer = "container:Takes.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

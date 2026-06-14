@@ -6,34 +6,34 @@
 
 **Architecture:** Keep the current ordered `SessionTrack` and ID-based playback model. Add a parsed Music selection result that can carry both valid URLs and per-item failures, then feed valid URLs through the existing best-effort import path while preserving grouped errors. Keep UI drop behavior local to `ContentView` by deciding row replacement from original provider count, and align the app command menu rewind with the existing toolbar/key-monitor timeline-start behavior.
 
-**Tech Stack:** Swift, SwiftUI, AppKit drag/drop bridging, AVFoundation, Swift Testing, Xcode scheme `TrackSwitch`.
+**Tech Stack:** Swift, SwiftUI, AppKit drag/drop bridging, AVFoundation, Swift Testing, Xcode scheme `Takes`.
 
 ---
 
 ## File Structure
 
-- Modify `Sources/TrackSwitch/Models.swift`
+- Modify `Sources/Takes/Models.swift`
   - Add a lightweight Music/import selection result type if needed.
   - Reuse existing `ImportFailure` and `PlaybackError.importSummary`.
-- Modify `Sources/TrackSwitch/LibraryTrackSelectionLoader.swift`
+- Modify `Sources/Takes/LibraryTrackSelectionLoader.swift`
   - Change Music AppleScript output so nonlocal tracks are emitted as per-row failures instead of aborting the whole selection.
   - Change parsing to return valid URLs plus failures instead of throwing on the first bad row.
-- Modify `Sources/TrackSwitch/PlaybackController.swift`
+- Modify `Sources/Takes/PlaybackController.swift`
   - Add a helper that imports already-collected valid Music URLs and merges parse/Music failures with import/cap failures.
   - Keep general file imports unchanged.
-- Modify `Sources/TrackSwitch/ContentView.swift`
+- Modify `Sources/Takes/ContentView.swift`
   - Decide row replacement using `fileProviders.count == 1`, not resolved `urls.count == 1`.
-- Modify `Sources/TrackSwitch/TrackSwitchApp.swift`
+- Modify `Sources/Takes/TakesApp.swift`
   - Change command-menu rewind to seek to `controller.session.timelineStart`.
-- Modify `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify `Tests/TakesTests/SessionTests.swift`
   - Add focused tests for mixed Music selection parsing/import, row-drop decision logic if exposed as a pure helper, and menu rewind helper if exposed.
 
 ## Task 1: Music Selection Best-Effort Parsing
 
 **Files:**
-- Modify: `Sources/TrackSwitch/LibraryTrackSelectionLoader.swift`
-- Modify: `Sources/TrackSwitch/Models.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/LibraryTrackSelectionLoader.swift`
+- Modify: `Sources/Takes/Models.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Add failing parser test for mixed Music output**
 
@@ -68,7 +68,7 @@ func musicSelectionParsingKeepsValidTracksAndReportsInvalidRows() throws {
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/musicSelectionParsingKeepsValidTracksAndReportsInvalidRows
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/musicSelectionParsingKeepsValidTracksAndReportsInvalidRows
 ```
 
 Expected: compile failure because `parseSelectionOutput(_:)` still returns `[URL]`.
@@ -243,7 +243,7 @@ let result = LibraryTrackSelectionLoader.parseSelectionOutput(output)
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/musicSelectionParsingSortsTwoTracksByViewOrder -only-testing:TrackSwitchTests/SessionTests/musicSelectionParsingSortsManyTracksByViewOrder -only-testing:TrackSwitchTests/SessionTests/musicSelectionParsingKeepsValidTracksAndReportsInvalidRows
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/musicSelectionParsingSortsTwoTracksByViewOrder -only-testing:TakesTests/SessionTests/musicSelectionParsingSortsManyTracksByViewOrder -only-testing:TakesTests/SessionTests/musicSelectionParsingKeepsValidTracksAndReportsInvalidRows
 ```
 
 Expected: pass.
@@ -251,8 +251,8 @@ Expected: pass.
 ## Task 2: Merge Music Selection Failures With Import Results
 
 **Files:**
-- Modify: `Sources/TrackSwitch/PlaybackController.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/PlaybackController.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Add fake Music selector using the new protocol**
 
@@ -303,7 +303,7 @@ func musicSelectionAppendsValidTracksAndReportsSelectionFailures() async throws 
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/musicSelectionAppendsValidTracksAndReportsSelectionFailures
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/musicSelectionAppendsValidTracksAndReportsSelectionFailures
 ```
 
 Expected: compile failure until `PlaybackController.loadSelectedLibraryTracks()` uses `selectedTracks()`.
@@ -383,7 +383,7 @@ func loadSelectedLibraryTracks() async {
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/musicSelectionAppendsValidTracksAndReportsSelectionFailures -only-testing:TrackSwitchTests/SessionTests/importedFilesReportFailuresAndTrackCapSkipsTogether
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/musicSelectionAppendsValidTracksAndReportsSelectionFailures -only-testing:TakesTests/SessionTests/importedFilesReportFailuresAndTrackCapSkipsTogether
 ```
 
 Expected: pass.
@@ -391,8 +391,8 @@ Expected: pass.
 ## Task 3: Row Drop Replacement Uses Provider Count
 
 **Files:**
-- Modify: `Sources/TrackSwitch/ContentView.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/ContentView.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Add pure helper tests**
 
@@ -414,7 +414,7 @@ func rowDropActionReplacesOnlyWhenOriginalProviderCountIsOne() {
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/rowDropActionReplacesOnlyWhenOriginalProviderCountIsOne
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/rowDropActionReplacesOnlyWhenOriginalProviderCountIsOne
 ```
 
 Expected: compile failure because `ContentView.dropAction` does not exist.
@@ -473,7 +473,7 @@ case .append:
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch -only-testing:TrackSwitchTests/SessionTests/rowDropActionReplacesOnlyWhenOriginalProviderCountIsOne
+xcodebuild test -scheme Takes -only-testing:TakesTests/SessionTests/rowDropActionReplacesOnlyWhenOriginalProviderCountIsOne
 ```
 
 Expected: pass.
@@ -481,11 +481,11 @@ Expected: pass.
 ## Task 4: Command Menu Rewind Uses Timeline Start
 
 **Files:**
-- Modify: `Sources/TrackSwitch/TrackSwitchApp.swift`
+- Modify: `Sources/Takes/TakesApp.swift`
 
 - [ ] **Step 1: Change the menu command**
 
-In `TrackSwitchApp.swift`, replace:
+In `TakesApp.swift`, replace:
 
 ```swift
 controller.seek(to: 0)
@@ -528,7 +528,7 @@ Expected: both commands produce no matches.
 Run:
 
 ```bash
-xcodebuild test -scheme TrackSwitch
+xcodebuild test -scheme Takes
 ```
 
 Expected: `** TEST SUCCEEDED **`.
@@ -538,7 +538,7 @@ Expected: `** TEST SUCCEEDED **`.
 Run:
 
 ```bash
-xcodebuild build -scheme TrackSwitch
+xcodebuild build -scheme Takes
 ```
 
 Expected: `** BUILD SUCCEEDED **`.
@@ -564,6 +564,6 @@ Expected:
 Run:
 
 ```bash
-git add Sources/TrackSwitch/Models.swift Sources/TrackSwitch/LibraryTrackSelectionLoader.swift Sources/TrackSwitch/PlaybackController.swift Sources/TrackSwitch/ContentView.swift Sources/TrackSwitch/TrackSwitchApp.swift Tests/TrackSwitchTests/SessionTests.swift
+git add Sources/Takes/Models.swift Sources/Takes/LibraryTrackSelectionLoader.swift Sources/Takes/PlaybackController.swift Sources/Takes/ContentView.swift Sources/Takes/TakesApp.swift Tests/TakesTests/SessionTests.swift
 git commit -m "Fix arbitrary track review findings"
 ```

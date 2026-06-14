@@ -1,8 +1,8 @@
-# TrackSwitch Waveform Timeline UI Design
+# Takes Waveform Timeline UI Design
 
 ## Context
 
-TrackSwitch currently compares two loaded audio files with shared transport playback, instant active-track switching, per-track gain, and Track B offset. The UI is still arranged around per-track load cards, a separate transport slider, and control cards below the transport.
+Takes currently compares two loaded audio files with shared transport playback, instant active-track switching, per-track gain, and Track B offset. The UI is still arranged around per-track load cards, a separate transport slider, and control cards below the transport.
 
 The new UI should make the shared timeline visible. Playback controls move to the top, tracks are listed below, each track shows a waveform lane, and the transport slider is replaced by a vertical playhead that extends through the waveform area.
 
@@ -189,12 +189,12 @@ The implementation should keep the first pass focused:
 
 Likely code areas:
 
-- `Sources/TrackSwitch/ContentView.swift` for layout, popups, drag/drop, file import, and timeline seeking gestures.
-- `Sources/TrackSwitch/Models.swift` for signed timeline session state.
-- `Sources/TrackSwitch/PlaybackController.swift` for signed seek/playback scheduling and assignment helpers.
-- `Sources/TrackSwitch/TransportMapping.swift` for pure signed global timeline math.
-- `Tests/TrackSwitchTests/TransportMappingTests.swift` for timeline math coverage.
-- `Tests/TrackSwitchTests/SessionTests.swift` for assignment, formatting, and controller behavior coverage.
+- `Sources/Takes/ContentView.swift` for layout, popups, drag/drop, file import, and timeline seeking gestures.
+- `Sources/Takes/Models.swift` for signed timeline session state.
+- `Sources/Takes/PlaybackController.swift` for signed seek/playback scheduling and assignment helpers.
+- `Sources/Takes/TransportMapping.swift` for pure signed global timeline math.
+- `Tests/TakesTests/TransportMappingTests.swift` for timeline math coverage.
+- `Tests/TakesTests/SessionTests.swift` for assignment, formatting, and controller behavior coverage.
 
 ## Testing
 

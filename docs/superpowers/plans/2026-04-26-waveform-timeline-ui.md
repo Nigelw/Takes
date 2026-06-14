@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the approved TrackSwitch top-transport, signed global timeline, placeholder waveform lanes, unified loading rules, and per-track offset/gain controls.
+**Goal:** Build the approved Takes top-transport, signed global timeline, placeholder waveform lanes, unified loading rules, and per-track offset/gain controls.
 
 **Architecture:** Refactor transport state from relative session time to signed global time, keeping pure timeline math in `TransportMapping.swift` and playback coordination in `PlaybackController.swift`. Then replace the current card/slider UI in `ContentView.swift` with a top transport bar and two waveform rows that share one playhead.
 
@@ -12,13 +12,13 @@
 
 ## File Structure
 
-- Modify `Sources/TrackSwitch/TransportMapping.swift`: signed timeline bounds, global-time file position, clamping, audibility, and display span helpers.
-- Modify `Sources/TrackSwitch/Models.swift`: session stores `timelineStart`, `timelineEnd`, and signed `transportPosition`; add signed timestamp formatting and assignment error text.
-- Modify `Sources/TrackSwitch/PlaybackController.swift`: preserve gain/offset on replacement for both tracks, add shared URL assignment, use signed transport for scheduling/timer/seek, expose active-track selection.
-- Modify `Sources/TrackSwitch/ContentView.swift`: replace current header/transport/control cards with top transport, import menu, two track rows, placeholder waveform timeline, gear gain popover, offset controls, click/drag seek, and drop routing.
-- Modify `Sources/TrackSwitch/LibraryTrackSelectionLoader.swift`: align the Music more-than-two error text with the shared import error.
-- Modify `Tests/TrackSwitchTests/TransportMappingTests.swift`: rewrite transport math tests for signed global time.
-- Modify `Tests/TrackSwitchTests/SessionTests.swift`: update session readiness, assignment, signed timestamp, and expanded offset range tests.
+- Modify `Sources/Takes/TransportMapping.swift`: signed timeline bounds, global-time file position, clamping, audibility, and display span helpers.
+- Modify `Sources/Takes/Models.swift`: session stores `timelineStart`, `timelineEnd`, and signed `transportPosition`; add signed timestamp formatting and assignment error text.
+- Modify `Sources/Takes/PlaybackController.swift`: preserve gain/offset on replacement for both tracks, add shared URL assignment, use signed transport for scheduling/timer/seek, expose active-track selection.
+- Modify `Sources/Takes/ContentView.swift`: replace current header/transport/control cards with top transport, import menu, two track rows, placeholder waveform timeline, gear gain popover, offset controls, click/drag seek, and drop routing.
+- Modify `Sources/Takes/LibraryTrackSelectionLoader.swift`: align the Music more-than-two error text with the shared import error.
+- Modify `Tests/TakesTests/TransportMappingTests.swift`: rewrite transport math tests for signed global time.
+- Modify `Tests/TakesTests/SessionTests.swift`: update session readiness, assignment, signed timestamp, and expanded offset range tests.
 
 Keep all changes in existing files. Do not add a waveform extraction service in this pass.
 
@@ -27,17 +27,17 @@ Keep all changes in existing files. Do not add a waveform extraction service in 
 ### Task 1: Signed Timeline Math
 
 **Files:**
-- Modify: `Sources/TrackSwitch/TransportMapping.swift`
-- Test: `Tests/TrackSwitchTests/TransportMappingTests.swift`
+- Modify: `Sources/Takes/TransportMapping.swift`
+- Test: `Tests/TakesTests/TransportMappingTests.swift`
 
 - [ ] **Step 1: Replace transport tests with signed global-time expectations**
 
-In `Tests/TrackSwitchTests/TransportMappingTests.swift`, update the tested API to signed timeline methods:
+In `Tests/TakesTests/TransportMappingTests.swift`, update the tested API to signed timeline methods:
 
 ```swift
 import AVFoundation
 import Testing
-@testable import TrackSwitch
+@testable import Takes
 
 struct TransportMappingTests {
     @Test
@@ -128,7 +128,7 @@ struct TransportMappingTests {
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data -only-testing:TrackSwitchTests/TransportMappingTests test
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data -only-testing:TakesTests/TransportMappingTests test
 ```
 
 Expected: FAIL or compile failure because `timelineRange`, `filePosition(forGlobalTime:)`, signed `isTrackAudible`, and signed `clampedTransport` do not exist yet.
@@ -211,7 +211,7 @@ struct TransportMapping {
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data -only-testing:TrackSwitchTests/TransportMappingTests test
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data -only-testing:TakesTests/TransportMappingTests test
 ```
 
 Expected: PASS for `TransportMappingTests`.
@@ -219,7 +219,7 @@ Expected: PASS for `TransportMappingTests`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/TrackSwitch/TransportMapping.swift Tests/TrackSwitchTests/TransportMappingTests.swift
+git add Sources/Takes/TransportMapping.swift Tests/TakesTests/TransportMappingTests.swift
 git commit -m "Refactor transport mapping for signed timeline"
 ```
 
@@ -228,14 +228,14 @@ git commit -m "Refactor transport mapping for signed timeline"
 ### Task 2: Session State, Signed Formatting, And Assignment Rules
 
 **Files:**
-- Modify: `Sources/TrackSwitch/Models.swift`
-- Modify: `Sources/TrackSwitch/PlaybackController.swift`
-- Modify: `Sources/TrackSwitch/ContentView.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/Models.swift`
+- Modify: `Sources/Takes/PlaybackController.swift`
+- Modify: `Sources/Takes/ContentView.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Add failing session tests**
 
-In `Tests/TrackSwitchTests/SessionTests.swift`, update or add these tests:
+In `Tests/TakesTests/SessionTests.swift`, update or add these tests:
 
 ```swift
 @Test
@@ -308,14 +308,14 @@ Update the existing Music assignment tests to call `importAssignments(for:in:)` 
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data -only-testing:TrackSwitchTests/SessionTests test
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data -only-testing:TakesTests/SessionTests test
 ```
 
 Expected: FAIL or compile failure for missing `timelineStart`, `timelineEnd`, `formattedSignedTimestamp`, `tooManyImportFiles`, and `importAssignments`.
 
 - [ ] **Step 3: Update models**
 
-In `Sources/TrackSwitch/Models.swift`, make these changes:
+In `Sources/Takes/Models.swift`, make these changes:
 
 ```swift
 struct ComparisonSession: Equatable {
@@ -389,7 +389,7 @@ extension TimeInterval {
 
 - [ ] **Step 4: Add shared assignment helper**
 
-In `Sources/TrackSwitch/PlaybackController.swift`, replace `libraryAssignments(for:clickedSide:)` with:
+In `Sources/Takes/PlaybackController.swift`, replace `libraryAssignments(for:clickedSide:)` with:
 
 ```swift
 nonisolated static func importAssignments(
@@ -420,7 +420,7 @@ Delete `libraryAssignments(for:clickedSide:)` and update all call sites to use `
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data -only-testing:TrackSwitchTests/SessionTests test
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data -only-testing:TakesTests/SessionTests test
 ```
 
 Expected: PASS for `SessionTests`.
@@ -428,7 +428,7 @@ Expected: PASS for `SessionTests`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/TrackSwitch/Models.swift Sources/TrackSwitch/PlaybackController.swift Sources/TrackSwitch/ContentView.swift Tests/TrackSwitchTests/SessionTests.swift
+git add Sources/Takes/Models.swift Sources/Takes/PlaybackController.swift Sources/Takes/ContentView.swift Tests/TakesTests/SessionTests.swift
 git commit -m "Add signed session state and import assignment rules"
 ```
 
@@ -437,9 +437,9 @@ git commit -m "Add signed session state and import assignment rules"
 ### Task 3: Playback Controller Signed Scheduling
 
 **Files:**
-- Modify: `Sources/TrackSwitch/PlaybackController.swift`
-- Test: `Tests/TrackSwitchTests/TransportMappingTests.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/PlaybackController.swift`
+- Test: `Tests/TakesTests/TransportMappingTests.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Add controller-adjacent tests where pure behavior is exposed**
 
@@ -468,7 +468,7 @@ func replacementPreservesExistingSideSettings() {
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data -only-testing:TrackSwitchTests/SessionTests test
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data -only-testing:TakesTests/SessionTests test
 ```
 
 Expected: FAIL because `replacingTrackMetadata` does not exist.
@@ -703,7 +703,7 @@ func stop() {
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data -only-testing:TrackSwitchTests/TransportMappingTests -only-testing:TrackSwitchTests/SessionTests test
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data -only-testing:TakesTests/TransportMappingTests -only-testing:TakesTests/SessionTests test
 ```
 
 Expected: PASS for both test files.
@@ -711,7 +711,7 @@ Expected: PASS for both test files.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Sources/TrackSwitch/PlaybackController.swift Tests/TrackSwitchTests/SessionTests.swift
+git add Sources/Takes/PlaybackController.swift Tests/TakesTests/SessionTests.swift
 git commit -m "Use signed timeline for playback scheduling"
 ```
 
@@ -720,9 +720,9 @@ git commit -m "Use signed timeline for playback scheduling"
 ### Task 4: Top Transport And Unified Import UI
 
 **Files:**
-- Modify: `Sources/TrackSwitch/ContentView.swift`
-- Modify: `Sources/TrackSwitch/PlaybackController.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/ContentView.swift`
+- Modify: `Sources/Takes/PlaybackController.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Update importer state for multi-select**
 
@@ -884,7 +884,7 @@ private func handleImport(_ result: Result<[URL], Error>) {
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data build-for-testing
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data build-for-testing
 ```
 
 Expected: BUILD SUCCEEDED. Fix compile errors before continuing.
@@ -892,7 +892,7 @@ Expected: BUILD SUCCEEDED. Fix compile errors before continuing.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Sources/TrackSwitch/ContentView.swift Sources/TrackSwitch/PlaybackController.swift
+git add Sources/Takes/ContentView.swift Sources/Takes/PlaybackController.swift
 git commit -m "Add top transport and unified import controls"
 ```
 
@@ -901,8 +901,8 @@ git commit -m "Add top transport and unified import controls"
 ### Task 5: Waveform Rows, Playhead, And Seek Gestures
 
 **Files:**
-- Modify: `Sources/TrackSwitch/ContentView.swift`
-- Test: `Tests/TrackSwitchTests/TransportMappingTests.swift`
+- Modify: `Sources/Takes/ContentView.swift`
+- Test: `Tests/TakesTests/TransportMappingTests.swift`
 
 - [ ] **Step 1: Add geometry helpers for display math**
 
@@ -1175,7 +1175,7 @@ private func placeholderWaveform(for side: TrackSide) -> some View {
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data build-for-testing
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data build-for-testing
 ```
 
 Expected: BUILD SUCCEEDED.
@@ -1183,7 +1183,7 @@ Expected: BUILD SUCCEEDED.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Sources/TrackSwitch/ContentView.swift Sources/TrackSwitch/PlaybackController.swift
+git add Sources/Takes/ContentView.swift Sources/Takes/PlaybackController.swift
 git commit -m "Add waveform lanes and draggable playhead"
 ```
 
@@ -1192,10 +1192,10 @@ git commit -m "Add waveform lanes and draggable playhead"
 ### Task 6: Drag-And-Drop Routing And Cleanup
 
 **Files:**
-- Modify: `Sources/TrackSwitch/ContentView.swift`
-- Modify: `Sources/TrackSwitch/PlaybackController.swift`
-- Modify: `Sources/TrackSwitch/LibraryTrackSelectionLoader.swift`
-- Test: `Tests/TrackSwitchTests/SessionTests.swift`
+- Modify: `Sources/Takes/ContentView.swift`
+- Modify: `Sources/Takes/PlaybackController.swift`
+- Modify: `Sources/Takes/LibraryTrackSelectionLoader.swift`
+- Test: `Tests/TakesTests/SessionTests.swift`
 
 - [ ] **Step 1: Add URL extraction helper for multi-drop**
 
@@ -1306,7 +1306,7 @@ guard entries.count <= 2 else {
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data build-for-testing
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data build-for-testing
 ```
 
 Expected: BUILD SUCCEEDED.
@@ -1314,7 +1314,7 @@ Expected: BUILD SUCCEEDED.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/TrackSwitch/ContentView.swift Sources/TrackSwitch/PlaybackController.swift Sources/TrackSwitch/LibraryTrackSelectionLoader.swift
+git add Sources/Takes/ContentView.swift Sources/Takes/PlaybackController.swift Sources/Takes/LibraryTrackSelectionLoader.swift
 git commit -m "Route drops through unified import behavior"
 ```
 
@@ -1359,7 +1359,7 @@ Update playback notes:
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data -only-testing:TrackSwitchTests/TransportMappingTests -only-testing:TrackSwitchTests/SessionTests test
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data -only-testing:TakesTests/TransportMappingTests -only-testing:TakesTests/SessionTests test
 ```
 
 Expected: PASS. If the environment blocks Apple test infrastructure, record the exact failure output in the task notes and continue to the `build-for-testing` verification step.
@@ -1369,7 +1369,7 @@ Expected: PASS. If the environment blocks Apple test infrastructure, record the 
 Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data build-for-testing
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data build-for-testing
 ```
 
 Expected: BUILD SUCCEEDED.
@@ -1379,7 +1379,7 @@ Expected: BUILD SUCCEEDED.
 Run the app in Xcode or with:
 
 ```bash
-open /Users/Nigel/Developer/TrackSwitch/.derived-data/Build/Products/Debug/TrackSwitch.app
+open .derived-data/Build/Products/Debug/Takes.app
 ```
 
 Verify manually:
@@ -1423,7 +1423,7 @@ Expected: clean worktree.
 - [ ] Run:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data build-for-testing
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data build-for-testing
 ```
 
 Expected: BUILD SUCCEEDED.
@@ -1431,7 +1431,7 @@ Expected: BUILD SUCCEEDED.
 - [ ] Run the full test suite:
 
 ```bash
-xcodebuild -project TrackSwitch.xcodeproj -scheme TrackSwitch -configuration Debug -derivedDataPath .derived-data test
+xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath .derived-data test
 ```
 
 Expected: all tests pass. If blocked by sandboxed Apple test infrastructure, record the exact failure and rely on `build-for-testing` plus focused test output from earlier tasks.

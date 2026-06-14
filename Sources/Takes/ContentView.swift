@@ -420,23 +420,23 @@ struct ContentView: View {
         }
         .padding(20)
         .frame(
-            minWidth: TrackSwitchWindowPolicy.minimumContentWidth,
-            minHeight: TrackSwitchWindowPolicy.minimumContentHeight
+            minWidth: TakesWindowPolicy.minimumContentWidth,
+            minHeight: TakesWindowPolicy.minimumContentHeight
         )
         .background {
             MainWindowConfigurationView { window in
                 mainWindow = window
                 guard !didConfigureMainWindow else { return }
                 didConfigureMainWindow = true
-                TrackSwitchWindowPolicy.configureMainWindow(window)
-                TrackSwitchWindowPolicy.resizeMainWindow(
+                TakesWindowPolicy.configureMainWindow(window)
+                TakesWindowPolicy.resizeMainWindow(
                     window,
                     displayingTrackRows: controller.session.tracks.count
                 )
             }
         }
         .alert(
-            "TrackSwitch Error",
+            "Takes Error",
             isPresented: Binding(
                 get: { controller.playbackError != nil },
                 set: { isPresented in
@@ -470,17 +470,17 @@ struct ContentView: View {
         }
         .onChange(of: controller.session.tracks.count) { previousTrackCount, trackCount in
             guard let mainWindow else { return }
-            let shouldResize = TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+            let shouldResize = TakesWindowPolicy.shouldAutoGrowWindow(
                 previousTrackRowCount: previousTrackCount,
                 newTrackRowCount: trackCount,
                 currentWindowHeight: mainWindow.frame.height
-            ) || TrackSwitchWindowPolicy.shouldAutoShrinkWindow(
+            ) || TakesWindowPolicy.shouldAutoShrinkWindow(
                 previousTrackRowCount: previousTrackCount,
                 newTrackRowCount: trackCount,
                 currentWindowHeight: mainWindow.frame.height
             )
             guard shouldResize else { return }
-            TrackSwitchWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount)
+            TakesWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount)
         }
         .onDisappear {
             keyMonitor?.stop()
@@ -520,7 +520,7 @@ struct ContentView: View {
     }
 
     private var trackRowHeight: CGFloat {
-        TrackSwitchWindowPolicy.trackRowHeight
+        TakesWindowPolicy.trackRowHeight
     }
 
     private var trackInfoWidth: CGFloat {
@@ -528,7 +528,7 @@ struct ContentView: View {
     }
 
     private var trackHeaderHeight: CGFloat {
-        TrackSwitchWindowPolicy.trackTimelineHeaderHeight
+        TakesWindowPolicy.trackTimelineHeaderHeight
     }
 
     private var timelineHeaderTargetMarkerCount: Int {
@@ -536,11 +536,11 @@ struct ContentView: View {
     }
 
     private var trackTimelineDividerHeight: CGFloat {
-        TrackSwitchWindowPolicy.trackTimelineDividerHeight
+        TakesWindowPolicy.trackTimelineDividerHeight
     }
 
     private var trackTimelineHeight: CGFloat {
-        TrackSwitchWindowPolicy.trackTimelineHeight(displayingTrackRows: controller.session.tracks.count)
+        TakesWindowPolicy.trackTimelineHeight(displayingTrackRows: controller.session.tracks.count)
     }
 
     private func globalTime(atX x: CGFloat, width: CGFloat) -> TimeInterval {

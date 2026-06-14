@@ -2,7 +2,7 @@ import AVFoundation
 import AppKit
 import Foundation
 import Testing
-@testable import TrackSwitch
+@testable import Takes
 
 struct SessionTests {
     @Test
@@ -143,42 +143,42 @@ struct SessionTests {
 
     @Test
     func windowPolicyAllowsOneTrackRowAtMinimumHeight() {
-        #expect(TrackSwitchWindowPolicy.minimumContentHeight == TrackSwitchWindowPolicy.contentHeight(displayingTrackRows: 1))
+        #expect(TakesWindowPolicy.minimumContentHeight == TakesWindowPolicy.contentHeight(displayingTrackRows: 1))
     }
 
     @Test
     func windowPolicyDefaultsToOneVisibleTrackRow() {
-        #expect(TrackSwitchWindowPolicy.defaultContentHeight == TrackSwitchWindowPolicy.contentHeight(displayingTrackRows: 1))
+        #expect(TakesWindowPolicy.defaultContentHeight == TakesWindowPolicy.contentHeight(displayingTrackRows: 1))
     }
 
     @Test
     func windowPolicyAddsChromeToDefaultWindowHeight() {
-        #expect(TrackSwitchWindowPolicy.defaultWindowHeight == TrackSwitchWindowPolicy.defaultContentHeight + TrackSwitchWindowPolicy.windowChromeHeight)
-        #expect(TrackSwitchWindowPolicy.defaultWindowHeight > TrackSwitchWindowPolicy.defaultContentHeight)
+        #expect(TakesWindowPolicy.defaultWindowHeight == TakesWindowPolicy.defaultContentHeight + TakesWindowPolicy.windowChromeHeight)
+        #expect(TakesWindowPolicy.defaultWindowHeight > TakesWindowPolicy.defaultContentHeight)
     }
 
     @Test
     func windowPolicyGrowsFrameDownwardForAdditionalTrackRows() {
-        let currentFrame = CGRect(x: 80, y: 700, width: 700, height: TrackSwitchWindowPolicy.defaultWindowHeight)
+        let currentFrame = CGRect(x: 80, y: 700, width: 700, height: TakesWindowPolicy.defaultWindowHeight)
         let visibleFrame = CGRect(x: 0, y: 100, width: 1200, height: 800)
 
-        let resizedFrame = TrackSwitchWindowPolicy.frame(
+        let resizedFrame = TakesWindowPolicy.frame(
             fittingTrackRows: 3,
             currentFrame: currentFrame,
             visibleFrame: visibleFrame
         )
 
         #expect(resizedFrame.maxY == currentFrame.maxY)
-        #expect(resizedFrame.height == TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 3))
+        #expect(resizedFrame.height == TakesWindowPolicy.windowHeight(displayingTrackRows: 3))
         #expect(resizedFrame.minY < currentFrame.minY)
     }
 
     @Test
     func windowPolicyCapsResizedFrameAtVisibleMonitorBottom() {
-        let currentFrame = CGRect(x: 80, y: 300, width: 700, height: TrackSwitchWindowPolicy.defaultWindowHeight)
+        let currentFrame = CGRect(x: 80, y: 300, width: 700, height: TakesWindowPolicy.defaultWindowHeight)
         let visibleFrame = CGRect(x: 0, y: 260, width: 1200, height: 800)
 
-        let resizedFrame = TrackSwitchWindowPolicy.frame(
+        let resizedFrame = TakesWindowPolicy.frame(
             fittingTrackRows: 8,
             currentFrame: currentFrame,
             visibleFrame: visibleFrame
@@ -186,24 +186,24 @@ struct SessionTests {
 
         #expect(resizedFrame.maxY == currentFrame.maxY)
         #expect(resizedFrame.minY == visibleFrame.minY)
-        #expect(resizedFrame.height < TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 8))
+        #expect(resizedFrame.height < TakesWindowPolicy.windowHeight(displayingTrackRows: 8))
     }
 
     @Test
     func windowPolicyOnlyAutoGrowsWhenTrackRowsAreAdded() {
-        let currentWindowHeight = TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 2)
+        let currentWindowHeight = TakesWindowPolicy.windowHeight(displayingTrackRows: 2)
 
-        #expect(TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+        #expect(TakesWindowPolicy.shouldAutoGrowWindow(
             previousTrackRowCount: 2,
             newTrackRowCount: 3,
             currentWindowHeight: currentWindowHeight
         ))
-        #expect(!TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+        #expect(!TakesWindowPolicy.shouldAutoGrowWindow(
             previousTrackRowCount: 6,
             newTrackRowCount: 5,
             currentWindowHeight: currentWindowHeight
         ))
-        #expect(!TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+        #expect(!TakesWindowPolicy.shouldAutoGrowWindow(
             previousTrackRowCount: 5,
             newTrackRowCount: 5,
             currentWindowHeight: currentWindowHeight
@@ -212,9 +212,9 @@ struct SessionTests {
 
     @Test
     func windowPolicyDoesNotAutoGrowWhenAddedRowsAlreadyFitCurrentWindowHeight() {
-        let currentWindowHeight = TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 4)
+        let currentWindowHeight = TakesWindowPolicy.windowHeight(displayingTrackRows: 4)
 
-        #expect(!TrackSwitchWindowPolicy.shouldAutoGrowWindow(
+        #expect(!TakesWindowPolicy.shouldAutoGrowWindow(
             previousTrackRowCount: 2,
             newTrackRowCount: 4,
             currentWindowHeight: currentWindowHeight
@@ -223,9 +223,9 @@ struct SessionTests {
 
     @Test
     func windowPolicyAutoShrinksWhenRemovedRowsFitBelowCurrentWindowHeight() {
-        let currentWindowHeight = TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 4)
+        let currentWindowHeight = TakesWindowPolicy.windowHeight(displayingTrackRows: 4)
 
-        #expect(TrackSwitchWindowPolicy.shouldAutoShrinkWindow(
+        #expect(TakesWindowPolicy.shouldAutoShrinkWindow(
             previousTrackRowCount: 4,
             newTrackRowCount: 2,
             currentWindowHeight: currentWindowHeight
@@ -234,14 +234,14 @@ struct SessionTests {
 
     @Test
     func windowPolicyDoesNotAutoShrinkWhenRemainingRowsNeedCurrentWindowHeight() {
-        let currentWindowHeight = TrackSwitchWindowPolicy.windowHeight(displayingTrackRows: 4)
+        let currentWindowHeight = TakesWindowPolicy.windowHeight(displayingTrackRows: 4)
 
-        #expect(!TrackSwitchWindowPolicy.shouldAutoShrinkWindow(
+        #expect(!TakesWindowPolicy.shouldAutoShrinkWindow(
             previousTrackRowCount: 4,
             newTrackRowCount: 4,
             currentWindowHeight: currentWindowHeight
         ))
-        #expect(!TrackSwitchWindowPolicy.shouldAutoShrinkWindow(
+        #expect(!TakesWindowPolicy.shouldAutoShrinkWindow(
             previousTrackRowCount: 5,
             newTrackRowCount: 4,
             currentWindowHeight: currentWindowHeight
@@ -250,18 +250,18 @@ struct SessionTests {
 
     @Test
     func windowPolicyUsesNarrowerMinimumWidthThanDefaultWidth() {
-        #expect(TrackSwitchWindowPolicy.minimumContentWidth == 500)
-        #expect(TrackSwitchWindowPolicy.defaultWindowWidth > TrackSwitchWindowPolicy.minimumContentWidth)
+        #expect(TakesWindowPolicy.minimumContentWidth == 500)
+        #expect(TakesWindowPolicy.defaultWindowWidth > TakesWindowPolicy.minimumContentWidth)
     }
 
     @Test
     func windowPolicyClearsSavedMainWindowFrame() {
-        let defaults = UserDefaults(suiteName: "TrackSwitchWindowPolicyTests-\(UUID().uuidString)")!
-        defaults.set("10 20 900 568 0 0 1512 944", forKey: TrackSwitchWindowPolicy.mainWindowFrameAutosaveName)
+        let defaults = UserDefaults(suiteName: "TakesWindowPolicyTests-\(UUID().uuidString)")!
+        defaults.set("10 20 900 568 0 0 1512 944", forKey: TakesWindowPolicy.mainWindowFrameAutosaveName)
 
-        TrackSwitchWindowPolicy.clearSavedMainWindowFrame(defaults: defaults)
+        TakesWindowPolicy.clearSavedMainWindowFrame(defaults: defaults)
 
-        #expect(defaults.string(forKey: TrackSwitchWindowPolicy.mainWindowFrameAutosaveName) == nil)
+        #expect(defaults.string(forKey: TakesWindowPolicy.mainWindowFrameAutosaveName) == nil)
     }
 
     @Test
@@ -279,7 +279,7 @@ struct SessionTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appending(path: "Config")
-            .appending(path: "TrackSwitch-Info.plist")
+            .appending(path: "Takes-Info.plist")
 
         let data = try Data(contentsOf: plistURL)
         let plist = try #require(
@@ -287,7 +287,7 @@ struct SessionTests {
         )
 
         let usage = plist["NSAppleEventsUsageDescription"] as? String
-        #expect(usage?.isEmpty == false)
+        #expect(usage == "Takes needs to read the selected local track from Music.")
     }
 
     @Test
@@ -297,7 +297,7 @@ struct SessionTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appending(path: "Config")
-            .appending(path: "TrackSwitch-Info.plist")
+            .appending(path: "Takes-Info.plist")
 
         let data = try Data(contentsOf: plistURL)
         let plist = try #require(
@@ -489,7 +489,7 @@ struct SessionTests {
         await controller.loadImportedFiles(urls)
 
         #expect(controller.session.tracks.count == PlaybackController.maximumTrackCount)
-        #expect(controller.playbackError?.localizedDescription.contains("TrackSwitch currently supports up to 32 loaded tracks.") == true)
+        #expect(controller.playbackError?.localizedDescription.contains("Takes currently supports up to 32 loaded tracks.") == true)
         #expect(controller.playbackError?.localizedDescription.contains("track-32.wav") == true)
     }
 
@@ -517,7 +517,7 @@ struct SessionTests {
         #expect(controller.session.tracks.count == PlaybackController.maximumTrackCount)
         #expect(controller.session.tracks.map { $0.loadedTrack.displayName }.suffix(2) == ["incoming-0.wav", "incoming-1.wav"])
         #expect(controller.playbackError?.localizedDescription.contains("missing-mixed.wav") == true)
-        #expect(controller.playbackError?.localizedDescription.contains("TrackSwitch currently supports up to 32 loaded tracks.") == true)
+        #expect(controller.playbackError?.localizedDescription.contains("Takes currently supports up to 32 loaded tracks.") == true)
         #expect(controller.playbackError?.localizedDescription.contains("incoming-2.wav") == true)
     }
 

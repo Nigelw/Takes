@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Testing
 import UniformTypeIdentifiers
-@testable import TrackSwitch
+@testable import Takes
 
 struct TrackDropHighlightTests {
     @Test
@@ -210,8 +210,8 @@ struct TrackDropHighlightTests {
 
     @Test
     func appUsesSingleMainWindowPolicy() {
-        #expect(TrackSwitchWindowPolicy.mainWindowID == "main")
-        #expect(TrackSwitchWindowPolicy.replacesDefaultNewItemCommands)
+        #expect(TakesWindowPolicy.mainWindowID == "main")
+        #expect(TakesWindowPolicy.replacesDefaultNewItemCommands)
     }
 
     @Test

@@ -83,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-enum TrackSwitchWindowPolicy {
+enum TakesWindowPolicy {
     static let mainWindowID = "main"
     static let replacesDefaultNewItemCommands = true
     static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
@@ -197,16 +197,16 @@ enum TrackSwitchWindowPolicy {
 }
 
 @main
-struct TrackSwitchApp: App {
+struct TakesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var controller = PlaybackController()
 
     init() {
-        TrackSwitchWindowPolicy.clearSavedMainWindowFrame()
+        TakesWindowPolicy.clearSavedMainWindowFrame()
     }
 
     var body: some Scene {
-        Window("TrackSwitch", id: TrackSwitchWindowPolicy.mainWindowID) {
+        Window("Takes", id: TakesWindowPolicy.mainWindowID) {
             ContentView(controller: controller)
                 .onAppear {
                     appDelegate.fileOpenRouter.setHandler { urls in
@@ -215,8 +215,8 @@ struct TrackSwitchApp: App {
                 }
         }
         .defaultSize(
-            width: TrackSwitchWindowPolicy.defaultWindowWidth,
-            height: TrackSwitchWindowPolicy.defaultWindowHeight
+            width: TakesWindowPolicy.defaultWindowWidth,
+            height: TakesWindowPolicy.defaultWindowHeight
         )
         .windowResizability(.contentMinSize)
         .commands {

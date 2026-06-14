@@ -1,6 +1,6 @@
 import AVFoundation
 import Testing
-@testable import TrackSwitch
+@testable import Takes
 
 struct TransportMappingTests {
     @Test
