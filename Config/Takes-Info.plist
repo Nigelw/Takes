@@ -37,7 +37,7 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Takes needs to read the selected local track from Music.</string>
+	<string>Takes needs to get the current selection from Finder and Apple Music.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>
