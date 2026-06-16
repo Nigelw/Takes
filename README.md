@@ -1,6 +1,12 @@
 # TrackSwitch
 
+<p align="center">
+  <img src="website/icon.png" alt="TrackSwitch app icon" width="128" height="128">
+</p>
+
 TrackSwitch is a native macOS app for comparing two versions of the same audio track. It keeps both tracks aligned on a shared transport timeline and lets you switch playback between them instantly so you can evaluate mastering differences at the same point in the song.
+
+![TrackSwitch main UI](website/screenshot.jpg)
 
 This README is written for someone working on the repo. It covers project layout, how to build and run the app, the core playback model, and a brief operator guide for manual testing.
 
