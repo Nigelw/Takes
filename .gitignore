@@ -4,6 +4,7 @@
 .swift-home/
 DerivedData/
 .derived-data/
+build/
 .swiftpm/
 .codex/
 mockups/
