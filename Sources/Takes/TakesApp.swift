@@ -200,6 +200,8 @@ enum TakesWindowPolicy {
 struct TakesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var controller = PlaybackController()
+    @StateObject private var settings = AppSettings()
+    @StateObject private var updater = SoftwareUpdater()
 
     init() {
         TakesWindowPolicy.clearSavedMainWindowFrame()
@@ -208,6 +210,8 @@ struct TakesApp: App {
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
             ContentView(controller: controller)
+                .environmentObject(settings)
+                .environmentObject(updater)
                 .onAppear {
                     appDelegate.fileOpenRouter.setHandler { urls in
                         Task { await controller.loadImportedFiles(urls) }
@@ -220,6 +224,12 @@ struct TakesApp: App {
         )
         .windowResizability(.contentMinSize)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    updater.checkForUpdates()
+                }
+            }
+
             FileCommands()
 
             CommandMenu("Playback") {
@@ -281,6 +291,12 @@ struct TakesApp: App {
                 .keyboardShortcut(.rightArrow, modifiers: [.command])
                 .disabled(!controller.session.isPlayable)
             }
+        }
+
+        Settings {
+            SettingsView()
+                .environmentObject(settings)
+                .environmentObject(updater)
         }
     }
 }
