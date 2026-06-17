@@ -287,7 +287,7 @@ struct SessionTests {
         )
 
         let usage = plist["NSAppleEventsUsageDescription"] as? String
-        #expect(usage == "Takes needs to read the selected local track from Music.")
+        #expect(usage == "Takes needs to get the current selection from Finder and Apple Music.")
     }
 
     @Test
@@ -902,8 +902,8 @@ struct SessionTests {
 
         #expect(gainConfig.steppedValue(from: 0, direction: 1, largeStep: false) == 1)
         #expect(gainConfig.steppedValue(from: 0, direction: -1, largeStep: true) == -10)
-        #expect(offsetConfig.steppedValue(from: 0, direction: 1, largeStep: false) == 10)
-        #expect(offsetConfig.steppedValue(from: 0, direction: -1, largeStep: true) == -100)
+        #expect(offsetConfig.steppedValue(from: 0, direction: 1, largeStep: false) == 100)
+        #expect(offsetConfig.steppedValue(from: 0, direction: -1, largeStep: true) == -500)
     }
 
     @Test
@@ -931,9 +931,9 @@ struct SessionTests {
     func numericControlUsesCurrentFieldValueWhenStepping() {
         let offsetConfig = NumericControlConfiguration.offset
 
-        #expect(offsetConfig.steppedValue(fromText: "20", fallbackValue: 0, direction: 1, largeStep: false) == 30)
-        #expect(offsetConfig.steppedValue(fromText: "30", fallbackValue: 0, direction: 1, largeStep: true) == 130)
-        #expect(offsetConfig.steppedValue(fromText: "130", fallbackValue: 0, direction: -1, largeStep: true) == 30)
+        #expect(offsetConfig.steppedValue(fromText: "20", fallbackValue: 0, direction: 1, largeStep: false) == 120)
+        #expect(offsetConfig.steppedValue(fromText: "30", fallbackValue: 0, direction: 1, largeStep: true) == 530)
+        #expect(offsetConfig.steppedValue(fromText: "530", fallbackValue: 0, direction: -1, largeStep: true) == 30)
     }
 
     @Test
@@ -1040,8 +1040,8 @@ struct SessionTests {
             largeStep: true
         )
 
-        #expect(stepped == 120)
-        #expect(editState.committedValue == 120)
+        #expect(stepped == 520)
+        #expect(editState.committedValue == 520)
         #expect(editState.pendingText == nil)
     }
 
@@ -1059,8 +1059,8 @@ struct SessionTests {
             largeStep: false
         )
 
-        #expect(stepped == 30)
-        #expect(editState.committedValue == 30)
+        #expect(stepped == 120)
+        #expect(editState.committedValue == 120)
         #expect(editState.pendingText == nil)
     }
 

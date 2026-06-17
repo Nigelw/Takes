@@ -9,7 +9,7 @@ struct NumericControlConfiguration {
     let suffix: String
 
     static let gain = NumericControlConfiguration(range: -24...24, step: 1, largeStep: 10, suffix: "dB")
-    static let offset = NumericControlConfiguration(range: -300_000...300_000, step: 10, largeStep: 100, suffix: "ms")
+    static let offset = NumericControlConfiguration(range: -300_000...300_000, step: 100, largeStep: 500, suffix: "ms")
 
     func clamped(_ value: Int) -> Int {
         min(max(value, range.lowerBound), range.upperBound)
@@ -371,6 +371,7 @@ extension FocusedValues {
 
 struct ContentView: View {
     @ObservedObject var controller: PlaybackController
+    @EnvironmentObject private var settings: AppSettings
 
     @StateObject private var openFileCommandState = OpenFileCommandState()
     @State private var keyMonitor: KeyMonitor?
@@ -849,7 +850,7 @@ struct ContentView: View {
                     get: { offsetMs },
                     set: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) }
                 ),
-                configuration: .offset
+                configuration: settings.offsetConfiguration
             )
         }
     }
@@ -1389,6 +1390,7 @@ private struct IntegerInputField: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
+        context.coordinator.configuration = configuration
         let clamped = configuration.clamped(value)
         if clamped != value {
             DispatchQueue.main.async {
@@ -1405,7 +1407,7 @@ private struct IntegerInputField: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         @Binding private var value: Int
-        private let configuration: NumericControlConfiguration
+        var configuration: NumericControlConfiguration
         private var editState: NumericControlEditState
         private(set) var isEditing = false
         private var isCancellingEdit = false
