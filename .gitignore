@@ -6,9 +6,8 @@ DerivedData/
 .derived-data/
 .swiftpm/
 .codex/
-mockups/
+Private/
 .superpowers/
-Tests/Audio/*
 
 *.xcuserstate
 xcuserdata/
