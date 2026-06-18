@@ -207,10 +207,27 @@ the stapled tickets work offline.
 
 ## Phase 5 — Distribute & wire up auto-updates (GitHub Releases)
 
-### Step 5.1 — Decide where appcast.xml lives
-Recommended: **GitHub Pages** off this repo → stable URL `https://nigelw.github.io/Takes/appcast.xml`
-(matches Step 2.4). Enable Pages in repo Settings → Pages (e.g. `/docs` folder or a `gh-pages`
-branch). The DMG itself is hosted as a **release asset**, not in Pages.
+### Step 5.1 — Hosting: GitHub Pages serving the `website/` folder (DONE)
+The appcast is served from **GitHub Pages**, published from the repo's **`website/`** folder via a
+**GitHub Actions** workflow (modeled on Shpigford/clearly's `website/` layout). Live at
+`https://nigelw.github.io/Takes/`, so `website/appcast.xml` → `https://nigelw.github.io/Takes/appcast.xml`
+(matches the `SUFeedURL` from Step 2.4). The DMG is **not** on Pages — it's a GitHub **release asset**.
+
+How it works:
+- `.github/workflows/pages.yml` uploads **only `website/`** as the Pages artifact (`path: './website'`)
+  on pushes to `main` that touch `website/**` (or the workflow), plus manual `workflow_dispatch`.
+  Because only `website/` is published, internal `docs/` and source stay off the site.
+- Pages **Source** is set to **GitHub Actions** (repo Settings → Pages). With the Actions source the
+  files are served as-is — **no Jekyll**, so no `.nojekyll` file is needed. (`.nojekyll` only matters
+  for the classic "Deploy from a branch" source or the Jekyll workflow.)
+- To publish a new/updated appcast, commit it into `website/` on `main` and push — the workflow
+  redeploys automatically (CDN cache may lag a minute or two).
+
+Note: the repo is **public**, so files under `docs/` remain viewable directly on github.com even
+though they're not on the published site. Pages scoping is about the website, not secrecy.
+
+`website/` currently holds `icon.png` and `screenshot.jpg`; `appcast.xml` (and an optional
+`index.html` landing page) are added below.
 
 ### Step 5.2 — Generate / update the signed appcast
 Sparkle's `generate_appcast` signs each update with your EdDSA key and writes `appcast.xml`.
@@ -224,7 +241,8 @@ Run (path to the tool is inside the Sparkle SwiftPM checkout/artifacts):
   "https://github.com/Nigelw/Takes/releases/download/v2.0/" \
   build/   # a dir containing the notarized DMG
 ```
-Review the generated `appcast.xml`, then publish it to the Pages location.
+Review the generated `appcast.xml`, then publish it by writing it to `website/appcast.xml`,
+committing on `main`, and pushing — the Pages workflow (Step 5.1) redeploys it automatically.
 
 ### Step 5.3 — Create the GitHub release
 ```sh
@@ -258,4 +276,5 @@ workflow later (needs cert + notary creds as encrypted secrets).
 - [ ] Signature verifies with Developer ID + runtime (3.3)
 - [ ] App notarized + stapled (4.1–4.2)
 - [ ] Styled DMG built from stapled app, notarized + stapled (4.3–4.4)
-- [ ] Appcast signed & published, release created (5.2–5.3)
+- [x] Pages serving website/ via Actions workflow (5.1)
+- [x] Appcast signed & published, release created (5.2–5.3) — v2.0a2 / build 3
