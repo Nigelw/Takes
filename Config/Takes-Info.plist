@@ -31,15 +31,17 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Takes needs to get the current selection from Finder and Apple Music.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUFeedURL</key>
+	<string>https://nigelw.github.io/Takes/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>ScIZIKYjEYLihl6SRoq6RNAPtLSyZmOykANUpE6xklg=</string>
 </dict>

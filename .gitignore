@@ -1,4 +1,5 @@
 .build/
+build/
 .codex
 DerivedData/
 .derived-data/
