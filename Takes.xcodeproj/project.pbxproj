@@ -8,9 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		A10000000000000000000021 /* AudioFileLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* AudioFileLoader.swift */; };
-		A1000000000000000000C011 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C001 /* AppSettings.swift */; };
-		A1000000000000000000C012 /* SoftwareUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C002 /* SoftwareUpdater.swift */; };
-		A1000000000000000000C013 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C003 /* SettingsView.swift */; };
 		A10000000000000000000022 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* ContentView.swift */; };
 		A10000000000000000000023 /* KeyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* KeyMonitor.swift */; };
 		A10000000000000000000024 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* Models.swift */; };
@@ -22,6 +19,9 @@
 		A10000000000000000000031 /* SessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* SessionTests.swift */; };
 		A10000000000000000000032 /* TransportMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* TransportMappingTests.swift */; };
 		A10000000000000000000033 /* TrackDropHighlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001D /* TrackDropHighlightTests.swift */; };
+		A1000000000000000000C011 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C001 /* AppSettings.swift */; };
+		A1000000000000000000C012 /* SoftwareUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C002 /* SoftwareUpdater.swift */; };
+		A1000000000000000000C013 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C003 /* SettingsView.swift */; };
 		A6FE79452FDE592C003F2711 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A6FE79442FDE592C003F2711 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -39,9 +39,6 @@
 		A10000000000000000000002 /* Takes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Takes.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000003 /* TakesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TakesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000011 /* AudioFileLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFileLoader.swift; sourceTree = "<group>"; };
-		A1000000000000000000C001 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
-		A1000000000000000000C002 /* SoftwareUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftwareUpdater.swift; sourceTree = "<group>"; };
-		A1000000000000000000C003 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* KeyMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyMonitor.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
@@ -54,6 +51,9 @@
 		A1000000000000000000001B /* LibraryTrackSelectionLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryTrackSelectionLoader.swift; sourceTree = "<group>"; };
 		A1000000000000000000001C /* Assets/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets/Assets.xcassets; sourceTree = "<group>"; };
 		A1000000000000000000001D /* TrackDropHighlightTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackDropHighlightTests.swift; sourceTree = "<group>"; };
+		A1000000000000000000C001 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		A1000000000000000000C002 /* SoftwareUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftwareUpdater.swift; sourceTree = "<group>"; };
+		A1000000000000000000C003 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -392,7 +392,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = KMA5YWAK8T;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_TESTABILITY = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
@@ -420,7 +420,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = KMA5YWAK8T;
 				ENABLE_APP_SANDBOX = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Config/Takes-Info.plist";
