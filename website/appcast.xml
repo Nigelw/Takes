@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Takes</title>
+        <item>
+            <title>2.0a2</title>
+            <pubDate>Thu, 18 Jun 2026 15:40:58 -0400</pubDate>
+            <sparkle:version>3</sparkle:version>
+            <sparkle:shortVersionString>2.0a2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0a2/Takes.dmg" length="2593614" type="application/octet-stream" sparkle:edSignature="XsZ+g8CNrCd0ZRbRiLn7BY2I9GsAUfKSlTUepfC5i3SkEpZjfqv0fqDciwp/NhqQ+H4KFgKbNHCjT5zJnf15Dw=="/>
+        </item>
+    </channel>
+</rss>
