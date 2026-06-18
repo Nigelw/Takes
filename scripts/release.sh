@@ -87,7 +87,14 @@ else
     -ov -format UDZO "$DMG_PATH"
 fi
 
-# Staple the DMG too so it validates offline after download.
+# Notarize the DMG itself so users get no Gatekeeper prompt when mounting it.
+# (The .app inside was already notarized/stapled above; this covers the wrapper.)
+echo "==> Notarizing the DMG"
+xcrun notarytool submit "$DMG_PATH" \
+  --keychain-profile "$NOTARY_PROFILE" \
+  --wait
+
+# Staple the ticket to the DMG so it validates offline after download.
 echo "==> Stapling the DMG"
 xcrun stapler staple "$DMG_PATH"
 
