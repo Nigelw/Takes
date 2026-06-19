@@ -291,6 +291,10 @@ struct TakesApp: App {
                 .keyboardShortcut(.rightArrow, modifiers: [.command])
                 .disabled(!controller.session.isPlayable)
             }
+
+            CommandGroup(replacing: .help) {
+                Link("Release Notes", destination: URL(string: "https://nigelw.github.io/Takes/changelog.html")!)
+            }
         }
 
         Settings {
