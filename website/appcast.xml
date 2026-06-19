@@ -1,15 +1,24 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>Takes</title>
+        <item>
+            <title>2.0a3</title>
+            <pubDate>Fri, 19 Jun 2026 07:31:39 -0400</pubDate>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>2.0a3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:releaseNotesLink>https://nigelw.github.io/Takes/Takes.md</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0a3/Takes.dmg" length="2629939" type="application/octet-stream" sparkle:edSignature="EfHo/vyzU5aAdnGqc5wbNAiA+mKd7LUU1cosThxeIenX45pa/DyCbXv2MUTUhBNaispit6WcHweEG/cnU6ucAg=="/>
+        </item>
         <item>
             <title>2.0a2</title>
             <pubDate>Thu, 18 Jun 2026 15:40:58 -0400</pubDate>
             <sparkle:version>3</sparkle:version>
             <sparkle:shortVersionString>2.0a2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0a2/Takes.dmg" length="2593614" type="application/octet-stream" sparkle:edSignature="XsZ+g8CNrCd0ZRbRiLn7BY2I9GsAUfKSlTUepfC5i3SkEpZjfqv0fqDciwp/NhqQ+H4KFgKbNHCjT5zJnf15Dw==" />
-        <description>&lt;h3&gt;Major improvements&lt;/h3&gt;
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0a2/Takes.dmg" length="2593614" type="application/octet-stream" sparkle:edSignature="XsZ+g8CNrCd0ZRbRiLn7BY2I9GsAUfKSlTUepfC5i3SkEpZjfqv0fqDciwp/NhqQ+H4KFgKbNHCjT5zJnf15Dw=="/>
+            <description>&lt;h3&gt;Major improvements&lt;/h3&gt;
 &lt;ul&gt;
 &lt;li&gt;New UI&lt;/li&gt;
 &lt;li&gt;New icon&lt;/li&gt;
@@ -29,6 +38,7 @@
 &lt;li&gt;Improved drag and drop support (drop files and folders on app icon to open, simplified behavior when dropping on app window)&lt;/li&gt;
 &lt;li&gt;Improved window sizing behavior (more compact, smart resizing, single window)&lt;/li&gt;
 &lt;li&gt;Signed &amp;amp; notarized for public distribution&lt;/li&gt;
-&lt;/ul&gt;</description></item>
+&lt;/ul&gt;</description>
+        </item>
     </channel>
 </rss>
