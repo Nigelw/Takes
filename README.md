@@ -1,12 +1,26 @@
-# Takes
-
 <p align="center">
   <img src="website/icon.png" alt="Takes app icon" width="128">
 </p>
 
-Takes is a native macOS app for comparing multiple versions of the same audio track. It keeps loaded tracks aligned on a shared transport timeline and lets you switch playback between them instantly so you can evaluate mastering differences at the same point in the song.
+<h1 align="center">Takes</h1>
 
-![Takes main UI](website/screenshot.jpg)
+<hr>
+
+<p align="center">
+  An app for comparing multiple versions of the same audio track.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Nigelw/Takes/releases/latest/download/Takes.dmg"><strong>Download Latest</strong></a>
+</p>
+
+<p align="center">
+  <img src="website/screenshot.jpg" alt="Takes main UI" width="800">
+</p>
+
+Takes is a native macOS app for comparing multiple versions of the same audio track. It lets you rapidly switch between tracks during playback to evaluate mastering differences at the same point in the song.
+
+---
 
 This README is written for someone working on the repo. It covers project layout, how to build and run the app, the core playback model, and a brief operator guide for manual testing.
 
