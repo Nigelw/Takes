@@ -374,6 +374,7 @@ struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
 
     @StateObject private var openFileCommandState = OpenFileCommandState()
+    @StateObject private var waveformStore = WaveformStore()
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
     @State private var reorderInsertionTarget: TrackReorderInsertionTarget?
@@ -468,6 +469,10 @@ struct ContentView: View {
         .focusedSceneValue(\.canClearTracks, !controller.session.tracks.isEmpty)
         .onAppear {
             setupKeyMonitor()
+            waveformStore.sync(tracks: controller.session.tracks)
+        }
+        .onChange(of: controller.session.tracks) { _, tracks in
+            waveformStore.sync(tracks: tracks)
         }
         .onChange(of: controller.session.tracks.count) { previousTrackCount, trackCount in
             guard let mainWindow else { return }
@@ -861,14 +866,15 @@ struct ContentView: View {
                 Rectangle()
                     .fill(.background.opacity(0.01))
 
-                if let track = sessionTrack?.loadedTrack {
-                    placeholderWaveform(index: index)
+                if let sessionTrack {
+                    let loaded = sessionTrack.loadedTrack
+                    waveformShape(for: waveformStore.waveform(for: sessionTrack.id))
                         .frame(
-                            width: max(CGFloat(track.duration / timelineSpan) * proxy.size.width, 1),
+                            width: max(CGFloat(loaded.duration / timelineSpan) * proxy.size.width, 1),
                             height: 58
                         )
                         .offset(
-                            x: xPosition(for: track.offsetSeconds, width: proxy.size.width)
+                            x: xPosition(for: loaded.offsetSeconds, width: proxy.size.width)
                         )
                         .foregroundStyle(trackColor(index: index).opacity(0.55))
                 } else {
@@ -893,19 +899,68 @@ struct ContentView: View {
         }
     }
 
-    private func placeholderWaveform(index trackIndex: Int) -> some View {
+    @ViewBuilder
+    private func waveformShape(for waveform: Waveform?) -> some View {
         Canvas { context, size in
-            let barCount = 96
-            let barWidth = max(size.width / CGFloat(barCount * 2), 1)
-            for barIndex in 0..<barCount {
-                let phase = Double(barIndex) * 0.37 + Double(trackIndex % 7) * 0.4
-                let amplitude = 0.25 + 0.7 * abs(sin(phase) * cos(phase * 0.43))
-                let height = size.height * amplitude
-                let x = CGFloat(barIndex) * size.width / CGFloat(barCount)
-                let rect = CGRect(x: x, y: (size.height - height) / 2, width: barWidth, height: height)
-                context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .foreground)
-            }
+            guard let waveform, waveform.bucketCount > 0, !waveform.peaks.isEmpty else { return }
+            context.fill(
+                Self.waveformPath(for: waveform, in: size),
+                with: .foreground
+            )
         }
+    }
+
+    /// Builds a filled, center-mirrored peak envelope by pooling the high-res
+    /// bucket cache down to one column per pixel. Columns are mapped across the
+    /// full `bucketCount`, so a partially generated waveform fills in
+    /// left-to-right as more buckets arrive, and the pooling stays O(width)
+    /// regardless of cache size — cheap enough to re-run on every resize or zoom.
+    private static func waveformPath(for waveform: Waveform, in size: CGSize) -> Path {
+        let bucketCount = waveform.bucketCount
+        let peaks = waveform.peaks
+        guard bucketCount > 0, !peaks.isEmpty, size.width > 0, size.height > 0 else {
+            return Path()
+        }
+
+        let midline = size.height / 2
+        let columns = max(1, Int(size.width.rounded()))
+        // A visible floor so silent passages still read as a thin line.
+        let minHalfHeight: CGFloat = 0.5
+        let available = peaks.count
+
+        // Half-height per column with rendered data (a contiguous leading run
+        // while generation is in progress).
+        var halves: [CGFloat] = []
+        halves.reserveCapacity(columns)
+        for column in 0..<columns {
+            let start = column * bucketCount / columns
+            let end = max(start + 1, (column + 1) * bucketCount / columns)
+            let lower = min(start, available)
+            let upper = min(end, available)
+            guard upper > lower else { break }
+
+            var peak: Float = 0
+            for index in lower..<upper where peaks[index] > peak {
+                peak = peaks[index]
+            }
+            halves.append(max(CGFloat(peak) * midline, minHalfHeight))
+        }
+
+        guard !halves.isEmpty else { return Path() }
+        let columnWidth = size.width / CGFloat(columns)
+
+        var path = Path()
+        // Top edge, left to right.
+        for (column, half) in halves.enumerated() {
+            let point = CGPoint(x: CGFloat(column) * columnWidth, y: midline - half)
+            column == 0 ? path.move(to: point) : path.addLine(to: point)
+        }
+        // Bottom edge, right to left, mirroring the top.
+        for column in stride(from: halves.count - 1, through: 0, by: -1) {
+            path.addLine(to: CGPoint(x: CGFloat(column) * columnWidth, y: midline + halves[column]))
+        }
+        path.closeSubpath()
+        return path
     }
 
     private func trackColor(index: Int) -> Color {
