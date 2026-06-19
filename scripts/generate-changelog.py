@@ -11,6 +11,7 @@ Usage:
         OUTPUT   default: website/changelog.html
 """
 import html
+import re
 import sys
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
@@ -28,6 +29,54 @@ def text(item, tag, ns=None):
     return el.text.strip() if el is not None and el.text else ""
 
 
+def inline_md(s):
+    s = html.escape(s)
+    s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+    s = re.sub(r"`(.+?)`", r"<code>\1</code>", s)
+    return s
+
+
+def md_to_html(md):
+    """Render the small Markdown subset used by release notes (bullet lists,
+    h2/h3 headings, paragraphs) to HTML. Other formats are passed through."""
+    out, in_list = [], False
+    for raw in md.splitlines():
+        line = raw.rstrip()
+        bullet = re.match(r"^\s*[-*]\s+(.*)$", line)
+        heading = re.match(r"^(#{2,})\s+(.*)$", line)
+        if bullet:
+            if not in_list:
+                out.append("<ul>")
+                in_list = True
+            out.append(f"<li>{inline_md(bullet.group(1))}</li>")
+            continue
+        if in_list:
+            out.append("</ul>")
+            in_list = False
+        if not line.strip():
+            continue
+        if heading:
+            tag = "h3" if len(heading.group(1)) == 2 else "h4"
+            out.append(f"<{tag}>{inline_md(heading.group(2))}</{tag}>")
+        else:
+            out.append(f"<p>{inline_md(line.strip())}</p>")
+    if in_list:
+        out.append("</ul>")
+    return "\n".join(out)
+
+
+def notes_html(item):
+    desc = item.find("description")
+    if desc is None or not desc.text:
+        return ""
+    raw = desc.text.strip()
+    # Sparkle marks Markdown notes with sparkle:format="markdown"; HTML notes
+    # (e.g. backfilled entries) have no format attribute and pass through.
+    if desc.get(f"{{{SPARKLE}}}format") == "markdown":
+        return md_to_html(raw)
+    return raw
+
+
 def parse_items(appcast):
     tree = ET.parse(appcast)
     items = []
@@ -38,7 +87,7 @@ def parse_items(appcast):
             "short": text(item, "shortVersionString", SPARKLE) or text(item, "title"),
             "min_os": text(item, "minimumSystemVersion", SPARKLE),
             "date": text(item, "pubDate"),
-            "notes": text(item, "description"),  # CDATA HTML, may be empty
+            "notes": notes_html(item),  # HTML, rendered from Markdown when needed
         })
     # Newest first by build number (Sparkle's comparison key).
     items.sort(key=lambda i: i["build"], reverse=True)

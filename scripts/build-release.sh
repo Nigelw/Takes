@@ -158,8 +158,12 @@ step "Generating signed appcast"
 APPCAST_SRC="$BUILD_DIR/appcast-src"
 rm -rf "$APPCAST_SRC"; mkdir -p "$APPCAST_SRC"
 cp "$DMG" "$APPCAST_SRC/$APP_NAME.dmg"
-# Release notes: generate_appcast embeds notes from a file with the same
-# basename as the archive ($APP_NAME.md). Markdown is rendered to HTML.
+# Release notes: generate_appcast reads notes from a file with the same
+# basename as the archive ($APP_NAME.md) and renders the Markdown to HTML.
+# --embed-release-notes is REQUIRED: without it, a .md notes file is emitted as
+# an external <sparkle:releaseNotesLink> to a URL we never host (404 in the
+# updater + blank changelog). Embedding inlines the notes as <description>, so
+# Sparkle and the changelog page both read them straight from the appcast.
 if [[ -n "$NOTES_FILE" ]]; then
   cp "$NOTES_FILE" "$APPCAST_SRC/$APP_NAME.md"
   echo "  using release notes from $NOTES_FILE"
@@ -167,6 +171,7 @@ fi
 # Seed with the existing feed so prior entries are preserved.
 [[ -f "$WEBSITE_DIR/appcast.xml" ]] && cp "$WEBSITE_DIR/appcast.xml" "$APPCAST_SRC/appcast.xml"
 "$GENERATE_APPCAST" \
+  --embed-release-notes \
   --download-url-prefix "${GITHUB_DOWNLOAD_BASE}/${TAG}/" \
   -o "$WEBSITE_DIR/appcast.xml" \
   "$APPCAST_SRC/"

@@ -8,7 +8,9 @@
             <sparkle:version>4</sparkle:version>
             <sparkle:shortVersionString>2.0a3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:releaseNotesLink>https://nigelw.github.io/Takes/Takes.md</sparkle:releaseNotesLink>
+            <description sparkle:format="markdown"><![CDATA[- Each track now shows real waveforms instead of a placeholder mockup
+- Rendering doesn't block the UI
+]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0a3/Takes.dmg" length="2629939" type="application/octet-stream" sparkle:edSignature="EfHo/vyzU5aAdnGqc5wbNAiA+mKd7LUU1cosThxeIenX45pa/DyCbXv2MUTUhBNaispit6WcHweEG/cnU6ucAg=="/>
         </item>
         <item>
