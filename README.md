@@ -4,8 +4,6 @@
 
 <h1 align="center">Takes</h1>
 
-<hr>
-
 <p align="center">
   An app for comparing multiple versions of the same audio track.
 </p>
