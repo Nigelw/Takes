@@ -92,6 +92,8 @@ def render(items):
              color: #b25000; background: #ffefe0; padding: .15rem .45rem; border-radius: 5px; }}
     .notes ul {{ margin: 0; padding-left: 1.25rem; }}
     .notes li {{ margin: .2rem 0; }}
+    .notes h3, .notes h4 {{ font-size: .95rem; margin: 1rem 0 .35rem; }}
+    .notes > :first-child {{ margin-top: 0; }}
     .empty {{ color: #8e8e93; font-style: italic; }}
     footer {{ margin-top: 3rem; font-size: .85rem; color: #6e6e73; }}
     footer a {{ color: inherit; }}

@@ -1,4 +1,4 @@
-<?xml version="1.0" standalone="yes"?>
+<?xml version='1.0' encoding='utf-8'?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>Takes</title>
@@ -8,7 +8,27 @@
             <sparkle:version>3</sparkle:version>
             <sparkle:shortVersionString>2.0a2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0a2/Takes.dmg" length="2593614" type="application/octet-stream" sparkle:edSignature="XsZ+g8CNrCd0ZRbRiLn7BY2I9GsAUfKSlTUepfC5i3SkEpZjfqv0fqDciwp/NhqQ+H4KFgKbNHCjT5zJnf15Dw=="/>
-        </item>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0a2/Takes.dmg" length="2593614" type="application/octet-stream" sparkle:edSignature="XsZ+g8CNrCd0ZRbRiLn7BY2I9GsAUfKSlTUepfC5i3SkEpZjfqv0fqDciwp/NhqQ+H4KFgKbNHCjT5zJnf15Dw==" />
+        <description>&lt;h3&gt;Major improvements&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;New UI&lt;/li&gt;
+&lt;li&gt;New icon&lt;/li&gt;
+&lt;li&gt;New name&lt;/li&gt;
+&lt;li&gt;Compare up to 32 tracks&lt;/li&gt;
+&lt;li&gt;Auto-updates via Sparkle&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Smaller changes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Drag to reorder tracks&lt;/li&gt;
+&lt;li&gt;Quick Open from Finder and Apple Music selection&lt;/li&gt;
+&lt;li&gt;Hidden shortcuts: use number keys 1–8 to quickly switch to correspondingly numbered track. Hitting 9 switches to the last track.&lt;/li&gt;
+&lt;li&gt;Input field behavior improvements (Esc key reverts to previous value, up/down arrow keys increment value, arrow key insertion point navigation takes precedence over playback keyboard shortcuts when input field is active)&lt;/li&gt;
+&lt;li&gt;Added settings for offset nudging intervals &amp;amp; auto-update behavior&lt;/li&gt;
+&lt;li&gt;Added proper menubar&lt;/li&gt;
+&lt;li&gt;Added full set of keyboard shortcuts&lt;/li&gt;
+&lt;li&gt;Improved drag and drop support (drop files and folders on app icon to open, simplified behavior when dropping on app window)&lt;/li&gt;
+&lt;li&gt;Improved window sizing behavior (more compact, smart resizing, single window)"&lt;/li&gt;
+&lt;li&gt;Signed &amp;amp; notarized for public distribution&lt;/li&gt;
+&lt;/ul&gt;</description></item>
     </channel>
 </rss>
