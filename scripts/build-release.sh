@@ -19,8 +19,13 @@
 #   - gh authenticated (only needed for --publish)
 #
 # Usage:
-#   scripts/build-release.sh             # build + notarize, no publish
-#   scripts/build-release.sh --publish   # also create release + push appcast
+#   scripts/build-release.sh                          # build + notarize, no publish
+#   scripts/build-release.sh --publish                # also create release + push appcast
+#   scripts/build-release.sh --notes-file NOTES.md    # use Markdown notes for appcast + release
+#   scripts/build-release.sh --publish --notes-file release-notes.md
+#
+# --notes-file <path>  Markdown release notes. Embedded in the Sparkle appcast
+#                      (rendered to HTML) and used as the GitHub release body.
 
 set -euo pipefail
 
@@ -42,13 +47,21 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 
 PUBLISH=0
-[[ "${1:-}" == "--publish" ]] && PUBLISH=1
+NOTES_FILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --publish) PUBLISH=1; shift ;;
+    --notes-file) NOTES_FILE="${2:-}"; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$1"; }
 die()  { printf '\033[1;31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 
 # ---- Preflight ------------------------------------------------------------
 step "Preflight"
+[[ -z "$NOTES_FILE" || -f "$NOTES_FILE" ]] || die "notes file not found: $NOTES_FILE"
 command -v create-dmg >/dev/null || die "create-dmg not found (brew install create-dmg)"
 security find-identity -v -p codesigning | grep -q "$TEAM_ID" || die "Developer ID identity not in keychain"
 xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
@@ -141,6 +154,12 @@ step "Generating signed appcast"
 APPCAST_SRC="$BUILD_DIR/appcast-src"
 rm -rf "$APPCAST_SRC"; mkdir -p "$APPCAST_SRC"
 cp "$DMG" "$APPCAST_SRC/$APP_NAME.dmg"
+# Release notes: generate_appcast embeds notes from a file with the same
+# basename as the archive ($APP_NAME.md). Markdown is rendered to HTML.
+if [[ -n "$NOTES_FILE" ]]; then
+  cp "$NOTES_FILE" "$APPCAST_SRC/$APP_NAME.md"
+  echo "  using release notes from $NOTES_FILE"
+fi
 # Seed with the existing feed so prior entries are preserved.
 [[ -f "$WEBSITE_DIR/appcast.xml" ]] && cp "$WEBSITE_DIR/appcast.xml" "$APPCAST_SRC/appcast.xml"
 "$GENERATE_APPCAST" \
@@ -164,13 +183,14 @@ EOF
 fi
 
 step "Creating GitHub release $TAG"
-PRERELEASE_FLAG=""
-[[ "$MARKETING_VERSION" =~ [a-zA-Z] ]] && PRERELEASE_FLAG="--prerelease"  # alpha/beta strings
-gh release create "$TAG" "$DMG" \
-  --repo "$REPO" \
-  --title "$APP_NAME $MARKETING_VERSION" \
-  $PRERELEASE_FLAG \
-  --notes "Direct-distribution build $MARKETING_VERSION (build $BUILD_NUMBER). Notarized & stapled; delivered via Sparkle."
+RELEASE_ARGS=(--repo "$REPO" --title "$APP_NAME $MARKETING_VERSION")
+[[ "$MARKETING_VERSION" =~ [a-zA-Z] ]] && RELEASE_ARGS+=(--prerelease)  # alpha/beta strings
+if [[ -n "$NOTES_FILE" ]]; then
+  RELEASE_ARGS+=(--notes-file "$NOTES_FILE")
+else
+  RELEASE_ARGS+=(--notes "Direct-distribution build $MARKETING_VERSION (build $BUILD_NUMBER). Notarized & stapled; delivered via Sparkle.")
+fi
+gh release create "$TAG" "$DMG" "${RELEASE_ARGS[@]}"
 
 step "Verifying release asset"
 URL="${GITHUB_DOWNLOAD_BASE}/${TAG}/$APP_NAME.dmg"
