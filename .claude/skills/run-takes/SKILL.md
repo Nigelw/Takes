@@ -3,7 +3,7 @@ name: run-takes
 description: Run, launch, start, build, screenshot, or verify the Takes macOS audio comparison app. Use when asked to run Takes, take a screenshot of Takes, test Takes UI, or confirm a UI change works.
 ---
 
-Takes is a native macOS SwiftUI app for comparing multiple audio tracks on a shared transport timeline. It is driven by launching the `.app` bundle with `open` and then using **computer-use** tools to take screenshots and click. There is no headless or CLI path — the app requires a display.
+Takes is a native macOS SwiftUI app for comparing multiple audio tracks on a shared transport timeline. It is driven by launching the `.app` bundle with `open` and then using **computer-use** tools to take screenshots and click. Observing and interacting with the UI requires a display (computer-use) — but audio files can be loaded from the shell with `open -a` instead of navigating the open dialog (see [Load audio files](#load-audio-files-agent-path)).
 
 All paths below are relative to the repo root (`Takes/`).
 
@@ -48,6 +48,22 @@ After the script prints `Takes is running`, use computer-use tools to interact:
 2. Call `screenshot` to see the current state.
 3. Use `left_click`, `key`, `type`, etc. to interact.
 4. Call `screenshot` (with `save_to_disk: true`) to capture the result.
+
+## Load audio files (agent path)
+
+To get audio into the app, **don't drive the open dialog with computer-use** — it's flaky (menu timing, list-row selection, cmd-click multi-select that silently doesn't take). Instead load files straight from the shell. The app declares `public.audio` as a handled document type and routes opened URLs through `AppDelegate.application(_:open:)`, so `open -a` lands in the same code path as File ▸ Open / drag-and-drop:
+
+```bash
+APP="$PWD/.derived-data/Build/Products/Debug/Takes.app"
+open -a "$APP" "/abs/path/track-a.m4a" "/abs/path/track-b.m4a"
+```
+
+- Use **absolute file paths** (and an absolute path to the `.app`).
+- This **appends** to the current session, like opening files normally. For a clean load, quit/relaunch first (or click Clear All).
+- The app must already be built and launched once so Launch Services has it registered (`smoke.sh` handles build + launch).
+- Sample audio for testing lives in `Private/Audio Samples/` (e.g. the two `Where to Begin` takes make a good comparison pair).
+
+After loading, use computer-use only for what genuinely needs eyes — confirming the waveform rendered, checking playback, reading the UI.
 
 ### What the UI looks like at launch
 
