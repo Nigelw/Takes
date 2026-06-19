@@ -111,6 +111,30 @@ curl -sL -o /dev/null -w '%{http_code} %{size_download}\n' \
 
 Report the released version, the release URL, and the live-feed confirmation back to the user.
 
+## Step 7 — Archive the build and capture a screenshot (local)
+
+Local archival only — `Private/` is gitignored, so nothing is pushed. Both items use the `<MARKETING_VERSION>` filename convention (note the space, matching existing files like `Private/Builds/TrackSwitch v1.0.dmg`).
+
+**7a — Archive the disk image.** Copy the notarized release DMG into `Private/Builds/`:
+
+```bash
+cp build/Takes.dmg "Private/Builds/Takes v<MARKETING_VERSION>.dmg"
+```
+
+**7b — Capture the main window.** Launch the build just produced (`build/export/Takes.app` — the notarized release app), load two audio files, and screenshot the window. Use the **computer-use** tools and the launch/interaction details in the [run-takes skill](../run-takes/SKILL.md):
+
+1. Quit any running instance (`pkill -x Takes`), then `open build/export/Takes.app` and wait for it to appear (`pgrep -x Takes`).
+2. `request_access` for `["Takes"]`, then `screenshot` to see the launch state.
+3. Load **two** files from `Private/Audio Samples/` into the two track slots — drag them in from Finder, or use the `+` button's native file picker (per run-takes, both work; the drop zone is the right panel of each track row). For visual consistency across releases, load the **same two** files each time (e.g. `11 Where to Begin.m4a` and `4-04 Where to Begin (Live).m4a`).
+4. Once both tracks show as loaded, capture just the app window and save it to `Private/Screenshots/Takes v<MARKETING_VERSION>.png`. Prefer a window-tight capture: read the Takes window's bounds, then
+   ```bash
+   screencapture -o -R<x,y,w,h> "Private/Screenshots/Takes v<MARKETING_VERSION>.png"
+   ```
+   If the window bounds aren't readily available, fall back to a computer-use `screenshot` with `save_to_disk`, then crop to the window with `sips`.
+5. Quit the app (`pkill -x Takes`).
+
+Confirm both artifacts exist and report their paths.
+
 ## Notes
 
 - This is an outward-facing, hard-to-reverse operation. Pause for the user's confirmation at Step 2 (version) and Step 3 (notes) before the irreversible Step 5.
