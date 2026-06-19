@@ -63,7 +63,7 @@ die()  { printf '\033[1;31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 step "Preflight"
 [[ -z "$NOTES_FILE" || -f "$NOTES_FILE" ]] || die "notes file not found: $NOTES_FILE"
 command -v create-dmg >/dev/null || die "create-dmg not found (brew install create-dmg)"
-security find-identity -v -p codesigning | grep -q "$TEAM_ID" || die "Developer ID identity not in keychain"
+grep -q "$TEAM_ID" <<<"$(security find-identity -v -p codesigning)" || die "Developer ID identity not in keychain"
 xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
   || die "notary profile '$NOTARY_PROFILE' not usable (see Phase 1.2)"
 security find-generic-password -s "https://sparkle-project.org" >/dev/null 2>&1 \
@@ -110,8 +110,12 @@ xcodebuild -exportArchive -archivePath "$ARCHIVE" \
 
 step "Verifying signature"
 codesign --verify --deep --strict --verbose=2 "$APP"
-codesign -dvv "$APP" 2>&1 | grep -q "Developer ID Application" || die "app not Developer ID signed"
-codesign -dvv "$APP" 2>&1 | grep -q "flags=.*runtime" || die "hardened runtime not enabled"
+# Capture once, then grep the variable: piping codesign into `grep -q` races
+# under `set -o pipefail` — grep exits on first match and closes the pipe, so
+# codesign gets SIGPIPE and the pipeline "fails" even though the match succeeded.
+sig_info=$(codesign -dvv "$APP" 2>&1)
+grep -q "Developer ID Application" <<<"$sig_info" || die "app not Developer ID signed"
+grep -q "flags=.*runtime" <<<"$sig_info" || die "hardened runtime not enabled"
 
 # ---- Notarize + staple the app -------------------------------------------
 step "Notarizing app"
