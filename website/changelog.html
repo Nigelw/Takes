@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Takes — Changelog</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+           max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; color: #1d1d1f; }
+    header { display: flex; align-items: center; gap: .75rem; margin-bottom: 2.5rem; }
+    header img { width: 48px; height: 48px; border-radius: 11px; }
+    header h1 { font-size: 1.5rem; margin: 0; }
+    .release { padding: 1.5rem 0; border-top: 1px solid #e5e5e7; }
+    .release:first-of-type { border-top: none; }
+    .release h2 { font-size: 1.2rem; margin: 0 0 .25rem; display: flex; align-items: baseline; gap: .6rem; }
+    .meta { color: #6e6e73; font-size: .85rem; margin: 0 0 .75rem; }
+    .badge { font-size: .65rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+             color: #b25000; background: #ffefe0; padding: .15rem .45rem; border-radius: 5px; }
+    .notes ul { margin: 0; padding-left: 1.25rem; }
+    .notes li { margin: .2rem 0; }
+    .empty { color: #8e8e93; font-style: italic; }
+    footer { margin-top: 3rem; font-size: .85rem; color: #6e6e73; }
+    footer a { color: inherit; }
+    @media (prefers-color-scheme: dark) {
+      body { color: #f5f5f7; }
+      .release { border-color: #2c2c2e; }
+      .meta, footer { color: #98989d; }
+      .badge { color: #ffb066; background: #3a2410; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="icon.png" alt="Takes icon">
+    <h1>Takes — Changelog</h1>
+  </header>
+    <section class="release">
+      <h2>2.0a2<span class="badge">Pre-release</span></h2>
+      <p class="meta">June 18, 2026 · build 3</p>
+      <div class="notes"><p class="empty">No release notes.</p></div>
+    </section>
+  <footer>
+    <a href="https://github.com/Nigelw/Takes/releases">All releases on GitHub</a>
+  </footer>
+</body>
+</html>

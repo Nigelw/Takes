@@ -168,6 +168,9 @@ fi
   "$APPCAST_SRC/"
 echo "  wrote $WEBSITE_DIR/appcast.xml"
 
+step "Generating changelog page"
+python3 scripts/generate-changelog.py "$WEBSITE_DIR/appcast.xml" "$WEBSITE_DIR/changelog.html"
+
 # ---- Publish (outward-facing) --------------------------------------------
 if [[ $PUBLISH -eq 0 ]]; then
   step "Done (local build only)"
@@ -175,6 +178,7 @@ if [[ $PUBLISH -eq 0 ]]; then
 Built and notarized:
   $DMG
   $WEBSITE_DIR/appcast.xml  (enclosure → ${GITHUB_DOWNLOAD_BASE}/${TAG}/$APP_NAME.dmg)
+  $WEBSITE_DIR/changelog.html
 
 Nothing was published. To create the GitHub release and publish the appcast, re-run with:
   scripts/build-release.sh --publish
@@ -198,9 +202,9 @@ DMG_SIZE="$(stat -f%z "$DMG")"
 ASSET_SIZE="$(curl -sL -o /dev/null -w '%{size_download}' "$URL")"
 [[ "$DMG_SIZE" == "$ASSET_SIZE" ]] || die "uploaded asset size ($ASSET_SIZE) != local DMG ($DMG_SIZE)"
 
-step "Publishing appcast (commit + push)"
-git add "$WEBSITE_DIR/appcast.xml"
-git commit -m "Publish Sparkle appcast for $MARKETING_VERSION (build $BUILD_NUMBER)"
+step "Publishing appcast + changelog (commit + push)"
+git add "$WEBSITE_DIR/appcast.xml" "$WEBSITE_DIR/changelog.html"
+git commit -m "Publish $MARKETING_VERSION (build $BUILD_NUMBER): appcast + changelog"
 git push origin "$DEFAULT_BRANCH"
 
 step "Released $TAG"

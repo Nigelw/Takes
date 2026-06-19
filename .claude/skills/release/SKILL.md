@@ -89,7 +89,7 @@ git push origin main
 scripts/build-release.sh --publish --notes-file build/release-notes.md
 ```
 
-This archives, exports (Developer ID), notarizes + staples the app, builds the styled signed DMG, notarizes + staples it, generates the signed appcast (with the notes embedded), creates the `v<MARKETING_VERSION>` GitHub release (auto-flagged prerelease for alpha/beta strings) with the DMG attached, then commits and pushes `website/appcast.xml`. Takes several minutes (two notarization round-trips). All failure-prone work happens **before** anything is published, so a notarization failure aborts cleanly with no release/tag created.
+This archives, exports (Developer ID), notarizes + staples the app, builds the styled signed DMG, notarizes + staples it, generates the signed appcast (with the notes embedded), regenerates `website/changelog.html` from the appcast, creates the `v<MARKETING_VERSION>` GitHub release (auto-flagged prerelease for alpha/beta strings) with the DMG attached, then commits and pushes `website/appcast.xml` + `website/changelog.html`. Takes several minutes (two notarization round-trips). All failure-prone work happens **before** anything is published, so a notarization failure aborts cleanly with no release/tag created.
 
 Optional safety: run once **without** `--publish` first to confirm the build + notarize half, then re-run with `--publish`. Costs an extra build cycle.
 
@@ -107,6 +107,12 @@ curl -sL https://nigelw.github.io/Takes/appcast.xml | grep -E 'sparkle:version|e
 ```bash
 curl -sL -o /dev/null -w '%{http_code} %{size_download}\n' \
   "https://github.com/Nigelw/Takes/releases/download/v<MARKETING_VERSION>/Takes.dmg"
+```
+
+- The changelog page should show the new version at the top:
+
+```bash
+curl -sL https://nigelw.github.io/Takes/changelog.html | grep -m1 '<h2>'
 ```
 
 Report the released version, the release URL, and the live-feed confirmation back to the user.
