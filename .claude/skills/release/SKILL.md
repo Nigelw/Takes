@@ -125,12 +125,18 @@ cp build/Takes.dmg "Private/Builds/Takes v<MARKETING_VERSION>.dmg"
 
 1. Quit any running instance (`pkill -x Takes`), then `open build/export/Takes.app` and wait for it to appear (`pgrep -x Takes`).
 2. `request_access` for `["Takes"]`, then `screenshot` to see the launch state.
-3. Load **two** files from `Private/Audio Samples/` into the two track slots — drag them in from Finder, or use the `+` button's native file picker (per run-takes, both work; the drop zone is the right panel of each track row). For visual consistency across releases, load the **same two** files each time (e.g. `11 Where to Begin.m4a` and `4-04 Where to Begin (Live).m4a`).
-4. Once both tracks show as loaded, capture just the app window and save it to `Private/Screenshots/Takes v<MARKETING_VERSION>.png`. Prefer a window-tight capture: read the Takes window's bounds, then
+3. Load **two** files from `Private/Audio Samples/` into the two track slots — drag them in from Finder, or use the `+` button's native file picker (per run-takes, both work; the drop zone is the right panel of each track row). For visual consistency across releases, load the **same two** files each time (e.g. `2-18 I'm Not There.mp3` and `3-11 I'm Not There.m4a`).
+4. Once both tracks show as loaded, capture **just the Takes window** to `Private/Screenshots/Takes v<MARKETING_VERSION>.png`. Get the window id (and exact bounds) with the helper — no need to eyeball anything:
    ```bash
-   screencapture -o -R<x,y,w,h> "Private/Screenshots/Takes v<MARKETING_VERSION>.png"
+   read WID X Y W H < <(swift .claude/skills/release/window-info.swift Takes)
    ```
-   If the window bounds aren't readily available, fall back to a computer-use `screenshot` with `save_to_disk`, then crop to the window with `sips`.
+   Then, in order of preference:
+   - **By window id (cleanest, no bounds needed):**
+     ```bash
+     screencapture -o -l"$WID" "Private/Screenshots/Takes v<MARKETING_VERSION>.png"
+     ```
+     `screencapture` needs **Screen Recording** permission for the process that runs it (System Settings → Privacy & Security → Screen Recording). Granting it to the terminal you release from is a one-time step that makes this the whole capture.
+   - **Fallback if `screencapture` is blocked** (e.g. the agent's shell lacks that permission — it fails with `could not create image from window`): take a computer-use `screenshot` with `save_to_disk` (that path has screen access), then crop to the helper's `$X $Y $W $H` rectangle.
 5. Quit the app (`pkill -x Takes`).
 
 Confirm both artifacts exist and report their paths.
