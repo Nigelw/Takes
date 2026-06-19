@@ -374,6 +374,7 @@ struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
 
     @StateObject private var openFileCommandState = OpenFileCommandState()
+    @StateObject private var waveformStore = WaveformStore()
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
     @State private var reorderInsertionTarget: TrackReorderInsertionTarget?
@@ -468,6 +469,10 @@ struct ContentView: View {
         .focusedSceneValue(\.canClearTracks, !controller.session.tracks.isEmpty)
         .onAppear {
             setupKeyMonitor()
+            waveformStore.sync(tracks: controller.session.tracks)
+        }
+        .onChange(of: controller.session.tracks) { _, tracks in
+            waveformStore.sync(tracks: tracks)
         }
         .onChange(of: controller.session.tracks.count) { previousTrackCount, trackCount in
             guard let mainWindow else { return }
@@ -861,14 +866,15 @@ struct ContentView: View {
                 Rectangle()
                     .fill(.background.opacity(0.01))
 
-                if let track = sessionTrack?.loadedTrack {
-                    placeholderWaveform(index: index)
+                if let sessionTrack {
+                    let loaded = sessionTrack.loadedTrack
+                    waveformShape(for: waveformStore.waveform(for: sessionTrack.id))
                         .frame(
-                            width: max(CGFloat(track.duration / timelineSpan) * proxy.size.width, 1),
+                            width: max(CGFloat(loaded.duration / timelineSpan) * proxy.size.width, 1),
                             height: 58
                         )
                         .offset(
-                            x: xPosition(for: track.offsetSeconds, width: proxy.size.width)
+                            x: xPosition(for: loaded.offsetSeconds, width: proxy.size.width)
                         )
                         .foregroundStyle(trackColor(index: index).opacity(0.55))
                 } else {
@@ -893,19 +899,51 @@ struct ContentView: View {
         }
     }
 
-    private func placeholderWaveform(index trackIndex: Int) -> some View {
+    @ViewBuilder
+    private func waveformShape(for waveform: Waveform?) -> some View {
         Canvas { context, size in
-            let barCount = 96
-            let barWidth = max(size.width / CGFloat(barCount * 2), 1)
-            for barIndex in 0..<barCount {
-                let phase = Double(barIndex) * 0.37 + Double(trackIndex % 7) * 0.4
-                let amplitude = 0.25 + 0.7 * abs(sin(phase) * cos(phase * 0.43))
-                let height = size.height * amplitude
-                let x = CGFloat(barIndex) * size.width / CGFloat(barCount)
-                let rect = CGRect(x: x, y: (size.height - height) / 2, width: barWidth, height: height)
-                context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .foreground)
-            }
+            guard let waveform, waveform.binCount > 0, !waveform.peaks.isEmpty else { return }
+            context.fill(
+                Self.waveformPath(for: waveform, in: size),
+                with: .foreground
+            )
         }
+    }
+
+    /// Builds a filled, center-mirrored peak envelope. Bins are laid out across
+    /// the full width by their position in the file (`binCount`), so a partially
+    /// generated waveform fills in left-to-right as more peaks arrive.
+    private static func waveformPath(for waveform: Waveform, in size: CGSize) -> Path {
+        let binCount = waveform.binCount
+        let peaks = waveform.peaks
+        guard binCount > 0, !peaks.isEmpty, size.width > 0, size.height > 0 else {
+            return Path()
+        }
+
+        let midline = size.height / 2
+        let binWidth = size.width / CGFloat(binCount)
+        // A visible floor so silent passages still read as a thin line.
+        let minHalfHeight: CGFloat = 0.5
+
+        var path = Path()
+
+        // Top edge, left to right.
+        for index in peaks.indices {
+            let x = CGFloat(index) * binWidth
+            let half = max(CGFloat(peaks[index]) * midline, minHalfHeight)
+            let point = CGPoint(x: x, y: midline - half)
+            index == peaks.startIndex ? path.move(to: point) : path.addLine(to: point)
+        }
+
+        // Bottom edge, right to left, mirroring the top.
+        for index in peaks.indices.reversed() {
+            let x = CGFloat(index) * binWidth
+            let half = max(CGFloat(peaks[index]) * midline, minHalfHeight)
+            path.addLine(to: CGPoint(x: x, y: midline + half))
+        }
+
+        path.closeSubpath()
+        return path
     }
 
     private func trackColor(index: Int) -> Color {
