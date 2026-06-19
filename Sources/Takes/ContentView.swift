@@ -902,7 +902,7 @@ struct ContentView: View {
     @ViewBuilder
     private func waveformShape(for waveform: Waveform?) -> some View {
         Canvas { context, size in
-            guard let waveform, waveform.binCount > 0, !waveform.peaks.isEmpty else { return }
+            guard let waveform, waveform.bucketCount > 0, !waveform.peaks.isEmpty else { return }
             context.fill(
                 Self.waveformPath(for: waveform, in: size),
                 with: .foreground
@@ -910,38 +910,55 @@ struct ContentView: View {
         }
     }
 
-    /// Builds a filled, center-mirrored peak envelope. Bins are laid out across
-    /// the full width by their position in the file (`binCount`), so a partially
-    /// generated waveform fills in left-to-right as more peaks arrive.
+    /// Builds a filled, center-mirrored peak envelope by pooling the high-res
+    /// bucket cache down to one column per pixel. Columns are mapped across the
+    /// full `bucketCount`, so a partially generated waveform fills in
+    /// left-to-right as more buckets arrive, and the pooling stays O(width)
+    /// regardless of cache size — cheap enough to re-run on every resize or zoom.
     private static func waveformPath(for waveform: Waveform, in size: CGSize) -> Path {
-        let binCount = waveform.binCount
+        let bucketCount = waveform.bucketCount
         let peaks = waveform.peaks
-        guard binCount > 0, !peaks.isEmpty, size.width > 0, size.height > 0 else {
+        guard bucketCount > 0, !peaks.isEmpty, size.width > 0, size.height > 0 else {
             return Path()
         }
 
         let midline = size.height / 2
-        let binWidth = size.width / CGFloat(binCount)
+        let columns = max(1, Int(size.width.rounded()))
         // A visible floor so silent passages still read as a thin line.
         let minHalfHeight: CGFloat = 0.5
+        let available = peaks.count
+
+        // Half-height per column with rendered data (a contiguous leading run
+        // while generation is in progress).
+        var halves: [CGFloat] = []
+        halves.reserveCapacity(columns)
+        for column in 0..<columns {
+            let start = column * bucketCount / columns
+            let end = max(start + 1, (column + 1) * bucketCount / columns)
+            let lower = min(start, available)
+            let upper = min(end, available)
+            guard upper > lower else { break }
+
+            var peak: Float = 0
+            for index in lower..<upper where peaks[index] > peak {
+                peak = peaks[index]
+            }
+            halves.append(max(CGFloat(peak) * midline, minHalfHeight))
+        }
+
+        guard !halves.isEmpty else { return Path() }
+        let columnWidth = size.width / CGFloat(columns)
 
         var path = Path()
-
         // Top edge, left to right.
-        for index in peaks.indices {
-            let x = CGFloat(index) * binWidth
-            let half = max(CGFloat(peaks[index]) * midline, minHalfHeight)
-            let point = CGPoint(x: x, y: midline - half)
-            index == peaks.startIndex ? path.move(to: point) : path.addLine(to: point)
+        for (column, half) in halves.enumerated() {
+            let point = CGPoint(x: CGFloat(column) * columnWidth, y: midline - half)
+            column == 0 ? path.move(to: point) : path.addLine(to: point)
         }
-
         // Bottom edge, right to left, mirroring the top.
-        for index in peaks.indices.reversed() {
-            let x = CGFloat(index) * binWidth
-            let half = max(CGFloat(peaks[index]) * midline, minHalfHeight)
-            path.addLine(to: CGPoint(x: x, y: midline + half))
+        for column in stride(from: halves.count - 1, through: 0, by: -1) {
+            path.addLine(to: CGPoint(x: CGFloat(column) * columnWidth, y: midline + halves[column]))
         }
-
         path.closeSubpath()
         return path
     }

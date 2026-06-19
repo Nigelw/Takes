@@ -6,19 +6,25 @@ struct WaveformSourceTests {
     @Test
     func generatesPeaksThatTrackTheSignalEnvelope() async throws {
         // First half silent, second half full-scale, so the resulting envelope
-        // should be ~0 across the first half of bins and ~1 across the second.
-        let url = try writeTestFile(frameCount: 44_100) { frame, total in
+        // should be ~0 across the first half of buckets and ~1 across the second.
+        let frameCount = 44_100
+        let url = try writeTestFile(frameCount: frameCount) { frame, total in
             frame < total / 2 ? 0 : 1
         }
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let result = await collectWaveform(url: url, binCount: 100)
+        let result = await collectWaveform(url: url)
 
+        let expectedBuckets = WaveformSource.bucketCount(forFrameCount: AVAudioFramePosition(frameCount))
         #expect(result.isComplete)
-        #expect(result.peaks.count == 100)
+        #expect(result.bucketCount == expectedBuckets)
+        #expect(result.peaks.count == expectedBuckets)
 
-        let firstHalfPeak = result.peaks[0..<50].max() ?? 0
-        let secondHalfMin = result.peaks[50..<100].min() ?? 0
+        // Sample either side of the midpoint, leaving a margin for the single
+        // bucket that straddles the silence/full-scale boundary.
+        let mid = expectedBuckets / 2
+        let firstHalfPeak = result.peaks[0..<(mid - 2)].max() ?? 0
+        let secondHalfMin = result.peaks[(mid + 2)...].min() ?? 0
         #expect(firstHalfPeak < 0.01)
         #expect(secondHalfMin > 0.99)
     }
@@ -29,7 +35,7 @@ struct WaveformSourceTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let progress = ProgressCounter()
-        await WaveformSource.generate(url: url, binCount: 100) { _, isComplete in
+        await WaveformSource.generate(url: url) { _, _, isComplete in
             await progress.record(isComplete: isComplete)
         }
 
@@ -41,18 +47,31 @@ struct WaveformSourceTests {
     func emptyOrMissingFileCompletesWithNoPeaks() async throws {
         let missing = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("does-not-exist.caf")
 
-        let result = await collectWaveform(url: missing, binCount: 100)
+        let result = await collectWaveform(url: missing)
 
         #expect(result.isComplete)
         #expect(result.peaks.isEmpty)
+        #expect(result.bucketCount == 0)
+    }
+
+    @Test
+    func bucketCountCapsResolutionForLongFiles() {
+        // Short files: one bucket per `minimumFramesPerBucket`.
+        #expect(WaveformSource.bucketCount(forFrameCount: 0) == 0)
+        #expect(WaveformSource.bucketCount(forFrameCount: 256) == 1)
+        #expect(WaveformSource.bucketCount(forFrameCount: 257) == 2)
+
+        // Very long files are capped so memory stays bounded.
+        let huge = AVAudioFramePosition(WaveformSource.maximumBuckets) * 256 * 10
+        #expect(WaveformSource.bucketCount(forFrameCount: huge) == WaveformSource.maximumBuckets)
     }
 
     // MARK: - Helpers
 
-    private func collectWaveform(url: URL, binCount: Int) async -> (peaks: [Float], isComplete: Bool) {
+    private func collectWaveform(url: URL) async -> (peaks: [Float], bucketCount: Int, isComplete: Bool) {
         let collector = Collector()
-        await WaveformSource.generate(url: url, binCount: binCount) { peaks, isComplete in
-            await collector.record(peaks: peaks, isComplete: isComplete)
+        await WaveformSource.generate(url: url) { peaks, bucketCount, isComplete in
+            await collector.record(peaks: peaks, bucketCount: bucketCount, isComplete: isComplete)
         }
         return await collector.snapshot()
     }
@@ -94,15 +113,17 @@ struct WaveformSourceTests {
 
     private actor Collector {
         private var peaks: [Float] = []
+        private var bucketCount = 0
         private var isComplete = false
 
-        func record(peaks: [Float], isComplete: Bool) {
+        func record(peaks: [Float], bucketCount: Int, isComplete: Bool) {
             self.peaks = peaks
+            self.bucketCount = bucketCount
             self.isComplete = isComplete
         }
 
-        func snapshot() -> (peaks: [Float], isComplete: Bool) {
-            (peaks, isComplete)
+        func snapshot() -> (peaks: [Float], bucketCount: Int, isComplete: Bool) {
+            (peaks, bucketCount, isComplete)
         }
     }
 }
