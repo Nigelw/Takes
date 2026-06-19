@@ -168,8 +168,11 @@ if [[ -n "$NOTES_FILE" ]]; then
   cp "$NOTES_FILE" "$APPCAST_SRC/$APP_NAME.md"
   echo "  using release notes from $NOTES_FILE"
 fi
-# Seed with the existing feed so prior entries are preserved.
-[[ -f "$WEBSITE_DIR/appcast.xml" ]] && cp "$WEBSITE_DIR/appcast.xml" "$APPCAST_SRC/appcast.xml"
+# Prior entries are preserved because generate_appcast reads and updates the
+# existing feed at its -o path. That committed file ($WEBSITE_DIR/appcast.xml)
+# IS the release history — it is not reconstructable from anything else, so it
+# must stay in git. (generate_appcast ignores any appcast inside the input dir,
+# so there's no point seeding $APPCAST_SRC with a copy.)
 "$GENERATE_APPCAST" \
   --embed-release-notes \
   --download-url-prefix "${GITHUB_DOWNLOAD_BASE}/${TAG}/" \

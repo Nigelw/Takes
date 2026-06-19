@@ -2,8 +2,8 @@
 """Generate website/changelog.html from the Sparkle appcast.
 
 The appcast is the source of truth for release history: each <item> carries the
-version, date, and release notes (the <description> HTML). This renders them as
-a single self-contained, human-readable page.
+version, date, and release notes (the <description>, authored in Markdown). This
+renders them as a single self-contained, human-readable page.
 
 Usage:
     scripts/generate-changelog.py [APPCAST] [OUTPUT]
@@ -66,15 +66,12 @@ def md_to_html(md):
 
 
 def notes_html(item):
+    # Release notes are authored in Markdown and embedded in the appcast as
+    # <description sparkle:format="markdown">; render that to HTML.
     desc = item.find("description")
     if desc is None or not desc.text:
         return ""
-    raw = desc.text.strip()
-    # Sparkle marks Markdown notes with sparkle:format="markdown"; HTML notes
-    # (e.g. backfilled entries) have no format attribute and pass through.
-    if desc.get(f"{{{SPARKLE}}}format") == "markdown":
-        return md_to_html(raw)
-    return raw
+    return md_to_html(desc.text.strip())
 
 
 def parse_items(appcast):
