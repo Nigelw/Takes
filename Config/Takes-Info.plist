@@ -40,6 +40,8 @@
 	<string>Takes needs to get the current selection from Finder and Apple Music.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 	<key>SUFeedURL</key>
 	<string>https://nigelw.github.io/Takes/appcast.xml</string>
 	<key>SUPublicEDKey</key>
