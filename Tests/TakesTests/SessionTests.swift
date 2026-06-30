@@ -822,6 +822,26 @@ struct SessionTests {
 
     @MainActor
     @Test
+    func importedFilesAppendWhilePausedPreservesPlayheadPosition() async throws {
+        let first = try makeTemporaryAudioFile(name: "paused-first.wav")
+        let second = try makeTemporaryAudioFile(name: "paused-second.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([first])
+        controller.seek(to: 0.5)
+
+        await controller.loadImportedFiles([second])
+
+        #expect(controller.session.isPlaying == false)
+        #expect(controller.session.transportPosition == 0.5)
+    }
+
+    @MainActor
+    @Test
     func importedFilesAppendWhilePlayingUsesCurrentTransportAfterSlowImport() async throws {
         let first = try makeTemporaryAudioFile(name: "slow-playing-first.wav")
         let second = try makeTemporaryAudioFile(name: "slow-playing-second.wav")
