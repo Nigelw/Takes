@@ -1417,11 +1417,15 @@ private final class TimelineGestureNSView: NSView {
         onPan?(Double(-event.scrollingDeltaX / width), event.momentumPhase != [])
     }
 
+    /// Multiplier applied to the raw trackpad pinch delta. Higher = zoom
+    /// changes faster per unit of finger movement.
+    private static let zoomSensitivity = 1.5
+
     override func magnify(with event: NSEvent) {
         let width = bounds.width
         guard width > 0 else { return }
         let fraction = Double(convert(event.locationInWindow, from: nil).x / width)
-        onMagnify?(Double(event.magnification), fraction)
+        onMagnify?(Double(event.magnification) * Self.zoomSensitivity, fraction)
     }
 }
 
