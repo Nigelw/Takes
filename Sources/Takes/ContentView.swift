@@ -604,6 +604,11 @@ struct ContentView: View {
         7
     }
 
+    /// Minimum on-screen spacing (points) between minor ticks before they are hidden.
+    private var timelineHeaderMinorTickMinSpacing: Double {
+        7
+    }
+
     private var trackTimelineDividerHeight: CGFloat {
         TakesWindowPolicy.trackTimelineDividerHeight
     }
@@ -702,24 +707,35 @@ struct ContentView: View {
     }
 
     private func timelineHeaderRuler(width: CGFloat) -> some View {
-        let markers = TimelineHeaderMarker.markers(
+        let ruler = TimelineHeaderMarker.ruler(
             timelineStart: visibleStart,
             timelineEnd: controller.session.visibleEnd,
             targetMarkerCount: timelineHeaderTargetMarkerCount
         )
 
+        // Drop minor ticks once they would pack closer than this; keeps the ruler from turning into
+        // a gray blur at narrow widths or high subdivision counts.
+        let visibleSpan = controller.session.visibleEnd - visibleStart
+        let minorSpacing = visibleSpan > 0 ? ruler.minorInterval / visibleSpan * Double(width) : 0
+        let showMinorTicks = minorSpacing >= timelineHeaderMinorTickMinSpacing
+
         return ZStack(alignment: .topLeading) {
             Rectangle()
                 .fill(.background.opacity(0.01))
 
-            if markers.isEmpty {
+            if ruler.majorTicks.isEmpty {
                 Text("00:00")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .padding(.leading, 8)
                     .frame(maxHeight: .infinity, alignment: .center)
             } else {
-                ForEach(markers, id: \.time) { marker in
+                if showMinorTicks {
+                    ForEach(ruler.minorTicks, id: \.self) { tickTime in
+                        timelineHeaderMinorTick(at: tickTime, width: width)
+                    }
+                }
+                ForEach(ruler.majorTicks, id: \.time) { marker in
                     timelineHeaderMarker(marker, width: width)
                 }
             }
@@ -728,9 +744,18 @@ struct ContentView: View {
         .accessibilityLabel("Timeline")
     }
 
+    private func timelineHeaderMinorTick(at time: TimeInterval, width: CGFloat) -> some View {
+        Rectangle()
+            .fill(.secondary.opacity(0.45))
+            .frame(width: 1, height: 5)
+            .offset(x: xPosition(for: time, width: width))
+            .frame(width: width, height: ImportActionControlMetrics.controlHeight, alignment: .topLeading)
+            .accessibilityHidden(true)
+    }
+
     private func timelineHeaderMarker(_ marker: TimelineHeaderMarker, width: CGFloat) -> some View {
         let tickX = xPosition(for: marker.time, width: width)
-        let labelWidth: CGFloat = 52
+        let labelWidth: CGFloat = 60
         let labelLayout = TimelineHeaderLabelLayout.leading(
             tickX: Double(tickX),
             labelWidth: Double(labelWidth),

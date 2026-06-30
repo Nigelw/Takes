@@ -66,13 +66,13 @@ struct SessionTests {
     @Test
     func timelineMarkersIncludeSignedNegativeTimes() {
         let markers = TimelineHeaderMarker.markers(
-            timelineStart: -12,
-            timelineEnd: 44,
-            targetMarkerCount: 5
+            timelineStart: -20,
+            timelineEnd: 40,
+            targetMarkerCount: 6
         )
 
-        #expect(markers.map(\.label) == ["-00:10", "00:00", "00:10", "00:20", "00:30", "00:40"])
-        #expect(markers.map(\.time) == [-10, 0, 10, 20, 30, 40])
+        #expect(markers.map(\.label) == ["-00:20", "-00:10", "00:00", "00:10", "00:20", "00:30", "00:40"])
+        #expect(markers.map(\.time) == [-20, -10, 0, 10, 20, 30, 40])
     }
 
     @Test

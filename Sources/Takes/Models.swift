@@ -94,54 +94,98 @@ struct TimelineHeaderMarker: Equatable {
 
     static let labelLeadingPadding: Double = 8
 
+    /// Labeled ticks for the ruler. Thin wrapper over ``ruler(timelineStart:timelineEnd:targetMarkerCount:)``.
     static func markers(
         timelineStart: TimeInterval,
         timelineEnd: TimeInterval,
         targetMarkerCount: Int
     ) -> [TimelineHeaderMarker] {
+        ruler(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            targetMarkerCount: targetMarkerCount
+        ).majorTicks
+    }
+
+    /// Builds the full two-tier ruler for the visible window: tall labeled *major* ticks plus
+    /// shorter unlabeled *minor* ticks that subdivide each major span. Minor ticks never coincide
+    /// with a major tick. Both tiers are derived from the same chosen interval so they stay aligned.
+    static func ruler(
+        timelineStart: TimeInterval,
+        timelineEnd: TimeInterval,
+        targetMarkerCount: Int
+    ) -> TimelineRuler {
         let span = timelineEnd - timelineStart
-        guard span > 0, targetMarkerCount > 0 else { return [] }
+        guard span > 0, targetMarkerCount > 0 else { return TimelineRuler(majorTicks: [], minorTicks: [], minorInterval: 0) }
 
         let interval = readableInterval(for: span / Double(targetMarkerCount))
-        guard interval > 0 else { return [] }
+        guard interval > 0 else { return TimelineRuler(majorTicks: [], minorTicks: [], minorInterval: 0) }
 
-        let firstTick = ceil(timelineStart / interval) * interval
-        var time = firstTick
-        var markers: [TimelineHeaderMarker] = []
-
-        while time <= timelineEnd + 0.0001 {
-            markers.append(TimelineHeaderMarker(time: time, label: time.formattedSignedTimestamp))
+        let epsilon = interval * 0.0001
+        var majorTicks: [TimelineHeaderMarker] = []
+        var time = ceil(timelineStart / interval) * interval
+        while time <= timelineEnd + epsilon {
+            majorTicks.append(
+                TimelineHeaderMarker(time: time, label: time.formattedSignedTimestamp(forInterval: interval))
+            )
             time += interval
         }
 
-        return markers
-    }
-
-    private static func readableInterval(for rawInterval: TimeInterval) -> TimeInterval {
-        guard rawInterval.isFinite, rawInterval > 0 else { return 1 }
-
-        let baseIntervals: [TimeInterval] = [1, 2, 5, 10, 30]
-        var scale: TimeInterval = 1
-
-        while scale * 30 < rawInterval {
-            scale *= 60
-        }
-
-        if scale > 1 {
-            for multiplier in baseIntervals {
-                let candidate = multiplier * scale
-                if candidate >= rawInterval {
-                    return candidate
+        var minorTicks: [TimeInterval] = []
+        let divisions = minorDivisions(for: interval)
+        let minorInterval = divisions > 1 ? interval / Double(divisions) : 0
+        if minorInterval > 0 {
+            var index = Int((timelineStart / minorInterval).rounded(.up))
+            while Double(index) * minorInterval < timelineStart - epsilon { index += 1 }
+            while Double(index) * minorInterval <= timelineEnd + epsilon {
+                // Skip positions that land on a major tick (multiples of `divisions`).
+                if index % divisions != 0 {
+                    minorTicks.append(Double(index) * minorInterval)
                 }
+                index += 1
             }
         }
 
-        if rawInterval <= 12 {
-            return 10
-        }
-
-        return baseIntervals.first { $0 >= rawInterval } ?? 30
+        return TimelineRuler(majorTicks: majorTicks, minorTicks: minorTicks, minorInterval: minorInterval)
     }
+
+    /// Ascending "nice number" ladder spanning sub-second to a full day. `readableInterval`
+    /// picks the smallest value `>= rawInterval`, keeping the chosen tick spacing close to the
+    /// target so the visible tick count stays near `targetMarkerCount` at every zoom level.
+    static let niceIntervals: [TimeInterval] = [
+        0.1, 0.2, 0.5,
+        1, 2, 5, 10, 15, 30,
+        60, 120, 300, 600, 900, 1800,
+        3600, 7200, 10800, 21600, 43200, 86400
+    ]
+
+    /// How many equal parts to split each ladder interval into for minor ticks. Chosen so every
+    /// resulting minor step is itself a round value (0.5→0.1, 60→15 s, 600→120 s, …) rather than an
+    /// awkward fraction. Parallel to `niceIntervals`; `1` would mean "no minor ticks".
+    static let minorDivisionsPerInterval: [Int] = [
+        2, 2, 5,      // 0.1  0.2  0.5
+        5, 4, 5, 5, 3, 6,   // 1  2  5  10  15  30
+        4, 4, 5, 5, 3, 6,   // 60  120  300  600  900  1800
+        6, 4, 3, 6, 6, 6    // 3600  7200  10800  21600  43200  86400
+    ]
+
+    static func readableInterval(for rawInterval: TimeInterval) -> TimeInterval {
+        guard rawInterval.isFinite, rawInterval > 0 else { return niceIntervals.first ?? 1 }
+        return niceIntervals.first { $0 >= rawInterval } ?? niceIntervals.last ?? 1
+    }
+
+    static func minorDivisions(for interval: TimeInterval) -> Int {
+        guard let index = niceIntervals.firstIndex(of: interval) else { return 1 }
+        return minorDivisionsPerInterval[index]
+    }
+}
+
+struct TimelineRuler: Equatable {
+    let majorTicks: [TimelineHeaderMarker]
+    let minorTicks: [TimeInterval]
+    /// Spacing between adjacent minor ticks, in seconds (`0` when there are no minor ticks). Lets the
+    /// view convert to a pixel spacing and drop minor ticks when they would render too densely.
+    let minorInterval: TimeInterval
 }
 
 struct TimelineHeaderLabelLayout: Equatable {
@@ -251,6 +295,16 @@ extension TimeInterval {
         return prefix + abs(self).formattedUnsignedTimestamp
     }
 
+    /// Resolution-aware variant for ruler labels: sub-second tick intervals append tenths
+    /// (e.g. `0:03.5`) so adjacent labels stay distinct; whole-second intervals are unchanged.
+    func formattedSignedTimestamp(forInterval interval: TimeInterval) -> String {
+        let prefix = self < 0 ? "-" : ""
+        if interval.isFinite, interval > 0, interval < 1 {
+            return prefix + abs(self).formattedSubSecondTimestamp
+        }
+        return prefix + abs(self).formattedUnsignedTimestamp
+    }
+
     private var formattedUnsignedTimestamp: String {
         guard self.isFinite else { return "--:--" }
         let rounded = Int(max(0, self.rounded()))
@@ -261,5 +315,19 @@ extension TimeInterval {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         }
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private var formattedSubSecondTimestamp: String {
+        guard self.isFinite else { return "--:--" }
+        let totalTenths = Int((max(0, self) * 10).rounded())
+        let tenths = totalTenths % 10
+        let totalSeconds = totalTenths / 10
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d.%d", hours, minutes, seconds, tenths)
+        }
+        return String(format: "%d:%02d.%d", minutes, seconds, tenths)
     }
 }
