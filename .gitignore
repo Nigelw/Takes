@@ -1,5 +1,6 @@
 .build/
 build/
+.claude/worktrees/
 .codex
 DerivedData/
 .derived-data/
