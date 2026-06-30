@@ -19,6 +19,26 @@ final class PlaybackController: ObservableObject {
     private var playbackStartedAt: CFTimeInterval?
     private var playbackStartedFromTransport: TimeInterval = 0
     private var timer: Timer?
+    private var scrollAnimationTimer: Timer?
+    private var scrollAnimation: ScrollAnimation?
+    private var ignoringStaleMomentumPan = false
+
+    /// A short tween of `visibleStart`, used to animate the catch-up scroll when
+    /// playback starts with the playhead off-screen.
+    private struct ScrollAnimation {
+        let from: TimeInterval
+        let to: TimeInterval
+        let startedAt: CFTimeInterval
+        let duration: CFTimeInterval
+    }
+
+    /// Kept quick so the animation finishes well before the first page jump.
+    private static let scrollCatchUpDuration: CFTimeInterval = 0.2
+
+    /// Duration of the animated page turn at the edge during playback. Shorter
+    /// than the catch-up so it stays out of the way at high zoom, where pages
+    /// come quickly.
+    private static let pageAnimationDuration: CFTimeInterval = 0.15
 
     private struct RuntimeTrack {
         let file: AVAudioFile
@@ -223,6 +243,7 @@ final class PlaybackController: ObservableObject {
             playbackStartedAt = CACurrentMediaTime()
             startTimer()
             applyAudibility()
+            animateScrollToPlayheadIfNeeded()
         } catch let error as PlaybackError {
             playbackError = error
         } catch {
@@ -243,6 +264,7 @@ final class PlaybackController: ObservableObject {
     }
 
     func stop() {
+        stopScrollAnimation()
         for runtime in runtimeTracksInSessionOrder() {
             runtime.player.stop()
         }
@@ -256,6 +278,7 @@ final class PlaybackController: ObservableObject {
 
     func seek(to seconds: TimeInterval) {
         guard session.isPlayable else { return }
+        stopScrollAnimation()
         let clamped = TransportMapping.clampedTransport(
             seconds,
             timelineStart: session.timelineStart,
@@ -388,6 +411,7 @@ final class PlaybackController: ObservableObject {
     func clearTracks() {
         guard !session.tracks.isEmpty else { return }
 
+        stopScrollAnimation()
         for runtime in runtimeTracksInSessionOrder() {
             runtime.player.stop()
         }
@@ -430,6 +454,187 @@ final class PlaybackController: ObservableObject {
 
     func skip(by delta: TimeInterval) {
         seek(to: session.transportPosition + delta)
+    }
+
+    // MARK: - Timeline zoom
+
+    /// Whether the content is long enough to zoom into at all.
+    var canZoomTimeline: Bool {
+        session.duration > TimelineViewport.minimumVisibleSpan
+    }
+
+    /// Set the visible span directly (slider), anchored to the playhead (D3).
+    func zoomVisibleSpan(to span: TimeInterval) {
+        applyRezoom(span: span, cursorFraction: nil)
+    }
+
+    /// Step the zoom by one −/+ increment, anchored to the playhead (D4).
+    func stepZoom(zoomingIn: Bool) {
+        let span = TimelineViewport.steppedVisibleSpan(
+            visibleSpan: max(session.visibleSpan, TimelineViewport.minimumVisibleSpan),
+            zoomingIn: zoomingIn
+        )
+        applyRezoom(span: span, cursorFraction: nil)
+    }
+
+    /// Pinch-to-zoom, anchored to the cursor (D5). `magnification` is the
+    /// trackpad delta; `fraction` is the cursor's `0...1` position across the
+    /// timeline.
+    func magnifyTimeline(by magnification: Double, atFraction fraction: Double) {
+        guard session.visibleSpan > 0 else { return }
+        let span = session.visibleSpan / (1 + magnification)
+        applyRezoom(span: span, cursorFraction: fraction)
+    }
+
+    /// Two-finger horizontal scroll → pan (D5). `fraction` shifts the window by
+    /// that proportion of the visible span. `isMomentum` marks trackpad inertia
+    /// events (as opposed to fingers-on-glass).
+    func panTimeline(byFraction fraction: Double, isMomentum: Bool) {
+        // While the catch-up scroll animates, ignore all pan input so it can't
+        // yank the tween.
+        guard scrollAnimation == nil else { return }
+
+        if isMomentum {
+            // Drop the inertia tail of the fling the user made before pressing
+            // play. It outlives the catch-up tween, and once the tween lands it
+            // would drift the view back off the playhead (a "bounce"). A fresh
+            // fingers-on-glass pan (below) clears this and restores inertia.
+            guard !ignoringStaleMomentumPan else { return }
+        } else {
+            ignoringStaleMomentumPan = false
+        }
+
+        guard session.visibleSpan > 0 else { return }
+        let result = TimelineViewport.clampedWindow(
+            visibleStart: session.visibleStart + fraction * session.visibleSpan,
+            visibleSpan: session.visibleSpan,
+            contentStart: session.timelineStart,
+            contentEnd: session.timelineEnd
+        )
+        session.visibleStart = result.start
+        session.visibleSpan = result.span
+    }
+
+    private func applyRezoom(span: TimeInterval, cursorFraction: Double?) {
+        guard session.timelineEnd > session.timelineStart else { return }
+        let visibleSpan = max(session.visibleSpan, 0.001)
+
+        let anchorTime: TimeInterval
+        let anchorFraction: Double
+        if let cursorFraction {
+            anchorFraction = min(max(cursorFraction, 0), 1)
+            anchorTime = session.visibleStart + anchorFraction * visibleSpan
+        } else {
+            let anchor = TimelineViewport.anchor(
+                transport: session.transportPosition,
+                visibleStart: session.visibleStart,
+                visibleSpan: visibleSpan
+            )
+            anchorTime = anchor.time
+            anchorFraction = anchor.fraction
+        }
+
+        let result = TimelineViewport.rezoom(
+            newSpan: span,
+            anchorTime: anchorTime,
+            anchorFraction: anchorFraction,
+            contentStart: session.timelineStart,
+            contentEnd: session.timelineEnd
+        )
+        session.visibleStart = result.start
+        session.visibleSpan = result.span
+    }
+
+    /// While playing and zoomed in, page the window forward when the playhead
+    /// runs off the edge (D6). Between pages `visibleStart` is left untouched so
+    /// the timeline holds still. Suppressed while a scroll is animating (the
+    /// tween is already moving the window).
+    private func followPlayheadIfZoomed() {
+        guard scrollAnimation == nil else { return }
+
+        let contentSpan = session.timelineEnd - session.timelineStart
+        guard contentSpan > 0,
+              !TimelineViewport.isFit(visibleSpan: session.visibleSpan, contentSpan: contentSpan)
+        else { return }
+
+        guard let newStart = TimelineViewport.pagedStart(
+            transport: session.transportPosition,
+            visibleStart: session.visibleStart,
+            visibleSpan: session.visibleSpan,
+            contentStart: session.timelineStart,
+            contentEnd: session.timelineEnd
+        ) else { return }
+
+        // Animate the page turn rather than snapping the window forward.
+        startScrollAnimation(to: newStart, duration: Self.pageAnimationDuration)
+    }
+
+    /// On play, if the playhead sits outside the visible window, animate the
+    /// scroll that brings it into view rather than jumping — the motion shows
+    /// where the view shifted.
+    private func animateScrollToPlayheadIfNeeded() {
+        let contentSpan = session.timelineEnd - session.timelineStart
+        guard contentSpan > 0,
+              !TimelineViewport.isFit(visibleSpan: session.visibleSpan, contentSpan: contentSpan),
+              let newStart = TimelineViewport.pagedStart(
+                  transport: session.transportPosition,
+                  visibleStart: session.visibleStart,
+                  visibleSpan: session.visibleSpan,
+                  contentStart: session.timelineStart,
+                  contentEnd: session.timelineEnd
+              )
+        else { return }
+
+        guard startScrollAnimation(to: newStart, duration: Self.scrollCatchUpDuration) else { return }
+
+        // The fling that scrolled us here may still have inertia in flight;
+        // ignore its momentum tail so it can't bounce the view after the tween.
+        ignoringStaleMomentumPan = true
+    }
+
+    /// Start a tween of `visibleStart` to `newStart`. Returns `false` (and does
+    /// nothing) if the window is already there.
+    @discardableResult
+    private func startScrollAnimation(to newStart: TimeInterval, duration: CFTimeInterval) -> Bool {
+        let from = session.visibleStart
+        guard abs(newStart - from) > 0.0001 else { return false }
+
+        scrollAnimation = ScrollAnimation(
+            from: from,
+            to: newStart,
+            startedAt: CACurrentMediaTime(),
+            duration: duration
+        )
+        scrollAnimationTimer?.invalidate()
+        scrollAnimationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.advanceScrollAnimation()
+            }
+        }
+        return true
+    }
+
+    private func advanceScrollAnimation() {
+        guard let animation = scrollAnimation else {
+            stopScrollAnimation()
+            return
+        }
+
+        let progress = min(1, (CACurrentMediaTime() - animation.startedAt) / animation.duration)
+        // easeOutCubic — decelerates into place.
+        let eased = 1 - pow(1 - progress, 3)
+        session.visibleStart = animation.from + (animation.to - animation.from) * eased
+
+        if progress >= 1 {
+            session.visibleStart = animation.to
+            stopScrollAnimation()
+        }
+    }
+
+    private func stopScrollAnimation() {
+        scrollAnimationTimer?.invalidate()
+        scrollAnimationTimer = nil
+        scrollAnimation = nil
     }
 
     nonisolated static func transportPositionAfterTimelineRecalculation(
@@ -542,10 +747,14 @@ final class PlaybackController: ObservableObject {
     }
 
     private func recalculateSessionDuration(preferZero: Bool = false) {
+        let previousContentSpan = session.timelineEnd - session.timelineStart
+
         guard let range = TransportMapping.timelineRange(tracks: session.tracks.map(\.loadedTrack)) else {
             session.timelineStart = 0
             session.timelineEnd = 0
             session.transportPosition = 0
+            session.visibleStart = 0
+            session.visibleSpan = 0
             return
         }
 
@@ -557,6 +766,16 @@ final class PlaybackController: ObservableObject {
             timelineEnd: session.timelineEnd,
             preferZero: preferZero || session.transportPosition == 0
         )
+
+        let viewport = TimelineViewport.adjustedForContentChange(
+            visibleStart: session.visibleStart,
+            visibleSpan: session.visibleSpan,
+            previousContentSpan: previousContentSpan,
+            contentStart: session.timelineStart,
+            contentEnd: session.timelineEnd
+        )
+        session.visibleStart = viewport.start
+        session.visibleSpan = viewport.span
 
         playbackError = nil
     }
@@ -652,6 +871,7 @@ final class PlaybackController: ObservableObject {
         guard session.isPlaying else { return }
         let transport = currentTransportPosition()
         session.transportPosition = transport
+        followPlayheadIfZoomed()
         if transport >= session.timelineEnd {
             for runtime in runtimeTracksInSessionOrder() {
                 runtime.player.stop()

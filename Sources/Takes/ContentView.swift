@@ -419,6 +419,8 @@ struct ContentView: View {
                 .fixedSize(horizontal: false, vertical: true)
             trackTimelineSection
                 .frame(maxHeight: .infinity)
+            zoomControlBar
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
         .frame(
@@ -521,8 +523,69 @@ struct ContentView: View {
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private var timelineSpan: TimeInterval {
-        max(controller.session.timelineEnd - controller.session.timelineStart, 0.001)
+    private var zoomControlBar: some View {
+        HStack(spacing: 10) {
+            Spacer()
+            zoomControls
+        }
+        .padding(.horizontal, 10)
+        .frame(height: TakesWindowPolicy.zoomBarReservedHeight)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var zoomControls: some View {
+        let contentSpan = controller.session.duration
+        let enabled = controller.canZoomTimeline
+        return HStack(spacing: 8) {
+            Button {
+                controller.stepZoom(zoomingIn: false)
+            } label: {
+                Image(systemName: "minus.magnifyingglass")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!enabled)
+            .help("Zoom out")
+            .accessibilityLabel("Zoom Out")
+
+            Slider(
+                value: Binding(
+                    get: {
+                        TimelineViewport.sliderValue(
+                            visibleSpan: max(controller.session.visibleSpan, 0.001),
+                            contentSpan: contentSpan
+                        )
+                    },
+                    set: { value in
+                        controller.zoomVisibleSpan(
+                            to: TimelineViewport.visibleSpan(sliderValue: value, contentSpan: contentSpan)
+                        )
+                    }
+                ),
+                in: 0...1
+            )
+            .controlSize(.small)
+            .frame(width: 150)
+            .disabled(!enabled)
+            .accessibilityLabel("Timeline Zoom")
+
+            Button {
+                controller.stepZoom(zoomingIn: true)
+            } label: {
+                Image(systemName: "plus.magnifyingglass")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!enabled)
+            .help("Zoom in")
+            .accessibilityLabel("Zoom In")
+        }
+    }
+
+    private var visibleStart: TimeInterval {
+        controller.session.visibleStart
+    }
+
+    private var visibleSpan: TimeInterval {
+        max(controller.session.visibleSpan, 0.001)
     }
 
     private var trackRowHeight: CGFloat {
@@ -550,17 +613,17 @@ struct ContentView: View {
     }
 
     private func globalTime(atX x: CGFloat, width: CGFloat) -> TimeInterval {
-        guard width > 0 else { return controller.session.timelineStart }
+        guard width > 0 else { return visibleStart }
         let normalized = min(max(Double(x / width), 0), 1)
-        return controller.session.timelineStart + normalized * timelineSpan
+        return visibleStart + normalized * visibleSpan
     }
 
     private func xPosition(for globalTime: TimeInterval, width: CGFloat) -> CGFloat {
         CGFloat(
             TransportMapping.normalizedPosition(
                 globalTime: globalTime,
-                timelineStart: controller.session.timelineStart,
-                timelineEnd: controller.session.timelineEnd
+                timelineStart: visibleStart,
+                timelineEnd: controller.session.visibleEnd
             )
         ) * width
     }
@@ -589,14 +652,12 @@ struct ContentView: View {
                         }
                         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                        if controller.session.isPlayable {
+                        let playheadX = xPosition(for: controller.session.transportPosition, width: waveformWidth)
+                        if controller.session.isPlayable, playheadX >= -1, playheadX <= waveformWidth + 1 {
                             Rectangle()
                                 .fill(.blue)
                                 .frame(width: 2, height: trackTimelineHeight - 16)
-                                .offset(
-                                    x: trackInfoWidth + xPosition(for: controller.session.transportPosition, width: waveformWidth),
-                                    y: 8
-                                )
+                                .offset(x: trackInfoWidth + playheadX, y: 8)
                         }
                     }
                     .frame(width: proxy.size.width)
@@ -604,6 +665,14 @@ struct ContentView: View {
                 .frame(maxHeight: .infinity)
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+            .overlay(alignment: .topLeading) {
+                TimelineGestureOverlay(
+                    onPan: { controller.panTimeline(byFraction: $0, isMomentum: $1) },
+                    onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
+                )
+                .frame(width: waveformWidth, height: proxy.size.height)
+                .offset(x: trackInfoWidth)
+            }
         }
     }
 
@@ -634,8 +703,8 @@ struct ContentView: View {
 
     private func timelineHeaderRuler(width: CGFloat) -> some View {
         let markers = TimelineHeaderMarker.markers(
-            timelineStart: controller.session.timelineStart,
-            timelineEnd: controller.session.timelineEnd,
+            timelineStart: visibleStart,
+            timelineEnd: controller.session.visibleEnd,
             targetMarkerCount: timelineHeaderTargetMarkerCount
         )
 
@@ -868,14 +937,8 @@ struct ContentView: View {
 
                 if let sessionTrack {
                     let loaded = sessionTrack.loadedTrack
-                    waveformShape(for: waveformStore.waveform(for: sessionTrack.id))
-                        .frame(
-                            width: max(CGFloat(loaded.duration / timelineSpan) * proxy.size.width, 1),
-                            height: 58
-                        )
-                        .offset(
-                            x: xPosition(for: loaded.offsetSeconds, width: proxy.size.width)
-                        )
+                    waveformShape(for: waveformStore.waveform(for: sessionTrack.id), track: loaded)
+                        .frame(width: proxy.size.width, height: 58)
                         .foregroundStyle(trackColor(index: index).opacity(0.55))
                 } else {
                     Text("Drop audio file here")
@@ -889,6 +952,7 @@ struct ContentView: View {
                     .frame(width: 1)
                     .offset(x: xPosition(for: 0, width: proxy.size.width))
             }
+            .clipped()
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -900,64 +964,113 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func waveformShape(for waveform: Waveform?) -> some View {
+    private func waveformShape(for waveform: Waveform?, track: LoadedTrack) -> some View {
+        let windowStart = visibleStart
+        let windowSpan = visibleSpan
         Canvas { context, size in
             guard let waveform, waveform.bucketCount > 0, !waveform.peaks.isEmpty else { return }
             context.fill(
-                Self.waveformPath(for: waveform, in: size),
+                Self.waveformPath(
+                    for: waveform,
+                    in: size,
+                    trackStart: track.offsetSeconds,
+                    trackDuration: track.duration,
+                    visibleStart: windowStart,
+                    visibleSpan: windowSpan
+                ),
                 with: .foreground
             )
         }
     }
 
-    /// Builds a filled, center-mirrored peak envelope by pooling the high-res
-    /// bucket cache down to one column per pixel. Columns are mapped across the
-    /// full `bucketCount`, so a partially generated waveform fills in
-    /// left-to-right as more buckets arrive, and the pooling stays O(width)
-    /// regardless of cache size — cheap enough to re-run on every resize or zoom.
-    private static func waveformPath(for waveform: Waveform, in size: CGSize) -> Path {
+    /// Builds a filled, center-mirrored peak envelope across the visible window.
+    ///
+    /// The Canvas is always the viewport width, never the (potentially enormous)
+    /// full track width, so the work stays O(viewport px) regardless of zoom and
+    /// a partially generated waveform still fills in left-to-right.
+    ///
+    /// Buckets are pooled into fixed `[k·stride, (k+1)·stride)` groups anchored
+    /// to the *file* (bucket index 0), never to the screen, and each group is
+    /// drawn as one vertex at its true sub-pixel x. This is what keeps scrolling
+    /// stable: if pooling were aligned to the on-screen pixel grid, then as
+    /// playback advances `visibleStart` each frame, every fixed pixel column
+    /// would gain/lose a peak bucket at a slightly different moment and the
+    /// envelope would shimmer. File-anchored groups have fixed peaks, so a
+    /// scroll only slides their x — the shape translates cleanly. `stride` is
+    /// chosen so a group is ≈ 1 pixel wide (≥ 1 bucket), preserving transients.
+    private static func waveformPath(
+        for waveform: Waveform,
+        in size: CGSize,
+        trackStart: TimeInterval,
+        trackDuration: TimeInterval,
+        visibleStart: TimeInterval,
+        visibleSpan: TimeInterval
+    ) -> Path {
         let bucketCount = waveform.bucketCount
         let peaks = waveform.peaks
-        guard bucketCount > 0, !peaks.isEmpty, size.width > 0, size.height > 0 else {
+        guard bucketCount > 0, !peaks.isEmpty, size.width > 0, size.height > 0,
+              trackDuration > 0, visibleSpan > 0 else {
             return Path()
         }
 
+        let width = size.width
         let midline = size.height / 2
-        let columns = max(1, Int(size.width.rounded()))
         // A visible floor so silent passages still read as a thin line.
         let minHalfHeight: CGFloat = 0.5
         let available = peaks.count
 
-        // Half-height per column with rendered data (a contiguous leading run
-        // while generation is in progress).
-        var halves: [CGFloat] = []
-        halves.reserveCapacity(columns)
-        for column in 0..<columns {
-            let start = column * bucketCount / columns
-            let end = max(start + 1, (column + 1) * bucketCount / columns)
-            let lower = min(start, available)
-            let upper = min(end, available)
-            guard upper > lower else { break }
+        // Portion of the visible window the track actually covers.
+        let trackEnd = trackStart + trackDuration
+        let overlapStart = max(visibleStart, trackStart)
+        let overlapEnd = min(visibleStart + visibleSpan, trackEnd)
+        guard overlapEnd > overlapStart else { return Path() }
 
-            var peak: Float = 0
-            for index in lower..<upper where peaks[index] > peak {
-                peak = peaks[index]
-            }
-            halves.append(max(CGFloat(peak) * midline, minHalfHeight))
+        // x for a (fractional) bucket index, mapped through the visible window.
+        func x(forBucket bucket: Double) -> CGFloat {
+            CGFloat((trackStart + bucket / Double(bucketCount) * trackDuration - visibleStart) / visibleSpan) * width
         }
 
-        guard !halves.isEmpty else { return Path() }
-        let columnWidth = size.width / CGFloat(columns)
+        // Buckets per drawn vertex ≈ buckets per on-screen pixel, ≥ 1.
+        let bucketsAcrossViewport = visibleSpan / trackDuration * Double(bucketCount)
+        let bucketStride = max(1, Int((bucketsAcrossViewport / Double(width)).rounded()))
+
+        // File-anchored group range overlapping the visible region, padded one
+        // group each side so the envelope crosses the clip edges smoothly.
+        let firstBucket = Int((overlapStart - trackStart) / trackDuration * Double(bucketCount))
+        let lastBucket = Int((overlapEnd - trackStart) / trackDuration * Double(bucketCount))
+        let firstGroup = firstBucket / bucketStride - 1
+        let lastGroup = lastBucket / bucketStride + 1
+
+        // (x, half-height) vertices forming the top edge of the envelope.
+        var vertices: [(x: CGFloat, half: CGFloat)] = []
+        vertices.reserveCapacity(lastGroup - firstGroup + 1)
+        for group in firstGroup...lastGroup {
+            guard group >= 0 else { continue }
+            let bucketLow = group * bucketStride
+            guard bucketLow < available else { break }
+            let bucketHigh = min(bucketLow + bucketStride, bucketCount)
+            let upper = min(bucketHigh, available)
+            guard upper > bucketLow else { break }
+
+            var peak: Float = 0
+            for index in bucketLow..<upper where peaks[index] > peak {
+                peak = peaks[index]
+            }
+            let center = Double(bucketLow + bucketHigh) / 2
+            vertices.append((x(forBucket: center), max(CGFloat(peak) * midline, minHalfHeight)))
+        }
+
+        guard !vertices.isEmpty else { return Path() }
 
         var path = Path()
         // Top edge, left to right.
-        for (column, half) in halves.enumerated() {
-            let point = CGPoint(x: CGFloat(column) * columnWidth, y: midline - half)
-            column == 0 ? path.move(to: point) : path.addLine(to: point)
+        for (index, vertex) in vertices.enumerated() {
+            let point = CGPoint(x: vertex.x, y: midline - vertex.half)
+            index == 0 ? path.move(to: point) : path.addLine(to: point)
         }
         // Bottom edge, right to left, mirroring the top.
-        for column in stride(from: halves.count - 1, through: 0, by: -1) {
-            path.addLine(to: CGPoint(x: CGFloat(column) * columnWidth, y: midline + halves[column]))
+        for index in stride(from: vertices.count - 1, through: 0, by: -1) {
+            path.addLine(to: CGPoint(x: vertices[index].x, y: midline + vertices[index].half))
         }
         path.closeSubpath()
         return path
@@ -1247,6 +1360,68 @@ private final class ImmediateMenuSegmentedControl: NSSegmentedControl {
         )
         immediateMenu.popUp(positioning: nil, at: menuOrigin, in: self)
         selectedSegment = -1
+    }
+}
+
+/// A transparent overlay that captures trackpad pan (two-finger horizontal
+/// scroll) and pinch-to-zoom for the timeline, while letting clicks/drags
+/// (seek) and vertical scroll (the track list) pass straight through to the
+/// SwiftUI views beneath it.
+private struct TimelineGestureOverlay: NSViewRepresentable {
+    /// Pan: shift the visible window by a fraction of its span. The `Bool` flags
+    /// trackpad inertia (momentum) events.
+    let onPan: (Double, Bool) -> Void
+    /// Pinch: magnification delta, plus the cursor's `0...1` position.
+    let onMagnify: (Double, Double) -> Void
+
+    func makeNSView(context: Context) -> TimelineGestureNSView {
+        let view = TimelineGestureNSView()
+        view.onPan = onPan
+        view.onMagnify = onMagnify
+        return view
+    }
+
+    func updateNSView(_ nsView: TimelineGestureNSView, context: Context) {
+        nsView.onPan = onPan
+        nsView.onMagnify = onMagnify
+    }
+}
+
+private final class TimelineGestureNSView: NSView {
+    var onPan: ((Double, Bool) -> Void)?
+    var onMagnify: ((Double, Double) -> Void)?
+
+    // Only claim the events we handle. `NSApp.currentEvent` lets `hitTest`
+    // decide per-event: scroll/magnify route to us, everything else (clicks,
+    // drags, vertical scroll) falls through to the views below.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let event = NSApp.currentEvent else { return nil }
+        switch event.type {
+        case .magnify, .beginGesture, .endGesture, .smartMagnify:
+            return super.hitTest(point)
+        case .scrollWheel:
+            // Horizontal-dominant scroll pans; let vertical scroll reach the
+            // track list's ScrollView underneath.
+            guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return nil }
+            return super.hitTest(point)
+        default:
+            return nil
+        }
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        let width = bounds.width
+        guard width > 0, event.scrollingDeltaX != 0 else { return }
+        // Two-finger swipe: the content tracks the fingers. A non-empty
+        // momentumPhase means this is trackpad inertia, not fingers-on-glass.
+        onPan?(Double(-event.scrollingDeltaX / width), event.momentumPhase != [])
+    }
+
+    override func magnify(with event: NSEvent) {
+        let width = bounds.width
+        guard width > 0 else { return }
+        let fraction = Double(convert(event.locationInWindow, from: nil).x / width)
+        onMagnify?(Double(event.magnification), fraction)
     }
 }
 

@@ -35,13 +35,21 @@ struct ComparisonSession: Equatable {
     var timelineStart: TimeInterval = 0
     var timelineEnd: TimeInterval = 0
 
+    /// The window currently drawn, in absolute seconds. A sub-window of the
+    /// content range `[timelineStart, timelineEnd]`. When it equals the content
+    /// range the timeline is fully zoomed out ("fit"). See `TimelineViewport`.
+    var visibleStart: TimeInterval = 0
+    var visibleSpan: TimeInterval = 0
+
     init(
         tracks: [SessionTrack] = [],
         activeTrackID: SessionTrack.ID? = nil,
         isPlaying: Bool = false,
         transportPosition: TimeInterval = 0,
         timelineStart: TimeInterval = 0,
-        timelineEnd: TimeInterval = 0
+        timelineEnd: TimeInterval = 0,
+        visibleStart: TimeInterval = 0,
+        visibleSpan: TimeInterval = 0
     ) {
         self.tracks = tracks
         self.activeTrackID = activeTrackID
@@ -49,10 +57,16 @@ struct ComparisonSession: Equatable {
         self.transportPosition = transportPosition
         self.timelineStart = timelineStart
         self.timelineEnd = timelineEnd
+        self.visibleStart = visibleStart
+        self.visibleSpan = visibleSpan
     }
 
     var duration: TimeInterval {
         max(0, timelineEnd - timelineStart)
+    }
+
+    var visibleEnd: TimeInterval {
+        visibleStart + visibleSpan
     }
 
     var isPlayable: Bool {
