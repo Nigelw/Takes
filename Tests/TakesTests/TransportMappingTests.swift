@@ -79,3 +79,191 @@ struct TransportMappingTests {
         )
     }
 }
+
+struct TimelineViewportTests {
+    @Test
+    func fitIsVisibleSpanEqualToContentSpan() {
+        #expect(TimelineViewport.isFit(visibleSpan: 100, contentSpan: 100))
+        #expect(TimelineViewport.isFit(visibleSpan: 0, contentSpan: 0))
+        #expect(!TimelineViewport.isFit(visibleSpan: 20, contentSpan: 100))
+    }
+
+    @Test
+    func zoomIsContentSpanOverVisibleSpan() {
+        #expect(TimelineViewport.zoom(visibleSpan: 20, contentSpan: 100) == 5)
+        #expect(TimelineViewport.zoom(visibleSpan: 100, contentSpan: 100) == 1)
+        // Never reports below 1 (fully zoomed out).
+        #expect(TimelineViewport.zoom(visibleSpan: 200, contentSpan: 100) == 1)
+    }
+
+    @Test
+    func maximumZoomUsesMinimumVisibleSpan() {
+        #expect(TimelineViewport.maximumZoom(contentSpan: 100) == 200)
+        // Content shorter than the minimum span cannot be zoomed.
+        #expect(TimelineViewport.maximumZoom(contentSpan: 0.25) == 1)
+    }
+
+    @Test
+    func clampedWindowKeepsSpanInsideContent() {
+        let result = TimelineViewport.clampedWindow(
+            visibleStart: 90,
+            visibleSpan: 20,
+            contentStart: 0,
+            contentEnd: 100
+        )
+        #expect(result.span == 20)
+        #expect(result.start == 80)
+    }
+
+    @Test
+    func clampedWindowShrinksSpanLargerThanContent() {
+        let result = TimelineViewport.clampedWindow(
+            visibleStart: -10,
+            visibleSpan: 250,
+            contentStart: 0,
+            contentEnd: 100
+        )
+        #expect(result.span == 100)
+        #expect(result.start == 0)
+    }
+
+    @Test
+    func anchorPrefersOnScreenPlayhead() {
+        let anchor = TimelineViewport.anchor(transport: 50, visibleStart: 0, visibleSpan: 100)
+        #expect(anchor.time == 50)
+        #expect(anchor.fraction == 0.5)
+    }
+
+    @Test
+    func anchorFallsBackToViewCentreWhenPlayheadOffScreen() {
+        let anchor = TimelineViewport.anchor(transport: 95, visibleStart: 0, visibleSpan: 40)
+        #expect(anchor.time == 20)
+        #expect(anchor.fraction == 0.5)
+    }
+
+    @Test
+    func rezoomKeepsAnchorAtSameOnScreenFraction() {
+        let result = TimelineViewport.rezoom(
+            newSpan: 20,
+            anchorTime: 50,
+            anchorFraction: 0.5,
+            contentStart: 0,
+            contentEnd: 100
+        )
+        #expect(result.span == 20)
+        #expect(result.start == 40)
+    }
+
+    @Test
+    func rezoomClampsToMaximumZoom() {
+        // Below the 0.5 s minimum span gets clamped up to it.
+        let result = TimelineViewport.rezoom(
+            newSpan: 0.1,
+            anchorTime: 50,
+            anchorFraction: 0.5,
+            contentStart: 0,
+            contentEnd: 100
+        )
+        #expect(result.span == TimelineViewport.minimumVisibleSpan)
+    }
+
+    @Test
+    func pagingStaysPutWhilePlayheadInsidePage() {
+        #expect(TimelineViewport.pagedStart(
+            transport: 30,
+            visibleStart: 20,
+            visibleSpan: 20,
+            contentStart: 0,
+            contentEnd: 100
+        ) == nil)
+    }
+
+    @Test
+    func pagingJumpsPlayheadToLeftEdgeWhenItReachesTheRightEdge() {
+        #expect(TimelineViewport.pagedStart(
+            transport: 40,
+            visibleStart: 20,
+            visibleSpan: 20,
+            contentStart: 0,
+            contentEnd: 100
+        ) == 40)
+    }
+
+    @Test
+    func pagingClampsTheFinalPageToContentEnd() {
+        #expect(TimelineViewport.pagedStart(
+            transport: 85,
+            visibleStart: 60,
+            visibleSpan: 20,
+            contentStart: 0,
+            contentEnd: 100
+        ) == 80)
+        // Window already pinned at the end: the playhead runs to the edge
+        // without paging further.
+        #expect(TimelineViewport.pagedStart(
+            transport: 95,
+            visibleStart: 80,
+            visibleSpan: 20,
+            contentStart: 0,
+            contentEnd: 100
+        ) == nil)
+    }
+
+    @Test
+    func pagingBringsBackwardSeekIntoView() {
+        #expect(TimelineViewport.pagedStart(
+            transport: 5,
+            visibleStart: 40,
+            visibleSpan: 20,
+            contentStart: 0,
+            contentEnd: 100
+        ) == 5)
+    }
+
+    @Test
+    func contentChangeRefitsWhileZoomedOut() {
+        let result = TimelineViewport.adjustedForContentChange(
+            visibleStart: 0,
+            visibleSpan: 100,
+            previousContentSpan: 100,
+            contentStart: 0,
+            contentEnd: 160
+        )
+        #expect(result.start == 0)
+        #expect(result.span == 160)
+    }
+
+    @Test
+    func contentChangeKeepsSpanWhileZoomedIn() {
+        let result = TimelineViewport.adjustedForContentChange(
+            visibleStart: 40,
+            visibleSpan: 20,
+            previousContentSpan: 100,
+            contentStart: 0,
+            contentEnd: 160
+        )
+        #expect(result.start == 40)
+        #expect(result.span == 20)
+    }
+
+    @Test
+    func sliderValueRoundTripsThroughVisibleSpan() {
+        let span = TimelineViewport.visibleSpan(sliderValue: 0.3038, contentSpan: 100)
+        #expect(abs(span - 20) < 0.05)
+
+        let value = TimelineViewport.sliderValue(visibleSpan: 20, contentSpan: 100)
+        #expect(abs(value - 0.3038) < 0.001)
+    }
+
+    @Test
+    func sliderEndsMapToFitAndMaximumZoom() {
+        #expect(TimelineViewport.visibleSpan(sliderValue: 0, contentSpan: 100) == 100)
+        #expect(abs(TimelineViewport.visibleSpan(sliderValue: 1, contentSpan: 100) - 0.5) < 0.0001)
+    }
+
+    @Test
+    func stepZoomAppliesFixedMultiplicativeIncrement() {
+        #expect(TimelineViewport.steppedVisibleSpan(visibleSpan: 30, zoomingIn: true) == 30 / 1.5)
+        #expect(TimelineViewport.steppedVisibleSpan(visibleSpan: 30, zoomingIn: false) == 30 * 1.5)
+    }
+}

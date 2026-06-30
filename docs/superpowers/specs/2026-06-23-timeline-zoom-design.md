@@ -104,25 +104,23 @@ range is large); buttons step by a fixed log increment.
 Note: a plain click-drag on the waveform already *seeks* the playhead, which is
 why panning needs its own gesture rather than reusing drag.
 
-**Update (2026-06-23): no scrollbar.** A scrollbar was explored at several
-placements (in the bottom bar, docked under the lanes, an overlay on the lanes,
-and a native standalone `NSScroller` overlay) and then dropped entirely. A true
-native auto-fading scrollbar only comes from an `NSScrollView`, which would
-re-couple us to the oversized-document-view architecture we deliberately avoid
-(see *Architecture*); the non-native alternatives didn't earn their footprint.
-Panning is therefore trackpad-only (two-finger scroll), with zoom via the slider
-and pinch. Revisit if a discoverable pan affordance is missed in use — the
-overview/minimap strip (a future idea) would be the preferred form.
+### D6 — Playback follow: page at the edge
 
-### D6 — Playback follow: keep playhead centered
+**Decision (revised after use):** While playing and zoomed in, hold the window
+still and let the playhead run across it; when the playhead reaches the right
+edge, page forward so it lands back at the left edge (`visibleStart = transport`,
+clamped so the final page rests against the content end and the playhead reaches
+the edge there). Active only during playback; free scrolling when paused.
 
-**Decision:** While playing and zoomed in, scroll so the playhead stays centered:
-`visibleStart = transport − visibleSpan/2`, clamped at content edges (so it stops
-centering and lets the playhead reach the edge near the very start/end). Active
-only during playback; free scrolling when paused.
+**Why the change:** The original decision was continuous centering
+(`visibleStart = transport − visibleSpan/2` every tick). In practice the
+constant sub-pixel scrolling was visually busy and made the waveform shimmer as
+it re-rendered each frame. Paging keeps `visibleStart` constant between jumps, so
+the waveform is static and only the playhead moves — calmer, and it sidesteps the
+per-frame re-render entirely.
 
-**Alternatives rejected:** "Page when it hits the edge" (calmer but less
-continuous); "don't follow" (lose sight of playback when zoomed).
+**Alternatives rejected:** "Keep centered" (original — busy, shimmered);
+"don't follow" (lose sight of playback when zoomed).
 
 ### D7 — Max zoom (tunable default)
 
