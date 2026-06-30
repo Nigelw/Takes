@@ -104,22 +104,33 @@ range is large); buttons step by a fixed log increment.
 Note: a plain click-drag on the waveform already *seeks* the playhead, which is
 why panning needs its own gesture rather than reusing drag.
 
-### D6 — Playback follow: page at the edge
+### D6 — Playback follow: page at the edge (animated turn)
 
 **Decision (revised after use):** While playing and zoomed in, hold the window
 still and let the playhead run across it; when the playhead reaches the right
-edge, page forward so it lands back at the left edge (`visibleStart = transport`,
-clamped so the final page rests against the content end and the playhead reaches
-the edge there). Active only during playback; free scrolling when paused.
+edge, page forward so it lands back near the left edge (`visibleStart =
+transport`, clamped so the final page rests against the content end and the
+playhead reaches the edge there). The page turn is *animated* with a quick tween
+(~0.15 s) rather than an instant jump, which preserves the sense of where the
+view shifted. Active only during playback; free scrolling when paused.
+
+Related: pressing play with the playhead scrolled off-screen animates a slightly
+longer catch-up scroll (~0.2 s) to bring it into view. Both reuse one
+`visibleStart` tween (a 60 fps timer interpolating the value, so the waveform,
+playhead, and ruler all move together). The tween ignores the stale momentum
+tail of a pre-play fling so leftover inertia can't bounce the view after it
+lands.
 
 **Why the change:** The original decision was continuous centering
 (`visibleStart = transport − visibleSpan/2` every tick). In practice the
 constant sub-pixel scrolling was visually busy and made the waveform shimmer as
 it re-rendered each frame. Paging keeps `visibleStart` constant between jumps, so
-the waveform is static and only the playhead moves — calmer, and it sidesteps the
-per-frame re-render entirely.
+the waveform is static and only the playhead moves — calmer. The brief animated
+turn was added back deliberately (and kept after trying it) for spatial
+continuity, while staying short enough not to feel busy.
 
 **Alternatives rejected:** "Keep centered" (original — busy, shimmered);
+"instant page jump" (calmer but loses the spatial cue of the shift);
 "don't follow" (lose sight of playback when zoomed).
 
 ### D7 — Max zoom (tunable default)

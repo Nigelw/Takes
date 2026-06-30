@@ -35,6 +35,11 @@ final class PlaybackController: ObservableObject {
     /// Kept quick so the animation finishes well before the first page jump.
     private static let scrollCatchUpDuration: CFTimeInterval = 0.2
 
+    /// Duration of the animated page turn at the edge during playback. Shorter
+    /// than the catch-up so it stays out of the way at high zoom, where pages
+    /// come quickly.
+    private static let pageAnimationDuration: CFTimeInterval = 0.15
+
     private struct RuntimeTrack {
         let file: AVAudioFile
         let player: AVAudioPlayerNode
@@ -542,8 +547,8 @@ final class PlaybackController: ObservableObject {
 
     /// While playing and zoomed in, page the window forward when the playhead
     /// runs off the edge (D6). Between pages `visibleStart` is left untouched so
-    /// the timeline holds still. Suppressed while a catch-up scroll is animating
-    /// (that tween is already bringing the playhead into view).
+    /// the timeline holds still. Suppressed while a scroll is animating (the
+    /// tween is already moving the window).
     private func followPlayheadIfZoomed() {
         guard scrollAnimation == nil else { return }
 
@@ -560,12 +565,13 @@ final class PlaybackController: ObservableObject {
             contentEnd: session.timelineEnd
         ) else { return }
 
-        session.visibleStart = newStart
+        // Animate the page turn rather than snapping the window forward.
+        startScrollAnimation(to: newStart, duration: Self.pageAnimationDuration)
     }
 
     /// On play, if the playhead sits outside the visible window, animate the
     /// scroll that brings it into view rather than jumping — the motion shows
-    /// where the view shifted. Paging during playback stays instant.
+    /// where the view shifted.
     private func animateScrollToPlayheadIfNeeded() {
         let contentSpan = session.timelineEnd - session.timelineStart
         guard contentSpan > 0,
@@ -579,17 +585,25 @@ final class PlaybackController: ObservableObject {
               )
         else { return }
 
-        let from = session.visibleStart
-        guard abs(newStart - from) > 0.0001 else { return }
+        guard startScrollAnimation(to: newStart, duration: Self.scrollCatchUpDuration) else { return }
 
         // The fling that scrolled us here may still have inertia in flight;
         // ignore its momentum tail so it can't bounce the view after the tween.
         ignoringStaleMomentumPan = true
+    }
+
+    /// Start a tween of `visibleStart` to `newStart`. Returns `false` (and does
+    /// nothing) if the window is already there.
+    @discardableResult
+    private func startScrollAnimation(to newStart: TimeInterval, duration: CFTimeInterval) -> Bool {
+        let from = session.visibleStart
+        guard abs(newStart - from) > 0.0001 else { return false }
+
         scrollAnimation = ScrollAnimation(
             from: from,
             to: newStart,
             startedAt: CACurrentMediaTime(),
-            duration: Self.scrollCatchUpDuration
+            duration: duration
         )
         scrollAnimationTimer?.invalidate()
         scrollAnimationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
@@ -597,6 +611,7 @@ final class PlaybackController: ObservableObject {
                 self?.advanceScrollAnimation()
             }
         }
+        return true
     }
 
     private func advanceScrollAnimation() {
