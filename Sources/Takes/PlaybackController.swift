@@ -18,6 +18,7 @@ final class PlaybackController: ObservableObject {
     private var runtimeTracksByID: [SessionTrack.ID: RuntimeTrack] = [:]
     private var playbackStartedAt: CFTimeInterval?
     private var playbackStartedFromTransport: TimeInterval = 0
+    private var transportStoppedAtTimelineStart = true
     private var timer: Timer?
     private var scrollAnimationTimer: Timer?
     private var scrollAnimation: ScrollAnimation?
@@ -99,7 +100,7 @@ final class PlaybackController: ObservableObject {
 
         if !preparedLoads.isEmpty {
             preparedLoads.forEach(appendPreparedTrackLoad)
-            finishTrackLoading(preferZero: !wasPlaying)
+            finishTrackLoading(preferZero: !wasPlaying && transportStoppedAtTimelineStart)
             if let resumePosition, !restorePlaybackAfterImportAppend(at: resumePosition) {
                 return
             }
@@ -239,6 +240,7 @@ final class PlaybackController: ObservableObject {
             try reschedulePlayers(startingAt: session.transportPosition)
             startScheduledPlayers()
             session.isPlaying = true
+            transportStoppedAtTimelineStart = false
             playbackStartedFromTransport = session.transportPosition
             playbackStartedAt = CACurrentMediaTime()
             startTimer()
@@ -258,6 +260,7 @@ final class PlaybackController: ObservableObject {
             runtime.player.pause()
         }
         session.isPlaying = false
+        transportStoppedAtTimelineStart = false
         playbackStartedAt = nil
         playbackStartedFromTransport = session.transportPosition
         timer?.invalidate()
@@ -270,6 +273,7 @@ final class PlaybackController: ObservableObject {
         }
         session.isPlaying = false
         session.transportPosition = session.timelineStart
+        transportStoppedAtTimelineStart = true
         playbackStartedAt = nil
         playbackStartedFromTransport = session.transportPosition
         timer?.invalidate()
@@ -285,6 +289,7 @@ final class PlaybackController: ObservableObject {
             timelineEnd: session.timelineEnd
         )
         session.transportPosition = clamped
+        transportStoppedAtTimelineStart = false
 
         guard session.isPlaying else { return }
         do {
@@ -366,7 +371,7 @@ final class PlaybackController: ObservableObject {
             session.tracks[index].loadedTrack = preparedLoad.metadata
             configureEngine()
             attachRuntimeTrack(for: trackID, file: preparedLoad.file)
-            finishTrackLoading(preferZero: !wasPlaying)
+            finishTrackLoading(preferZero: !wasPlaying && transportStoppedAtTimelineStart)
 
             guard wasPlaying, let resumePosition else { return }
             restorePlaybackAfterTrackMutation(at: resumePosition)
@@ -419,6 +424,7 @@ final class PlaybackController: ObservableObject {
         session.tracks.removeAll()
         session.activeTrackID = nil
         session.isPlaying = false
+        transportStoppedAtTimelineStart = true
         playbackStartedAt = nil
         playbackStartedFromTransport = 0
         timer?.invalidate()
@@ -878,6 +884,7 @@ final class PlaybackController: ObservableObject {
             }
             session.isPlaying = false
             session.transportPosition = Self.transportPositionAtNaturalEnd(timelineEnd: session.timelineEnd)
+            transportStoppedAtTimelineStart = false
             playbackStartedAt = nil
             playbackStartedFromTransport = session.transportPosition
             timer?.invalidate()
