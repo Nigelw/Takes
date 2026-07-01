@@ -1542,7 +1542,7 @@ private final class TimelineScrollNSView: NSScrollView {
 
     private func commonInit() {
         drawsBackground = false
-        hasHorizontalScroller = false
+        hasHorizontalScroller = true
         hasVerticalScroller = false
         horizontalScrollElasticity = .allowed
         verticalScrollElasticity = .none
@@ -1567,6 +1567,10 @@ private final class TimelineScrollNSView: NSScrollView {
     // in-flight vertical scroll cannot steal the event stream from the track
     // list's ScrollView.
     override func hitTest(_ point: NSPoint) -> NSView? {
+        if let scrollerHit = horizontalScrollerHitTest(at: point) {
+            return scrollerHit
+        }
+
         guard let event = NSApp.currentEvent else { return nil }
         switch event.type {
         case .magnify, .beginGesture, .endGesture, .smartMagnify:
@@ -1583,6 +1587,18 @@ private final class TimelineScrollNSView: NSScrollView {
         default:
             return nil
         }
+    }
+
+    private func horizontalScrollerHitTest(at point: NSPoint) -> NSView? {
+        guard let horizontalScroller else { return nil }
+        let pointInSelf = superview.map { convert(point, from: $0) } ?? point
+        let pointInScroller = horizontalScroller.convert(pointInSelf, from: self)
+        guard horizontalScroller.bounds.contains(pointInScroller) else { return nil }
+        let hitView = super.hitTest(point)
+        guard hitView === horizontalScroller || hitView?.isDescendant(of: horizontalScroller) == true else {
+            return nil
+        }
+        return hitView
     }
 
     override func scrollWheel(with event: NSEvent) {
