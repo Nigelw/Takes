@@ -144,6 +144,15 @@ enum TakesWindowPolicy {
         )
     }
 
+    static func defaultFrame(visibleFrame: CGRect) -> CGRect {
+        CGRect(
+            x: visibleFrame.minX,
+            y: visibleFrame.maxY - defaultWindowSize.height,
+            width: defaultWindowSize.width,
+            height: defaultWindowSize.height
+        )
+    }
+
     static func shouldAutoGrowWindow(
         previousTrackRowCount: Int,
         newTrackRowCount: Int,
@@ -175,14 +184,8 @@ enum TakesWindowPolicy {
         window.setFrameAutosaveName("")
         window.minSize = minimumWindowSize
 
-        let frame = window.frame
-        let defaultFrame = CGRect(
-            x: frame.minX,
-            y: frame.maxY - defaultWindowSize.height,
-            width: defaultWindowSize.width,
-            height: defaultWindowSize.height
-        )
-        window.setFrame(defaultFrame, display: true)
+        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+        window.setFrame(defaultFrame(visibleFrame: visibleFrame), display: true)
     }
 
     @MainActor

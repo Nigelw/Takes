@@ -175,6 +175,18 @@ struct SessionTests {
     }
 
     @Test
+    func windowPolicyDefaultsFrameToVisibleScreenTopLeft() {
+        let visibleFrame = CGRect(x: 48, y: 80, width: 1200, height: 800)
+
+        let defaultFrame = TakesWindowPolicy.defaultFrame(visibleFrame: visibleFrame)
+
+        #expect(defaultFrame.minX == visibleFrame.minX)
+        #expect(defaultFrame.maxY == visibleFrame.maxY)
+        #expect(defaultFrame.width == TakesWindowPolicy.defaultWindowWidth)
+        #expect(defaultFrame.height == TakesWindowPolicy.defaultWindowHeight)
+    }
+
+    @Test
     func windowPolicyCapsResizedFrameAtVisibleMonitorBottom() {
         let currentFrame = CGRect(x: 80, y: 300, width: 700, height: TakesWindowPolicy.defaultWindowHeight)
         let visibleFrame = CGRect(x: 0, y: 260, width: 1200, height: 800)
