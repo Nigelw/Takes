@@ -234,6 +234,11 @@ final class PlaybackController: ObservableObject {
     func play() {
         guard session.isPlayable else { return }
         playbackError = nil
+        // Parked at the end (Repeat Off stops there): start over from the top of
+        // the track/selection rather than replaying nothing.
+        if session.transportPosition >= session.playbackEnd {
+            session.transportPosition = session.playbackStart
+        }
         do {
             try ensureEngineRunning()
             try reschedulePlayers(startingAt: session.transportPosition)
@@ -975,15 +980,15 @@ final class PlaybackController: ObservableObject {
     }
 
     /// Stop playback at the end of the playable range (Repeat Off).
-    /// Repeat Off: stop at the end of the playable range and rewind the playhead
-    /// to its start, ready to play again from the top of the track/selection.
+    /// Repeat Off: stop at the end of the playable range, leaving the playhead
+    /// parked there. The next `play()` rewinds to the start of the range.
     private func stopAtEnd() {
         for runtime in runtimeTracksInSessionOrder() {
             runtime.player.stop()
         }
         session.isPlaying = false
-        session.transportPosition = session.playbackStart
-        transportStoppedAtTimelineStart = session.loopRegion == nil
+        session.transportPosition = session.playbackEnd
+        transportStoppedAtTimelineStart = false
         playbackStartedAt = nil
         playbackStartedFromTransport = session.transportPosition
         timer?.invalidate()

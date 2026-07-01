@@ -1152,12 +1152,26 @@ struct ContentView: View {
                         controller.beginLoop(region)
                     }
                 } else {
-                    // A plain click: seek, deselecting first if it lands outside the loop.
                     let t = globalTime(atX: value.location.x, width: waveformWidth)
-                    if let loop = controller.session.loopRegion, t < loop.start || t > loop.end {
-                        controller.deselectLoop()
+                    let shiftHeld = NSApp.currentEvent?.modifierFlags.contains(.shift) == true
+                        || NSEvent.modifierFlags.contains(.shift)
+                    if shiftHeld {
+                        // Shift-click: select the range between the playhead and the click.
+                        if let region = LoopRegion.normalized(
+                            start: controller.session.transportPosition,
+                            end: t,
+                            timelineStart: controller.session.timelineStart,
+                            timelineEnd: controller.session.timelineEnd
+                        ) {
+                            controller.beginLoop(region)
+                        }
+                    } else {
+                        // A plain click: seek, deselecting first if it lands outside the loop.
+                        if let loop = controller.session.loopRegion, t < loop.start || t > loop.end {
+                            controller.deselectLoop()
+                        }
+                        controller.seek(to: t)
                     }
-                    controller.seek(to: t)
                 }
             }
     }

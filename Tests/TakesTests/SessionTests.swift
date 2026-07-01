@@ -949,6 +949,22 @@ struct SessionTests {
 
     @MainActor
     @Test
+    func playFromEndRewindsToStart() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.seek(to: controller.session.timelineEnd)
+        #expect(controller.session.transportPosition == controller.session.timelineEnd)
+
+        controller.play()
+        #expect(controller.session.transportPosition < 0.01)
+        controller.pause()
+    }
+
+    @MainActor
+    @Test
     func seekClampsWithinActiveLoop() async throws {
         let url = try makeTemporaryAudioFile(name: "loop.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
