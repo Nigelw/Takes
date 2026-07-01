@@ -132,6 +132,44 @@ struct TimelineHeaderMarkerTests {
     }
 
     @Test
+    func leadingMajorTicksEmitLabelsBeforeTheWindowWithoutChangingSpacing() {
+        // span 20 → major interval 5. Baseline first tick is 0.
+        let baseline = TimelineHeaderMarker.ruler(timelineStart: 0, timelineEnd: 20, targetMarkerCount: target)
+        #expect(baseline.majorTicks.map(\.time) == [0, 5, 10, 15, 20])
+
+        // Requesting a leading tick prepends one interval before the window so its label can clip at
+        // the left edge; the interval and all in-window ticks are unchanged.
+        let extended = TimelineHeaderMarker.ruler(
+            timelineStart: 0,
+            timelineEnd: 20,
+            targetMarkerCount: target,
+            leadingMajorTicks: 1
+        )
+        #expect(extended.majorTicks.map(\.time) == [-5, 0, 5, 10, 15, 20])
+        #expect(extended.minorInterval == baseline.minorInterval)
+        // Minor ticks are unaffected — only labeled major ticks reach past the edge.
+        #expect(extended.minorTicks == baseline.minorTicks)
+    }
+
+    @Test
+    func leadingMajorTicksStepBackFromTheFirstInWindowTick() {
+        // Window starting off a tick boundary: first in-window major tick is 6, so the leading tick
+        // is exactly one interval (2 s) earlier at 4 — not `timelineStart`.
+        let ruler = TimelineHeaderMarker.ruler(
+            timelineStart: 5,
+            timelineEnd: 17,
+            targetMarkerCount: target,
+            leadingMajorTicks: 1
+        )
+        let interval = TimelineHeaderMarker.readableInterval(for: (17.0 - 5.0) / Double(target))
+        let times = ruler.majorTicks.map(\.time)
+        let first = try! #require(times.first)
+        let second = try! #require(times.dropFirst().first)
+        #expect(second - first == interval)
+        #expect(first < 5)
+    }
+
+    @Test
     func minorTicksStayWithinVisibleWindow() {
         let start: TimeInterval = 3.4
         let end: TimeInterval = 47.8

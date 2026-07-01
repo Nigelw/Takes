@@ -716,7 +716,10 @@ struct ContentView: View {
         let ruler = TimelineHeaderMarker.ruler(
             timelineStart: rulerStart,
             timelineEnd: rulerEnd,
-            targetMarkerCount: timelineHeaderTargetMarkerCount
+            targetMarkerCount: timelineHeaderTargetMarkerCount,
+            // Keep the just-off-screen major tick so its label clips at the left edge while scrolling
+            // rather than blinking out (mirrors the right-edge clipping in TimelineHeaderLabelLayout).
+            leadingMajorTicks: 1
         )
 
         // Drop minor ticks once they would pack closer than this; keeps the ruler from turning into
@@ -764,7 +767,6 @@ struct ContentView: View {
         let labelWidth: CGFloat = 60
         let labelLayout = TimelineHeaderLabelLayout.leading(
             tickX: Double(tickX),
-            labelWidth: Double(labelWidth),
             rulerWidth: Double(width)
         )
 

@@ -1,11 +1,20 @@
 ---
 name: run-takes
-description: Run, launch, start, build, screenshot, or verify the Takes macOS audio comparison app. Use when asked to run Takes, take a screenshot of Takes, test Takes UI, or confirm a UI change works.
+description: Run, launch, start, build, screenshot, or verify the Takes macOS audio comparison app. Use when asked to run Takes, take a screenshot of Takes, test Takes UI, hand the app to the user to test, or confirm a UI change works.
 ---
 
-Takes is a native macOS SwiftUI app for comparing multiple audio tracks on a shared transport timeline. It is driven by launching the `.app` bundle with `open` and then using **computer-use** tools to take screenshots and click. Observing and interacting with the UI requires a display (computer-use) — but audio files can be loaded from the shell with `open -a` instead of navigating the open dialog (see [Load audio files](#load-audio-files-agent-path)).
+Takes is a native macOS SwiftUI app for comparing multiple audio tracks on a shared transport timeline. It is driven by launching the `.app` bundle with `open`. From there you can either drive the UI yourself with **computer-use** tools, or just hand the running app to the user to test by hand.
 
 All paths below are relative to the repo root (`Takes/`).
+
+## Pick a mode
+
+There are two ways to run the app. Choose based on what the user asked for:
+
+- **Hand-off mode** — build, launch, and let the user test it themselves. Use this when the user says they want to test/try/drive it, "let me test", "I'll check it", or otherwise wants the app in front of them. Do **not** take screenshots or click around; just get it running and stop. See [Run (hand-off to user)](#run-hand-off-to-user).
+- **Agent-driven mode** — build, launch, then verify the change yourself with computer-use (screenshots, clicks). Use this when asked to "take a screenshot", "confirm the change works", "verify the UI", or when the user isn't at the machine. See [Run (agent path)](#run-agent-path).
+
+When it's ambiguous which mode is wanted, prefer hand-off mode and tell the user the app is ready for them to test.
 
 ## Prerequisites
 
@@ -78,13 +87,23 @@ After loading, use computer-use only for what genuinely needs eyes — confirmin
 pkill -x Takes
 ```
 
-## Run (human path)
+## Run (hand-off to user)
+
+Build and launch, then stop and let the user drive it. `smoke.sh` kills any existing instance, builds, and launches:
 
 ```bash
-open .derived-data/Build/Products/Debug/Takes.app
+bash .claude/skills/run-takes/smoke.sh
 ```
 
-Or open `Takes.xcodeproj` in Xcode and press Cmd-R.
+Skip the rebuild if the app is already built and you only need it relaunched:
+
+```bash
+bash .claude/skills/run-takes/smoke.sh --no-build
+```
+
+Once the script prints `Takes is running`, you're done — the app is on screen for the user. **Do not** call `request_access`, `screenshot`, or click anything. Tell the user it's ready to test, and optionally offer to preload sample audio (see [Load audio files](#load-audio-files-agent-path)) so they land on a populated timeline. Loading files from the shell is fine in this mode — it's the computer-use interaction you skip, not the setup.
+
+To launch by hand instead of via the script: `open .derived-data/Build/Products/Debug/Takes.app`, or open `Takes.xcodeproj` in Xcode and press Cmd-R (rebuilds from source).
 
 ## Test (non-UI)
 

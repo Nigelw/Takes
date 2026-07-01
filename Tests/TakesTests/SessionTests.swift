@@ -81,22 +81,23 @@ struct SessionTests {
     }
 
     @Test
-    func timelineMarkerLabelsHideWhenTheyWouldOverflowTheRightEdge() {
-        let visibleLayout = TimelineHeaderLabelLayout.leading(
-            tickX: 40,
-            labelWidth: 52,
-            rulerWidth: 120
-        )
+    func timelineMarkerLabelsStayVisibleUntilTheirLeadingEdgeLeavesTheRuler() {
+        // A label whose box overflows the right edge stays mounted so the ruler can clip it, letting
+        // it scroll out of view instead of vanishing early.
         let overflowingLayout = TimelineHeaderLabelLayout.leading(
             tickX: 108,
-            labelWidth: 52,
+            rulerWidth: 120
+        )
+        // Only once the label's leading edge is past the right edge is there nothing left to show.
+        let offscreenLayout = TimelineHeaderLabelLayout.leading(
+            tickX: 116,
             rulerWidth: 120
         )
 
-        #expect(visibleLayout.x == 48)
-        #expect(visibleLayout.isVisible)
         #expect(overflowingLayout.x == 116)
-        #expect(!overflowingLayout.isVisible)
+        #expect(overflowingLayout.isVisible)
+        #expect(offscreenLayout.x == 124)
+        #expect(!offscreenLayout.isVisible)
     }
 
     @MainActor
