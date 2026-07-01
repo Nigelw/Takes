@@ -54,4 +54,31 @@ enum Theme {
 
     /// Hairline separators between full-bleed regions and rows.
     static let hairline = Color(nsColor: .separatorColor)
+
+    // MARK: Beveled transport readout
+
+    /// Fill for the transport time readout panel.
+    static let readoutSurface = dynamic(
+        light: (0.898, 0.910, 0.937), // #E5E8EF
+        dark: (0.047, 0.055, 0.071)   // #0C0E12
+    )
+
+    private static func whiteAlpha(light: Double, dark: Double) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            NSColor(srgbRed: 1, green: 1, blue: 1, alpha: appearance.isDark ? dark : light)
+        })
+    }
+
+    /// Bright light edge of the readout, also used to engrave the digits.
+    static let readoutHighlight = whiteAlpha(light: 0.72, dark: 0.08)
+
+    /// Soft recessed inner-shadow edge of the readout.
+    static let readoutShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.64)
+            : NSColor(srgbRed: 96 / 255, green: 104 / 255, blue: 125 / 255, alpha: 0.28)
+    })
+
+    /// Outer hairline around the readout panel.
+    static let readoutStroke = whiteAlpha(light: 0.76, dark: 0.08)
 }

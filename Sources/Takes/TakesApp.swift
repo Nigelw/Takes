@@ -95,10 +95,12 @@ enum TakesWindowPolicy {
     static let contentPadding: CGFloat = 0
     static let rootVerticalSpacing: CGFloat = 1
     static let timelineHeaderSpacing: CGFloat = 1
-    static let transportBarReservedHeight: CGFloat = 54
+    static let transportBarReservedHeight: CGFloat = 70
     static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
     static let defaultContentHeight = contentHeight(displayingTrackRows: 1)
-    static let windowChromeHeight: CGFloat = 28
+    // The transparent full-size-content titlebar overlaps the content, so the
+    // window height equals the content height (no separate chrome band).
+    static let windowChromeHeight: CGFloat = 0
     static let defaultWindowHeight = defaultContentHeight + windowChromeHeight
     static let minimumWindowSize = CGSize(
         width: minimumContentWidth,
@@ -180,6 +182,15 @@ enum TakesWindowPolicy {
     static func configureMainWindow(_ window: NSWindow) {
         window.setFrameAutosaveName("")
         window.minSize = minimumWindowSize
+
+        // Unify the titlebar with the transport bar: let content draw up
+        // behind a transparent titlebar so the top bar reads as one surface,
+        // with only the traffic lights floating over it.
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
+        window.isMovableByWindowBackground = false
 
         let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
         window.setFrame(defaultFrame(visibleFrame: visibleFrame), display: true)
