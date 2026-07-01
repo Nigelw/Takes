@@ -55,6 +55,12 @@ enum Theme {
     /// Hairline separators between full-bleed regions and rows.
     static let hairline = Color(nsColor: .separatorColor)
 
+    /// Soft drop shadow cast by the transport bar onto the timeline header, so the
+    /// header reads as slightly recessed beneath it. A touch stronger in dark mode.
+    static let transportShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.45 : 0.18)
+    })
+
     // MARK: Beveled transport readout
 
     /// Fill for the transport time readout panel.

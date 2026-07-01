@@ -216,17 +216,17 @@ struct TrackDropHighlightTests {
 
     @Test
     func importActionControlUsesCompactSplitButtonMetrics() {
-        #expect(ImportActionControlMetrics.controlWidth == 86)
+        #expect(ImportActionControlMetrics.controlWidth == 62)
         #expect(ImportActionControlMetrics.controlHeight == 34)
-        #expect(ImportActionControlMetrics.primaryButtonWidth == 48)
-        #expect(ImportActionControlMetrics.menuButtonWidth == 37)
+        #expect(ImportActionControlMetrics.primaryButtonWidth == 34)
+        #expect(ImportActionControlMetrics.menuButtonWidth == 27)
     }
 
     @Test
     func importActionSplitButtonHitTestingFindsMenuSegmentOnMouseDown() {
         #expect(
             ImportActionSplitButtonHitTesting.segment(
-                atX: 70,
+                atX: 50,
                 controlWidth: ImportActionControlMetrics.controlWidth,
                 primaryWidth: ImportActionControlMetrics.primaryButtonWidth,
                 menuWidth: ImportActionControlMetrics.menuButtonWidth,
