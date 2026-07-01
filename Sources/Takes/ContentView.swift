@@ -709,6 +709,9 @@ struct ContentView: View {
                                 .fill(.blue)
                                 .frame(width: 2, height: trackTimelineHeight - 16)
                                 .offset(x: trackInfoWidth + playheadX, y: 8)
+                                // Never let the thin playhead swallow drags meant
+                                // for a loop handle sitting directly beneath it.
+                                .allowsHitTesting(false)
                         }
                     }
                     .frame(width: proxy.size.width)
@@ -1074,10 +1077,14 @@ struct ContentView: View {
         .offset(x: trackInfoWidth)
     }
 
+    /// Grab handle drawn at each loop edge. Deliberately unlike the thin solid
+    /// playhead: a wider white capsule with a blue outline, so it reads as
+    /// draggable and stays distinguishable when the playhead sits on top of it.
     private func loopEdge() -> some View {
-        Rectangle()
-            .fill(Color.blue)
-            .frame(width: 2)
+        Capsule()
+            .fill(Color.white)
+            .overlay(Capsule().strokeBorder(Color.blue, lineWidth: 1.5))
+            .frame(width: 6)
     }
 
     /// x-span (points, within the waveform column) of the draft loop while

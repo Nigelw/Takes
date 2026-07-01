@@ -916,11 +916,6 @@ struct SessionTests {
         #expect(position == 10)
     }
 
-    @Test
-    func endOfPlaybackPositionStopsAtTimelineEnd() {
-        #expect(PlaybackController.transportPositionAtNaturalEnd(timelineEnd: 12.5) == 12.5)
-    }
-
     @MainActor
     @Test
     func beginLoopForcesSwitchAndRepeatAndMovesPlayheadToStart() async throws {
@@ -938,7 +933,7 @@ struct SessionTests {
 
     @MainActor
     @Test
-    func deselectLoopRestoresPreviousRepeatMode() async throws {
+    func deselectLoopTurnsRepeatOff() async throws {
         let url = try makeTemporaryAudioFile(name: "loop.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let controller = PlaybackController()
@@ -949,7 +944,7 @@ struct SessionTests {
         controller.deselectLoop()
 
         #expect(controller.session.loopRegion == nil)
-        #expect(controller.session.repeatMode == .one)
+        #expect(controller.session.repeatMode == .off)
     }
 
     @MainActor
@@ -969,12 +964,13 @@ struct SessionTests {
 
     @MainActor
     @Test
-    func clearingTracksDropsLoopAndRestoresRepeatMode() async throws {
+    func clearingTracksDropsLoopAndTurnsRepeatOff() async throws {
         let url = try makeTemporaryAudioFile(name: "loop.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let controller = PlaybackController()
         await controller.loadImportedFiles([url])
 
+        controller.setRepeatMode(.one)
         controller.beginLoop(LoopRegion(start: 0.2, end: 0.5))
         controller.clearTracks()
 

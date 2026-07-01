@@ -15,9 +15,6 @@ final class PlaybackController: ObservableObject {
     nonisolated private static let maximumSilenceBufferDuration: TimeInterval = 5
 
     private var engineConfigured = false
-    /// The repeat mode in effect before a loop forced Switch & Repeat, restored
-    /// when the loop is deselected.
-    private var repeatModeBeforeLoop: RepeatMode?
     private var runtimeTracksByID: [SessionTrack.ID: RuntimeTrack] = [:]
     private var playbackStartedAt: CFTimeInterval?
     private var playbackStartedFromTransport: TimeInterval = 0
@@ -426,7 +423,7 @@ final class PlaybackController: ObservableObject {
         runtimeTracksByID.removeAll()
         session.tracks.removeAll()
         session.activeTrackID = nil
-        clearLoopRestoringRepeatMode()
+        clearLoop()
         session.isPlaying = false
         transportStoppedAtTimelineStart = true
         playbackStartedAt = nil
@@ -470,25 +467,15 @@ final class PlaybackController: ObservableObject {
 
     func setRepeatMode(_ mode: RepeatMode) {
         session.repeatMode = mode
-        // Once the user picks a mode explicitly, drop any loop-restore memory so a
-        // later deselect doesn't override their choice.
-        if session.loopRegion == nil {
-            repeatModeBeforeLoop = nil
-        } else {
-            repeatModeBeforeLoop = mode
-        }
     }
 
     func cycleRepeatMode() {
         setRepeatMode(session.repeatMode.next)
     }
 
-    /// Activate a loop: remember the current repeat mode, force Switch & Repeat so
-    /// the loop is heard across tracks, and move the playhead to the loop start.
+    /// Activate a loop: force Switch & Repeat so the loop is heard across tracks,
+    /// and move the playhead to the loop start.
     func beginLoop(_ region: LoopRegion) {
-        if session.loopRegion == nil {
-            repeatModeBeforeLoop = session.repeatMode
-        }
         session.loopRegion = region
         session.repeatMode = .switchAndRepeat
         seek(to: region.start)
@@ -510,24 +497,20 @@ final class PlaybackController: ObservableObject {
         seek(to: session.transportPosition)
     }
 
-    /// Clear the loop and restore the repeat mode from before it was created.
+    /// Clear the loop and turn repeat off.
     func deselectLoop() {
         guard session.loopRegion != nil else { return }
-        clearLoopRestoringRepeatMode()
+        clearLoop()
         // Rebind audio to the full timeline if we're mid-playback.
         seek(to: session.transportPosition)
     }
 
-    /// Drop the loop and restore the pre-loop repeat mode, without touching the
-    /// transport. Used both by `deselectLoop` and when the timeline no longer
-    /// holds the loop.
-    private func clearLoopRestoringRepeatMode() {
-        guard session.loopRegion != nil || repeatModeBeforeLoop != nil else { return }
+    /// Drop the loop and turn repeat off, without touching the transport. Used by
+    /// `deselectLoop` and when the timeline no longer holds the loop.
+    private func clearLoop() {
+        guard session.loopRegion != nil else { return }
         session.loopRegion = nil
-        if let previous = repeatModeBeforeLoop {
-            session.repeatMode = previous
-            repeatModeBeforeLoop = nil
-        }
+        session.repeatMode = .off
     }
 
     // MARK: - Timeline zoom
@@ -721,10 +704,6 @@ final class PlaybackController: ObservableObject {
         return chunks
     }
 
-    nonisolated static func transportPositionAtNaturalEnd(timelineEnd: TimeInterval) -> TimeInterval {
-        timelineEnd
-    }
-
     /// What playback should do when it reaches the end of the playable range.
     enum EndAction: Equatable {
         case stop
@@ -826,7 +805,7 @@ final class PlaybackController: ObservableObject {
             session.transportPosition = 0
             session.visibleStart = 0
             session.visibleSpan = 0
-            clearLoopRestoringRepeatMode()
+            clearLoop()
             return
         }
 
@@ -844,7 +823,7 @@ final class PlaybackController: ObservableObject {
             ) {
                 session.loopRegion = clamped
             } else {
-                clearLoopRestoringRepeatMode()
+                clearLoop()
             }
         }
         session.transportPosition = Self.transportPositionAfterTimelineRecalculation(
@@ -996,13 +975,15 @@ final class PlaybackController: ObservableObject {
     }
 
     /// Stop playback at the end of the playable range (Repeat Off).
+    /// Repeat Off: stop at the end of the playable range and rewind the playhead
+    /// to its start, ready to play again from the top of the track/selection.
     private func stopAtEnd() {
         for runtime in runtimeTracksInSessionOrder() {
             runtime.player.stop()
         }
         session.isPlaying = false
-        session.transportPosition = Self.transportPositionAtNaturalEnd(timelineEnd: session.playbackEnd)
-        transportStoppedAtTimelineStart = false
+        session.transportPosition = session.playbackStart
+        transportStoppedAtTimelineStart = session.loopRegion == nil
         playbackStartedAt = nil
         playbackStartedFromTransport = session.transportPosition
         timer?.invalidate()
