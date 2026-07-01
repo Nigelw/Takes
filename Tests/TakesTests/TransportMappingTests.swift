@@ -266,4 +266,53 @@ struct TimelineViewportTests {
         #expect(TimelineViewport.steppedVisibleSpan(visibleSpan: 30, zoomingIn: true) == 30 / 1.5)
         #expect(TimelineViewport.steppedVisibleSpan(visibleSpan: 30, zoomingIn: false) == 30 * 1.5)
     }
+
+    @Test
+    func scrollGeometryMapsVisibleStartToNativeOffset() {
+        let scale = TimelineScrollGeometry.pointsPerSecond(viewportWidth: 800, visibleSpan: 20)
+        #expect(scale == 40)
+
+        let offset = TimelineScrollGeometry.scrollOffset(
+            visibleStart: 35,
+            contentStart: -5,
+            pointsPerSecond: scale
+        )
+        #expect(offset == 1600)
+
+        let start = TimelineScrollGeometry.visibleStart(
+            scrollOffset: offset,
+            contentStart: -5,
+            pointsPerSecond: scale
+        )
+        #expect(start == 35)
+    }
+
+    @Test
+    func scrollGeometrySnapsSubpixelOffsetsToContentEdges() {
+        let scale = TimelineScrollGeometry.pointsPerSecond(viewportWidth: 800, visibleSpan: 20)
+
+        let start = TimelineScrollGeometry.visibleStart(
+            scrollOffset: 0.25,
+            contentStart: 0,
+            contentEnd: 100,
+            visibleSpan: 20,
+            pointsPerSecond: scale
+        )
+        #expect(start == 0)
+
+        let end = TimelineScrollGeometry.visibleStart(
+            scrollOffset: 3200.25,
+            contentStart: 0,
+            contentEnd: 100,
+            visibleSpan: 20,
+            pointsPerSecond: scale
+        )
+        #expect(end == 80)
+    }
+
+    @Test
+    func scrollGeometryDocumentWidthTracksZoom() {
+        #expect(TimelineScrollGeometry.documentWidth(contentSpan: 100, visibleSpan: 100, viewportWidth: 800) == 800)
+        #expect(TimelineScrollGeometry.documentWidth(contentSpan: 100, visibleSpan: 20, viewportWidth: 800) == 4000)
+    }
 }

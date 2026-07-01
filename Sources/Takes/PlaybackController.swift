@@ -22,7 +22,6 @@ final class PlaybackController: ObservableObject {
     private var timer: Timer?
     private var scrollAnimationTimer: Timer?
     private var scrollAnimation: ScrollAnimation?
-    private var ignoringStaleMomentumPan = false
 
     /// A short tween of `visibleStart`, used to animate the catch-up scroll when
     /// playback starts with the playhead off-screen.
@@ -492,33 +491,11 @@ final class PlaybackController: ObservableObject {
         applyRezoom(span: span, cursorFraction: fraction)
     }
 
-    /// Two-finger horizontal scroll → pan (D5). `fraction` shifts the window by
-    /// that proportion of the visible span. `isMomentum` marks trackpad inertia
-    /// events (as opposed to fingers-on-glass).
-    func panTimeline(byFraction fraction: Double, isMomentum: Bool) {
-        // While the catch-up scroll animates, ignore all pan input so it can't
-        // yank the tween.
-        guard scrollAnimation == nil else { return }
-
-        if isMomentum {
-            // Drop the inertia tail of the fling the user made before pressing
-            // play. It outlives the catch-up tween, and once the tween lands it
-            // would drift the view back off the playhead (a "bounce"). A fresh
-            // fingers-on-glass pan (below) clears this and restores inertia.
-            guard !ignoringStaleMomentumPan else { return }
-        } else {
-            ignoringStaleMomentumPan = false
-        }
-
+    /// Native horizontal scroll view offset → visible timeline start. The
+    /// scroll view owns gesture physics, including elastic bounce at the edges.
+    func scrollTimeline(toVisibleStart visibleStart: TimeInterval) {
         guard session.visibleSpan > 0 else { return }
-        let result = TimelineViewport.clampedWindow(
-            visibleStart: session.visibleStart + fraction * session.visibleSpan,
-            visibleSpan: session.visibleSpan,
-            contentStart: session.timelineStart,
-            contentEnd: session.timelineEnd
-        )
-        session.visibleStart = result.start
-        session.visibleSpan = result.span
+        session.visibleStart = visibleStart
     }
 
     private func applyRezoom(span: TimeInterval, cursorFraction: Double?) {
@@ -591,11 +568,7 @@ final class PlaybackController: ObservableObject {
               )
         else { return }
 
-        guard startScrollAnimation(to: newStart, duration: Self.scrollCatchUpDuration) else { return }
-
-        // The fling that scrolled us here may still have inertia in flight;
-        // ignore its momentum tail so it can't bounce the view after the tween.
-        ignoringStaleMomentumPan = true
+        startScrollAnimation(to: newStart, duration: Self.scrollCatchUpDuration)
     }
 
     /// Start a tween of `visibleStart` to `newStart`. Returns `false` (and does

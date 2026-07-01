@@ -211,3 +211,65 @@ enum TimelineViewport {
         visibleSpan * (zoomingIn ? 1 / zoomButtonStep : zoomButtonStep)
     }
 }
+
+enum TimelineScrollGeometry {
+    static func pointsPerSecond(
+        viewportWidth: Double,
+        visibleSpan: TimeInterval
+    ) -> Double {
+        guard viewportWidth > 0, visibleSpan > 0 else { return 0 }
+        return viewportWidth / visibleSpan
+    }
+
+    static func documentWidth(
+        contentSpan: TimeInterval,
+        visibleSpan: TimeInterval,
+        viewportWidth: Double
+    ) -> Double {
+        let scale = pointsPerSecond(viewportWidth: viewportWidth, visibleSpan: visibleSpan)
+        guard contentSpan > 0, scale > 0 else { return max(viewportWidth, 0) }
+        return max(viewportWidth, contentSpan * scale)
+    }
+
+    static func scrollOffset(
+        visibleStart: TimeInterval,
+        contentStart: TimeInterval,
+        pointsPerSecond: Double
+    ) -> Double {
+        guard pointsPerSecond > 0 else { return 0 }
+        return (visibleStart - contentStart) * pointsPerSecond
+    }
+
+    static func visibleStart(
+        scrollOffset: Double,
+        contentStart: TimeInterval,
+        pointsPerSecond: Double
+    ) -> TimeInterval {
+        guard pointsPerSecond > 0 else { return contentStart }
+        return contentStart + scrollOffset / pointsPerSecond
+    }
+
+    static func visibleStart(
+        scrollOffset: Double,
+        contentStart: TimeInterval,
+        contentEnd: TimeInterval,
+        visibleSpan: TimeInterval,
+        pointsPerSecond: Double,
+        snapTolerancePoints: Double = 0.5
+    ) -> TimeInterval {
+        guard pointsPerSecond > 0 else { return contentStart }
+
+        let maximumOffset = max((contentEnd - contentStart - visibleSpan) * pointsPerSecond, 0)
+        if abs(scrollOffset) <= snapTolerancePoints {
+            return contentStart
+        }
+        if abs(scrollOffset - maximumOffset) <= snapTolerancePoints {
+            return contentEnd - visibleSpan
+        }
+        return visibleStart(
+            scrollOffset: scrollOffset,
+            contentStart: contentStart,
+            pointsPerSecond: pointsPerSecond
+        )
+    }
+}
