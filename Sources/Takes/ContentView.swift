@@ -255,10 +255,10 @@ enum ImportActionMenuItem: CaseIterable {
 }
 
 enum ImportActionControlMetrics {
-    static let controlWidth: CGFloat = 86
+    static let controlWidth: CGFloat = 62
     static let controlHeight: CGFloat = 34
-    static let primaryButtonWidth: CGFloat = 48
-    static let menuButtonWidth: CGFloat = 37
+    static let primaryButtonWidth: CGFloat = 34
+    static let menuButtonWidth: CGFloat = 27
 }
 
 enum ImportActionSplitButtonHitTesting {
@@ -394,6 +394,9 @@ struct ContentView: View {
     /// Coordinate space for the waveform column, so loop gestures report x in
     /// `0...waveformWidth` regardless of the column's offset.
     private static let loopColumnSpace = "loopColumn"
+    /// Coordinate space for the timeline ruler, so ruler gestures report x in
+    /// `0...waveformWidth` just like the waveform column.
+    private static let rulerSpace = "timelineRuler"
     /// Horizontal travel (points) that turns a click into a loop drag.
     private static let loopDragThreshold: CGFloat = 4
 
@@ -434,6 +437,18 @@ struct ContentView: View {
             Divider()
             trackTimelineSection
                 .frame(maxHeight: .infinity)
+                // A soft shadow gradient hugging the top edge of the content makes the
+                // timeline header read as recessed beneath the transport bar. Drawn as an
+                // overlay (adaptive color, stronger in dark mode) rather than a hard line.
+                .overlay(alignment: .top) {
+                    LinearGradient(
+                        colors: [Theme.transportShadow, .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 6)
+                    .allowsHitTesting(false)
+                }
         }
         .frame(
             minWidth: TakesWindowPolicy.minimumContentWidth,
@@ -724,8 +739,12 @@ struct ContentView: View {
                         if controller.session.isPlayable, playheadX >= -1, playheadX <= waveformWidth + 1 {
                             Rectangle()
                                 .fill(Theme.secondary)
-                                .frame(width: 2, height: trackTimelineHeight - 16)
-                                .offset(x: trackInfoWidth + playheadX, y: 8)
+                                .frame(width: 2, height: trackTimelineHeight - 8)
+                                // Start at the very top of the rows so the line meets the ruler's
+                                // playhead handle and the two read as one playhead. Round the x to
+                                // whole pixels and subtract half the 2pt line width so the line's
+                                // CENTER (not its leading edge) sits on the handle's 2pt flat tip.
+                                .offset(x: trackInfoWidth + playheadX.rounded() - 1, y: 0)
                                 // Never let the thin playhead swallow drags meant
                                 // for a loop handle sitting directly beneath it.
                                 .allowsHitTesting(false)
@@ -759,7 +778,8 @@ struct ContentView: View {
             )
             .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
             .padding(.leading, 8)
-            .frame(width: trackInfoWidth, alignment: .leading)
+            // Center the button cluster in the taller header rather than pinning it up top.
+            .frame(width: trackInfoWidth, height: trackHeaderHeight, alignment: .leading)
             .overlay(alignment: .trailing) {
                 Button("Clear All") {
                     controller.clearTracks()
@@ -772,9 +792,91 @@ struct ContentView: View {
 
             timelineHeaderRuler(width: waveformWidth)
                 .frame(maxWidth: .infinity)
+                // Same click-to-seek / drag-to-loop behaviour as the waveform column.
+                .contentShape(Rectangle())
+                .gesture(loopSelectionGesture(waveformWidth: waveformWidth, in: Self.rulerSpace))
+                .coordinateSpace(name: Self.rulerSpace)
+                // The grabber sits on top so a drag that starts on it scrubs, while a drag
+                // elsewhere in the ruler falls through to the loop/seek gesture above.
+                .overlay(alignment: .bottomLeading) {
+                    timelineHeaderPlayhead(width: waveformWidth)
+                }
                 .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
         }
         .componentDebugLabel("Timeline Header", enabled: settings.showsComponentDebugLabels)
+    }
+
+    /// GarageBand-style grabber seated on the ruler at the playhead's x: a downward pentagon
+    /// (flat top, straight sides, converging to a small flat tip) whose bottom tip matches the
+    /// 2pt playhead line so the two read as one continuous playhead. Draggable to scrub — the
+    /// grip has a comfortable hit area a bit wider than the art. Mirrors the line's
+    /// `isPlayable` + in-range guard so both appear and disappear together.
+    private func timelineHeaderPlayhead(width: CGFloat) -> some View {
+        let playheadX = xPosition(for: controller.session.transportPosition, width: width)
+        let handleWidth: CGFloat = 14
+        let handleHeight: CGFloat = 18
+        // Comfortable grab target a bit wider than the visible grabber.
+        let hitWidth: CGFloat = 22
+        // Snap the handle center to whole pixels so its 2pt flat tip overlaps the 2pt line exactly.
+        let handleCenter = (playheadX).rounded()
+        return Group {
+            if controller.session.isPlayable, playheadX >= -1, playheadX <= width + 1 {
+                ZStack {
+                    PlayheadHandle(tipWidth: 2)
+                        .fill(Theme.secondary)
+                        // Beveled dimension: a light top highlight fading to a dark bottom shadow,
+                        // blended over the teal fill. Adaptive so it reads in light and dark mode.
+                        .overlay {
+                            PlayheadHandle(tipWidth: 2)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            .white.opacity(0.35),
+                                            .clear,
+                                            .black.opacity(0.22)
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                        }
+                        // Thin light edge along the top to sharpen the bevel.
+                        .overlay {
+                            PlayheadHandle(tipWidth: 2)
+                                .stroke(.white.opacity(0.30), lineWidth: 0.5)
+                        }
+                        .overlay {
+                            // Two vertical grip lines to mimic GarageBand's grabber texture.
+                            HStack(spacing: 3) {
+                                Capsule().frame(width: 1, height: 6)
+                                Capsule().frame(width: 1, height: 6)
+                            }
+                            .foregroundStyle(.white.opacity(0.55))
+                            // Sit the grips in the rectangular upper body, above the tapered tip.
+                            .offset(y: -3)
+                        }
+                        .frame(width: handleWidth, height: handleHeight)
+                        .accessibilityHidden(true)
+                }
+                // Wider transparent hit area centered on the same x as the art.
+                .frame(width: hitWidth, height: handleHeight)
+                .contentShape(Rectangle())
+                // Nudge down ~1pt so the flat tip bridges the header/content divider and
+                // touches the top of the playhead line below.
+                .offset(x: handleCenter - hitWidth / 2, y: 1)
+                .onHover { inside in
+                    if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
+                }
+                // Drag the grabber to scrub. Reports x in the ruler's space (0...width).
+                .gesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.rulerSpace))
+                        .onChanged { value in
+                            controller.seek(to: globalTime(atX: value.location.x, width: width))
+                        }
+                )
+            }
+        }
+        .frame(width: width, alignment: .leading)
     }
 
     private func timelineHeaderRuler(width: CGFloat) -> some View {
@@ -820,12 +922,23 @@ struct ContentView: View {
         .accessibilityLabel("Timeline")
     }
 
+    // Ruler notches hang downward from below the numbers toward the rows, Fission-style:
+    // major (labeled) ticks are tall — their top edge comes up to just beneath the number so the
+    // label sits against the tick like a baseline — while minor ticks stay short. Both are
+    // bottom-anchored so they hang toward the rows.
+    private var timelineHeaderTickColor: Color { .secondary.opacity(0.45) }
+    private var timelineHeaderMajorTickHeight: CGFloat { 19 }
+    private var timelineHeaderMinorTickHeight: CGFloat { 10 }
+    /// Vertical inset of the time label from the top of the header.
+    private var timelineHeaderLabelTopInset: CGFloat { 3 }
+
     private func timelineHeaderMinorTick(at time: TimeInterval, width: CGFloat) -> some View {
         Rectangle()
-            .fill(.secondary.opacity(0.45))
-            .frame(width: 1, height: 5)
+            .fill(timelineHeaderTickColor)
+            .frame(width: 1, height: timelineHeaderMinorTickHeight)
             .offset(x: xPosition(for: time, width: width))
-            .frame(width: width, height: ImportActionControlMetrics.controlHeight, alignment: .topLeading)
+            // Anchor to the bottom so the notch hangs down toward the waveforms.
+            .frame(width: width, height: trackHeaderHeight, alignment: .bottomLeading)
             .accessibilityHidden(true)
     }
 
@@ -838,11 +951,7 @@ struct ContentView: View {
         )
 
         return ZStack(alignment: .topLeading) {
-            Rectangle()
-                .fill(.secondary.opacity(0.45))
-                .frame(width: 1, height: 13)
-                .offset(x: tickX)
-
+            // Number on top.
             if labelLayout.isVisible {
                 Text(marker.label)
                     .font(.caption2.monospacedDigit())
@@ -850,10 +959,17 @@ struct ContentView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .frame(width: labelWidth, alignment: .leading)
-                    .offset(x: CGFloat(labelLayout.x), y: 11)
+                    .offset(x: CGFloat(labelLayout.x), y: timelineHeaderLabelTopInset)
             }
+
+            // Taller notch hanging below the number, anchored to the header bottom.
+            Rectangle()
+                .fill(timelineHeaderTickColor)
+                .frame(width: 1, height: timelineHeaderMajorTickHeight)
+                .offset(x: tickX)
+                .frame(width: width, height: trackHeaderHeight, alignment: .bottomLeading)
         }
-        .frame(width: width, height: ImportActionControlMetrics.controlHeight, alignment: .topLeading)
+        .frame(width: width, height: trackHeaderHeight, alignment: .topLeading)
         .accessibilityLabel(marker.label)
     }
 
@@ -1071,7 +1187,7 @@ struct ContentView: View {
             // Drag to select a loop; click to seek (and deselect if outside the loop).
             Color.clear
                 .contentShape(Rectangle())
-                .gesture(loopSelectionGesture(waveformWidth: waveformWidth))
+                .gesture(loopSelectionGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
 
             if let range = activeLoopXRange(waveformWidth: waveformWidth) {
                 Rectangle()
@@ -1151,51 +1267,65 @@ struct ContentView: View {
             )
     }
 
-    private func loopSelectionGesture(waveformWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.loopColumnSpace))
+    /// Click-to-seek / drag-to-select-loop behaviour, shared by the waveform column and the
+    /// timeline ruler. Both map their local x (0...`waveformWidth`) to time the same way, so the
+    /// same gesture drives both. `space` is the coordinate space the caller attaches it in.
+    private func loopSelectionGesture(
+        waveformWidth: CGFloat,
+        in space: String
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
             .onChanged { value in
-                let dx = abs(value.location.x - value.startLocation.x)
-                if loopDraft != nil || dx > Self.loopDragThreshold {
-                    loopDraft = LoopDraft(
-                        start: globalTime(atX: value.startLocation.x, width: waveformWidth),
-                        current: globalTime(atX: value.location.x, width: waveformWidth)
-                    )
-                }
+                handleLoopSelectionChanged(value: value, waveformWidth: waveformWidth)
             }
             .onEnded { value in
-                if loopDraft != nil {
-                    loopDraft = nil
-                    if let region = LoopRegion.normalized(
-                        start: globalTime(atX: value.startLocation.x, width: waveformWidth),
-                        end: globalTime(atX: value.location.x, width: waveformWidth),
-                        timelineStart: controller.session.timelineStart,
-                        timelineEnd: controller.session.timelineEnd
-                    ) {
-                        controller.beginLoop(region)
-                    }
-                } else {
-                    let t = globalTime(atX: value.location.x, width: waveformWidth)
-                    let shiftHeld = NSApp.currentEvent?.modifierFlags.contains(.shift) == true
-                        || NSEvent.modifierFlags.contains(.shift)
-                    if shiftHeld {
-                        // Shift-click: select the range between the playhead and the click.
-                        if let region = LoopRegion.normalized(
-                            start: controller.session.transportPosition,
-                            end: t,
-                            timelineStart: controller.session.timelineStart,
-                            timelineEnd: controller.session.timelineEnd
-                        ) {
-                            controller.beginLoop(region)
-                        }
-                    } else {
-                        // A plain click: seek, deselecting first if it lands outside the loop.
-                        if let loop = controller.session.loopRegion, t < loop.start || t > loop.end {
-                            controller.deselectLoop()
-                        }
-                        controller.seek(to: t)
-                    }
-                }
+                handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth)
             }
+    }
+
+    private func handleLoopSelectionChanged(value: DragGesture.Value, waveformWidth: CGFloat) {
+        let dx = abs(value.location.x - value.startLocation.x)
+        if loopDraft != nil || dx > Self.loopDragThreshold {
+            loopDraft = LoopDraft(
+                start: globalTime(atX: value.startLocation.x, width: waveformWidth),
+                current: globalTime(atX: value.location.x, width: waveformWidth)
+            )
+        }
+    }
+
+    private func handleLoopSelectionEnded(value: DragGesture.Value, waveformWidth: CGFloat) {
+        if loopDraft != nil {
+            loopDraft = nil
+            if let region = LoopRegion.normalized(
+                start: globalTime(atX: value.startLocation.x, width: waveformWidth),
+                end: globalTime(atX: value.location.x, width: waveformWidth),
+                timelineStart: controller.session.timelineStart,
+                timelineEnd: controller.session.timelineEnd
+            ) {
+                controller.beginLoop(region)
+            }
+        } else {
+            let t = globalTime(atX: value.location.x, width: waveformWidth)
+            let shiftHeld = NSApp.currentEvent?.modifierFlags.contains(.shift) == true
+                || NSEvent.modifierFlags.contains(.shift)
+            if shiftHeld {
+                // Shift-click: select the range between the playhead and the click.
+                if let region = LoopRegion.normalized(
+                    start: controller.session.transportPosition,
+                    end: t,
+                    timelineStart: controller.session.timelineStart,
+                    timelineEnd: controller.session.timelineEnd
+                ) {
+                    controller.beginLoop(region)
+                }
+            } else {
+                // A plain click: seek, deselecting first if it lands outside the loop.
+                if let loop = controller.session.loopRegion, t < loop.start || t > loop.end {
+                    controller.deselectLoop()
+                }
+                controller.seek(to: t)
+            }
+        }
     }
 
     @ViewBuilder
@@ -1483,6 +1613,46 @@ struct ContentView: View {
         }
 
         return true
+    }
+}
+
+/// GarageBand-style playhead grabber: a downward pentagon ("home plate") with a flat, softly
+/// rounded top, straight vertical sides through the upper body, then a taper to a small flat tip
+/// at the bottom-center. The flat tip matches the 2pt playhead line so the two read as one
+/// continuous playhead.
+private struct PlayheadHandle: Shape {
+    /// Width of the flat bottom tip; sized to the playhead line so they overlap seamlessly.
+    var tipWidth: CGFloat = 2
+    /// Corner radius of the two flat top corners.
+    var topCornerRadius: CGFloat = 2
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        // Fraction of the height that stays a straight-sided rectangle before tapering.
+        let shoulderY = rect.minY + rect.height * 0.62
+        let halfTip = min(tipWidth, rect.width) / 2
+        let r = min(topCornerRadius, rect.width / 2)
+
+        // Top edge with rounded top corners.
+        path.move(to: CGPoint(x: rect.minX + r, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
+        path.addArc(
+            center: CGPoint(x: rect.maxX - r, y: rect.minY + r),
+            radius: r, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false
+        )
+        // Straight right side down to the shoulder, then taper in to the flat tip.
+        path.addLine(to: CGPoint(x: rect.maxX, y: shoulderY))
+        path.addLine(to: CGPoint(x: rect.midX + halfTip, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.midX - halfTip, y: rect.maxY))
+        // Back up the tapered left side and straight left side.
+        path.addLine(to: CGPoint(x: rect.minX, y: shoulderY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + r))
+        path.addArc(
+            center: CGPoint(x: rect.minX + r, y: rect.minY + r),
+            radius: r, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false
+        )
+        path.closeSubpath()
+        return path
     }
 }
 

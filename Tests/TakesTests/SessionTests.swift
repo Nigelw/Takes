@@ -77,7 +77,7 @@ struct SessionTests {
 
     @Test
     func timelineMarkerLabelsAreInsetToTheRightOfTickMarks() {
-        #expect(TimelineHeaderMarker.labelLeadingPadding == 8)
+        #expect(TimelineHeaderMarker.labelLeadingPadding == 4)
     }
 
     @Test
@@ -85,7 +85,7 @@ struct SessionTests {
         // A label whose box overflows the right edge stays mounted so the ruler can clip it, letting
         // it scroll out of view instead of vanishing early.
         let overflowingLayout = TimelineHeaderLabelLayout.leading(
-            tickX: 108,
+            tickX: 112,
             rulerWidth: 120
         )
         // Only once the label's leading edge is past the right edge is there nothing left to show.
@@ -96,7 +96,7 @@ struct SessionTests {
 
         #expect(overflowingLayout.x == 116)
         #expect(overflowingLayout.isVisible)
-        #expect(offscreenLayout.x == 124)
+        #expect(offscreenLayout.x == 120)
         #expect(!offscreenLayout.isVisible)
     }
 
@@ -153,9 +153,12 @@ struct SessionTests {
     }
 
     @Test
-    func windowPolicyAddsChromeToDefaultWindowHeight() {
+    func windowPolicyOmitsChromeFromDefaultWindowHeight() {
+        // The transparent full-size-content titlebar overlaps the content, so the
+        // window height equals the content height (no separate chrome band).
+        #expect(TakesWindowPolicy.windowChromeHeight == 0)
         #expect(TakesWindowPolicy.defaultWindowHeight == TakesWindowPolicy.defaultContentHeight + TakesWindowPolicy.windowChromeHeight)
-        #expect(TakesWindowPolicy.defaultWindowHeight > TakesWindowPolicy.defaultContentHeight)
+        #expect(TakesWindowPolicy.defaultWindowHeight == TakesWindowPolicy.defaultContentHeight)
     }
 
     @Test

@@ -165,7 +165,7 @@ struct TimelineHeaderMarker: Equatable {
     let time: TimeInterval
     let label: String
 
-    static let labelLeadingPadding: Double = 8
+    static let labelLeadingPadding: Double = 4
 
     /// Labeled ticks for the ruler. Thin wrapper over ``ruler(timelineStart:timelineEnd:targetMarkerCount:)``.
     static func markers(
