@@ -17,6 +17,59 @@ struct LoadedTrack: Equatable {
     }
 }
 
+/// How playback behaves when the end of the playable range (timeline end, or the
+/// loop end when a loop is active) is reached.
+enum RepeatMode: String, CaseIterable, Equatable {
+    /// Stop at the end.
+    case off
+    /// Restart the same track from the beginning of the range.
+    case one
+    /// Switch to the next track and restart from the beginning of the range.
+    case switchAndRepeat
+
+    /// Cycle order used by the toolbar button: Off → One → Switch → Off.
+    var next: RepeatMode {
+        switch self {
+        case .off: return .one
+        case .one: return .switchAndRepeat
+        case .switchAndRepeat: return .off
+        }
+    }
+}
+
+/// A looped subsection of the timeline, in absolute seconds. Invariant: `start < end`.
+struct LoopRegion: Equatable {
+    var start: TimeInterval
+    var end: TimeInterval
+
+    /// Shortest loop we allow, so a tiny accidental drag doesn't create a
+    /// zero-width or unusably short loop.
+    static let minimumLength: TimeInterval = 0.05
+
+    /// Build a loop from two drag endpoints (in any order), clamped to the
+    /// timeline and widened to at least `minimumLength`. Returns `nil` when the
+    /// timeline itself is too short to hold a loop.
+    static func normalized(
+        start rawStart: TimeInterval,
+        end rawEnd: TimeInterval,
+        timelineStart: TimeInterval,
+        timelineEnd: TimeInterval
+    ) -> LoopRegion? {
+        guard timelineEnd - timelineStart >= minimumLength else { return nil }
+
+        let lower = max(timelineStart, min(rawStart, rawEnd))
+        let upper = min(timelineEnd, max(rawStart, rawEnd))
+
+        var start = lower
+        var end = max(upper, start + minimumLength)
+        if end > timelineEnd {
+            end = timelineEnd
+            start = end - minimumLength
+        }
+        return LoopRegion(start: start, end: end)
+    }
+}
+
 struct SessionTrack: Identifiable, Equatable {
     let id: UUID
     var loadedTrack: LoadedTrack
@@ -35,6 +88,12 @@ struct ComparisonSession: Equatable {
     var timelineStart: TimeInterval = 0
     var timelineEnd: TimeInterval = 0
 
+    var repeatMode: RepeatMode = .off
+
+    /// The active loop, if any. When set, playback is confined to this range and
+    /// wraps at its end. See `playbackStart` / `playbackEnd`.
+    var loopRegion: LoopRegion?
+
     /// The window currently drawn, in absolute seconds. A sub-window of the
     /// content range `[timelineStart, timelineEnd]`. When it equals the content
     /// range the timeline is fully zoomed out ("fit"). See `TimelineViewport`.
@@ -48,6 +107,8 @@ struct ComparisonSession: Equatable {
         transportPosition: TimeInterval = 0,
         timelineStart: TimeInterval = 0,
         timelineEnd: TimeInterval = 0,
+        repeatMode: RepeatMode = .off,
+        loopRegion: LoopRegion? = nil,
         visibleStart: TimeInterval = 0,
         visibleSpan: TimeInterval = 0
     ) {
@@ -57,12 +118,24 @@ struct ComparisonSession: Equatable {
         self.transportPosition = transportPosition
         self.timelineStart = timelineStart
         self.timelineEnd = timelineEnd
+        self.repeatMode = repeatMode
+        self.loopRegion = loopRegion
         self.visibleStart = visibleStart
         self.visibleSpan = visibleSpan
     }
 
     var duration: TimeInterval {
         max(0, timelineEnd - timelineStart)
+    }
+
+    /// Start of the playable range: the loop start when looping, else the timeline start.
+    var playbackStart: TimeInterval {
+        loopRegion?.start ?? timelineStart
+    }
+
+    /// End of the playable range: the loop end when looping, else the timeline end.
+    var playbackEnd: TimeInterval {
+        loopRegion?.end ?? timelineEnd
     }
 
     var visibleEnd: TimeInterval {

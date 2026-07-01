@@ -916,9 +916,82 @@ struct SessionTests {
         #expect(position == 10)
     }
 
+    @MainActor
     @Test
-    func endOfPlaybackPositionStopsAtTimelineEnd() {
-        #expect(PlaybackController.transportPositionAtNaturalEnd(timelineEnd: 12.5) == 12.5)
+    func beginLoopForcesSwitchAndRepeatAndMovesPlayheadToStart() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.beginLoop(LoopRegion(start: 0.2, end: 0.5))
+
+        #expect(controller.session.loopRegion == LoopRegion(start: 0.2, end: 0.5))
+        #expect(controller.session.repeatMode == .switchAndRepeat)
+        #expect(abs(controller.session.transportPosition - 0.2) < 0.0001)
+    }
+
+    @MainActor
+    @Test
+    func deselectLoopTurnsRepeatOff() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.setRepeatMode(.one)
+        controller.beginLoop(LoopRegion(start: 0.2, end: 0.5))
+        controller.deselectLoop()
+
+        #expect(controller.session.loopRegion == nil)
+        #expect(controller.session.repeatMode == .off)
+    }
+
+    @MainActor
+    @Test
+    func playFromEndRewindsToStart() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.seek(to: controller.session.timelineEnd)
+        #expect(controller.session.transportPosition == controller.session.timelineEnd)
+
+        controller.play()
+        #expect(controller.session.transportPosition < 0.01)
+        controller.pause()
+    }
+
+    @MainActor
+    @Test
+    func seekClampsWithinActiveLoop() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.beginLoop(LoopRegion(start: 0.2, end: 0.5))
+        controller.seek(to: 0.9)
+        #expect(abs(controller.session.transportPosition - 0.5) < 0.0001)
+        controller.seek(to: 0.0)
+        #expect(abs(controller.session.transportPosition - 0.2) < 0.0001)
+    }
+
+    @MainActor
+    @Test
+    func clearingTracksDropsLoopAndTurnsRepeatOff() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.setRepeatMode(.one)
+        controller.beginLoop(LoopRegion(start: 0.2, end: 0.5))
+        controller.clearTracks()
+
+        #expect(controller.session.loopRegion == nil)
+        #expect(controller.session.repeatMode == .off)
     }
 
     @Test

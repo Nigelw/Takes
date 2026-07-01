@@ -235,6 +235,14 @@ struct TakesApp: App {
 
             FileCommands()
 
+            CommandGroup(after: .pasteboard) {
+                Button("Deselect") {
+                    controller.deselectLoop()
+                }
+                .keyboardShortcut("d", modifiers: [.command])
+                .disabled(controller.session.loopRegion == nil)
+            }
+
             CommandMenu("Playback") {
                 Button(controller.session.isPlaying ? "Pause" : "Play") {
                     controller.session.isPlaying ? controller.pause() : controller.play()
@@ -253,6 +261,21 @@ struct TakesApp: App {
                 }
                 .keyboardShortcut("x", modifiers: [.shift])
                 .disabled(!controller.session.canSwitchPlayback)
+
+                Divider()
+
+                Menu("Repeat") {
+                    Picker("Repeat", selection: Binding(
+                        get: { controller.session.repeatMode },
+                        set: { controller.setRepeatMode($0) }
+                    )) {
+                        Text("Off").tag(RepeatMode.off)
+                        Text("One").tag(RepeatMode.one)
+                        Text("Switch & Repeat").tag(RepeatMode.switchAndRepeat)
+                    }
+                    .pickerStyle(.inline)
+                }
+                .disabled(!controller.session.isPlayable)
 
                 Divider()
 
