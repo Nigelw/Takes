@@ -671,8 +671,12 @@ struct ContentView: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             .overlay(alignment: .topLeading) {
-                TimelineGestureOverlay(
-                    onPan: { controller.panTimeline(byFraction: $0, isMomentum: $1) },
+                TimelineScrollOverlay(
+                    visibleStart: controller.session.visibleStart,
+                    visibleSpan: visibleSpan,
+                    contentStart: controller.session.timelineStart,
+                    contentEnd: controller.session.timelineEnd,
+                    onScroll: { controller.scrollTimeline(toVisibleStart: $0) },
                     onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
                 )
                 .frame(width: waveformWidth, height: proxy.size.height)
@@ -707,9 +711,11 @@ struct ContentView: View {
     }
 
     private func timelineHeaderRuler(width: CGFloat) -> some View {
+        let rulerStart = max(visibleStart, controller.session.timelineStart)
+        let rulerEnd = min(controller.session.visibleEnd, controller.session.timelineEnd)
         let ruler = TimelineHeaderMarker.ruler(
-            timelineStart: visibleStart,
-            timelineEnd: controller.session.visibleEnd,
+            timelineStart: rulerStart,
+            timelineEnd: rulerEnd,
             targetMarkerCount: timelineHeaderTargetMarkerCount
         )
 
@@ -1388,58 +1394,219 @@ private final class ImmediateMenuSegmentedControl: NSSegmentedControl {
     }
 }
 
-/// A transparent overlay that captures trackpad pan (two-finger horizontal
-/// scroll) and pinch-to-zoom for the timeline, while letting clicks/drags
-/// (seek) and vertical scroll (the track list) pass straight through to the
-/// SwiftUI views beneath it.
-private struct TimelineGestureOverlay: NSViewRepresentable {
-    /// Pan: shift the visible window by a fraction of its span. The `Bool` flags
-    /// trackpad inertia (momentum) events.
-    let onPan: (Double, Bool) -> Void
+/// A transparent horizontal `NSScrollView` overlay for the timeline. AppKit owns
+/// the scroll physics, including native rubber-band bounce, while SwiftUI keeps
+/// drawing the waveform from the reported visible time window.
+private struct TimelineScrollOverlay: NSViewRepresentable {
+    let visibleStart: TimeInterval
+    let visibleSpan: TimeInterval
+    let contentStart: TimeInterval
+    let contentEnd: TimeInterval
+    /// Native scroll offset mapped back to the visible timeline start.
+    let onScroll: (TimeInterval) -> Void
     /// Pinch: magnification delta, plus the cursor's `0...1` position.
     let onMagnify: (Double, Double) -> Void
 
-    func makeNSView(context: Context) -> TimelineGestureNSView {
-        let view = TimelineGestureNSView()
-        view.onPan = onPan
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onScroll: onScroll)
+    }
+
+    func makeNSView(context: Context) -> TimelineScrollNSView {
+        let view = TimelineScrollNSView()
         view.onMagnify = onMagnify
+        context.coordinator.attach(to: view)
+        configure(view)
         return view
     }
 
-    func updateNSView(_ nsView: TimelineGestureNSView, context: Context) {
-        nsView.onPan = onPan
+    func updateNSView(_ nsView: TimelineScrollNSView, context: Context) {
         nsView.onMagnify = onMagnify
+        context.coordinator.onScroll = onScroll
+        configure(nsView)
+    }
+
+    private func configure(_ scrollView: TimelineScrollNSView) {
+        let viewportWidth = max(scrollView.bounds.width, 0)
+        let viewportHeight = max(scrollView.bounds.height, 0)
+        let contentSpan = max(contentEnd - contentStart, 0)
+        let pointsPerSecond = TimelineScrollGeometry.pointsPerSecond(
+            viewportWidth: Double(viewportWidth),
+            visibleSpan: visibleSpan
+        )
+        let documentWidth = TimelineScrollGeometry.documentWidth(
+            contentSpan: contentSpan,
+            visibleSpan: visibleSpan,
+            viewportWidth: Double(viewportWidth)
+        )
+        scrollView.timelineContentStart = contentStart
+        scrollView.timelineContentEnd = contentEnd
+        scrollView.timelineVisibleSpan = visibleSpan
+        scrollView.timelinePointsPerSecond = pointsPerSecond
+        scrollView.documentView?.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: CGFloat(max(documentWidth, Double(viewportWidth))),
+            height: viewportHeight
+        )
+
+        guard !scrollView.isReportingNativeScroll else { return }
+        let x = TimelineScrollGeometry.scrollOffset(
+            visibleStart: visibleStart,
+            contentStart: contentStart,
+            pointsPerSecond: pointsPerSecond
+        )
+        guard abs(scrollView.contentView.bounds.origin.x - CGFloat(x)) > 0.5 else { return }
+        scrollView.contentView.scroll(to: NSPoint(x: CGFloat(x), y: 0))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var onScroll: (TimeInterval) -> Void
+        private weak var scrollView: TimelineScrollNSView?
+
+        init(onScroll: @escaping (TimeInterval) -> Void) {
+            self.onScroll = onScroll
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        func attach(to scrollView: TimelineScrollNSView) {
+            self.scrollView = scrollView
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(boundsDidChange(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView
+            )
+        }
+
+        @objc private func boundsDidChange(_ notification: Notification) {
+            guard let scrollView else { return }
+            let visibleStart = TimelineScrollGeometry.visibleStart(
+                scrollOffset: scrollView.contentView.bounds.origin.x,
+                contentStart: scrollView.timelineContentStart,
+                contentEnd: scrollView.timelineContentEnd,
+                visibleSpan: scrollView.timelineVisibleSpan,
+                pointsPerSecond: scrollView.timelinePointsPerSecond
+            )
+            scrollView.isReportingNativeScroll = true
+            onScroll(visibleStart)
+            DispatchQueue.main.async { [weak scrollView] in
+                scrollView?.isReportingNativeScroll = false
+            }
+        }
     }
 }
 
-private final class TimelineGestureNSView: NSView {
-    var onPan: ((Double, Bool) -> Void)?
+private final class TimelineScrollNSView: NSScrollView {
     var onMagnify: ((Double, Double) -> Void)?
+    var timelineContentStart: TimeInterval = 0
+    var timelineContentEnd: TimeInterval = 0
+    var timelineVisibleSpan: TimeInterval = 0
+    var timelinePointsPerSecond: Double = 0
+    var isReportingNativeScroll = false
+    private var lockedScrollAxis: ScrollAxis?
+
+    private enum ScrollAxis {
+        case horizontal
+        case vertical
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        commonInit()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
+        drawsBackground = false
+        hasHorizontalScroller = false
+        hasVerticalScroller = false
+        horizontalScrollElasticity = .allowed
+        verticalScrollElasticity = .none
+        usesPredominantAxisScrolling = true
+        autohidesScrollers = true
+        borderType = .noBorder
+        documentView = NSView(frame: .zero)
+    }
 
     // Only claim the events we handle. `NSApp.currentEvent` lets `hitTest`
     // decide per-event: scroll/magnify route to us, everything else (clicks,
-    // drags, vertical scroll) falls through to the views below.
+    // drags, vertical scroll) falls through to the views below. Scroll gestures
+    // are axis-locked until the gesture ends so horizontal movement during an
+    // in-flight vertical scroll cannot steal the event stream from the track
+    // list's ScrollView.
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard let event = NSApp.currentEvent else { return nil }
         switch event.type {
         case .magnify, .beginGesture, .endGesture, .smartMagnify:
-            return super.hitTest(point)
+            return self
         case .scrollWheel:
-            // Horizontal-dominant scroll pans; let vertical scroll reach the
-            // track list's ScrollView underneath.
-            guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return nil }
-            return super.hitTest(point)
+            if scrollGestureBegan(event) || !scrollGestureHasPhase(event) {
+                lockedScrollAxis = nil
+            }
+            let axis = scrollAxis(for: event)
+            if scrollGestureEnded(event) {
+                lockedScrollAxis = nil
+            }
+            return axis == .horizontal ? self : nil
         default:
             return nil
         }
     }
 
     override func scrollWheel(with event: NSEvent) {
-        let width = bounds.width
-        guard width > 0, event.scrollingDeltaX != 0 else { return }
-        // Two-finger swipe: the content tracks the fingers. A non-empty
-        // momentumPhase means this is trackpad inertia, not fingers-on-glass.
-        onPan?(Double(-event.scrollingDeltaX / width), event.momentumPhase != [])
+        if scrollGestureBegan(event) || !scrollGestureHasPhase(event) {
+            lockedScrollAxis = nil
+        }
+        super.scrollWheel(with: event)
+        if scrollGestureEnded(event) {
+            lockedScrollAxis = nil
+        }
+    }
+
+    private func scrollAxis(for event: NSEvent) -> ScrollAxis? {
+        if let lockedScrollAxis {
+            return lockedScrollAxis
+        }
+
+        let horizontalDelta = abs(event.scrollingDeltaX)
+        let verticalDelta = abs(event.scrollingDeltaY)
+        guard horizontalDelta > 0 || verticalDelta > 0 else { return nil }
+
+        let axis: ScrollAxis = horizontalDelta > verticalDelta ? .horizontal : .vertical
+        if scrollGestureInProgress(event) {
+            lockedScrollAxis = axis
+        }
+        return axis
+    }
+
+    private func scrollGestureHasPhase(_ event: NSEvent) -> Bool {
+        event.phase != [] || event.momentumPhase != []
+    }
+
+    private func scrollGestureBegan(_ event: NSEvent) -> Bool {
+        event.phase.contains(.began) || event.momentumPhase.contains(.began)
+    }
+
+    private func scrollGestureInProgress(_ event: NSEvent) -> Bool {
+        let phase = event.momentumPhase != [] ? event.momentumPhase : event.phase
+        return phase != [] && !phase.contains(.ended) && !phase.contains(.cancelled)
+    }
+
+    private func scrollGestureEnded(_ event: NSEvent) -> Bool {
+        event.phase.contains(.ended)
+            || event.phase.contains(.cancelled)
+            || event.momentumPhase.contains(.ended)
+            || event.momentumPhase.contains(.cancelled)
     }
 
     /// Multiplier applied to the raw trackpad pinch delta. Higher = zoom
