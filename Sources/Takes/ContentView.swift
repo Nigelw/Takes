@@ -419,8 +419,6 @@ struct ContentView: View {
                 .fixedSize(horizontal: false, vertical: true)
             trackTimelineSection
                 .frame(maxHeight: .infinity)
-            zoomControlBar
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
         .frame(
@@ -518,18 +516,12 @@ struct ContentView: View {
             Text("\(controller.session.transportPosition.formattedSignedTimestamp) / \(controller.session.timelineEnd.formattedSignedTimestamp)")
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-        }
-        .padding()
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
 
-    private var zoomControlBar: some View {
-        HStack(spacing: 10) {
             Spacer()
+
             zoomControls
         }
-        .padding(.horizontal, 10)
-        .frame(height: TakesWindowPolicy.zoomBarReservedHeight)
+        .padding()
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 

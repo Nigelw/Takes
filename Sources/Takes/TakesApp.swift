@@ -96,7 +96,6 @@ enum TakesWindowPolicy {
     static let rootVerticalSpacing: CGFloat = 14
     static let timelineHeaderSpacing: CGFloat = 8
     static let transportBarReservedHeight: CGFloat = 54
-    static let zoomBarReservedHeight: CGFloat = 30
     static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
     static let defaultContentHeight = contentHeight(displayingTrackRows: 1)
     static let windowChromeHeight: CGFloat = 28
@@ -123,8 +122,6 @@ enum TakesWindowPolicy {
             + trackTimelineHeaderHeight
             + timelineHeaderSpacing
             + trackTimelineHeight(displayingTrackRows: rowCount)
-            + rootVerticalSpacing
-            + zoomBarReservedHeight
     }
 
     static func windowHeight(displayingTrackRows rowCount: Int) -> CGFloat {
