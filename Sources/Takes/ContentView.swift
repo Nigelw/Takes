@@ -428,13 +428,13 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
             transportBar
                 .fixedSize(horizontal: false, vertical: true)
+            Divider()
             trackTimelineSection
                 .frame(maxHeight: .infinity)
         }
-        .padding(20)
         .frame(
             minWidth: TakesWindowPolicy.minimumContentWidth,
             minHeight: TakesWindowPolicy.minimumContentHeight
@@ -537,8 +537,8 @@ struct ContentView: View {
 
             zoomControls
         }
-        .padding()
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .componentDebugLabel("Transport Bar", enabled: settings.showsComponentDebugLabels)
     }
 
@@ -681,9 +681,10 @@ struct ContentView: View {
     private var trackTimelineSection: some View {
         GeometryReader { proxy in
             let waveformWidth = max(proxy.size.width - trackInfoWidth, 1)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
                 trackTimelineHeader(waveformWidth: waveformWidth)
                     .frame(width: proxy.size.width, height: trackHeaderHeight)
+                Divider()
 
                 ScrollView(.vertical) {
                     ZStack(alignment: .topLeading) {
@@ -700,7 +701,6 @@ struct ContentView: View {
                                 }
                             }
                         }
-                        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                         if controller.session.isPlayable {
                             loopSelectionOverlay(waveformWidth: waveformWidth)
@@ -709,7 +709,7 @@ struct ContentView: View {
                         let playheadX = xPosition(for: controller.session.transportPosition, width: waveformWidth)
                         if controller.session.isPlayable, playheadX >= -1, playheadX <= waveformWidth + 1 {
                             Rectangle()
-                                .fill(.blue)
+                                .fill(Theme.secondary)
                                 .frame(width: 2, height: trackTimelineHeight - 16)
                                 .offset(x: trackInfoWidth + playheadX, y: 8)
                                 // Never let the thin playhead swallow drags meant
@@ -760,7 +760,6 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
                 .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
         }
-        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .componentDebugLabel("Timeline Header", enabled: settings.showsComponentDebugLabels)
     }
 
@@ -918,9 +917,10 @@ struct ContentView: View {
                 if controller.session.activeTrackID == sessionTrack.id {
                     Text("Active")
                         .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.primary)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2)
-                        .background(.blue.opacity(0.15), in: Capsule())
+                        .background(Theme.primary.opacity(0.15), in: Capsule())
                 }
                 Spacer()
                 Button {
@@ -1025,9 +1025,10 @@ struct ContentView: View {
 
                 if let sessionTrack {
                     let loaded = sessionTrack.loadedTrack
+                    let isActive = controller.session.activeTrackID == sessionTrack.id
                     waveformShape(for: waveformStore.waveform(for: sessionTrack.id), track: loaded)
                         .frame(width: proxy.size.width, height: 58)
-                        .foregroundStyle(trackColor(index: index).opacity(0.55))
+                        .foregroundStyle(isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7))
                 } else {
                     Text("Drop audio file here")
                         .font(.caption)
@@ -1060,7 +1061,7 @@ struct ContentView: View {
 
             if let range = activeLoopXRange(waveformWidth: waveformWidth) {
                 Rectangle()
-                    .fill(Color.blue.opacity(0.14))
+                    .fill(Theme.secondary.opacity(0.16))
                     .overlay(alignment: .leading) { loopEdge() }
                     .overlay(alignment: .trailing) { loopEdge() }
                     .frame(width: max(1, range.upperBound - range.lowerBound), height: laneHeight)
@@ -1090,7 +1091,7 @@ struct ContentView: View {
     private func loopEdge() -> some View {
         Capsule()
             .fill(Color.white)
-            .overlay(Capsule().strokeBorder(Color.blue, lineWidth: 1.5))
+            .overlay(Capsule().strokeBorder(Theme.secondary, lineWidth: 1.5))
             .frame(width: 6)
     }
 
@@ -1296,11 +1297,6 @@ struct ContentView: View {
         return path
     }
 
-    private func trackColor(index: Int) -> Color {
-        let colors: [Color] = [.blue, .green, .orange, .purple, .pink, .teal]
-        return colors[index % colors.count]
-    }
-
     private func handleImport(_ result: Result<[URL], Error>) {
         openFileCommandState.dismissOpenDialog()
 
@@ -1327,9 +1323,9 @@ struct ContentView: View {
 
     private func backgroundStyle(for highlight: TrackDropHighlight) -> some ShapeStyle {
         if highlight == .dropTarget {
-            return AnyShapeStyle(.blue.opacity(0.16))
+            return AnyShapeStyle(Theme.primary.opacity(0.16))
         }
-        return AnyShapeStyle(.quaternary.opacity(0.4))
+        return AnyShapeStyle(Color.clear)
     }
 
     private func trackReorderProvider(for trackID: SessionTrack.ID) -> NSItemProvider {
@@ -1363,10 +1359,10 @@ struct ContentView: View {
     ) -> some View {
         if reorderInsertionTarget == TrackReorderInsertionTarget(trackID: trackID, placement: placement) {
             Capsule()
-                .fill(.blue)
+                .fill(Theme.primary)
                 .frame(height: 3)
                 .padding(.horizontal, 10)
-                .shadow(color: .blue.opacity(0.25), radius: 2, y: 1)
+                .shadow(color: Theme.primary.opacity(0.25), radius: 2, y: 1)
                 .accessibilityHidden(true)
         }
     }
