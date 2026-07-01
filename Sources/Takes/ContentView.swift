@@ -397,6 +397,9 @@ struct ContentView: View {
     /// Coordinate space for the timeline ruler, so ruler gestures report x in
     /// `0...waveformWidth` just like the waveform column.
     private static let rulerSpace = "timelineRuler"
+    /// Coordinate space for the section-level playhead overlay (grabber + line),
+    /// so a grabber drag reports x across the whole section.
+    private static let playheadSpace = "timelinePlayhead"
     /// Horizontal travel (points) that turns a click into a loop drag.
     private static let loopDragThreshold: CGFloat = 4
 
@@ -446,7 +449,7 @@ struct ContentView: View {
                         startPoint: .top,
                         endPoint: .bottom
                     )
-                    .frame(height: 6)
+                    .frame(height: 8)
                     .allowsHitTesting(false)
                 }
         }
@@ -734,21 +737,6 @@ struct ContentView: View {
                         if controller.session.isPlayable {
                             loopSelectionOverlay(waveformWidth: waveformWidth)
                         }
-
-                        let playheadX = xPosition(for: controller.session.transportPosition, width: waveformWidth)
-                        if controller.session.isPlayable, playheadX >= -1, playheadX <= waveformWidth + 1 {
-                            Rectangle()
-                                .fill(Theme.secondary)
-                                .frame(width: 2, height: trackTimelineHeight - 8)
-                                // Start at the very top of the rows so the line meets the ruler's
-                                // playhead handle and the two read as one playhead. Round the x to
-                                // whole pixels and subtract half the 2pt line width so the line's
-                                // CENTER (not its leading edge) sits on the handle's 2pt flat tip.
-                                .offset(x: trackInfoWidth + playheadX.rounded() - 1, y: 0)
-                                // Never let the thin playhead swallow drags meant
-                                // for a loop handle sitting directly beneath it.
-                                .allowsHitTesting(false)
-                        }
                     }
                     .frame(width: proxy.size.width)
                 }
@@ -767,6 +755,22 @@ struct ContentView: View {
                 .frame(width: waveformWidth, height: proxy.size.height)
                 .offset(x: trackInfoWidth)
             }
+            .overlay(alignment: .topLeading) {
+                // Frozen-column edge: one continuous hairline at the info/waveform
+                // boundary, running the full height so the header's control|ruler
+                // border and the rows' info|waveform border are the same line.
+                Rectangle()
+                    .fill(Theme.frozenColumnEdge)
+                    .frame(width: 1, height: proxy.size.height)
+                    .offset(x: trackInfoWidth)
+                    .allowsHitTesting(false)
+            }
+            // Playhead drawn last so the grabber and line sit ON TOP of the
+            // frozen-column and header/row dividers rather than under them.
+            .overlay(alignment: .topLeading) {
+                timelinePlayheadOverlay(sectionHeight: proxy.size.height, waveformWidth: waveformWidth)
+            }
+            .coordinateSpace(name: Self.playheadSpace)
         }
     }
 
@@ -796,87 +800,93 @@ struct ContentView: View {
                 .contentShape(Rectangle())
                 .gesture(loopSelectionGesture(waveformWidth: waveformWidth, in: Self.rulerSpace))
                 .coordinateSpace(name: Self.rulerSpace)
-                // The grabber sits on top so a drag that starts on it scrubs, while a drag
-                // elsewhere in the ruler falls through to the loop/seek gesture above.
-                .overlay(alignment: .bottomLeading) {
-                    timelineHeaderPlayhead(width: waveformWidth)
-                }
                 .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
         }
         .componentDebugLabel("Timeline Header", enabled: settings.showsComponentDebugLabels)
     }
 
-    /// GarageBand-style grabber seated on the ruler at the playhead's x: a downward pentagon
-    /// (flat top, straight sides, converging to a small flat tip) whose bottom tip matches the
-    /// 2pt playhead line so the two read as one continuous playhead. Draggable to scrub — the
-    /// grip has a comfortable hit area a bit wider than the art. Mirrors the line's
-    /// `isPlayable` + in-range guard so both appear and disappear together.
-    private func timelineHeaderPlayhead(width: CGFloat) -> some View {
-        let playheadX = xPosition(for: controller.session.transportPosition, width: width)
-        let handleWidth: CGFloat = 14
-        let handleHeight: CGFloat = 18
-        // Comfortable grab target a bit wider than the visible grabber.
-        let hitWidth: CGFloat = 22
-        // Snap the handle center to whole pixels so its 2pt flat tip overlaps the 2pt line exactly.
-        let handleCenter = (playheadX).rounded()
-        return Group {
-            if controller.session.isPlayable, playheadX >= -1, playheadX <= width + 1 {
-                ZStack {
-                    PlayheadHandle(tipWidth: 2)
-                        .fill(Theme.secondary)
-                        // Beveled dimension: a light top highlight fading to a dark bottom shadow,
-                        // blended over the teal fill. Adaptive so it reads in light and dark mode.
-                        .overlay {
-                            PlayheadHandle(tipWidth: 2)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            .white.opacity(0.35),
-                                            .clear,
-                                            .black.opacity(0.22)
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                        }
-                        // Thin light edge along the top to sharpen the bevel.
-                        .overlay {
-                            PlayheadHandle(tipWidth: 2)
-                                .stroke(.white.opacity(0.30), lineWidth: 0.5)
-                        }
-                        .overlay {
-                            // Two vertical grip lines to mimic GarageBand's grabber texture.
-                            HStack(spacing: 3) {
-                                Capsule().frame(width: 1, height: 6)
-                                Capsule().frame(width: 1, height: 6)
-                            }
-                            .foregroundStyle(.white.opacity(0.55))
-                            // Sit the grips in the rectangular upper body, above the tapered tip.
-                            .offset(y: -3)
-                        }
-                        .frame(width: handleWidth, height: handleHeight)
-                        .accessibilityHidden(true)
-                }
-                // Wider transparent hit area centered on the same x as the art.
-                .frame(width: hitWidth, height: handleHeight)
-                .contentShape(Rectangle())
-                // Nudge down ~1pt so the flat tip bridges the header/content divider and
-                // touches the top of the playhead line below.
-                .offset(x: handleCenter - hitWidth / 2, y: 1)
-                .onHover { inside in
-                    if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
-                }
-                // Drag the grabber to scrub. Reports x in the ruler's space (0...width).
-                .gesture(
-                    DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.rulerSpace))
-                        .onChanged { value in
-                            controller.seek(to: globalTime(atX: value.location.x, width: width))
-                        }
-                )
+    /// GarageBand-style grabber art: a downward pentagon (flat top, straight sides,
+    /// converging to a small flat tip) with beveled dimension and grip lines.
+    /// Positioning, hit area, and gesture are applied by the caller.
+    private var playheadGrabberArt: some View {
+        PlayheadHandle(tipWidth: 2)
+            .fill(Theme.secondary)
+            // Beveled dimension: a light top highlight fading to a dark bottom shadow,
+            // blended over the teal fill. Adaptive so it reads in light and dark mode.
+            .overlay {
+                PlayheadHandle(tipWidth: 2)
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.35), .clear, .black.opacity(0.22)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
             }
+            // Thin light edge along the top to sharpen the bevel.
+            .overlay {
+                PlayheadHandle(tipWidth: 2)
+                    .stroke(.white.opacity(0.30), lineWidth: 0.5)
+            }
+            .overlay {
+                // Two vertical grip lines to mimic GarageBand's grabber texture.
+                HStack(spacing: 3) {
+                    Capsule().frame(width: 1, height: 6)
+                    Capsule().frame(width: 1, height: 6)
+                }
+                .foregroundStyle(.white.opacity(0.55))
+                // Sit the grips in the rectangular upper body, above the tapered tip.
+                .offset(y: -1)
+            }
+            .accessibilityHidden(true)
+    }
+
+    /// The full playhead — the grabber seated on the ruler notches plus the line
+    /// running down over the lanes — drawn as one overlay on top of the whole
+    /// section so it sits ABOVE the frozen-column and header/row dividers. The
+    /// grabber is draggable to scrub; the line is inert. Mirrors the same
+    /// `isPlayable` + in-range guard used elsewhere.
+    @ViewBuilder
+    private func timelinePlayheadOverlay(sectionHeight: CGFloat, waveformWidth: CGFloat) -> some View {
+        let playheadX = xPosition(for: controller.session.transportPosition, width: waveformWidth)
+        if controller.session.isPlayable, playheadX >= -1, playheadX <= waveformWidth + 1 {
+            let handleWidth: CGFloat = 14
+            let handleHeight: CGFloat = 16
+            // Comfortable grab target a bit wider than the visible grabber.
+            let hitWidth: CGFloat = 22
+            // Whole-pixel center so the 2pt tip and 2pt line overlap exactly.
+            let centerX = trackInfoWidth + playheadX.rounded()
+            // The grabber's flat tip seats just below the header/rows divider, where the line begins.
+            let seatBottom = trackHeaderHeight + trackTimelineDividerHeight
+            let lineHeight = max(min(trackTimelineHeight, sectionHeight - seatBottom), 0)
+            ZStack(alignment: .topLeading) {
+                Rectangle()
+                    .fill(Theme.secondary)
+                    // Center (not leading edge) of the 2pt line on centerX.
+                    .frame(width: 2, height: lineHeight)
+                    .offset(x: centerX - 1, y: seatBottom)
+                    .allowsHitTesting(false)
+
+                playheadGrabberArt
+                    .frame(width: handleWidth, height: handleHeight)
+                    // Wider transparent hit area centered on the same x as the art.
+                    .frame(width: hitWidth, height: handleHeight)
+                    .contentShape(Rectangle())
+                    // Seat the grabber so its flat tip lands at seatBottom (on the line's top).
+                    .offset(x: centerX - hitWidth / 2, y: seatBottom - handleHeight)
+                    .onHover { inside in
+                        if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
+                    }
+                    // Drag the grabber to scrub. Reports x across the section space.
+                    .gesture(
+                        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.playheadSpace))
+                            .onChanged { value in
+                                controller.seek(to: globalTime(atX: value.location.x - trackInfoWidth, width: waveformWidth))
+                            }
+                    )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(width: width, alignment: .leading)
     }
 
     private func timelineHeaderRuler(width: CGFloat) -> some View {
@@ -928,9 +938,9 @@ struct ContentView: View {
     // bottom-anchored so they hang toward the rows.
     private var timelineHeaderTickColor: Color { .secondary.opacity(0.45) }
     private var timelineHeaderMajorTickHeight: CGFloat { 19 }
-    private var timelineHeaderMinorTickHeight: CGFloat { 10 }
+    private var timelineHeaderMinorTickHeight: CGFloat { 8 }
     /// Vertical inset of the time label from the top of the header.
-    private var timelineHeaderLabelTopInset: CGFloat { 3 }
+    private var timelineHeaderLabelTopInset: CGFloat { 7 }
 
     private func timelineHeaderMinorTick(at time: TimeInterval, width: CGFloat) -> some View {
         Rectangle()
