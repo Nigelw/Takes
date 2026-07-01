@@ -320,6 +320,12 @@ struct TakesApp: App {
 
             CommandGroup(replacing: .help) {
                 Link("Release Notes", destination: URL(string: "https://nigelw.github.io/Takes/changelog.html")!)
+
+                Divider()
+
+                Menu("Debug") {
+                    Toggle("Show Component Names", isOn: $settings.showsComponentDebugLabels)
+                }
             }
         }
 
