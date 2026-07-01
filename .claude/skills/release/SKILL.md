@@ -127,12 +127,17 @@ Local archival only — `Private/` is gitignored, so nothing is pushed. Both ite
 cp build/Takes.dmg "Private/Builds/Takes v<MARKETING_VERSION>.dmg"
 ```
 
-**7b — Capture the main window.** Launch the build just produced (`build/export/Takes.app` — the notarized release app), load two audio files, and screenshot the window. Use the **computer-use** tools and the launch/interaction details in the [run-takes skill](../run-takes/SKILL.md):
+**7b — Capture the main window.** Launch the build just produced (`build/export/Takes.app` — the notarized release app) with the two sample tracks already loaded, then screenshot the window. Use the **computer-use** tools only for the screenshot — loading the files doesn't need them.
 
-1. Quit any running instance (`pkill -x Takes`), then `open build/export/Takes.app` and wait for it to appear (`pgrep -x Takes`).
-2. `request_access` for `["Takes"]`, then `screenshot` to see the launch state.
-3. Load **two** files from `Private/Audio Samples/` into the two track slots — drag them in from Finder, or use the `+` button's native file picker (per run-takes, both work; the drop zone is the right panel of each track row). For visual consistency across releases, load the **same two** files each time (e.g. `2-18 I'm Not There.mp3` and `3-11 I'm Not There.m4a`).
-4. Once both tracks show as loaded, capture **just the Takes window** to `Private/Screenshots/Takes v<MARKETING_VERSION>.png`. Get the window id (and exact bounds) with the helper — no need to eyeball anything:
+1. Quit any running instance (`pkill -x Takes`).
+2. Open the app directly with the two sample files as arguments — this loads them into the two track slots without any UI navigation, so skip the file picker/drag-and-drop dance entirely:
+   ```bash
+   APP="$PWD/build/export/Takes.app"
+   open -a "$APP" "$PWD/Private/Audio Samples/2-18 I'm Not There.mp3" "$PWD/Private/Audio Samples/3-11 I'm Not There.m4a"
+   ```
+   For visual consistency across releases, load the **same two** files each time. Wait for the app to appear (`pgrep -x Takes`).
+3. `request_access` for `["Takes"]`, then `screenshot` to confirm both tracks show as loaded.
+4. Capture **just the Takes window** to `Private/Screenshots/Takes v<MARKETING_VERSION>.png`. Get the window id (and exact bounds) with the helper — no need to eyeball anything:
    ```bash
    read WID X Y W H < <(swift .claude/skills/release/window-info.swift Takes)
    ```
