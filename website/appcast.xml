@@ -3,6 +3,25 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>2.0</title>
+            <pubDate>Wed, 01 Jul 2026 01:43:10 -0400</pubDate>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## Improvements
+- Timeline zooming
+  - Pinch to zoom or use the zoom control
+  - Waveform area uses native scroll inertia and bounce behavior
+  - View smoothly slides to keep playhead in view while zoomed in
+- Improved timeline ruler tick marks and labeling, including dynamic scale when zoomed
+- Added link to release notes in Help menu
+
+## Fixes
+- The playhead position is preserved when opening a new track while paused
+- Adjusted default window position]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0/Takes.dmg" length="2668066" type="application/octet-stream" sparkle:edSignature="kTkXdegL/pSIr3QZC7jL0YtoG9dlgkv3Xr1dj22gbJFAmt58uLLplS78R9ryPV6txKvda9WgY/0ontIyZzY/Dg=="/>
+        </item>
+        <item>
             <title>2.0a3</title>
             <pubDate>Fri, 19 Jun 2026 07:31:39 -0400</pubDate>
             <sparkle:version>4</sparkle:version>
