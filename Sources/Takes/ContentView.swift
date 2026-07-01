@@ -773,7 +773,7 @@ struct ContentView: View {
         return ZStack(alignment: .topLeading) {
             Rectangle()
                 .fill(.secondary.opacity(0.45))
-                .frame(width: 1, height: 9)
+                .frame(width: 1, height: 15)
                 .offset(x: tickX)
 
             if labelLayout.isVisible {
@@ -1444,22 +1444,33 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
         scrollView.timelineContentEnd = contentEnd
         scrollView.timelineVisibleSpan = visibleSpan
         scrollView.timelinePointsPerSecond = pointsPerSecond
-        scrollView.documentView?.frame = NSRect(
-            x: 0,
-            y: 0,
-            width: CGFloat(max(documentWidth, Double(viewportWidth))),
-            height: viewportHeight
-        )
+        if scrollView.isReportingNativeScroll {
+            scrollView.documentView?.frame = NSRect(
+                x: 0,
+                y: 0,
+                width: CGFloat(max(documentWidth, Double(viewportWidth))),
+                height: viewportHeight
+            )
+            return
+        }
 
-        guard !scrollView.isReportingNativeScroll else { return }
-        let x = TimelineScrollGeometry.scrollOffset(
-            visibleStart: visibleStart,
-            contentStart: contentStart,
-            pointsPerSecond: pointsPerSecond
-        )
-        guard abs(scrollView.contentView.bounds.origin.x - CGFloat(x)) > 0.5 else { return }
-        scrollView.contentView.scroll(to: NSPoint(x: CGFloat(x), y: 0))
-        scrollView.reflectScrolledClipView(scrollView.contentView)
+        scrollView.performProgrammaticSync {
+            scrollView.documentView?.frame = NSRect(
+                x: 0,
+                y: 0,
+                width: CGFloat(max(documentWidth, Double(viewportWidth))),
+                height: viewportHeight
+            )
+
+            let x = TimelineScrollGeometry.scrollOffset(
+                visibleStart: visibleStart,
+                contentStart: contentStart,
+                pointsPerSecond: pointsPerSecond
+            )
+            guard abs(scrollView.contentView.bounds.origin.x - CGFloat(x)) > 0.5 else { return }
+            scrollView.contentView.scroll(to: NSPoint(x: CGFloat(x), y: 0))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
     }
 
     @MainActor
@@ -1487,7 +1498,7 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
         }
 
         @objc private func boundsDidChange(_ notification: Notification) {
-            guard let scrollView else { return }
+            guard let scrollView, !scrollView.isApplyingProgrammaticSync else { return }
             let visibleStart = TimelineScrollGeometry.visibleStart(
                 scrollOffset: scrollView.contentView.bounds.origin.x,
                 contentStart: scrollView.timelineContentStart,
@@ -1511,6 +1522,7 @@ private final class TimelineScrollNSView: NSScrollView {
     var timelineVisibleSpan: TimeInterval = 0
     var timelinePointsPerSecond: Double = 0
     var isReportingNativeScroll = false
+    var isApplyingProgrammaticSync = false
     private var lockedScrollAxis: ScrollAxis?
 
     private enum ScrollAxis {
@@ -1538,6 +1550,14 @@ private final class TimelineScrollNSView: NSScrollView {
         autohidesScrollers = true
         borderType = .noBorder
         documentView = NSView(frame: .zero)
+    }
+
+    func performProgrammaticSync(_ update: () -> Void) {
+        isApplyingProgrammaticSync = true
+        update()
+        DispatchQueue.main.async { [weak self] in
+            self?.isApplyingProgrammaticSync = false
+        }
     }
 
     // Only claim the events we handle. `NSApp.currentEvent` lets `hitTest`
@@ -1616,9 +1636,16 @@ private final class TimelineScrollNSView: NSScrollView {
     private static let zoomSensitivity = 1.5
 
     override func magnify(with event: NSEvent) {
-        let width = bounds.width
+        let visibleBounds = contentView.bounds
+        let width = visibleBounds.width
         guard width > 0 else { return }
-        let fraction = Double(convert(event.locationInWindow, from: nil).x / width)
+        let windowLocation = window?.mouseLocationOutsideOfEventStream ?? event.locationInWindow
+        let location = contentView.convert(windowLocation, from: nil)
+        let fraction = TimelineScrollGeometry.viewportFraction(
+            locationX: Double(location.x),
+            visibleOriginX: Double(visibleBounds.origin.x),
+            viewportWidth: Double(width)
+        )
         onMagnify?(Double(event.magnification) * Self.zoomSensitivity, fraction)
     }
 }

@@ -487,7 +487,10 @@ final class PlaybackController: ObservableObject {
     /// timeline.
     func magnifyTimeline(by magnification: Double, atFraction fraction: Double) {
         guard session.visibleSpan > 0 else { return }
-        let span = session.visibleSpan / (1 + magnification)
+        let span = TimelineViewport.magnifiedVisibleSpan(
+            visibleSpan: session.visibleSpan,
+            magnification: magnification
+        )
         applyRezoom(span: span, cursorFraction: fraction)
     }
 

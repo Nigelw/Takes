@@ -268,6 +268,13 @@ struct TimelineViewportTests {
     }
 
     @Test
+    func pinchZoomScalesContinuouslyForZoomInAndOut() {
+        #expect(TimelineViewport.magnifiedVisibleSpan(visibleSpan: 30, magnification: 0.5) < 30)
+        #expect(TimelineViewport.magnifiedVisibleSpan(visibleSpan: 30, magnification: -0.5) > 30)
+        #expect(TimelineViewport.magnifiedVisibleSpan(visibleSpan: 30, magnification: -1).isFinite)
+    }
+
+    @Test
     func scrollGeometryMapsVisibleStartToNativeOffset() {
         let scale = TimelineScrollGeometry.pointsPerSecond(viewportWidth: 800, visibleSpan: 20)
         #expect(scale == 40)
@@ -314,5 +321,12 @@ struct TimelineViewportTests {
     func scrollGeometryDocumentWidthTracksZoom() {
         #expect(TimelineScrollGeometry.documentWidth(contentSpan: 100, visibleSpan: 100, viewportWidth: 800) == 800)
         #expect(TimelineScrollGeometry.documentWidth(contentSpan: 100, visibleSpan: 20, viewportWidth: 800) == 4000)
+    }
+
+    @Test
+    func scrollGeometryViewportFractionSubtractsVisibleOrigin() {
+        #expect(TimelineScrollGeometry.viewportFraction(locationX: 1800, visibleOriginX: 1400, viewportWidth: 800) == 0.5)
+        #expect(TimelineScrollGeometry.viewportFraction(locationX: 1390, visibleOriginX: 1400, viewportWidth: 800) == 0)
+        #expect(TimelineScrollGeometry.viewportFraction(locationX: 2210, visibleOriginX: 1400, viewportWidth: 800) == 1)
     }
 }
