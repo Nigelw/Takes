@@ -113,7 +113,8 @@ struct TimelineHeaderMarker: Equatable {
     static func ruler(
         timelineStart: TimeInterval,
         timelineEnd: TimeInterval,
-        targetMarkerCount: Int
+        targetMarkerCount: Int,
+        leadingMajorTicks: Int = 0
     ) -> TimelineRuler {
         let span = timelineEnd - timelineStart
         guard span > 0, targetMarkerCount > 0 else { return TimelineRuler(majorTicks: [], minorTicks: [], minorInterval: 0) }
@@ -123,7 +124,12 @@ struct TimelineHeaderMarker: Equatable {
 
         let epsilon = interval * 0.0001
         var majorTicks: [TimelineHeaderMarker] = []
-        var time = ceil(timelineStart / interval) * interval
+        // Begin `leadingMajorTicks` intervals before the window so a major tick whose line has just
+        // scrolled off the left edge still emits its label. Its label sits to the right of the tick,
+        // so part of it remains on-screen and should clip at the edge rather than vanish. Stepping
+        // back by whole intervals keeps `interval` (and thus spacing/labels) derived from the visible
+        // span, so tick positions don't jump as the extra ticks come and go.
+        var time = ceil(timelineStart / interval) * interval - Double(max(0, leadingMajorTicks)) * interval
         while time <= timelineEnd + epsilon {
             majorTicks.append(
                 TimelineHeaderMarker(time: time, label: time.formattedSignedTimestamp(forInterval: interval))
@@ -194,14 +200,15 @@ struct TimelineHeaderLabelLayout: Equatable {
 
     static func leading(
         tickX: Double,
-        labelWidth: Double,
         rulerWidth: Double,
         leadingPadding: Double = TimelineHeaderMarker.labelLeadingPadding
     ) -> TimelineHeaderLabelLayout {
         let labelX = tickX + leadingPadding
+        // Keep the label mounted as long as its leading edge is still on-screen; the ruler clips its
+        // right edge, so an overflowing label scrolls out of view instead of vanishing all at once.
         return TimelineHeaderLabelLayout(
             x: labelX,
-            isVisible: labelX + labelWidth <= rulerWidth
+            isVisible: labelX < rulerWidth
         )
     }
 }
