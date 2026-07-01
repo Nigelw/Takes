@@ -439,6 +439,7 @@ struct ContentView: View {
             minWidth: TakesWindowPolicy.minimumContentWidth,
             minHeight: TakesWindowPolicy.minimumContentHeight
         )
+        .background(WindowBackground().ignoresSafeArea())
         .background {
             MainWindowConfigurationView { window in
                 mainWindow = window
@@ -509,37 +510,51 @@ struct ContentView: View {
     }
 
     private var transportBar: some View {
-        HStack(spacing: 10) {
-            Button(controller.session.isPlaying ? "Pause" : "Play") {
-                controller.session.isPlaying ? controller.pause() : controller.play()
+        ZStack {
+            // Pinned to the true window center, independent of the side clusters.
+            DigitalTimeReadout(
+                elapsed: controller.session.transportPosition.formattedSignedTimestamp
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            HStack(spacing: 12) {
+                playButton
+                switchTrackButton
+                Spacer(minLength: 12)
+                repeatButton
+                zoomControls
             }
-            .disabled(!controller.session.isPlayable)
-
-//            Button("Rewind") {
-//                controller.seek(to: controller.session.timelineStart)
-//            }
-            .disabled(!controller.session.isPlayable)
-
-            Button("Switch Track") {
-                controller.selectNextTrack()
-            }
-            .disabled(!controller.session.canSwitchPlayback)
-
-            Spacer()
-
-            Text("\(controller.session.transportPosition.formattedSignedTimestamp) / \(controller.session.timelineEnd.formattedSignedTimestamp)")
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            repeatButton
-
-            zoomControls
+            .padding(.leading, 82)
+            .padding(.trailing, 18)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
         .componentDebugLabel("Transport Bar", enabled: settings.showsComponentDebugLabels)
+    }
+
+    private var playButton: some View {
+        Button {
+            controller.session.isPlaying ? controller.pause() : controller.play()
+        } label: {
+            Image(systemName: controller.session.isPlaying ? "pause.fill" : "play.fill")
+        }
+        .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: DigitalTimeReadout.panelHeight, glyphSize: 22))
+        .disabled(!controller.session.isPlayable)
+        .help(controller.session.isPlaying ? "Pause" : "Play")
+        .accessibilityLabel(controller.session.isPlaying ? "Pause" : "Play")
+        .componentDebugLabel("Play", enabled: settings.showsComponentDebugLabels)
+    }
+
+    private var switchTrackButton: some View {
+        Button {
+            controller.selectNextTrack()
+        } label: {
+            Image(systemName: "arrow.left.arrow.right")
+        }
+        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: 40, glyphSize: 15))
+        .disabled(!controller.session.canSwitchPlayback)
+        .help("Switch Track")
+        .accessibilityLabel("Switch Track")
+        .componentDebugLabel("Switch Track", enabled: settings.showsComponentDebugLabels)
     }
 
     private var zoomControls: some View {
@@ -573,7 +588,7 @@ struct ContentView: View {
                 in: 0...1
             )
             .controlSize(.small)
-            .frame(width: 150)
+            .frame(width: 96)
             .disabled(!enabled)
             .accessibilityLabel("Timeline Zoom")
 
@@ -596,9 +611,8 @@ struct ContentView: View {
             controller.cycleRepeatMode()
         } label: {
             Image(systemName: Self.repeatSymbol(for: mode))
-                .foregroundStyle(mode == .off ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.accentColor))
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: mode != .off, diameter: 40, glyphSize: 15))
         .disabled(!controller.session.isPlayable)
         .help(Self.repeatHelp(for: mode))
         .accessibilityLabel("Repeat")

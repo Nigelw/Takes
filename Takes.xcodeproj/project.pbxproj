@@ -26,6 +26,7 @@
 		A1000000000000000000C014 /* WaveformStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C004 /* WaveformStore.swift */; };
 		A1000000000000000000C015 /* ComponentDebugLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C005 /* ComponentDebugLabel.swift */; };
 		A1000000000000000000C016 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C006 /* Theme.swift */; };
+		A1000000000000000000C017 /* TransportControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C007 /* TransportControls.swift */; };
 		A6FE79452FDE592C003F2711 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A6FE79442FDE592C003F2711 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -63,6 +64,7 @@
 		A1000000000000000000C004 /* WaveformStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformStore.swift; sourceTree = "<group>"; };
 		A1000000000000000000C005 /* ComponentDebugLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentDebugLabel.swift; sourceTree = "<group>"; };
 		A1000000000000000000C006 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		A1000000000000000000C007 /* TransportControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportControls.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -140,6 +142,7 @@
 				A1000000000000000000001B /* LibraryTrackSelectionLoader.swift */,
 				A10000000000000000000014 /* Models.swift */,
 				A1000000000000000000C006 /* Theme.swift */,
+				A1000000000000000000C007 /* TransportControls.swift */,
 				A10000000000000000000015 /* PlaybackController.swift */,
 				A10000000000000000000016 /* TakesApp.swift */,
 				A1000000000000000000C003 /* SettingsView.swift */,
@@ -269,6 +272,7 @@
 				A10000000000000000000022 /* ContentView.swift in Sources */,
 				A1000000000000000000C015 /* ComponentDebugLabel.swift in Sources */,
 				A1000000000000000000C016 /* Theme.swift in Sources */,
+				A1000000000000000000C017 /* TransportControls.swift in Sources */,
 				A10000000000000000000023 /* KeyMonitor.swift in Sources */,
 				A10000000000000000000028 /* LibraryTrackSelectionLoader.swift in Sources */,
 				A10000000000000000000024 /* Models.swift in Sources */,
