@@ -92,9 +92,9 @@ enum TakesWindowPolicy {
     static let trackRowHeight: CGFloat = 124
     static let trackTimelineDividerHeight: CGFloat = 1
     static let trackTimelineHeaderHeight: CGFloat = 34
-    static let contentPadding: CGFloat = 20
-    static let rootVerticalSpacing: CGFloat = 14
-    static let timelineHeaderSpacing: CGFloat = 8
+    static let contentPadding: CGFloat = 0
+    static let rootVerticalSpacing: CGFloat = 1
+    static let timelineHeaderSpacing: CGFloat = 1
     static let transportBarReservedHeight: CGFloat = 54
     static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
     static let defaultContentHeight = contentHeight(displayingTrackRows: 1)
