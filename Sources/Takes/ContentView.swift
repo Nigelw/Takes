@@ -773,7 +773,7 @@ struct ContentView: View {
         return ZStack(alignment: .topLeading) {
             Rectangle()
                 .fill(.secondary.opacity(0.45))
-                .frame(width: 1, height: 15)
+                .frame(width: 1, height: 13)
                 .offset(x: tickX)
 
             if labelLayout.isVisible {
