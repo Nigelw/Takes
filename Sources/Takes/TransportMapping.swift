@@ -210,6 +210,16 @@ enum TimelineViewport {
     ) -> TimeInterval {
         visibleSpan * (zoomingIn ? 1 / zoomButtonStep : zoomButtonStep)
     }
+
+    /// Visible span after a trackpad pinch delta. Exponential scaling keeps
+    /// zoom-in and zoom-out continuous without a zero/negative denominator.
+    static func magnifiedVisibleSpan(
+        visibleSpan: TimeInterval,
+        magnification: Double
+    ) -> TimeInterval {
+        guard visibleSpan > 0, magnification.isFinite else { return visibleSpan }
+        return visibleSpan * exp(-magnification)
+    }
 }
 
 enum TimelineScrollGeometry {
@@ -271,5 +281,14 @@ enum TimelineScrollGeometry {
             contentStart: contentStart,
             pointsPerSecond: pointsPerSecond
         )
+    }
+
+    static func viewportFraction(
+        locationX: Double,
+        visibleOriginX: Double,
+        viewportWidth: Double
+    ) -> Double {
+        guard viewportWidth > 0 else { return 0 }
+        return min(max((locationX - visibleOriginX) / viewportWidth, 0), 1)
     }
 }
