@@ -539,6 +539,7 @@ struct ContentView: View {
         }
         .padding()
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .componentDebugLabel("Transport Bar", enabled: settings.showsComponentDebugLabels)
     }
 
     private var zoomControls: some View {
@@ -586,6 +587,7 @@ struct ContentView: View {
             .help("Zoom in")
             .accessibilityLabel("Zoom In")
         }
+        .componentDebugLabel("Zoom Controls", enabled: settings.showsComponentDebugLabels)
     }
 
     private var repeatButton: some View {
@@ -601,6 +603,7 @@ struct ContentView: View {
         .help(Self.repeatHelp(for: mode))
         .accessibilityLabel("Repeat")
         .accessibilityValue(Self.repeatModeName(for: mode))
+        .componentDebugLabel("Repeat", enabled: settings.showsComponentDebugLabels)
     }
 
     private static func repeatSymbol(for mode: RepeatMode) -> String {
@@ -755,8 +758,10 @@ struct ContentView: View {
 
             timelineHeaderRuler(width: waveformWidth)
                 .frame(maxWidth: .infinity)
+                .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
         }
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .componentDebugLabel("Timeline Header", enabled: settings.showsComponentDebugLabels)
     }
 
     private func timelineHeaderRuler(width: CGFloat) -> some View {
@@ -943,6 +948,7 @@ struct ContentView: View {
             offsetControl(sessionTrack: sessionTrack)
         }
         .padding(12)
+        .componentDebugLabel("Track Info", enabled: settings.showsComponentDebugLabels, color: .green)
     }
 
     private func gainButton(sessionTrack: SessionTrack) -> some View {
@@ -1035,6 +1041,7 @@ struct ContentView: View {
                     .offset(x: xPosition(for: 0, width: proxy.size.width))
             }
             .clipped()
+            .componentDebugLabel("Waveform Lane", enabled: settings.showsComponentDebugLabels, color: .purple)
         }
     }
 

@@ -24,6 +24,7 @@
 		A1000000000000000000C012 /* SoftwareUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C002 /* SoftwareUpdater.swift */; };
 		A1000000000000000000C013 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C003 /* SettingsView.swift */; };
 		A1000000000000000000C014 /* WaveformStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C004 /* WaveformStore.swift */; };
+		A1000000000000000000C015 /* ComponentDebugLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C005 /* ComponentDebugLabel.swift */; };
 		A6FE79452FDE592C003F2711 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A6FE79442FDE592C003F2711 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -59,6 +60,7 @@
 		A1000000000000000000C002 /* SoftwareUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftwareUpdater.swift; sourceTree = "<group>"; };
 		A1000000000000000000C003 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A1000000000000000000C004 /* WaveformStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformStore.swift; sourceTree = "<group>"; };
+		A1000000000000000000C005 /* ComponentDebugLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentDebugLabel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -130,6 +132,7 @@
 			children = (
 				A1000000000000000000C001 /* AppSettings.swift */,
 				A10000000000000000000011 /* AudioFileLoader.swift */,
+				A1000000000000000000C005 /* ComponentDebugLabel.swift */,
 				A10000000000000000000012 /* ContentView.swift */,
 				A10000000000000000000013 /* KeyMonitor.swift */,
 				A1000000000000000000001B /* LibraryTrackSelectionLoader.swift */,
@@ -261,6 +264,7 @@
 				A1000000000000000000C011 /* AppSettings.swift in Sources */,
 				A10000000000000000000021 /* AudioFileLoader.swift in Sources */,
 				A10000000000000000000022 /* ContentView.swift in Sources */,
+				A1000000000000000000C015 /* ComponentDebugLabel.swift in Sources */,
 				A10000000000000000000023 /* KeyMonitor.swift in Sources */,
 				A10000000000000000000028 /* LibraryTrackSelectionLoader.swift in Sources */,
 				A10000000000000000000024 /* Models.swift in Sources */,

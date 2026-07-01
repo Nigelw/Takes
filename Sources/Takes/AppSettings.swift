@@ -40,6 +40,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// When enabled, the main window overlays each major UI component with a
+    /// labelled badge naming its region. A developer aid for discussing the
+    /// layout during redesign work; toggled from the Help menu. Intentionally
+    /// not persisted so it never leaks into a normal launch.
+    @Published var showsComponentDebugLabels = false
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         offsetStep = Self.storedOffsetStep(defaults)
