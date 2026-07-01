@@ -15,6 +15,9 @@ final class PlaybackController: ObservableObject {
     nonisolated private static let maximumSilenceBufferDuration: TimeInterval = 5
 
     private var engineConfigured = false
+    /// The repeat mode in effect before a loop forced Switch & Repeat, restored
+    /// when the loop is deselected.
+    private var repeatModeBeforeLoop: RepeatMode?
     private var runtimeTracksByID: [SessionTrack.ID: RuntimeTrack] = [:]
     private var playbackStartedAt: CFTimeInterval?
     private var playbackStartedFromTransport: TimeInterval = 0
@@ -282,10 +285,11 @@ final class PlaybackController: ObservableObject {
     func seek(to seconds: TimeInterval) {
         guard session.isPlayable else { return }
         stopScrollAnimation()
+        // While a loop is active, keep the playhead inside it.
         let clamped = TransportMapping.clampedTransport(
             seconds,
-            timelineStart: session.timelineStart,
-            timelineEnd: session.timelineEnd
+            timelineStart: session.playbackStart,
+            timelineEnd: session.playbackEnd
         )
         session.transportPosition = clamped
         transportStoppedAtTimelineStart = false
@@ -422,6 +426,7 @@ final class PlaybackController: ObservableObject {
         runtimeTracksByID.removeAll()
         session.tracks.removeAll()
         session.activeTrackID = nil
+        clearLoopRestoringRepeatMode()
         session.isPlaying = false
         transportStoppedAtTimelineStart = true
         playbackStartedAt = nil
@@ -459,6 +464,70 @@ final class PlaybackController: ObservableObject {
 
     func skip(by delta: TimeInterval) {
         seek(to: session.transportPosition + delta)
+    }
+
+    // MARK: - Repeat & loop
+
+    func setRepeatMode(_ mode: RepeatMode) {
+        session.repeatMode = mode
+        // Once the user picks a mode explicitly, drop any loop-restore memory so a
+        // later deselect doesn't override their choice.
+        if session.loopRegion == nil {
+            repeatModeBeforeLoop = nil
+        } else {
+            repeatModeBeforeLoop = mode
+        }
+    }
+
+    func cycleRepeatMode() {
+        setRepeatMode(session.repeatMode.next)
+    }
+
+    /// Activate a loop: remember the current repeat mode, force Switch & Repeat so
+    /// the loop is heard across tracks, and move the playhead to the loop start.
+    func beginLoop(_ region: LoopRegion) {
+        if session.loopRegion == nil {
+            repeatModeBeforeLoop = session.repeatMode
+        }
+        session.loopRegion = region
+        session.repeatMode = .switchAndRepeat
+        seek(to: region.start)
+    }
+
+    /// Update one edge of the active loop while dragging a resize handle.
+    func resizeLoop(start: TimeInterval? = nil, end: TimeInterval? = nil) {
+        guard let current = session.loopRegion else { return }
+        guard let region = LoopRegion.normalized(
+            start: start ?? current.start,
+            end: end ?? current.end,
+            timelineStart: session.timelineStart,
+            timelineEnd: session.timelineEnd
+        ) else { return }
+
+        session.loopRegion = region
+        // Keep the playhead inside the loop and, if playing, rebind the audio to
+        // the new bounds (mirrors the existing scrub-reschedule behaviour).
+        seek(to: session.transportPosition)
+    }
+
+    /// Clear the loop and restore the repeat mode from before it was created.
+    func deselectLoop() {
+        guard session.loopRegion != nil else { return }
+        clearLoopRestoringRepeatMode()
+        // Rebind audio to the full timeline if we're mid-playback.
+        seek(to: session.transportPosition)
+    }
+
+    /// Drop the loop and restore the pre-loop repeat mode, without touching the
+    /// transport. Used both by `deselectLoop` and when the timeline no longer
+    /// holds the loop.
+    private func clearLoopRestoringRepeatMode() {
+        guard session.loopRegion != nil || repeatModeBeforeLoop != nil else { return }
+        session.loopRegion = nil
+        if let previous = repeatModeBeforeLoop {
+            session.repeatMode = previous
+            repeatModeBeforeLoop = nil
+        }
     }
 
     // MARK: - Timeline zoom
@@ -656,6 +725,26 @@ final class PlaybackController: ObservableObject {
         timelineEnd
     }
 
+    /// What playback should do when it reaches the end of the playable range.
+    enum EndAction: Equatable {
+        case stop
+        case restart
+        case switchThenRestart
+    }
+
+    /// Decide the end-of-range behaviour from the repeat mode. With a single track
+    /// there is no next track, so Switch & Repeat degrades to a plain restart.
+    nonisolated static func advanceAtEnd(mode: RepeatMode, canSwitch: Bool) -> EndAction {
+        switch mode {
+        case .off:
+            return .stop
+        case .one:
+            return .restart
+        case .switchAndRepeat:
+            return canSwitch ? .switchThenRestart : .restart
+        }
+    }
+
     private func configureEngine() {
         guard !engineConfigured else { return }
 
@@ -737,11 +826,27 @@ final class PlaybackController: ObservableObject {
             session.transportPosition = 0
             session.visibleStart = 0
             session.visibleSpan = 0
+            clearLoopRestoringRepeatMode()
             return
         }
 
         session.timelineStart = range.lowerBound
         session.timelineEnd = range.upperBound
+
+        // Keep the loop within the (possibly changed) timeline; drop it if it no
+        // longer fits, restoring the prior repeat mode.
+        if let loop = session.loopRegion {
+            if let clamped = LoopRegion.normalized(
+                start: loop.start,
+                end: loop.end,
+                timelineStart: session.timelineStart,
+                timelineEnd: session.timelineEnd
+            ) {
+                session.loopRegion = clamped
+            } else {
+                clearLoopRestoringRepeatMode()
+            }
+        }
         session.transportPosition = Self.transportPositionAfterTimelineRecalculation(
             currentPosition: session.transportPosition,
             timelineStart: session.timelineStart,
@@ -777,8 +882,25 @@ final class PlaybackController: ObservableObject {
             return
         }
 
+        // When a loop is active, cap everything at the loop end so no audio past
+        // the loop is ever heard. The transport clock still wraps precisely; the
+        // worst case is a sub-tick silent tail at the loop seam.
+        let loopEnd = session.loopRegion?.end
+
         if filePosition < 0 {
             let delaySeconds = -filePosition
+            if let loopEnd {
+                // The file becomes audible at global time == offset; anything that
+                // would sound after the loop end is dropped.
+                let audibleSeconds = loopEnd - track.offsetSeconds
+                guard audibleSeconds > 0 else { return }
+                scheduleSilence(on: player, format: file.processingFormat, duration: min(delaySeconds, loopEnd - globalTime))
+                let loopFrames = AVAudioFramePosition(audibleSeconds * track.sampleRate)
+                let frameCount = min(file.length, loopFrames)
+                guard frameCount > 0 else { return }
+                player.scheduleSegment(file, startingFrame: 0, frameCount: AVAudioFrameCount(frameCount), at: nil)
+                return
+            }
             scheduleSilence(on: player, format: file.processingFormat, duration: delaySeconds)
             player.scheduleSegment(
                 file,
@@ -790,8 +912,13 @@ final class PlaybackController: ObservableObject {
         }
 
         let frame = AVAudioFramePosition(filePosition * track.sampleRate)
-        let framesRemaining = max(0, file.length - frame)
+        var framesRemaining = max(0, file.length - frame)
         guard framesRemaining > 0 else { return }
+        if let loopEnd {
+            let loopFrames = AVAudioFramePosition(max(0, loopEnd - globalTime) * track.sampleRate)
+            framesRemaining = min(framesRemaining, loopFrames)
+            guard framesRemaining > 0 else { return }
+        }
         player.scheduleSegment(file, startingFrame: frame, frameCount: AVAudioFrameCount(framesRemaining), at: nil)
     }
 
@@ -854,17 +981,55 @@ final class PlaybackController: ObservableObject {
         let transport = currentTransportPosition()
         session.transportPosition = transport
         followPlayheadIfZoomed()
-        if transport >= session.timelineEnd {
-            for runtime in runtimeTracksInSessionOrder() {
-                runtime.player.stop()
-            }
-            session.isPlaying = false
-            session.transportPosition = Self.transportPositionAtNaturalEnd(timelineEnd: session.timelineEnd)
-            transportStoppedAtTimelineStart = false
-            playbackStartedAt = nil
-            playbackStartedFromTransport = session.transportPosition
-            timer?.invalidate()
+
+        guard transport >= session.playbackEnd else { return }
+
+        switch Self.advanceAtEnd(mode: session.repeatMode, canSwitch: session.canSwitchPlayback) {
+        case .stop:
+            stopAtEnd()
+        case .restart:
+            restartPlayback(from: session.playbackStart)
+        case .switchThenRestart:
+            selectNextTrack()
+            restartPlayback(from: session.playbackStart)
+        }
+    }
+
+    /// Stop playback at the end of the playable range (Repeat Off).
+    private func stopAtEnd() {
+        for runtime in runtimeTracksInSessionOrder() {
+            runtime.player.stop()
+        }
+        session.isPlaying = false
+        session.transportPosition = Self.transportPositionAtNaturalEnd(timelineEnd: session.playbackEnd)
+        transportStoppedAtTimelineStart = false
+        playbackStartedAt = nil
+        playbackStartedFromTransport = session.transportPosition
+        timer?.invalidate()
+        applyAudibility()
+    }
+
+    /// Jump the playhead back to `start` and keep playing without tearing the
+    /// timer/scroll down — the loop/repeat wrap.
+    private func restartPlayback(from start: TimeInterval) {
+        let clamped = TransportMapping.clampedTransport(
+            start,
+            timelineStart: session.timelineStart,
+            timelineEnd: session.timelineEnd
+        )
+        session.transportPosition = clamped
+        do {
+            try reschedulePlayers(startingAt: clamped)
+            startScheduledPlayers()
+            playbackStartedFromTransport = clamped
+            playbackStartedAt = CACurrentMediaTime()
             applyAudibility()
+        } catch let error as PlaybackError {
+            playbackError = error
+            stopAtEnd()
+        } catch {
+            playbackError = .schedulingFailed
+            stopAtEnd()
         }
     }
 

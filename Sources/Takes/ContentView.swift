@@ -382,6 +382,20 @@ struct ContentView: View {
     @State private var gainPopoverTrackID: SessionTrack.ID?
     @State private var didConfigureMainWindow = false
     @State private var mainWindow: NSWindow?
+    @State private var loopDraft: LoopDraft?
+
+    /// An in-progress loop drag, in absolute seconds. `start` is where the drag
+    /// began; `current` tracks the pointer. Committed to a `LoopRegion` on mouse-up.
+    private struct LoopDraft {
+        var start: TimeInterval
+        var current: TimeInterval
+    }
+
+    /// Coordinate space for the waveform column, so loop gestures report x in
+    /// `0...waveformWidth` regardless of the column's offset.
+    private static let loopColumnSpace = "loopColumn"
+    /// Horizontal travel (points) that turns a click into a loop drag.
+    private static let loopDragThreshold: CGFloat = 4
 
     init(controller: PlaybackController) {
         self.controller = controller
@@ -519,6 +533,8 @@ struct ContentView: View {
 
             Spacer()
 
+            repeatButton
+
             zoomControls
         }
         .padding()
@@ -570,6 +586,40 @@ struct ContentView: View {
             .help("Zoom in")
             .accessibilityLabel("Zoom In")
         }
+    }
+
+    private var repeatButton: some View {
+        let mode = controller.session.repeatMode
+        return Button {
+            controller.cycleRepeatMode()
+        } label: {
+            Image(systemName: Self.repeatSymbol(for: mode))
+                .foregroundStyle(mode == .off ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.accentColor))
+        }
+        .buttonStyle(.borderless)
+        .disabled(!controller.session.isPlayable)
+        .help(Self.repeatHelp(for: mode))
+        .accessibilityLabel("Repeat")
+        .accessibilityValue(Self.repeatModeName(for: mode))
+    }
+
+    private static func repeatSymbol(for mode: RepeatMode) -> String {
+        switch mode {
+        case .off, .switchAndRepeat: return "repeat"
+        case .one: return "repeat.1"
+        }
+    }
+
+    private static func repeatModeName(for mode: RepeatMode) -> String {
+        switch mode {
+        case .off: return "Off"
+        case .one: return "One"
+        case .switchAndRepeat: return "Switch & Repeat"
+        }
+    }
+
+    private static func repeatHelp(for mode: RepeatMode) -> String {
+        "Repeat: \(repeatModeName(for: mode))"
     }
 
     private var visibleStart: TimeInterval {
@@ -648,6 +698,10 @@ struct ContentView: View {
                             }
                         }
                         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                        if controller.session.isPlayable {
+                            loopSelectionOverlay(waveformWidth: waveformWidth)
+                        }
 
                         let playheadX = xPosition(for: controller.session.transportPosition, width: waveformWidth)
                         if controller.session.isPlayable, playheadX >= -1, playheadX <= waveformWidth + 1 {
@@ -978,14 +1032,127 @@ struct ContentView: View {
                     .offset(x: xPosition(for: 0, width: proxy.size.width))
             }
             .clipped()
+        }
+    }
+
+    // MARK: - Loop selection
+
+    /// The interaction layer, selection rectangle, and resize handles for the
+    /// loop, spanning all lanes across the waveform column. Clipped to the column
+    /// so an off-screen loop never spills into the track-info column.
+    private func loopSelectionOverlay(waveformWidth: CGFloat) -> some View {
+        let laneHeight = trackTimelineHeight - 16
+        return ZStack(alignment: .topLeading) {
+            // Drag to select a loop; click to seek (and deselect if outside the loop).
+            Color.clear
+                .contentShape(Rectangle())
+                .gesture(loopSelectionGesture(waveformWidth: waveformWidth))
+
+            if let range = activeLoopXRange(waveformWidth: waveformWidth) {
+                Rectangle()
+                    .fill(Color.blue.opacity(0.14))
+                    .overlay(alignment: .leading) { loopEdge() }
+                    .overlay(alignment: .trailing) { loopEdge() }
+                    .frame(width: max(1, range.upperBound - range.lowerBound), height: laneHeight)
+                    .offset(x: range.lowerBound, y: 8)
+                    .allowsHitTesting(false)
+            }
+
+            // Resize handles for a committed loop (not while drafting a new one).
+            if loopDraft == nil, let loop = controller.session.loopRegion {
+                loopResizeHandle(atTime: loop.start, waveformWidth: waveformWidth) { time in
+                    controller.resizeLoop(start: time)
+                }
+                loopResizeHandle(atTime: loop.end, waveformWidth: waveformWidth) { time in
+                    controller.resizeLoop(end: time)
+                }
+            }
+        }
+        .frame(width: waveformWidth, height: trackTimelineHeight, alignment: .topLeading)
+        .clipped()
+        .coordinateSpace(name: Self.loopColumnSpace)
+        .offset(x: trackInfoWidth)
+    }
+
+    private func loopEdge() -> some View {
+        Rectangle()
+            .fill(Color.blue)
+            .frame(width: 2)
+    }
+
+    /// x-span (points, within the waveform column) of the draft loop while
+    /// dragging, else the committed loop; `nil` when there is nothing to draw.
+    private func activeLoopXRange(waveformWidth: CGFloat) -> ClosedRange<CGFloat>? {
+        let start: TimeInterval
+        let end: TimeInterval
+        if let draft = loopDraft {
+            start = min(draft.start, draft.current)
+            end = max(draft.start, draft.current)
+        } else if let loop = controller.session.loopRegion {
+            start = loop.start
+            end = loop.end
+        } else {
+            return nil
+        }
+        let x0 = xPosition(for: start, width: waveformWidth)
+        let x1 = xPosition(for: end, width: waveformWidth)
+        return min(x0, x1)...max(x0, x1)
+    }
+
+    private func loopResizeHandle(
+        atTime time: TimeInterval,
+        waveformWidth: CGFloat,
+        onDrag: @escaping (TimeInterval) -> Void
+    ) -> some View {
+        let x = xPosition(for: time, width: waveformWidth)
+        let hitWidth: CGFloat = 12
+        return Rectangle()
+            .fill(Color.white.opacity(0.001))
+            .frame(width: hitWidth, height: trackTimelineHeight - 16)
             .contentShape(Rectangle())
+            .offset(x: x - hitWidth / 2, y: 8)
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.loopColumnSpace))
                     .onChanged { value in
-                        controller.seek(to: globalTime(atX: value.location.x, width: proxy.size.width))
+                        onDrag(globalTime(atX: value.location.x, width: waveformWidth))
                     }
             )
-        }
+    }
+
+    private func loopSelectionGesture(waveformWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.loopColumnSpace))
+            .onChanged { value in
+                let dx = abs(value.location.x - value.startLocation.x)
+                if loopDraft != nil || dx > Self.loopDragThreshold {
+                    loopDraft = LoopDraft(
+                        start: globalTime(atX: value.startLocation.x, width: waveformWidth),
+                        current: globalTime(atX: value.location.x, width: waveformWidth)
+                    )
+                }
+            }
+            .onEnded { value in
+                if loopDraft != nil {
+                    loopDraft = nil
+                    if let region = LoopRegion.normalized(
+                        start: globalTime(atX: value.startLocation.x, width: waveformWidth),
+                        end: globalTime(atX: value.location.x, width: waveformWidth),
+                        timelineStart: controller.session.timelineStart,
+                        timelineEnd: controller.session.timelineEnd
+                    ) {
+                        controller.beginLoop(region)
+                    }
+                } else {
+                    // A plain click: seek, deselecting first if it lands outside the loop.
+                    let t = globalTime(atX: value.location.x, width: waveformWidth)
+                    if let loop = controller.session.loopRegion, t < loop.start || t > loop.end {
+                        controller.deselectLoop()
+                    }
+                    controller.seek(to: t)
+                }
+            }
     }
 
     @ViewBuilder
