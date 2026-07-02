@@ -257,7 +257,7 @@ struct DigitalTimeReadout: View {
 
     var body: some View {
         Text(elapsed)
-            .font(.system(size: 30, weight: .semibold, design: .rounded).monospacedDigit())
+            .font(.system(size: 30, weight: .semibold, design: .monospaced))
             .foregroundStyle(.primary)
             // Engraved digits: a faint light copy pressed just below the glyphs
             // so they read as debossed into the panel, plus a hint of teal

@@ -351,6 +351,14 @@ private struct CanShowActiveTrackInFinderKey: FocusedValueKey {
     typealias Value = Bool
 }
 
+private struct TransportReadoutWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 180
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 extension FocusedValues {
     var openFileCommandState: OpenFileCommandState? {
         get { self[OpenFileCommandStateKey.self] }
@@ -383,6 +391,7 @@ struct ContentView: View {
     @State private var didConfigureMainWindow = false
     @State private var mainWindow: NSWindow?
     @State private var loopDraft: LoopDraft?
+    @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
 
     /// An in-progress loop drag, in absolute seconds. `start` is where the drag
     /// began; `current` tracks the pointer. Committed to a `LoopRegion` on mouse-up.
@@ -529,24 +538,45 @@ struct ContentView: View {
     }
 
     private var transportBar: some View {
-        ZStack {
-            // Pinned to the true window center, independent of the side clusters.
-            DigitalTimeReadout(
-                elapsed: controller.session.transportPosition.formattedSignedTimestamp
-            )
-            .frame(maxWidth: .infinity, alignment: .center)
+        GeometryReader { proxy in
+            let leftRegionWidth = max((proxy.size.width - transportReadoutWidth) / 2, 0)
 
-            HStack(spacing: 12) {
-                playButton
-                switchTrackButton
-                Spacer(minLength: 12)
-                repeatButton
-                zoomControls
+            ZStack {
+                HStack(spacing: 12) {
+                    playButton
+                    switchTrackButton
+                }
+                .frame(width: leftRegionWidth, alignment: .center)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Pinned to the true window center, independent of the side clusters.
+                DigitalTimeReadout(
+                    elapsed: controller.session.transportPosition.formattedSignedTimestamp
+                )
+                .background {
+                    GeometryReader { readoutProxy in
+                        Color.clear.preference(
+                            key: TransportReadoutWidthKey.self,
+                            value: readoutProxy.size.width
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+
+                HStack(spacing: 12) {
+                    repeatButton
+                    zoomControls
+                }
+                .padding(.trailing, 18)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .padding(.leading, 82)
-            .padding(.trailing, 18)
         }
+        .frame(height: DigitalTimeReadout.panelHeight)
         .padding(.vertical, 12)
+        .onPreferenceChange(TransportReadoutWidthKey.self) { width in
+            guard width > 0, abs(width - transportReadoutWidth) > 0.5 else { return }
+            transportReadoutWidth = width
+        }
         .componentDebugLabel("Transport Bar", enabled: settings.showsComponentDebugLabels)
     }
 
