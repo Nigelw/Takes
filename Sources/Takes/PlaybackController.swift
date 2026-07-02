@@ -60,10 +60,21 @@ final class PlaybackController: ObservableObject {
     }
 
     func loadImportedFiles(_ urls: [URL]) async {
-        await loadImportedFiles(urls, additionalFailures: [])
+        await loadImportedFiles(urls, additionalFailures: [], blindShuffle: { $0.shuffled() })
     }
 
-    private func loadImportedFiles(_ urls: [URL], additionalFailures: [ImportFailure]) async {
+    func loadImportedFiles(
+        _ urls: [URL],
+        blindShuffle: ([SessionTrack]) -> [SessionTrack]
+    ) async {
+        await loadImportedFiles(urls, additionalFailures: [], blindShuffle: blindShuffle)
+    }
+
+    private func loadImportedFiles(
+        _ urls: [URL],
+        additionalFailures: [ImportFailure],
+        blindShuffle: ([SessionTrack]) -> [SessionTrack]
+    ) async {
         guard !urls.isEmpty || !additionalFailures.isEmpty else { return }
 
         let wasPlaying = session.isPlaying
@@ -100,6 +111,7 @@ final class PlaybackController: ObservableObject {
         if !preparedLoads.isEmpty {
             preparedLoads.forEach(appendPreparedTrackLoad)
             finishTrackLoading(preferZero: !wasPlaying && transportStoppedAtTimelineStart)
+            shuffleForBlindListeningIfNeeded(using: blindShuffle)
             if let resumePosition, !restorePlaybackAfterImportAppend(at: resumePosition) {
                 return
             }
@@ -193,7 +205,11 @@ final class PlaybackController: ObservableObject {
     func loadSelectedLibraryTracks() async {
         do {
             let selection = try libraryTrackSelector.selectedTracks()
-            await loadImportedFiles(selection.urls, additionalFailures: selection.failures)
+            await loadImportedFiles(
+                selection.urls,
+                additionalFailures: selection.failures,
+                blindShuffle: { $0.shuffled() }
+            )
         } catch let error as PlaybackError {
             playbackError = error
         } catch {
@@ -428,6 +444,7 @@ final class PlaybackController: ObservableObject {
         runtimeTracksByID.removeAll()
         session.tracks.removeAll()
         session.activeTrackID = nil
+        session.isBlindListeningModeEnabled = false
         clearLoop()
         session.isPlaying = false
         transportStoppedAtTimelineStart = true
@@ -466,6 +483,66 @@ final class PlaybackController: ObservableObject {
 
     func skip(by delta: TimeInterval) {
         seek(to: session.transportPosition + delta)
+    }
+
+    // MARK: - Blind listening
+
+    func setBlindListeningMode(_ isEnabled: Bool) {
+        setBlindListeningMode(isEnabled) { tracks in
+            tracks.shuffled()
+        }
+    }
+
+    func toggleBlindListeningMode() {
+        setBlindListeningMode(!session.isBlindListeningModeEnabled)
+    }
+
+    func setBlindListeningMode(
+        _ isEnabled: Bool,
+        shuffle: ([SessionTrack]) -> [SessionTrack]
+    ) {
+        guard session.isBlindListeningModeEnabled != isEnabled else { return }
+
+        session.isBlindListeningModeEnabled = isEnabled
+        if isEnabled {
+            session.tracks = Self.blindListeningOrder(
+                currentTracks: session.tracks,
+                shuffledTracks: shuffle(session.tracks)
+            )
+            session.activeTrackID = session.tracks.first?.id
+        }
+        applyAudibility()
+    }
+
+    private func shuffleForBlindListeningIfNeeded(using shuffle: ([SessionTrack]) -> [SessionTrack]) {
+        guard session.isBlindListeningModeEnabled else { return }
+        session.tracks = Self.blindListeningOrder(
+            currentTracks: session.tracks,
+            shuffledTracks: shuffle(session.tracks)
+        )
+        session.activeTrackID = session.tracks.first?.id
+    }
+
+    nonisolated static func blindListeningOrder(
+        currentTracks: [SessionTrack],
+        shuffledTracks: [SessionTrack]
+    ) -> [SessionTrack] {
+        guard currentTracks.count > 1 else { return currentTracks }
+
+        let currentIDs = currentTracks.map(\.id)
+        let shuffledIDs = shuffledTracks.map(\.id)
+        guard Set(currentIDs) == Set(shuffledIDs), shuffledIDs.count == currentIDs.count else {
+            return currentTracks
+        }
+
+        if shuffledIDs != currentIDs {
+            return shuffledTracks
+        }
+
+        var rotated = currentTracks
+        let first = rotated.removeFirst()
+        rotated.append(first)
+        return rotated
     }
 
     // MARK: - Repeat & loop

@@ -623,7 +623,9 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
                     repeatButton
-                    Spacer(minLength: 0)
+                    blindListeningButton
+                        .padding(.leading, 8)
+                    Spacer(minLength: 8)
                     zoomControls
                 }
                 .padding(.trailing, 18)
@@ -745,6 +747,20 @@ struct ContentView: View {
         .accessibilityLabel("Repeat")
         .accessibilityValue(Self.repeatModeName(for: mode))
         .componentDebugLabel("Repeat", enabled: settings.showsComponentDebugLabels)
+    }
+
+    private var blindListeningButton: some View {
+        let isOn = controller.session.isBlindListeningModeEnabled
+        return Button {
+            controller.toggleBlindListeningMode()
+        } label: {
+            Image(systemName: isOn ? "eye.slash" : "eye")
+        }
+        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: isOn, diameter: 40, glyphSize: 15))
+        .help("Blind Listening Mode")
+        .accessibilityLabel("Blind Listening Mode")
+        .accessibilityValue(isOn ? "On" : "Off")
+        .componentDebugLabel("Blind Listening Mode", enabled: settings.showsComponentDebugLabels)
     }
 
     private static func repeatSymbol(for mode: RepeatMode) -> String {
@@ -1237,6 +1253,8 @@ struct ContentView: View {
     private func trackInfoArea(index: Int, sessionTrack: SessionTrack, showsTrash: Bool) -> some View {
         let track = sessionTrack.loadedTrack
         let isActive = controller.session.activeTrackID == sessionTrack.id
+        let isBlind = controller.session.isBlindListeningModeEnabled
+        let title = isBlind ? "Track \(index + 1)" : track.displayName
         // Badge on the left; filename, metadata, and the Offset row form a single
         // left-aligned column to its right so all three share the filename's left
         // edge. Vertically centered so the info column matches the waveform lane.
@@ -1252,11 +1270,11 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 2) {
-                        Text(track.displayName)
+                        Text(title)
                             .font(.headline.weight(.medium))
                             .lineLimit(1)
                             .truncationMode(.middle)
-                            .help(track.displayName)
+                            .help(title)
 
                         Spacer(minLength: 0)
 
@@ -1278,6 +1296,8 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .opacity(isBlind ? 0 : 1)
+                        .accessibilityHidden(isBlind)
                 }
 
                 offsetControl(sessionTrack: sessionTrack)
@@ -1439,11 +1459,17 @@ struct ContentView: View {
                         .accessibilityHidden(true)
                 }
 
-                let loaded = sessionTrack.loadedTrack
                 let isActive = controller.session.activeTrackID == sessionTrack.id
-                waveformShape(for: waveformStore.waveform(for: sessionTrack.id), track: loaded)
-                    .frame(width: proxy.size.width, height: 58)
-                    .foregroundStyle(isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7))
+                if controller.session.isBlindListeningModeEnabled {
+                    blindPlaceholderWaveform()
+                        .frame(width: proxy.size.width, height: 58)
+                        .foregroundStyle(isActive ? Theme.primary.opacity(0.70) : Theme.waveformInactive.opacity(0.58))
+                } else {
+                    let loaded = sessionTrack.loadedTrack
+                    waveformShape(for: waveformStore.waveform(for: sessionTrack.id), track: loaded)
+                        .frame(width: proxy.size.width, height: 58)
+                        .foregroundStyle(isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7))
+                }
 
                 Rectangle()
                     .fill(.secondary.opacity(0.25))
@@ -1625,6 +1651,46 @@ struct ContentView: View {
                 with: .foreground
             )
         }
+    }
+
+    private func blindPlaceholderWaveform() -> some View {
+        Canvas { context, size in
+            context.fill(Self.blindPlaceholderWaveformPath(in: size), with: .foreground)
+        }
+        .accessibilityLabel("Masked waveform")
+    }
+
+    private static func blindPlaceholderWaveformPath(in size: CGSize) -> Path {
+        guard size.width > 0, size.height > 0 else { return Path() }
+
+        let sampleCount = max(Int(size.width / 6), 12)
+        let midline = size.height / 2
+        let minHalfHeight: CGFloat = 1.2
+        var top: [CGPoint] = []
+        top.reserveCapacity(sampleCount + 1)
+
+        for index in 0...sampleCount {
+            let t = CGFloat(index) / CGFloat(sampleCount)
+            let wave = 0.48
+                + 0.24 * sin(t * .pi * 6.0)
+                + 0.16 * sin(t * .pi * 17.0 + 0.8)
+                + 0.08 * sin(t * .pi * 31.0 + 1.7)
+            let envelope = 0.55 + 0.45 * sin(t * .pi)
+            let halfHeight = max(minHalfHeight, min(0.92, wave * envelope) * midline)
+            top.append(CGPoint(x: t * size.width, y: midline - halfHeight))
+        }
+
+        var path = Path()
+        guard let first = top.first else { return path }
+        path.move(to: first)
+        for point in top.dropFirst() {
+            path.addLine(to: point)
+        }
+        for point in top.reversed() {
+            path.addLine(to: CGPoint(x: point.x, y: midline + (midline - point.y)))
+        }
+        path.closeSubpath()
+        return path
     }
 
     /// Builds a filled, center-mirrored peak envelope across the visible window.

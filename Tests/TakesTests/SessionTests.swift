@@ -121,7 +121,7 @@ struct SessionTests {
         ).localizedDescription
 
         #expect(description.contains("Takes currently supports up to 32 loaded tracks."))
-        #expect(description.contains("Skipped 40 files (showing first 8):"))
+        #expect(description.contains("Skipped 40 files:"))
         #expect(description.contains("track-0.wav"))
         #expect(description.contains("track-7.wav"))
         #expect(!description.contains("track-8.wav"))
@@ -738,6 +738,100 @@ struct SessionTests {
 
         #expect(controller.session.tracks.map(\.id) == [ids[1], ids[2], ids[0]])
         #expect(controller.session.activeTrackID == ids[0])
+    }
+
+    @MainActor
+    @Test
+    func enablingBlindListeningModeShufflesVisibleOrderAndSelectsFirstTrack() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "blind-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+        let ids = controller.session.tracks.map(\.id)
+        controller.selectActiveTrack(ids[1])
+        controller.seek(to: 0.5)
+
+        controller.setBlindListeningMode(true) { tracks in
+            [tracks[2], tracks[1], tracks[0]]
+        }
+
+        #expect(controller.session.isBlindListeningModeEnabled)
+        #expect(controller.session.tracks.map(\.id) == [ids[2], ids[1], ids[0]])
+        #expect(controller.session.activeTrackID == ids[2])
+        #expect(controller.session.transportPosition == 0.5)
+    }
+
+    @MainActor
+    @Test
+    func disablingBlindListeningModeKeepsShuffledOrder() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "blind-off-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+        let ids = controller.session.tracks.map(\.id)
+
+        controller.setBlindListeningMode(true) { tracks in
+            [tracks[1], tracks[2], tracks[0]]
+        }
+        controller.setBlindListeningMode(false)
+
+        #expect(!controller.session.isBlindListeningModeEnabled)
+        #expect(controller.session.tracks.map(\.id) == [ids[1], ids[2], ids[0]])
+    }
+
+    @MainActor
+    @Test
+    func blindListeningModeFallbackChangesOrderWhenShuffleReturnsSameOrder() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "blind-same-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+        let ids = controller.session.tracks.map(\.id)
+
+        controller.setBlindListeningMode(true) { $0 }
+
+        #expect(controller.session.tracks.map(\.id) == [ids[1], ids[2], ids[0]])
+    }
+
+    @MainActor
+    @Test
+    func preEnabledBlindListeningModeShufflesTracksAfterLoad() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "blind-preload-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        controller.setBlindListeningMode(true)
+
+        await controller.loadImportedFiles(urls) { tracks in
+            [tracks[2], tracks[0], tracks[1]]
+        }
+
+        #expect(controller.session.isBlindListeningModeEnabled)
+        #expect(controller.session.tracks.map { $0.loadedTrack.displayName } == [
+            "blind-preload-2.wav",
+            "blind-preload-0.wav",
+            "blind-preload-1.wav"
+        ])
+        #expect(controller.session.activeTrackID == controller.session.tracks[0].id)
     }
 
     @MainActor
