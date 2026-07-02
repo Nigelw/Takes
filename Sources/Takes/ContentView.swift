@@ -1383,6 +1383,12 @@ struct ContentView: View {
             Text("ms")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    binding.wrappedValue = 0
+                }
+                .accessibilityLabel("Offset units")
+                .accessibilityHint("Double click to reset offset to zero milliseconds.")
 
             Stepper(
                 "Offset",
