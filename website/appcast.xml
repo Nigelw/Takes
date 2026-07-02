@@ -3,6 +3,21 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>2.1</title>
+            <pubDate>Wed, 01 Jul 2026 21:32:43 -0400</pubDate>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>2.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## New Features
+- Loop audio by dragging or shift+clicking to select a range
+  - Resize selection by dragging the selection handles
+- Repeat modes: Off, Repeat One, and Switch & Repeat (to compare tracks back-to-back by toggling to the next track on each loop)
+
+## Fixes
+- Starting playback at the end of a track now restarts playback from the beginning]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.1/Takes.dmg" length="2722048" type="application/octet-stream" sparkle:edSignature="PnvS4YfNyfv7kgsetTSVoPkgfvEDZzJSfWIChKogAspp7TY2+PoW56lP4k5t1BkAwBQXPfYXioJAnGb1vRWfBg=="/>
+        </item>
+        <item>
             <title>2.0</title>
             <pubDate>Wed, 01 Jul 2026 01:43:10 -0400</pubDate>
             <sparkle:version>5</sparkle:version>
@@ -31,33 +46,6 @@
 - Rendering doesn't block the UI
 ]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0a3/Takes.dmg" length="2629939" type="application/octet-stream" sparkle:edSignature="EfHo/vyzU5aAdnGqc5wbNAiA+mKd7LUU1cosThxeIenX45pa/DyCbXv2MUTUhBNaispit6WcHweEG/cnU6ucAg=="/>
-        </item>
-        <item>
-            <title>2.0a2</title>
-            <pubDate>Thu, 18 Jun 2026 15:40:58 -0400</pubDate>
-            <sparkle:version>3</sparkle:version>
-            <sparkle:shortVersionString>2.0a2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0a2/Takes.dmg" length="2593614" type="application/octet-stream" sparkle:edSignature="XsZ+g8CNrCd0ZRbRiLn7BY2I9GsAUfKSlTUepfC5i3SkEpZjfqv0fqDciwp/NhqQ+H4KFgKbNHCjT5zJnf15Dw=="/>
-            <description sparkle:format="markdown"><![CDATA[## Major improvements
-- New UI
-- New icon
-- New name
-- Compare up to 32 tracks
-- Auto-updates via Sparkle
-
-## Smaller changes
-- Drag to reorder tracks
-- Quick Open from Finder and Apple Music selection
-- Hidden shortcuts: use number keys 1–8 to quickly switch to correspondingly numbered track. Hitting 9 switches to the last track.
-- Input field behavior improvements (Esc key reverts to previous value, up/down arrow keys increment value, arrow key insertion point navigation takes precedence over playback keyboard shortcuts when input field is active)
-- Added settings for offset nudging intervals & auto-update behavior
-- Added proper menubar
-- Added full set of keyboard shortcuts
-- Improved drag and drop support (drop files and folders on app icon to open, simplified behavior when dropping on app window)
-- Improved window sizing behavior (more compact, smart resizing, single window)
-- Signed & notarized for public distribution
-]]></description>
         </item>
     </channel>
 </rss>
