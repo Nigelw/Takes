@@ -1200,11 +1200,12 @@ struct ContentView: View {
             // Tweak these two numbers to taste.
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 2) {
                         Text(track.displayName)
                             .font(.headline.weight(.medium))
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .help(track.displayName)
 
                         Spacer(minLength: 0)
 
@@ -1213,8 +1214,10 @@ struct ContentView: View {
                         } label: {
                             Image(systemName: "trash")
                                 .accessibilityLabel("Remove Track \(index + 1)")
+                                .frame(width: 16, height: 16)
                         }
                         .buttonStyle(.borderless)
+                        .frame(width: 16, height: 16)
                         // Only surfaces on hover; kept mounted (opacity, not removed) so it
                         // stays reachable by accessibility/keyboard.
                         .opacity(showsTrash ? 1 : 0)
