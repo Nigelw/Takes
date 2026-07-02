@@ -2225,11 +2225,14 @@ private final class TimelineScrollNSView: NSScrollView {
             if scrollGestureBegan(event) || !scrollGestureHasPhase(event) {
                 lockedScrollAxis = nil
             }
-            let axis = scrollAxis(for: event)
-            if scrollGestureEnded(event) {
-                lockedScrollAxis = nil
-            }
-            return axis == .horizontal ? self : nil
+            // Do not clear the lock on gesture end here: hitTest can run more
+            // than once for the same event (extra passes happen while a field
+            // editor is active), and the ended event has zero deltas — a second
+            // pass without the lock would return nil and the scroll view would
+            // never see the gesture end, leaving the rubber band stretched.
+            // `scrollWheel(with:)` clears the lock exactly once per event, and
+            // the next gesture's began clears any stale lock anyway.
+            return scrollAxis(for: event) == .horizontal ? self : nil
         default:
             return nil
         }
