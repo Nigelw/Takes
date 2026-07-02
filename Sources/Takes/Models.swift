@@ -313,6 +313,8 @@ struct ImportFailure: Equatable {
 }
 
 enum PlaybackError: LocalizedError, Equatable {
+    private static let maximumDisplayedSkippedFileNames = 8
+
     case unsupportedFormat(URL)
     case failedToOpenFile(URL)
     case invalidSeekPosition
@@ -341,8 +343,7 @@ enum PlaybackError: LocalizedError, Equatable {
             let details = failures.map { "\($0.fileName): \($0.message)" }.joined(separator: "\n")
             return "Some files could not be loaded.\n\(details)"
         case let .trackLimitExceeded(limit, skippedFileNames):
-            let skipped = skippedFileNames.joined(separator: "\n")
-            return "Takes currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)"
+            return Self.trackLimitDescription(limit: limit, skippedFileNames: skippedFileNames)
         case let .importSummary(failures, skippedFileNames, limit):
             return Self.importSummaryDescription(
                 failures: failures,
@@ -350,6 +351,27 @@ enum PlaybackError: LocalizedError, Equatable {
                 limit: limit
             )
         }
+    }
+
+    private static func trackLimitDescription(limit: Int, skippedFileNames: [String]) -> String {
+        let skipped = summarizedSkippedFileNames(skippedFileNames)
+        return "Takes currently supports up to \(limit) loaded tracks.\n\(skipped)"
+    }
+
+    private static func summarizedSkippedFileNames(_ skippedFileNames: [String]) -> String {
+        guard skippedFileNames.count > maximumDisplayedSkippedFileNames else {
+            return "Skipped:\n\(skippedFileNames.joined(separator: "\n"))"
+        }
+
+        let displayedNames = skippedFileNames
+            .prefix(maximumDisplayedSkippedFileNames)
+            .joined(separator: "\n")
+        let remainingCount = skippedFileNames.count - maximumDisplayedSkippedFileNames
+        return """
+        Skipped \(skippedFileNames.count) files:
+        \(displayedNames)
+        ... and \(remainingCount) more.
+        """
     }
 
     private static func importSummaryDescription(
@@ -363,8 +385,7 @@ enum PlaybackError: LocalizedError, Equatable {
             sections.append("Some files could not be loaded.\n\(details)")
         }
         if !skippedFileNames.isEmpty {
-            let skipped = skippedFileNames.joined(separator: "\n")
-            sections.append("Takes currently supports up to \(limit) loaded tracks.\nSkipped:\n\(skipped)")
+            sections.append(trackLimitDescription(limit: limit, skippedFileNames: skippedFileNames))
         }
         return sections.joined(separator: "\n")
     }
