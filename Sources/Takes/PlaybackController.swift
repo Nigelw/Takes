@@ -539,6 +539,30 @@ final class PlaybackController: ObservableObject {
         applyRezoom(span: span, cursorFraction: nil)
     }
 
+    /// Zoom all the way out so the complete timeline is visible.
+    func zoomToFit() {
+        let span = session.timelineEnd - session.timelineStart
+        guard span > 0 else { return }
+        session.visibleStart = session.timelineStart
+        session.visibleSpan = span
+    }
+
+    /// Zoom the timeline to the current waveform loop selection.
+    func zoomToSelection() {
+        guard let loop = session.loopRegion else { return }
+        let selectionSpan = loop.end - loop.start
+        let visibleSpan = max(selectionSpan, TimelineViewport.minimumVisibleSpan)
+        let selectionCenter = loop.start + selectionSpan / 2
+        let viewport = TimelineViewport.clampedWindow(
+            visibleStart: selectionCenter - visibleSpan / 2,
+            visibleSpan: visibleSpan,
+            contentStart: session.timelineStart,
+            contentEnd: session.timelineEnd
+        )
+        session.visibleStart = viewport.start
+        session.visibleSpan = viewport.span
+    }
+
     /// Pinch-to-zoom, anchored to the cursor (D5). `magnification` is the
     /// trackpad delta; `fraction` is the cursor's `0...1` position across the
     /// timeline.

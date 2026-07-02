@@ -957,6 +957,53 @@ struct SessionTests {
 
     @MainActor
     @Test
+    func zoomToFitShowsFullTimeline() async throws {
+        let url = try makeTemporaryAudioFile(name: "zoom-fit.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+        controller.zoomVisibleSpan(to: TimelineViewport.minimumVisibleSpan)
+
+        controller.zoomToFit()
+
+        #expect(abs(controller.session.visibleStart - controller.session.timelineStart) < 0.0001)
+        #expect(abs(controller.session.visibleSpan - controller.session.duration) < 0.0001)
+    }
+
+    @MainActor
+    @Test
+    func zoomToSelectionShowsLoopRegion() async throws {
+        let url = try makeTemporaryAudioFile(name: "zoom-selection.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+        controller.beginLoop(LoopRegion(start: 0.2, end: 0.8))
+
+        controller.zoomToSelection()
+
+        #expect(abs(controller.session.visibleStart - 0.2) < 0.0001)
+        #expect(abs(controller.session.visibleSpan - 0.6) < 0.0001)
+    }
+
+    @MainActor
+    @Test
+    func zoomToSelectionLeavesViewportUnchangedWithoutLoopRegion() async throws {
+        let url = try makeTemporaryAudioFile(name: "zoom-no-selection.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+        controller.zoomVisibleSpan(to: TimelineViewport.minimumVisibleSpan)
+        let visibleStart = controller.session.visibleStart
+        let visibleSpan = controller.session.visibleSpan
+
+        controller.zoomToSelection()
+
+        #expect(controller.session.visibleStart == visibleStart)
+        #expect(controller.session.visibleSpan == visibleSpan)
+    }
+
+    @MainActor
+    @Test
     func playFromEndRewindsToStart() async throws {
         let url = try makeTemporaryAudioFile(name: "loop.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

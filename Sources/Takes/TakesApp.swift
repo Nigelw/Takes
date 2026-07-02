@@ -260,6 +260,7 @@ struct TakesApp: App {
             }
 
             FileCommands()
+            ViewCommands(controller: controller)
 
             CommandGroup(after: .pasteboard) {
                 Button("Deselect") {
@@ -434,5 +435,48 @@ private struct FileCommands: Commands {
             .keyboardShortcut(.delete, modifiers: [.command])
             .disabled(openFileCommandState == nil || canClearTracks != true)
         }
+    }
+}
+
+private struct ViewCommands: Commands {
+    @ObservedObject var controller: PlaybackController
+    @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Button("Zoom In") {
+                controller.stepZoom(zoomingIn: true)
+            }
+            .keyboardShortcut("+", modifiers: [.command])
+            .disabled(!canUseZoomShortcuts || !controller.canZoomTimeline)
+
+            Button("Zoom Out") {
+                controller.stepZoom(zoomingIn: false)
+            }
+            .keyboardShortcut("-", modifiers: [.command])
+            .disabled(!canUseZoomShortcuts || !controller.canZoomTimeline)
+
+            Button("Zoom to Selection") {
+                controller.zoomToSelection()
+            }
+            .keyboardShortcut("+", modifiers: [.command, .option])
+            .disabled(
+                !canUseZoomShortcuts
+                    || !controller.canZoomTimeline
+                    || controller.session.loopRegion == nil
+            )
+
+            Button("Zoom to Fit") {
+                controller.zoomToFit()
+            }
+            .keyboardShortcut("-", modifiers: [.command, .option])
+            .disabled(!canUseZoomShortcuts || !controller.canZoomTimeline)
+
+            Divider()
+        }
+    }
+
+    private var canUseZoomShortcuts: Bool {
+        canUseGlobalMenuShortcuts == true
     }
 }
