@@ -1066,6 +1066,14 @@ struct SessionTests {
     }
 
     @Test
+    func switchTrackButtonTreatsShiftModifierAsPreviousTrack() {
+        #expect(SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: [], fallbackFlags: []) == false)
+        #expect(SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: .shift, fallbackFlags: []) == true)
+        #expect(SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: [], fallbackFlags: .shift) == true)
+        #expect(SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: [.command, .shift], fallbackFlags: []) == true)
+    }
+
+    @Test
     func numericControlTreatsEscapeAsCancelEditingCommand() {
         #expect(NumericControlConfiguration.isCancelEditingCommand(#selector(NSResponder.insertNewline(_:))) == false)
         #expect(NumericControlConfiguration.isCancelEditingCommand(#selector(NSResponder.cancelOperation(_:))) == true)

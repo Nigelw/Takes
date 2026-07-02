@@ -38,6 +38,15 @@ struct NumericControlConfiguration {
     }
 }
 
+struct SwitchTrackModifierPolicy {
+    static func selectsPreviousTrack(
+        currentEventFlags: NSEvent.ModifierFlags?,
+        fallbackFlags: NSEvent.ModifierFlags = NSEvent.modifierFlags
+    ) -> Bool {
+        currentEventFlags?.contains(.shift) == true || fallbackFlags.contains(.shift)
+    }
+}
+
 struct NumericControlEditState {
     private(set) var committedValue: Int
     private(set) var pendingText: String?
@@ -621,7 +630,11 @@ struct ContentView: View {
 
     private var switchTrackButton: some View {
         Button {
-            controller.selectNextTrack()
+            if SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: NSApp.currentEvent?.modifierFlags) {
+                controller.selectPreviousTrack()
+            } else {
+                controller.selectNextTrack()
+            }
         } label: {
             Image(systemName: "arrow.trianglehead.swap")
         }
