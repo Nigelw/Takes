@@ -3,6 +3,21 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>2.6.1</title>
+            <pubDate>Thu, 02 Jul 2026 17:15:06 -0400</pubDate>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>2.6.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## Improvements
+- Double-click the "ms" label in the offset text field to reset it to zero
+
+## Fixes
+- Playback now continues when the system audio device changes, such as when putting in AirPods
+- The mouse cursor now resets correctly after interacting with a text field
+]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.6.1/Takes.dmg" length="3023113" type="application/octet-stream" sparkle:edSignature="9iNjYxcIEcHbTAA5bc7MdxAVqk71640lpyo1Fps8TsqKn8dgysYWQoson5HuYwLmGbaNlndYBPCKFeYkySTmBg=="/>
+        </item>
+        <item>
             <title>2.6</title>
             <pubDate>Thu, 02 Jul 2026 15:58:57 -0400</pubDate>
             <sparkle:version>8</sparkle:version>
@@ -36,21 +51,6 @@
 - Various layout, contrast, and window-sizing refinements
 ]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.5/Takes.dmg" length="2984360" type="application/octet-stream" sparkle:edSignature="AkxZcSZrUTzbn/Ijhw9EkahNg+fxGZum5QVUvDWkkX/2QMozwUjkGsoVsYRDIEzgls75Lje5udVnfZdXHHFBBQ=="/>
-        </item>
-        <item>
-            <title>2.1</title>
-            <pubDate>Wed, 01 Jul 2026 21:32:43 -0400</pubDate>
-            <sparkle:version>6</sparkle:version>
-            <sparkle:shortVersionString>2.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[## New Features
-- Loop audio by dragging or shift+clicking to select a range
-  - Resize selection by dragging the selection handles
-- Repeat modes: Off, Repeat One, and Switch & Repeat (to compare tracks back-to-back by toggling to the next track on each loop)
-
-## Fixes
-- Starting playback at the end of a track now restarts playback from the beginning]]></description>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.1/Takes.dmg" length="2722048" type="application/octet-stream" sparkle:edSignature="PnvS4YfNyfv7kgsetTSVoPkgfvEDZzJSfWIChKogAspp7TY2+PoW56lP4k5t1BkAwBQXPfYXioJAnGb1vRWfBg=="/>
         </item>
     </channel>
 </rss>
