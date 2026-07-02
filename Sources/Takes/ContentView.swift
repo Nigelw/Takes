@@ -388,6 +388,7 @@ struct ContentView: View {
     @State private var reorderInsertionTarget: TrackReorderInsertionTarget?
     @State private var emptyTrackIsDropTargeted = false
     @State private var hoveredTrackID: SessionTrack.ID?
+    @State private var focusedOffsetTrackID: SessionTrack.ID?
     @State private var didConfigureMainWindow = false
     @State private var mainWindow: NSWindow?
     @State private var loopDraft: LoopDraft?
@@ -1233,7 +1234,7 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            offsetField(binding: binding)
+            offsetField(binding: binding, trackID: sessionTrack.id)
         }
     }
 
@@ -1242,11 +1243,19 @@ struct ContentView: View {
     /// it reads as one input `[  0  ms  ⌃⌄ ]`. Typed-entry/clamping and the
     /// Shift-large-step behavior come from `IntegerInputField`; the stepper mirrors
     /// the same step amounts.
-    private func offsetField(binding: Binding<Int>) -> some View {
-        HStack(spacing: 4) {
+    private func offsetField(binding: Binding<Int>, trackID: SessionTrack.ID) -> some View {
+        let isFocused = focusedOffsetTrackID == trackID
+        return HStack(spacing: 4) {
             IntegerInputField(
                 value: binding,
-                configuration: settings.offsetConfiguration
+                configuration: settings.offsetConfiguration,
+                onFocusChange: { focused in
+                    if focused {
+                        focusedOffsetTrackID = trackID
+                    } else if focusedOffsetTrackID == trackID {
+                        focusedOffsetTrackID = nil
+                    }
+                }
             )
             .frame(width: 44)
 
@@ -1271,17 +1280,23 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(Theme.readoutSurface.shadow(.inner(color: .black.opacity(0.15), radius: 1.5, y: 1)))
         }
+        // Focused: the bevel gives way to a solid ring in the app's active
+        // indigo, plus a soft matching glow so the live field is unmissable.
         .overlay {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(
-                    LinearGradient(
-                        colors: [.black.opacity(0.14), .white.opacity(0.45)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 1
+                    isFocused
+                        ? AnyShapeStyle(Theme.primary)
+                        : AnyShapeStyle(LinearGradient(
+                            colors: [.black.opacity(0.14), .white.opacity(0.45)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )),
+                    lineWidth: isFocused ? 1.5 : 1
                 )
         }
+        .shadow(color: isFocused ? Theme.primary.opacity(0.55) : .clear, radius: 3)
+        .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 
     private func stepOffset(binding: Binding<Int>, direction: Int) {
@@ -2330,6 +2345,7 @@ private struct TrackRowDropDelegate: DropDelegate {
 private struct IntegerInputField: NSViewRepresentable {
     @Binding var value: Int
     let configuration: NumericControlConfiguration
+    var onFocusChange: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -2349,11 +2365,13 @@ private struct IntegerInputField: NSViewRepresentable {
         textField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         textField.delegate = context.coordinator
         textField.stringValue = "\(value)"
+        textField.onFocusChange = onFocusChange
         return textField
     }
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
         context.coordinator.configuration = configuration
+        (nsView as? NumericInputTextField)?.onFocusChange = onFocusChange
         let clamped = configuration.clamped(value)
         if clamped != value {
             DispatchQueue.main.async {
@@ -2548,6 +2566,23 @@ private struct IntegerInputField: NSViewRepresentable {
     }
 
     private final class NumericInputTextField: NSTextField {
+        /// Reports focus so the composite box wrapping this borderless field can
+        /// draw its own highlight (the field's native focus ring is disabled).
+        var onFocusChange: ((Bool) -> Void)?
+
+        override func becomeFirstResponder() -> Bool {
+            let accepted = super.becomeFirstResponder()
+            if accepted {
+                onFocusChange?(true)
+            }
+            return accepted
+        }
+
+        override func textDidEndEditing(_ notification: Notification) {
+            super.textDidEndEditing(notification)
+            onFocusChange?(false)
+        }
+
         override func performKeyEquivalent(with event: NSEvent) -> Bool {
             guard NumericInputKeyEquivalentPolicy.routesToFieldEditor(event: event),
                   let fieldEditor = currentEditor() as? NSTextView
