@@ -58,11 +58,14 @@ enum Theme {
     )
 
     /// Surface fill for the secondary transport buttons (Switch Track, Repeat)
-    /// when not engaged. Distinct from the window background so they read as
-    /// tactile controls rather than blending in.
+    /// and the readout bezel plate when not engaged. Distinct from the bar
+    /// surface so they read as tactile controls rather than blending in.
+    /// These sit on the lifted transport bar, so `transportBarLift`'s white
+    /// wash (25% light / 5.5% dark) is pre-composited into the values to keep
+    /// the control-to-bar contrast that was tuned before the lift existed.
     static let transportButtonFill = dynamic(
-        light: (0.965, 0.968, 0.98),
-        dark: (0.22, 0.23, 0.27)
+        light: (0.974, 0.976, 0.985),
+        dark: (0.263, 0.272, 0.310)
     )
 
     /// Waveform color for inactive (non-selected) tracks.
@@ -86,6 +89,19 @@ enum Theme {
     /// header reads as slightly recessed beneath it. A touch stronger in dark mode.
     static let transportShadow = Color(nsColor: NSColor(name: nil) { appearance in
         NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.45 : 0.10)
+    })
+
+    /// Faint light wash over the transport bar so it sits a step above the
+    /// timeline well its shadow falls onto. Carries the split in dark mode
+    /// (lighter reads as nearer); in light mode `timelineWellShade` does most
+    /// of the work and this stays close to invisible.
+    static let transportBarLift = whiteAlpha(light: 0.25, dark: 0.055)
+
+    /// Faint dark scrim over the tracks/timeline area, recessing it beneath
+    /// the transport bar. Laid over the shared window material rather than
+    /// replacing it, so both regions keep the same desktop-tinted vibrancy.
+    static let timelineWellShade = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.18 : 0.04)
     })
 
     // MARK: Beveled transport readout
