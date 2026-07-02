@@ -658,7 +658,9 @@ struct ContentView: View {
         }
         // Raised deck: a light wash lifts the bar off the shared window
         // material, pairing with `timelineWellShade` below the divider.
-        .background(Theme.transportBarLift)
+        // Purely decorative, so it must not intercept clicks — otherwise it
+        // swallows the mouseDown before the WindowDragArea behind it can drag.
+        .background(Theme.transportBarLift.allowsHitTesting(false))
         // The transport bar is the titlebar: any click on empty bar space
         // (not claimed by a control above) drags the window.
         .background(WindowDragArea())
@@ -731,7 +733,7 @@ struct ContentView: View {
                 in: 0...1
             )
             .controlSize(.small)
-            .frame(width: 72)
+            .frame(width: 56)
             .disabled(!enabled)
             .accessibilityLabel("Timeline Zoom")
 
