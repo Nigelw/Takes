@@ -76,7 +76,7 @@ struct TransportAppearance: Equatable {
         insetLightY: 1.0
     )
     var darkPrimary = TransportButtonAppearance(
-        glossOpacity: 0.20,
+        glossOpacity: 0.32,
         bevelTopOpacity: 0.40,
         bevelBottomOpacity: 0.60,
         insetDarkOpacity: 0.50,
@@ -84,7 +84,7 @@ struct TransportAppearance: Equatable {
         insetLightOpacity: 0.12
     )
     var darkSecondary = TransportButtonAppearance(
-        glossOpacity: 0.25,
+        glossOpacity: 0.15,
         bevelWidth: 1.0,
         bevelTopOpacity: 0.35,
         bevelBottomOpacity: 0.50,
