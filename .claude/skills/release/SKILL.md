@@ -97,6 +97,8 @@ Optional safety: run once **without** `--publish` first to confirm the build + n
 
 Pages redeploys on the appcast push (~1 min, CDN cache may lag). Confirm the new build is actually being served:
 
+> **If the Pages deploy fails, never `gh run rerun --failed`.** The `pages.yml` workflow uses `upload-pages-artifact@v5` / `deploy-pages@v5`, whose v4+ artifact backend makes artifacts **immutable** — a re-run uploads a *second* `github-pages` artifact instead of overwriting, and `deploy-pages` then aborts with `Multiple artifacts named "github-pages"... count is 2`. GitHub Pages also fails transiently on its own (`Deployment failed, try again later.`), so a failed deploy is common and expected. The correct recovery in both cases is a **fresh** run — `gh workflow run pages.yml --ref main` — which builds one clean artifact. Watch it with `gh run list --workflow pages.yml --limit 1` / `gh run view <id>`. (Seen live during the v2.6 release, 2026-07-02.)
+
 ```bash
 curl -sL https://nigelw.github.io/Takes/appcast.xml | grep -E 'sparkle:version|enclosure url'
 ```
