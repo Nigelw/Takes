@@ -572,7 +572,7 @@ struct ContentView: View {
         Button {
             controller.selectNextTrack()
         } label: {
-            Image(systemName: "arrow.left.arrow.right")
+            Image(systemName: "arrow.trianglehead.swap")
         }
         .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: 40, glyphSize: 15))
         .disabled(!controller.session.canSwitchPlayback)
@@ -646,8 +646,8 @@ struct ContentView: View {
 
     private static func repeatSymbol(for mode: RepeatMode) -> String {
         switch mode {
-        case .off, .switchAndRepeat: return "repeat"
-        case .one: return "repeat.1"
+        case .off, .one: return "repeat"
+        case .switchAndRepeat: return "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill"
         }
     }
 
