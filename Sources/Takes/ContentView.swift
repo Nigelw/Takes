@@ -860,7 +860,7 @@ struct ContentView: View {
         PlayheadHandle(tipWidth: 2)
             .fill(Theme.secondary)
             // Beveled dimension: a light top highlight fading to a dark bottom shadow,
-            // blended over the teal fill. Adaptive so it reads in light and dark mode.
+            // blended over the accent fill. Adaptive so it reads in light and dark mode.
             .overlay {
                 PlayheadHandle(tipWidth: 2)
                     .fill(
@@ -1364,7 +1364,7 @@ struct ContentView: View {
     }
 
     /// Grab handle drawn at each loop edge. Deliberately unlike the thin solid
-    /// playhead: a wider white capsule with a blue outline, so it reads as
+    /// playhead: a wider white capsule with an accent outline, so it reads as
     /// draggable and stays distinguishable when the playhead sits on top of it.
     private func loopEdge() -> some View {
         Capsule()

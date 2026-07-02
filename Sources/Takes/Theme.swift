@@ -12,7 +12,8 @@ extension NSAppearance {
 /// Central palette and semantic color tokens for the Takes redesign.
 ///
 /// Everything visual draws from here so the primary (indigo) and secondary
-/// (teal) hues stay consistent across the transport bar, timeline, and rows.
+/// (amber in light mode, cyan in dark) hues stay consistent across the
+/// transport bar, timeline, and rows.
 /// Colors are built from `NSColor` dynamic providers so a single token yields
 /// the right value in light and dark mode.
 enum Theme {
@@ -35,9 +36,12 @@ enum Theme {
         dark: (0.561, 0.529, 0.961)   // #8F87F5
     )
 
-    /// Teal used for the playhead and the loop-selection highlight.
+    /// Accent for the playhead and the loop-selection highlight. Tied to the
+    /// transport readout's display color (`readoutGlass`/`readoutGlow`): amber
+    /// in light mode, LED cyan in dark. The light amber is deepened a touch
+    /// from the glass color so a 2pt line holds up on light backgrounds.
     static let secondary = dynamic(
-        light: (0.059, 0.702, 0.780), // #0FB3C7
+        light: (0.871, 0.557, 0.118), // #DE8E1E
         dark: (0.220, 0.831, 0.902)   // #38D4E6
     )
 
@@ -101,20 +105,26 @@ enum Theme {
     /// Bright light edge of the readout, also used to engrave the digits.
     static let readoutHighlight = whiteAlpha(light: 0.72, dark: 0.08)
 
-    /// Dark glass window of the transport time readout. Dark in both modes —
-    /// a display window reads as unlit glass no matter what hardware surrounds
-    /// it — but a touch lighter in light mode so it doesn't punch a hole in the bar.
+    /// Glass window of the transport time readout. Two different machines:
+    /// light mode is a 90s amber-backlit LCD (the Alesis/Yamaha rack look),
+    /// dark mode the unlit near-black glass of an LED display.
     static let readoutGlass = dynamic(
-        light: (0.086, 0.098, 0.125), // #161920
+        light: (0.922, 0.647, 0.235), // #EBA53C
         dark: (0.027, 0.031, 0.043)   // #07080B
     )
 
-    /// LED hue of the seven-segment digits. Same cyan in both modes; the glass
-    /// behind it is always dark so it never needs a light-mode variant.
+    /// Seven-segment digit color: dark warm-brown LCD ink on the amber glass
+    /// in light mode, glowing LED cyan in dark mode.
     static let readoutGlow = dynamic(
-        light: (0.220, 0.831, 0.902), // #38D4E6
-        dark: (0.220, 0.831, 0.902)
+        light: (0.243, 0.145, 0.055), // #3E250E
+        dark: (0.220, 0.831, 0.902)   // #38D4E6
     )
+
+    /// Inner shadow of the readout's recessed glass well. Softer on the pale
+    /// LCD pane, deep on the dark LED glass.
+    static let readoutWellShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.65 : 0.28)
+    })
 
     /// Soft recessed inner-shadow edge of the readout.
     static let readoutShadow = Color(nsColor: NSColor(name: nil) { appearance in

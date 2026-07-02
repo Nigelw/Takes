@@ -346,6 +346,10 @@ struct DigitalTimeReadout: View {
 
     let elapsed: String
 
+    /// Light mode's LCD is backlit, so its glass gets a soft bloom overlay;
+    /// dark mode's LED glass stays unlit.
+    @Environment(\.colorScheme) private var colorScheme
+
     private let cornerRadius: CGFloat = 10
     /// Width of the raised bezel ring the glass window is sunk into.
     private let bezelWidth: CGFloat = 3
@@ -401,13 +405,29 @@ struct DigitalTimeReadout: View {
                         .strokeBorder(Theme.readoutStroke, lineWidth: 1)
                 }
 
-            // Dark glass window recessed into the bezel: an even inner shadow
-            // rings the whole well so the recess looks uniform.
+            // Glass window recessed into the bezel: an even inner shadow rings
+            // the whole well so the recess looks uniform.
             RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
                 .fill(
                     Theme.readoutGlass
-                        .shadow(.inner(color: .black.opacity(0.65), radius: 3, y: 1))
+                        .shadow(.inner(color: Theme.readoutWellShadow, radius: 3, y: 1))
                 )
+                .overlay {
+                    // Backlight bloom: the electroluminescent panel behind the
+                    // LCD is brightest in the middle and falls off toward the
+                    // edges, so the glass reads as lit from within.
+                    if colorScheme == .light {
+                        RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
+                            .fill(
+                                EllipticalGradient(
+                                    colors: [.white.opacity(0.24), .clear],
+                                    center: .center,
+                                    startRadiusFraction: 0,
+                                    endRadiusFraction: 0.85
+                                )
+                            )
+                    }
+                }
                 .overlay {
                     // Lip where the glass meets the bezel: dark top edge, light
                     // bottom edge, so the window reads as sunk below the ring.
@@ -433,6 +453,10 @@ struct DigitalTimeReadout: View {
 struct SevenSegmentDisplay: View {
     let text: String
     var digitHeight: CGFloat
+
+    /// Light mode renders as an LCD (dark ink segments that cast a soft shadow
+    /// onto the pale glass), dark mode as an LED (glowing segments).
+    @Environment(\.colorScheme) private var colorScheme
 
     // MARK: Metrics (all derived from digitHeight so the display scales as one)
 
@@ -471,11 +495,20 @@ struct SevenSegmentDisplay: View {
                 a: 1, b: 0, c: -skew, d: 1, tx: skew * digitHeight, ty: 0
             ))
 
+            let isLED = colorScheme == .dark
+
             var ghost = context
             ghost.addFilter(.blur(radius: thickness * 0.12))
 
+            // LED: a wide halo of the segment color underneath the crisp fill.
             var glow = context
             glow.addFilter(.blur(radius: digitHeight * 0.17))
+
+            // LCD: the ink layer floats just above the backing, dropping a
+            // tight shadow down-right onto the glass.
+            var shade = context
+            shade.translateBy(x: 0.8, y: 1.2)
+            shade.addFilter(.blur(radius: thickness * 0.35))
 
             var x: CGFloat = 0
             for glyph in glyphs {
@@ -485,7 +518,11 @@ struct SevenSegmentDisplay: View {
                     ghost.fill(path, with: .color(Theme.readoutGlow.opacity(0.14)))
                 }
                 for path in lit {
-                    glow.fill(path, with: .color(Theme.readoutGlow.opacity(0.95)))
+                    if isLED {
+                        glow.fill(path, with: .color(Theme.readoutGlow.opacity(0.95)))
+                    } else {
+                        shade.fill(path, with: .color(.black.opacity(0.30)))
+                    }
                 }
                 for path in lit {
                     context.fill(path, with: .color(Theme.readoutGlow))
