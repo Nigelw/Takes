@@ -375,7 +375,7 @@ private struct OpenAppearanceTunerButton: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("Appearance Tuner…") {
+        Button("Appearance Tuner") {
             openWindow(id: TakesWindowPolicy.appearanceTunerWindowID)
         }
     }

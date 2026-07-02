@@ -68,9 +68,17 @@ struct TransportButtonAppearance: Equatable {
     /// (currently the Repeat button).
     var activeFillOpacity: Double = 0.18
     /// Primary-tinted shadow emitted by the glyph when a secondary button is
-    /// active.
+    /// active. Kept tight — a soft halo laid right at the glyph edge; the wide
+    /// wash comes from the backlight pool below.
     var activeGlyphGlowOpacity: Double = 0
     var activeGlyphGlowRadius: Double = 0
+    /// Radial pool of primary light under the face when a secondary button is
+    /// active — brightest behind the glyph, fading out before the rim, like a
+    /// lamp beneath a translucent button cap.
+    var activeBacklightOpacity: Double = 0
+    /// Primary-tinted light the active button spills onto the surrounding bar.
+    var activeSpillOpacity: Double = 0
+    var activeSpillRadius: Double = 6.0
     /// Dark outer shadow above the button (recessed/pressed-in cue).
     var insetDarkOpacity: Double = 0.16
     var insetDarkRadius: Double = 1.5
@@ -118,9 +126,12 @@ struct TransportAppearance: Equatable {
         glossOpacity: 0.70,
         bevelWidth: 1.0,
         bevelBottomOpacity: 0.20,
-        activeFillOpacity: 0.04,
-        activeGlyphGlowOpacity: 0.49,
-        activeGlyphGlowRadius: 9.46,
+        activeFillOpacity: 0.06,
+        activeGlyphGlowOpacity: 0.45,
+        activeGlyphGlowRadius: 4.0,
+        activeBacklightOpacity: 0.07,
+        activeSpillOpacity: 0.35,
+        activeSpillRadius: 5.0,
         insetDarkRadius: 1.0,
         insetDarkY: -0.75,
         insetLightRadius: 0.75,
@@ -147,9 +158,12 @@ struct TransportAppearance: Equatable {
         bevelWidth: 1.0,
         bevelTopOpacity: 0.35,
         bevelBottomOpacity: 0.50,
-        activeFillOpacity: 0.10,
-        activeGlyphGlowOpacity: 0.83,
-        activeGlyphGlowRadius: 3.34,
+        activeFillOpacity: 0.12,
+        activeGlyphGlowOpacity: 0.85,
+        activeGlyphGlowRadius: 2.0,
+        activeBacklightOpacity: 0.30,
+        activeSpillOpacity: 0.50,
+        activeSpillRadius: 6.0,
         insetDarkOpacity: 0.45,
         insetDarkRadius: 1.0,
         insetDarkY: -0.75,
@@ -208,7 +222,6 @@ struct CircleTransportButtonStyle: ButtonStyle {
         return configuration.label
             .font(.system(size: glyphSize, weight: .semibold))
             .foregroundStyle(foreground)
-            .shadow(color: activeGlyphGlowColor(opacityScale: 0.85), radius: activeGlyphTightGlowRadius)
             .shadow(color: activeGlyphGlowColor(), radius: activeGlyphGlowRadius)
             // Pressed: the glyph sinks with the surface instead of shrinking.
             .offset(y: pressed ? pressedGlyphOffset : 0)
@@ -216,6 +229,9 @@ struct CircleTransportButtonStyle: ButtonStyle {
             .background(background(pressed: pressed))
             .overlay(border(pressed: pressed))
             .clipShape(Circle())
+            // Active buttons spill primary-tinted light onto the surrounding bar,
+            // so the glow reads as coming from the whole control, not the glyph.
+            .shadow(color: activeSpillColor, radius: CGFloat(appearance.activeSpillRadius))
             // Outer bevel: a soft dark shadow above and a light lip below make the
             // button read as slightly pressed into the window surface (concave cue).
             .shadow(color: .black.opacity(isEnabled ? appearance.insetDarkOpacity : 0), radius: CGFloat(appearance.insetDarkRadius), y: CGFloat(appearance.insetDarkY))
@@ -241,13 +257,14 @@ struct CircleTransportButtonStyle: ButtonStyle {
         kind == .secondary && isOn ? CGFloat(appearance.activeGlyphGlowRadius) : 0
     }
 
-    private var activeGlyphTightGlowRadius: CGFloat {
-        max(activeGlyphGlowRadius * 0.45, 0)
+    private func activeGlyphGlowColor() -> Color {
+        guard kind == .secondary, isOn else { return .clear }
+        return Theme.primary.opacity(appearance.activeGlyphGlowOpacity)
     }
 
-    private func activeGlyphGlowColor(opacityScale: Double = 1) -> Color {
-        guard kind == .secondary, isOn else { return .clear }
-        return Theme.primary.opacity(appearance.activeGlyphGlowOpacity * opacityScale)
+    private var activeSpillColor: Color {
+        guard kind == .secondary, isOn, isEnabled else { return .clear }
+        return Theme.primary.opacity(appearance.activeSpillOpacity)
     }
 
     /// Top-of-button gloss laid over the fill. Tweak these stops to adjust how
@@ -270,8 +287,21 @@ struct CircleTransportButtonStyle: ButtonStyle {
         case .secondary:
             Circle()
                 .fill(pressedWell(isOn ? AnyShapeStyle(Theme.primary.opacity(appearance.activeFillOpacity)) : AnyShapeStyle(appearance.secondaryFill), pressed: pressed))
+                .overlay(Circle().fill(backlight))
                 .overlay(Circle().fill(surfaceGloss(pressed: pressed)))
         }
+    }
+
+    /// Pool of primary light centered under the glyph of an active secondary
+    /// button, fading out before the rim — the lamp behind the button cap.
+    private var backlight: RadialGradient {
+        let opacity = isOn ? appearance.activeBacklightOpacity : 0
+        return RadialGradient(
+            colors: [Theme.primary.opacity(opacity), .clear],
+            center: .center,
+            startRadius: 0,
+            endRadius: diameter * 0.62
+        )
     }
 
     /// Wraps a fill so it casts a dark inner shadow from the top while pressed,
@@ -405,6 +435,9 @@ struct AppearanceTunerView: View {
                 tuner("Active highlight", value: b.activeFillOpacity, in: 0...1, default: d.activeFillOpacity)
                 tuner("Active glyph glow", value: b.activeGlyphGlowOpacity, in: 0...1, default: d.activeGlyphGlowOpacity)
                 tuner("Active glow radius", value: b.activeGlyphGlowRadius, in: 0...12, default: d.activeGlyphGlowRadius)
+                tuner("Active backlight", value: b.activeBacklightOpacity, in: 0...1, default: d.activeBacklightOpacity)
+                tuner("Active spill", value: b.activeSpillOpacity, in: 0...1, default: d.activeSpillOpacity)
+                tuner("Active spill radius", value: b.activeSpillRadius, in: 0...16, default: d.activeSpillRadius)
             }
             tuner("Inset dark opacity", value: b.insetDarkOpacity, in: 0...1, default: d.insetDarkOpacity)
             tuner("Inset dark radius", value: b.insetDarkRadius, in: 0...8, default: d.insetDarkRadius)
