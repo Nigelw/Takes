@@ -309,17 +309,20 @@ final class OpenFileCommandState: ObservableObject {
     private let loadAppleMusicSelection: @MainActor () -> Void
     private let loadFinderSelection: @MainActor () -> Void
     private let showActiveTrackInFinderAction: @MainActor () -> Void
+    private let removeActiveTrackAction: @MainActor () -> Void
     private let clearAllTracksAction: @MainActor () -> Void
 
     init(
         loadAppleMusicSelection: @escaping @MainActor () -> Void = {},
         loadFinderSelection: @escaping @MainActor () -> Void = {},
         showActiveTrackInFinder: @escaping @MainActor () -> Void = {},
+        removeActiveTrack: @escaping @MainActor () -> Void = {},
         clearAllTracks: @escaping @MainActor () -> Void = {}
     ) {
         self.loadAppleMusicSelection = loadAppleMusicSelection
         self.loadFinderSelection = loadFinderSelection
         self.showActiveTrackInFinderAction = showActiveTrackInFinder
+        self.removeActiveTrackAction = removeActiveTrack
         self.clearAllTracksAction = clearAllTracks
     }
 
@@ -343,6 +346,10 @@ final class OpenFileCommandState: ObservableObject {
         showActiveTrackInFinderAction()
     }
 
+    func removeActiveTrack() {
+        removeActiveTrackAction()
+    }
+
     func clearAllTracks() {
         clearAllTracksAction()
     }
@@ -353,6 +360,14 @@ private struct OpenFileCommandStateKey: FocusedValueKey {
 }
 
 private struct CanClearTracksKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
+private struct CanRemoveActiveTrackKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
+private struct CanUseGlobalMenuShortcutsKey: FocusedValueKey {
     typealias Value = Bool
 }
 
@@ -377,6 +392,16 @@ extension FocusedValues {
     var canClearTracks: Bool? {
         get { self[CanClearTracksKey.self] }
         set { self[CanClearTracksKey.self] = newValue }
+    }
+
+    var canRemoveActiveTrack: Bool? {
+        get { self[CanRemoveActiveTrackKey.self] }
+        set { self[CanRemoveActiveTrackKey.self] = newValue }
+    }
+
+    var canUseGlobalMenuShortcuts: Bool? {
+        get { self[CanUseGlobalMenuShortcutsKey.self] }
+        set { self[CanUseGlobalMenuShortcutsKey.self] = newValue }
     }
 
     var canShowActiveTrackInFinder: Bool? {
@@ -444,6 +469,10 @@ struct ContentView: View {
                 showActiveTrackInFinder: {
                     guard let url = controller.session.activeTrack?.loadedTrack.url else { return }
                     NSWorkspace.shared.activateFileViewerSelecting([url])
+                },
+                removeActiveTrack: {
+                    guard let trackID = controller.session.activeTrackID else { return }
+                    controller.removeTrack(trackID)
                 },
                 clearAllTracks: {
                     controller.clearTracks()
@@ -522,6 +551,8 @@ struct ContentView: View {
         }
         .focusedSceneValue(\.openFileCommandState, openFileCommandState)
         .focusedSceneValue(\.canShowActiveTrackInFinder, controller.session.activeTrack != nil)
+        .focusedSceneValue(\.canRemoveActiveTrack, controller.session.activeTrackID != nil)
+        .focusedSceneValue(\.canUseGlobalMenuShortcuts, focusedOffsetTrackID == nil)
         .focusedSceneValue(\.canClearTracks, !controller.session.tracks.isEmpty)
         .onAppear {
             setupKeyMonitor()
@@ -855,12 +886,12 @@ struct ContentView: View {
             // Center the button cluster in the taller header rather than pinning it up top.
             .frame(width: trackInfoWidth, height: trackHeaderHeight, alignment: .leading)
             .overlay(alignment: .trailing) {
-                Button("Clear All") {
+                Button("Remove All") {
                     controller.clearTracks()
                 }
                 .controlSize(.regular)
                 .disabled(controller.session.tracks.isEmpty)
-                .help("Clear all tracks")
+                .help("Remove all tracks")
                 .padding(.trailing, 8)
             }
 

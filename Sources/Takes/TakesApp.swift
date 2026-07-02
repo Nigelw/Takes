@@ -384,6 +384,8 @@ private struct OpenAppearanceTunerButton: View {
 private struct FileCommands: Commands {
     @FocusedValue(\.openFileCommandState) private var openFileCommandState
     @FocusedValue(\.canShowActiveTrackInFinder) private var canShowActiveTrackInFinder
+    @FocusedValue(\.canRemoveActiveTrack) private var canRemoveActiveTrack
+    @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
     @FocusedValue(\.canClearTracks) private var canClearTracks
 
     var body: some Commands {
@@ -416,7 +418,17 @@ private struct FileCommands: Commands {
 
             Divider()
 
-            Button("Clear All Tracks") {
+            Button("Remove Track") {
+                openFileCommandState?.removeActiveTrack()
+            }
+            .keyboardShortcut(.delete, modifiers: [])
+            .disabled(
+                openFileCommandState == nil
+                    || canRemoveActiveTrack != true
+                    || canUseGlobalMenuShortcuts != true
+            )
+
+            Button("Remove All Tracks") {
                 openFileCommandState?.clearAllTracks()
             }
             .keyboardShortcut(.delete, modifiers: [.command])
