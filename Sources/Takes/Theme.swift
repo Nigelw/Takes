@@ -12,7 +12,8 @@ extension NSAppearance {
 /// Central palette and semantic color tokens for the Takes redesign.
 ///
 /// Everything visual draws from here so the primary (indigo) and secondary
-/// (teal) hues stay consistent across the transport bar, timeline, and rows.
+/// (amber in light mode, cyan in dark) hues stay consistent across the
+/// transport bar, timeline, and rows.
 /// Colors are built from `NSColor` dynamic providers so a single token yields
 /// the right value in light and dark mode.
 enum Theme {
@@ -35,9 +36,12 @@ enum Theme {
         dark: (0.561, 0.529, 0.961)   // #8F87F5
     )
 
-    /// Teal used for the playhead and the loop-selection highlight.
+    /// Accent for the playhead and the loop-selection highlight. Tied to the
+    /// transport readout's display color (`readoutGlass`/`readoutGlow`): amber
+    /// in light mode, LED cyan in dark. The light amber is deepened a touch
+    /// from the glass color so a 2pt line holds up on light backgrounds.
     static let secondary = dynamic(
-        light: (0.059, 0.702, 0.780), // #0FB3C7
+        light: (0.871, 0.557, 0.118), // #DE8E1E
         dark: (0.220, 0.831, 0.902)   // #38D4E6
     )
 
@@ -101,6 +105,27 @@ enum Theme {
     /// Bright light edge of the readout, also used to engrave the digits.
     static let readoutHighlight = whiteAlpha(light: 0.72, dark: 0.08)
 
+    /// Glass window of the transport time readout. Two different machines:
+    /// light mode is a 90s amber-backlit LCD (the Alesis/Yamaha rack look),
+    /// dark mode the unlit near-black glass of an LED display.
+    static let readoutGlass = dynamic(
+        light: (0.922, 0.647, 0.235), // #EBA53C
+        dark: (0.027, 0.031, 0.043)   // #07080B
+    )
+
+    /// Seven-segment digit color: dark warm-brown LCD ink on the amber glass
+    /// in light mode, glowing LED cyan in dark mode.
+    static let readoutGlow = dynamic(
+        light: (0.243, 0.145, 0.055), // #3E250E
+        dark: (0.220, 0.831, 0.902)   // #38D4E6
+    )
+
+    /// Inner shadow of the readout's recessed glass well. Softer on the pale
+    /// LCD pane, deep on the dark LED glass.
+    static let readoutWellShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.65 : 0.28)
+    })
+
     /// Soft recessed inner-shadow edge of the readout.
     static let readoutShadow = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.isDark
@@ -110,4 +135,21 @@ enum Theme {
 
     /// Outer hairline around the readout panel.
     static let readoutStroke = whiteAlpha(light: 0.76, dark: 0.08)
+
+    /// Bright top edge of the raised bezel ring around the readout glass.
+    static let readoutBezelHighlight = whiteAlpha(light: 0.65, dark: 0.14)
+
+    /// Shadowed bottom edge of the bezel ring.
+    static let readoutBezelShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.45 : 0.16)
+    })
+
+    /// Faint reflected light along the bezel's bottom edge — the glint that
+    /// makes the ring read as polished rather than matte.
+    static let readoutBezelReflection = whiteAlpha(light: 0.55, dark: 0.10)
+
+    /// Soft drop shadow seating the readout panel on the transport bar.
+    static let readoutFrameShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.5 : 0.14)
+    })
 }

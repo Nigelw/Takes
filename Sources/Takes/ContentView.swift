@@ -351,6 +351,14 @@ private struct CanShowActiveTrackInFinderKey: FocusedValueKey {
     typealias Value = Bool
 }
 
+private struct TransportReadoutWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 180
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 extension FocusedValues {
     var openFileCommandState: OpenFileCommandState? {
         get { self[OpenFileCommandStateKey.self] }
@@ -380,9 +388,11 @@ struct ContentView: View {
     @State private var reorderInsertionTarget: TrackReorderInsertionTarget?
     @State private var emptyTrackIsDropTargeted = false
     @State private var hoveredTrackID: SessionTrack.ID?
+    @State private var focusedOffsetTrackID: SessionTrack.ID?
     @State private var didConfigureMainWindow = false
     @State private var mainWindow: NSWindow?
     @State private var loopDraft: LoopDraft?
+    @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
 
     /// An in-progress loop drag, in absolute seconds. `start` is where the drag
     /// began; `current` tracks the pointer. Committed to a `LoopRegion` on mouse-up.
@@ -455,8 +465,11 @@ struct ContentView: View {
         }
         .frame(
             minWidth: TakesWindowPolicy.minimumContentWidth,
-            minHeight: TakesWindowPolicy.minimumContentHeight
+            minHeight: TakesWindowPolicy.rootViewMinimumHeight
         )
+        // The transport bar doubles as the titlebar: lay the root view out
+        // under the hidden titlebar so the bar starts at the window's top edge.
+        .ignoresSafeArea(.container, edges: .top)
         .environment(\.transportAppearance, settings.transportAppearance)
         .background(WindowBackground().ignoresSafeArea())
         .background {
@@ -504,6 +517,10 @@ struct ContentView: View {
         .onAppear {
             setupKeyMonitor()
             waveformStore.sync(tracks: controller.session.tracks)
+            NSApp.appearance = settings.appearanceTheme.nsAppearance
+        }
+        .onChange(of: settings.appearanceTheme) { _, theme in
+            NSApp.appearance = theme.nsAppearance
         }
         .onChange(of: controller.session.tracks) { _, tracks in
             waveformStore.sync(tracks: tracks)
@@ -529,24 +546,55 @@ struct ContentView: View {
     }
 
     private var transportBar: some View {
-        ZStack {
-            // Pinned to the true window center, independent of the side clusters.
-            DigitalTimeReadout(
-                elapsed: controller.session.transportPosition.formattedSignedTimestamp
-            )
-            .frame(maxWidth: .infinity, alignment: .center)
+        GeometryReader { proxy in
+            let leftRegionWidth = max((proxy.size.width - transportReadoutWidth) / 2, 0)
 
-            HStack(spacing: 12) {
-                playButton
-                switchTrackButton
-                Spacer(minLength: 12)
-                repeatButton
-                zoomControls
+            ZStack {
+                HStack(spacing: 12) {
+                    playButton
+                    switchTrackButton
+                }
+                .frame(width: leftRegionWidth, alignment: .center)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Pinned to the true window center, independent of the side clusters.
+                DigitalTimeReadout(
+                    style: settings.readoutStyle,
+                    elapsed: controller.session.transportPosition.formattedSignedTimestamp
+                )
+                .background {
+                    GeometryReader { readoutProxy in
+                        Color.clear.preference(
+                            key: TransportReadoutWidthKey.self,
+                            value: readoutProxy.size.width
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                // Purely informational, so let clicks fall through to the window
+                // drag area — the readout shouldn't be a dead spot in the titlebar.
+                .allowsHitTesting(false)
+
+                HStack(spacing: 12) {
+                    repeatButton
+                    zoomControls
+                }
+                .padding(.trailing, 18)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .padding(.leading, 82)
-            .padding(.trailing, 18)
         }
-        .padding(.vertical, 12)
+        .frame(height: DigitalTimeReadout.panelHeight)
+        // Metrically 18 + 18, but shifted 2pt down: dead-center reads a touch
+        // high in the bar, so the controls sit slightly low of true center.
+        .padding(.top, 20)
+        .padding(.bottom, 16)
+        .onPreferenceChange(TransportReadoutWidthKey.self) { width in
+            guard width > 0, abs(width - transportReadoutWidth) > 0.5 else { return }
+            transportReadoutWidth = width
+        }
+        // The transport bar is the titlebar: any click on empty bar space
+        // (not claimed by a control above) drags the window.
+        .background(WindowDragArea())
         .componentDebugLabel("Transport Bar", enabled: settings.showsComponentDebugLabels)
     }
 
@@ -572,7 +620,7 @@ struct ContentView: View {
         Button {
             controller.selectNextTrack()
         } label: {
-            Image(systemName: "arrow.left.arrow.right")
+            Image(systemName: "arrow.trianglehead.swap")
         }
         .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: 40, glyphSize: 15))
         .disabled(!controller.session.canSwitchPlayback)
@@ -646,8 +694,8 @@ struct ContentView: View {
 
     private static func repeatSymbol(for mode: RepeatMode) -> String {
         switch mode {
-        case .off, .switchAndRepeat: return "repeat"
-        case .one: return "repeat.1"
+        case .off, .one: return "repeat"
+        case .switchAndRepeat: return "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill"
         }
     }
 
@@ -817,33 +865,50 @@ struct ContentView: View {
     private var playheadGrabberArt: some View {
         PlayheadHandle(tipWidth: 2)
             .fill(Theme.secondary)
-            // Beveled dimension: a light top highlight fading to a dark bottom shadow,
-            // blended over the teal fill. Adaptive so it reads in light and dark mode.
+            // Gloss cap over the upper body plus a shadowed taper, the same
+            // top-lit treatment as the transport buttons' faces.
             .overlay {
                 PlayheadHandle(tipWidth: 2)
                     .fill(
                         LinearGradient(
-                            colors: [.white.opacity(0.35), .clear, .black.opacity(0.22)],
+                            stops: [
+                                .init(color: .white.opacity(0.20), location: 0),
+                                .init(color: .white.opacity(0.14), location: 0.38),
+                                .init(color: .clear, location: 0.55),
+                                .init(color: .black.opacity(0.18), location: 1)
+                            ],
                             startPoint: .top,
                             endPoint: .bottom
                         )
                     )
             }
-            // Thin light edge along the top to sharpen the bevel.
+            // Beveled rim: a bright lit top edge falling into shadow at the
+            // tip, mirroring the transport buttons' bevel rings.
             .overlay {
                 PlayheadHandle(tipWidth: 2)
-                    .stroke(.white.opacity(0.30), lineWidth: 0.5)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.80), .white.opacity(0.12), .black.opacity(0.35)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.75
+                    )
             }
             .overlay {
-                // Two vertical grip lines to mimic GarageBand's grabber texture.
+                // Two engraved grip lines: dark grooves with a light catch on
+                // their lower lip, cut into the glossy cap.
                 HStack(spacing: 3) {
                     Capsule().frame(width: 1, height: 6)
                     Capsule().frame(width: 1, height: 6)
                 }
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(.black.opacity(0.32))
+                .shadow(color: .white.opacity(0.45), radius: 0.2, y: 0.6)
                 // Sit the grips in the rectangular upper body, above the tapered tip.
                 .offset(y: -1)
             }
+            // Slight lift off the ruler, like the raised transport controls.
+            .shadow(color: .black.opacity(0.30), radius: 1, y: 0.5)
             .accessibilityHidden(true)
     }
 
@@ -1169,7 +1234,7 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            offsetField(binding: binding)
+            offsetField(binding: binding, trackID: sessionTrack.id)
         }
     }
 
@@ -1178,11 +1243,19 @@ struct ContentView: View {
     /// it reads as one input `[  0  ms  ⌃⌄ ]`. Typed-entry/clamping and the
     /// Shift-large-step behavior come from `IntegerInputField`; the stepper mirrors
     /// the same step amounts.
-    private func offsetField(binding: Binding<Int>) -> some View {
-        HStack(spacing: 4) {
+    private func offsetField(binding: Binding<Int>, trackID: SessionTrack.ID) -> some View {
+        let isFocused = focusedOffsetTrackID == trackID
+        return HStack(spacing: 4) {
             IntegerInputField(
                 value: binding,
-                configuration: settings.offsetConfiguration
+                configuration: settings.offsetConfiguration,
+                onFocusChange: { focused in
+                    if focused {
+                        focusedOffsetTrackID = trackID
+                    } else if focusedOffsetTrackID == trackID {
+                        focusedOffsetTrackID = nil
+                    }
+                }
             )
             .frame(width: 44)
 
@@ -1207,17 +1280,23 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(Theme.readoutSurface.shadow(.inner(color: .black.opacity(0.15), radius: 1.5, y: 1)))
         }
+        // Focused: the bevel gives way to a solid ring in the app's active
+        // indigo, plus a soft matching glow so the live field is unmissable.
         .overlay {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(
-                    LinearGradient(
-                        colors: [.black.opacity(0.14), .white.opacity(0.45)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 1
+                    isFocused
+                        ? AnyShapeStyle(Theme.primary)
+                        : AnyShapeStyle(LinearGradient(
+                            colors: [.black.opacity(0.14), .white.opacity(0.45)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )),
+                    lineWidth: isFocused ? 1.5 : 1
                 )
         }
+        .shadow(color: isFocused ? Theme.primary.opacity(0.55) : .clear, radius: 3)
+        .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 
     private func stepOffset(binding: Binding<Int>, direction: Int) {
@@ -1288,8 +1367,7 @@ struct ContentView: View {
     /// loop, spanning all lanes across the waveform column. Clipped to the column
     /// so an off-screen loop never spills into the track-info column.
     private func loopSelectionOverlay(waveformWidth: CGFloat) -> some View {
-        let laneHeight = trackTimelineHeight - 16
-        return ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topLeading) {
             // Drag to select a loop; click to seek (and deselect if outside the loop).
             Color.clear
                 .contentShape(Rectangle())
@@ -1300,8 +1378,8 @@ struct ContentView: View {
                     .fill(Theme.secondary.opacity(0.16))
                     .overlay(alignment: .leading) { loopEdge() }
                     .overlay(alignment: .trailing) { loopEdge() }
-                    .frame(width: max(1, range.upperBound - range.lowerBound), height: laneHeight)
-                    .offset(x: range.lowerBound, y: 8)
+                    .frame(width: max(1, range.upperBound - range.lowerBound), height: trackTimelineHeight)
+                    .offset(x: range.lowerBound)
                     .allowsHitTesting(false)
             }
 
@@ -1321,14 +1399,15 @@ struct ContentView: View {
         .offset(x: trackInfoWidth)
     }
 
-    /// Grab handle drawn at each loop edge. Deliberately unlike the thin solid
-    /// playhead: a wider white capsule with a blue outline, so it reads as
-    /// draggable and stays distinguishable when the playhead sits on top of it.
+    /// Grab handle drawn at each loop edge: a slim accent rod inside a soft
+    /// accent halo. Deliberately unlike the flat solid playhead line, so it
+    /// reads as draggable and stays distinguishable when the playhead sits on
+    /// top of it.
     private func loopEdge() -> some View {
         Capsule()
-            .fill(Color.white)
-            .overlay(Capsule().strokeBorder(Theme.secondary, lineWidth: 1.5))
-            .frame(width: 6)
+            .fill(Theme.secondary)
+            .shadow(color: Theme.secondary.opacity(0.85), radius: 3)
+            .frame(width: 2)
     }
 
     /// x-span (points, within the waveform column) of the draft loop while
@@ -1359,9 +1438,9 @@ struct ContentView: View {
         let hitWidth: CGFloat = 12
         return Rectangle()
             .fill(Color.white.opacity(0.001))
-            .frame(width: hitWidth, height: trackTimelineHeight - 16)
+            .frame(width: hitWidth, height: trackTimelineHeight)
             .contentShape(Rectangle())
-            .offset(x: x - hitWidth / 2, y: 8)
+            .offset(x: x - hitWidth / 2)
             .onHover { inside in
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
             }
@@ -2266,6 +2345,7 @@ private struct TrackRowDropDelegate: DropDelegate {
 private struct IntegerInputField: NSViewRepresentable {
     @Binding var value: Int
     let configuration: NumericControlConfiguration
+    var onFocusChange: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -2285,11 +2365,13 @@ private struct IntegerInputField: NSViewRepresentable {
         textField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         textField.delegate = context.coordinator
         textField.stringValue = "\(value)"
+        textField.onFocusChange = onFocusChange
         return textField
     }
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
         context.coordinator.configuration = configuration
+        (nsView as? NumericInputTextField)?.onFocusChange = onFocusChange
         let clamped = configuration.clamped(value)
         if clamped != value {
             DispatchQueue.main.async {
@@ -2484,6 +2566,23 @@ private struct IntegerInputField: NSViewRepresentable {
     }
 
     private final class NumericInputTextField: NSTextField {
+        /// Reports focus so the composite box wrapping this borderless field can
+        /// draw its own highlight (the field's native focus ring is disabled).
+        var onFocusChange: ((Bool) -> Void)?
+
+        override func becomeFirstResponder() -> Bool {
+            let accepted = super.becomeFirstResponder()
+            if accepted {
+                onFocusChange?(true)
+            }
+            return accepted
+        }
+
+        override func textDidEndEditing(_ notification: Notification) {
+            super.textDidEndEditing(notification)
+            onFocusChange?(false)
+        }
+
         override func performKeyEquivalent(with event: NSEvent) -> Bool {
             guard NumericInputKeyEquivalentPolicy.routesToFieldEditor(event: event),
                   let fieldEditor = currentEditor() as? NSTextView

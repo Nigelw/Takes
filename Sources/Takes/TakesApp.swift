@@ -96,14 +96,22 @@ enum TakesWindowPolicy {
     static let contentPadding: CGFloat = 0
     static let rootVerticalSpacing: CGFloat = 1
     static let timelineHeaderSpacing: CGFloat = 1
-    // Play button / readout (56) + vertical padding (12 × 2).
-    static let transportBarReservedHeight: CGFloat = 80
+    // Play button / readout (56) + vertical padding (20 top + 16 bottom,
+    // optically shifted 2pt below true center).
+    static let transportBarReservedHeight: CGFloat = 92
     static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
     static let defaultContentHeight = contentHeight(displayingTrackRows: 1)
-    // SwiftUI still lays out the root view inside the titlebar-safe content
-    // layout rect, even though AppKit lets the background draw under the
-    // transparent full-size titlebar.
-    static let windowChromeHeight: CGFloat = 28
+    // The root view ignores the top safe area, so the transport bar occupies
+    // the hidden-titlebar region and the window adds no extra chrome height.
+    static let windowChromeHeight: CGFloat = 0
+    // The hidden titlebar still reports a top safe-area inset, and
+    // NSHostingView adds that inset to the root view's declared minimum height
+    // when it enforces the window's minimum size — even though the root view
+    // ignores the inset and lays out under the titlebar. Declare the SwiftUI
+    // minimum short by the inset so the enforced window minimum lands exactly
+    // on `minimumContentHeight`.
+    static let hiddenTitlebarSafeAreaInset: CGFloat = 28
+    static let rootViewMinimumHeight = minimumContentHeight - hiddenTitlebarSafeAreaInset
     static let defaultWindowHeight = defaultContentHeight + windowChromeHeight
     static let minimumWindowSize = CGSize(
         width: minimumContentWidth,
@@ -239,6 +247,10 @@ struct TakesApp: App {
             width: TakesWindowPolicy.defaultWindowWidth,
             height: TakesWindowPolicy.defaultWindowHeight
         )
+        // Declared on the scene (not just patched onto the NSWindow later) so
+        // SwiftUI sizes the hosting view full-height from creation, letting
+        // the window background genuinely draw under the titlebar.
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .appInfo) {
@@ -363,7 +375,7 @@ private struct OpenAppearanceTunerButton: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("Appearance Tuner…") {
+        Button("Appearance Tuner") {
             openWindow(id: TakesWindowPolicy.appearanceTunerWindowID)
         }
     }

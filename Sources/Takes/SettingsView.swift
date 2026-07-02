@@ -26,6 +26,22 @@ private struct GeneralSettingsView: View {
     var body: some View {
         Form {
             Section {
+                Picker("Theme", selection: $settings.appearanceTheme) {
+                    ForEach(AppearanceTheme.allCases) { theme in
+                        Text(theme.title).tag(theme)
+                    }
+                }
+
+                Picker("Readout Frame", selection: $settings.readoutStyle) {
+                    ForEach(ReadoutStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+            } header: {
+                Text("Appearance")
+            }
+
+            Section {
                 VStack(alignment: .leading, spacing: 4) {
                     LabeledContent("Nudge") {
                         OffsetAmountField(value: $settings.offsetStep, stepperIncrement: 10)
