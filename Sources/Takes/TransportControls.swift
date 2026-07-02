@@ -55,12 +55,43 @@ struct IndexBadgeAppearance: Equatable {
 /// Separate primary/secondary treatments — the secondary buttons are smaller
 /// (40pt vs 56pt), so they carry their own bevel/shadow values rather than
 /// reusing the primary's, which would read proportionally larger on them.
+///
+/// Each role also carries a dark-mode variant: white-based highlights (gloss,
+/// bevel top, light lip) glow far brighter against dark surfaces so they are
+/// dialed down, while black-based shadows (bevel bottom, inset dark) all but
+/// vanish on dark backgrounds so they are dialed up.
 struct TransportAppearance: Equatable {
-    var primary = TransportButtonAppearance()
-    var secondary = TransportButtonAppearance(
+    var lightPrimary = TransportButtonAppearance(
+        bevelTopOpacity: 0.70,
+        insetDarkOpacity: 0.25,
+        insetDarkY: -0.75
+    )
+    var lightSecondary = TransportButtonAppearance(
+        glossOpacity: 0.70,
         bevelWidth: 1.0,
+        bevelBottomOpacity: 0.20,
         insetDarkRadius: 1.0,
         insetDarkY: -0.75,
+        insetLightRadius: 0.75,
+        insetLightY: 1.0
+    )
+    var darkPrimary = TransportButtonAppearance(
+        glossOpacity: 0.20,
+        bevelTopOpacity: 0.40,
+        bevelBottomOpacity: 0.60,
+        insetDarkOpacity: 0.50,
+        insetDarkY: -0.75,
+        insetLightOpacity: 0.12
+    )
+    var darkSecondary = TransportButtonAppearance(
+        glossOpacity: 0.25,
+        bevelWidth: 1.0,
+        bevelTopOpacity: 0.35,
+        bevelBottomOpacity: 0.50,
+        insetDarkOpacity: 0.45,
+        insetDarkRadius: 1.0,
+        insetDarkY: -0.75,
+        insetLightOpacity: 0.10,
         insetLightRadius: 0.75,
         insetLightY: 1.0
     )
@@ -94,30 +125,39 @@ struct CircleTransportButtonStyle: ButtonStyle {
     var glyphSize: CGFloat
 
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.transportAppearance) private var transportAppearance
 
-    /// The treatment for this button's role — primary and secondary are tuned
-    /// separately so effects stay proportional to each button's size.
+    /// The treatment for this button's role and the current appearance mode —
+    /// primary/secondary are tuned separately so effects stay proportional to
+    /// each button's size, and light/dark carry their own highlight balances.
     private var appearance: TransportButtonAppearance {
-        kind == .primary ? transportAppearance.primary : transportAppearance.secondary
+        switch kind {
+        case .primary:
+            return colorScheme == .dark ? transportAppearance.darkPrimary : transportAppearance.lightPrimary
+        case .secondary:
+            return colorScheme == .dark ? transportAppearance.darkSecondary : transportAppearance.lightSecondary
+        }
     }
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let pressed = configuration.isPressed
+        return configuration.label
             .font(.system(size: glyphSize, weight: .semibold))
             .foregroundStyle(foreground)
+            // Pressed: the glyph sinks with the surface instead of shrinking.
+            .offset(y: pressed ? 0.75 : 0)
             .frame(width: diameter, height: diameter)
-            .background(background)
-            .overlay(border)
+            .background(background(pressed: pressed))
+            .overlay(border(pressed: pressed))
             .clipShape(Circle())
             // Outer bevel: a soft dark shadow above and a light lip below make the
             // button read as slightly pressed into the window surface (concave cue).
             .shadow(color: .black.opacity(isEnabled ? appearance.insetDarkOpacity : 0), radius: CGFloat(appearance.insetDarkRadius), y: CGFloat(appearance.insetDarkY))
             .shadow(color: .white.opacity(isEnabled ? appearance.insetLightOpacity : 0), radius: CGFloat(appearance.insetLightRadius), y: CGFloat(appearance.insetLightY))
-            .scaleEffect(configuration.isPressed ? 0.93 : 1)
             .opacity(isEnabled ? 1 : 0.4)
-            .brightness(configuration.isPressed ? -0.04 : 0)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .brightness(pressed ? -0.06 : 0)
+            .animation(.easeOut(duration: 0.12), value: pressed)
             .contentShape(Circle())
     }
 
@@ -131,37 +171,41 @@ struct CircleTransportButtonStyle: ButtonStyle {
     }
 
     /// Top-of-button gloss laid over the fill. Tweak these stops to adjust how
-    /// glossy/shiny the transport buttons look.
-    private var surfaceGloss: LinearGradient {
+    /// glossy/shiny the transport buttons look. Dims while pressed so the face
+    /// reads as tilted away from the light.
+    private func surfaceGloss(pressed: Bool) -> LinearGradient {
         LinearGradient(
-            colors: [Color.white.opacity(appearance.glossOpacity), .clear],
+            colors: [Color.white.opacity(appearance.glossOpacity * (pressed ? 0.35 : 1)), .clear],
             startPoint: .top,
             endPoint: .center
         )
     }
 
     @ViewBuilder
-    private var background: some View {
+    private func background(pressed: Bool) -> some View {
         switch kind {
         case .primary:
-            Circle().fill(Theme.primary).overlay(Circle().fill(surfaceGloss))
+            Circle().fill(Theme.primary).overlay(Circle().fill(surfaceGloss(pressed: pressed)))
         case .secondary:
             Circle()
                 .fill(isOn ? AnyShapeStyle(Theme.primary.opacity(0.18)) : AnyShapeStyle(appearance.secondaryFill))
-                .overlay(Circle().fill(surfaceGloss))
+                .overlay(Circle().fill(surfaceGloss(pressed: pressed)))
         }
     }
 
     // Crisp beveled rim matching the track index badge: bright along the top
-    // edge fading to a dark bottom edge, encircling the whole button.
-    private var border: some View {
-        Circle().strokeBorder(
+    // edge fading to a dark bottom edge, encircling the whole button. While
+    // pressed the rim inverts (dark top, light bottom) so the button reads as
+    // pushed into the surface rather than raised.
+    private func border(pressed: Bool) -> some View {
+        let raised: [Color] = [
+            .white.opacity(appearance.bevelTopOpacity),
+            .white.opacity(appearance.bevelTopOpacity * 0.24),
+            .black.opacity(appearance.bevelBottomOpacity)
+        ]
+        return Circle().strokeBorder(
             LinearGradient(
-                colors: [
-                    .white.opacity(appearance.bevelTopOpacity),
-                    .white.opacity(appearance.bevelTopOpacity * 0.24),
-                    .black.opacity(appearance.bevelBottomOpacity)
-                ],
+                colors: pressed ? raised.reversed() : raised,
                 startPoint: .top,
                 endPoint: .bottom
             ),
@@ -221,10 +265,14 @@ struct AppearanceTunerView: View {
         let badge = $settings.indexBadgeAppearance
         let badgeDefaults = IndexBadgeAppearance()
         return Form {
-            buttonSection("Primary Button (Play)", $settings.transportAppearance.primary,
-                          defaults: TransportAppearance().primary, showFill: false)
-            buttonSection("Secondary Buttons (Switch / Repeat)", $settings.transportAppearance.secondary,
-                          defaults: TransportAppearance().secondary, showFill: true)
+            buttonSection("Primary Button — Light", $settings.transportAppearance.lightPrimary,
+                          defaults: TransportAppearance().lightPrimary, showFill: false)
+            buttonSection("Secondary Buttons — Light", $settings.transportAppearance.lightSecondary,
+                          defaults: TransportAppearance().lightSecondary, showFill: true)
+            buttonSection("Primary Button — Dark", $settings.transportAppearance.darkPrimary,
+                          defaults: TransportAppearance().darkPrimary, showFill: false)
+            buttonSection("Secondary Buttons — Dark", $settings.transportAppearance.darkSecondary,
+                          defaults: TransportAppearance().darkSecondary, showFill: true)
             Section("Index Badge") {
                 tuner("Bevel width", value: badge.bevelWidth, in: 0...4, default: badgeDefaults.bevelWidth)
                 tuner("Bevel top", value: badge.bevelTopOpacity, in: 0...1, default: badgeDefaults.bevelTopOpacity)
