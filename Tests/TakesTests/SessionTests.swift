@@ -159,12 +159,11 @@ struct SessionTests {
     }
 
     @Test
-    func windowPolicyAddsTitlebarLayoutInsetToDefaultWindowHeight() {
-        // The background draws under the transparent titlebar, but SwiftUI lays
-        // out the content inside AppKit's titlebar-safe content layout rect.
-        #expect(TakesWindowPolicy.windowChromeHeight == 28)
-        #expect(TakesWindowPolicy.defaultWindowHeight == TakesWindowPolicy.defaultContentHeight + TakesWindowPolicy.windowChromeHeight)
-        #expect(TakesWindowPolicy.defaultWindowHeight > TakesWindowPolicy.defaultContentHeight)
+    func windowPolicyAddsNoChromeHeightAboveContent() {
+        // The transport bar occupies the hidden-titlebar region (the root view
+        // ignores the top safe area), so the window is exactly content-sized.
+        #expect(TakesWindowPolicy.windowChromeHeight == 0)
+        #expect(TakesWindowPolicy.defaultWindowHeight == TakesWindowPolicy.defaultContentHeight)
     }
 
     @Test

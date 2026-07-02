@@ -464,8 +464,11 @@ struct ContentView: View {
         }
         .frame(
             minWidth: TakesWindowPolicy.minimumContentWidth,
-            minHeight: TakesWindowPolicy.minimumContentHeight
+            minHeight: TakesWindowPolicy.rootViewMinimumHeight
         )
+        // The transport bar doubles as the titlebar: lay the root view out
+        // under the hidden titlebar so the bar starts at the window's top edge.
+        .ignoresSafeArea(.container, edges: .top)
         .environment(\.transportAppearance, settings.transportAppearance)
         .background(WindowBackground().ignoresSafeArea())
         .background {
@@ -562,6 +565,9 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
+                // Purely informational, so let clicks fall through to the window
+                // drag area — the readout shouldn't be a dead spot in the titlebar.
+                .allowsHitTesting(false)
 
                 HStack(spacing: 12) {
                     repeatButton
@@ -572,11 +578,17 @@ struct ContentView: View {
             }
         }
         .frame(height: DigitalTimeReadout.panelHeight)
-        .padding(.vertical, 12)
+        // Metrically 18 + 18, but shifted 2pt down: dead-center reads a touch
+        // high in the bar, so the controls sit slightly low of true center.
+        .padding(.top, 20)
+        .padding(.bottom, 16)
         .onPreferenceChange(TransportReadoutWidthKey.self) { width in
             guard width > 0, abs(width - transportReadoutWidth) > 0.5 else { return }
             transportReadoutWidth = width
         }
+        // The transport bar is the titlebar: any click on empty bar space
+        // (not claimed by a control above) drags the window.
+        .background(WindowDragArea())
         .componentDebugLabel("Transport Bar", enabled: settings.showsComponentDebugLabels)
     }
 
