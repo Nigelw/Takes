@@ -13,7 +13,7 @@ struct SettingsView: View {
 
             UpdateSettingsView()
                 .tabItem {
-                    Label("Update", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Updates", systemImage: "arrow.triangle.2.circlepath")
                 }
         }
         .frame(width: 460)
@@ -27,9 +27,10 @@ private struct GeneralSettingsView: View {
         Form {
             Section {
                 Picker("Theme", selection: $settings.appearanceTheme) {
-                    ForEach(AppearanceTheme.allCases) { theme in
-                        Text(theme.title).tag(theme)
-                    }
+                    Text(AppearanceTheme.system.title).tag(AppearanceTheme.system)
+                    Divider()
+                    Text(AppearanceTheme.light.title).tag(AppearanceTheme.light)
+                    Text(AppearanceTheme.dark.title).tag(AppearanceTheme.dark)
                 }
 
                 Picker("Readout Frame", selection: $settings.readoutStyle) {
@@ -63,9 +64,10 @@ private struct GeneralSettingsView: View {
                 HStack {
                     Spacer()
                     Button("Restore Defaults") {
-                        settings.restoreOffsetDefaults()
+                        settings.restoreDefaults()
                     }
-                    .disabled(settings.offsetAmountsAreDefault)
+                    .disabled(settings.settingsAreDefault)
+                    Spacer()
                 }
             }
         }
@@ -114,6 +116,9 @@ private struct UpdateSettingsView: View {
         Form {
             Section {
                 Toggle("Automatically check for updates", isOn: $updater.automaticallyChecksForUpdates)
+
+                Toggle("Automatically install updates", isOn: $updater.automaticallyDownloadsUpdates)
+                    .disabled(!updater.automaticallyChecksForUpdates || !updater.allowsAutomaticUpdates)
 
                 Picker("Check for updates", selection: $updater.checkFrequency) {
                     ForEach(UpdateCheckFrequency.allCases) { frequency in

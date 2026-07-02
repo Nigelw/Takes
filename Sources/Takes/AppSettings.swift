@@ -28,14 +28,16 @@ enum AppearanceTheme: String, CaseIterable, Identifiable {
 
 /// Visual treatment for the transport time readout.
 enum ReadoutStyle: String, CaseIterable, Identifiable {
-    /// Seven-segment LED/LCD display behind dark glass, styled like an 80s rack
-    /// unit's counter — glowing digits in dark mode, an amber-backlit LCD in light.
-    case retro
+    static let allCases: [ReadoutStyle] = [.glass, .retro]
 
     /// A convex glass tile resting directly on the transport bar: no bezel, a
     /// domed highlight where the glass catches the light, edges dipping just
     /// below the surrounding surface.
     case glass
+
+    /// Seven-segment LED/LCD display behind dark glass, styled like an 80s rack
+    /// unit's counter — glowing digits in dark mode, an amber-backlit LCD in light.
+    case retro
 
     var id: String { rawValue }
 
@@ -59,6 +61,8 @@ final class AppSettings: ObservableObject {
     nonisolated static let offsetStepDefault = NumericControlConfiguration.offset.step
     nonisolated static let offsetLargeStepDefault = NumericControlConfiguration.offset.largeStep
     nonisolated static let offsetStepRange = 1...10_000
+    nonisolated static let appearanceThemeDefault: AppearanceTheme = .system
+    nonisolated static let readoutStyleDefault: ReadoutStyle = .glass
 
     nonisolated static let offsetStepKey = "offsetNudgeStep"
     nonisolated static let offsetLargeStepKey = "offsetLargeNudgeStep"
@@ -132,13 +136,22 @@ final class AppSettings: ObservableObject {
         )
     }
 
-    func restoreOffsetDefaults() {
+    func restoreDefaults() {
         offsetStep = Self.offsetStepDefault
         offsetLargeStep = Self.offsetLargeStepDefault
+        appearanceTheme = Self.appearanceThemeDefault
+        readoutStyle = Self.readoutStyleDefault
+        transportAppearance = TransportAppearance()
+        indexBadgeAppearance = IndexBadgeAppearance()
     }
 
-    var offsetAmountsAreDefault: Bool {
-        offsetStep == Self.offsetStepDefault && offsetLargeStep == Self.offsetLargeStepDefault
+    var settingsAreDefault: Bool {
+        offsetStep == Self.offsetStepDefault
+            && offsetLargeStep == Self.offsetLargeStepDefault
+            && appearanceTheme == Self.appearanceThemeDefault
+            && readoutStyle == Self.readoutStyleDefault
+            && transportAppearance == TransportAppearance()
+            && indexBadgeAppearance == IndexBadgeAppearance()
     }
 
     nonisolated static func clamp(_ value: Int) -> Int {
@@ -154,10 +167,10 @@ final class AppSettings: ObservableObject {
     }
 
     nonisolated static func storedAppearanceTheme(_ defaults: UserDefaults = .standard) -> AppearanceTheme {
-        defaults.string(forKey: appearanceThemeKey).flatMap(AppearanceTheme.init(rawValue:)) ?? .system
+        defaults.string(forKey: appearanceThemeKey).flatMap(AppearanceTheme.init(rawValue:)) ?? appearanceThemeDefault
     }
 
     nonisolated static func storedReadoutStyle(_ defaults: UserDefaults = .standard) -> ReadoutStyle {
-        defaults.string(forKey: readoutStyleKey).flatMap(ReadoutStyle.init(rawValue:)) ?? .retro
+        defaults.string(forKey: readoutStyleKey).flatMap(ReadoutStyle.init(rawValue:)) ?? readoutStyleDefault
     }
 }

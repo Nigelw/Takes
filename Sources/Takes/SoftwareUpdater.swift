@@ -41,8 +41,18 @@ final class SoftwareUpdater: ObservableObject {
 
     @Published var automaticallyChecksForUpdates: Bool {
         didSet {
+            if !automaticallyChecksForUpdates {
+                automaticallyDownloadsUpdates = false
+            }
             guard updater.automaticallyChecksForUpdates != automaticallyChecksForUpdates else { return }
             updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates
+        }
+    }
+
+    @Published var automaticallyDownloadsUpdates: Bool {
+        didSet {
+            guard updater.automaticallyDownloadsUpdates != automaticallyDownloadsUpdates else { return }
+            updater.automaticallyDownloadsUpdates = automaticallyDownloadsUpdates
         }
     }
 
@@ -55,6 +65,7 @@ final class SoftwareUpdater: ObservableObject {
 
     @Published private(set) var lastUpdateCheckDate: Date?
     @Published private(set) var canCheckForUpdates: Bool
+    @Published private(set) var allowsAutomaticUpdates: Bool
 
     init() {
         controller = SPUStandardUpdaterController(
@@ -65,15 +76,28 @@ final class SoftwareUpdater: ObservableObject {
 
         let updater = controller.updater
         automaticallyChecksForUpdates = updater.automaticallyChecksForUpdates
+        automaticallyDownloadsUpdates = updater.automaticallyDownloadsUpdates
         checkFrequency = .closest(to: updater.updateCheckInterval)
         lastUpdateCheckDate = updater.lastUpdateCheckDate
         canCheckForUpdates = updater.canCheckForUpdates
+        allowsAutomaticUpdates = updater.allowsAutomaticUpdates
 
         observers.append(
             updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
                 MainActor.assumeIsolated {
                     self?.canCheckForUpdates = updater.canCheckForUpdates
                     self?.lastUpdateCheckDate = updater.lastUpdateCheckDate
+                }
+            }
+        )
+
+        observers.append(
+            updater.observe(\.allowsAutomaticUpdates, options: [.initial, .new]) { [weak self] updater, _ in
+                MainActor.assumeIsolated {
+                    self?.allowsAutomaticUpdates = updater.allowsAutomaticUpdates
+                    if !updater.allowsAutomaticUpdates {
+                        self?.automaticallyDownloadsUpdates = false
+                    }
                 }
             }
         )
