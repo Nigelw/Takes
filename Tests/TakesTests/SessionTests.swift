@@ -1468,6 +1468,21 @@ struct SessionTests {
 
     @Test
     @MainActor
+    func cursorResetPolicyRestoresArrowOnlyOutsideTextInputs() {
+        let container = NSView(frame: .zero)
+        let textField = NSTextField(frame: .zero)
+        container.addSubview(textField)
+        let button = NSButton(frame: .zero)
+        container.addSubview(button)
+
+        #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.iBeam, hitView: button) == true)
+        #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.iBeam, hitView: textField) == false)
+        #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.iBeam, hitView: nil) == true)
+        #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.arrow, hitView: button) == false)
+    }
+
+    @Test
+    @MainActor
     func globalShortcutsAreDisabledWhileTextInputIsFocused() {
         #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: nil) == true)
         #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSView(frame: .zero)) == true)

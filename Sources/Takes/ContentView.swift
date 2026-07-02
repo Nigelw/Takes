@@ -162,25 +162,39 @@ enum NumericInputKeyEquivalentPolicy {
 
 struct NumericControlFocusPolicy {
     @MainActor
-    static func shouldClearEditingFocus(firstResponder: NSResponder?, clickedView: NSView?) -> Bool {
-        guard firstResponder is NSTextView else { return false }
-        guard let clickedView else { return true }
-
-        var currentView: NSView? = clickedView
+    static func isTextInputView(_ view: NSView) -> Bool {
+        var currentView: NSView? = view
         while let view = currentView {
-            if view is NSTextField {
-                return false
+            if view is NSTextField || view is NSTextView {
+                return true
             }
             currentView = view.superview
         }
 
-        return true
+        return false
+    }
+
+    @MainActor
+    static func shouldClearEditingFocus(firstResponder: NSResponder?, clickedView: NSView?) -> Bool {
+        guard firstResponder is NSTextView else { return false }
+        guard let clickedView else { return true }
+
+        return !isTextInputView(clickedView)
     }
 }
 
 struct GlobalShortcutFocusPolicy {
     static func shouldHandleGlobalShortcut(firstResponder: NSResponder?) -> Bool {
         !(firstResponder is NSTextView || firstResponder is NSTextField)
+    }
+}
+
+struct CursorResetPolicy {
+    @MainActor
+    static func shouldUseArrowCursor(currentCursor: NSCursor, hitView: NSView?) -> Bool {
+        guard currentCursor === NSCursor.iBeam else { return false }
+        guard let hitView else { return true }
+        return !NumericControlFocusPolicy.isTextInputView(hitView)
     }
 }
 
@@ -1924,6 +1938,11 @@ struct ContentView: View {
             let locationInWindow = event.locationInWindow
             let clickedView = window.contentView?.hitTest(locationInWindow)
 
+            if CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.current, hitView: clickedView) {
+                NSCursor.arrow.set()
+            }
+
+            guard event.type != .mouseMoved else { return }
             if NumericControlFocusPolicy.shouldClearEditingFocus(
                 firstResponder: window.firstResponder,
                 clickedView: clickedView
