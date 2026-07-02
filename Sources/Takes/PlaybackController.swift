@@ -84,7 +84,7 @@ final class PlaybackController: ObservableObject {
             }
 
             do {
-                preparedLoads.append(try prepareTrackLoad(from: url))
+                preparedLoads.append(try await prepareTrackLoad(from: url))
             } catch let error as PlaybackError {
                 failures.append(ImportFailure(url: url, message: error.localizedDescription))
             } catch {
@@ -209,8 +209,8 @@ final class PlaybackController: ObservableObject {
         playbackError = nil
     }
 
-    private func prepareTrackLoad(from url: URL) throws -> PreparedTrackLoad {
-        let metadata = try loader.loadTrackMetadata(from: url)
+    private func prepareTrackLoad(from url: URL) async throws -> PreparedTrackLoad {
+        let metadata = try await loader.loadTrackMetadata(from: url)
         let file = try loader.makeAudioFile(from: url)
         return PreparedTrackLoad(metadata: metadata, file: file)
     }
@@ -369,7 +369,7 @@ final class PlaybackController: ObservableObject {
         guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
 
         do {
-            let preparedLoad = try prepareTrackLoad(from: url)
+            let preparedLoad = try await prepareTrackLoad(from: url)
             let wasPlaying = session.isPlaying
             let resumePosition = wasPlaying ? currentTransportPosition() : nil
 

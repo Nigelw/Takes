@@ -1308,12 +1308,12 @@ private struct FakeAudioFileLoader: AudioFileLoading {
     var delayedMetadataURLs: Set<URL> = []
     var metadataDelay: TimeInterval = 0
 
-    func loadTrackMetadata(from url: URL) throws -> LoadedTrack {
+    func loadTrackMetadata(from url: URL) async throws -> LoadedTrack {
         if failingURLs.contains(url) {
             throw PlaybackError.failedToOpenFile(url)
         }
         if delayedMetadataURLs.contains(url) {
-            Thread.sleep(forTimeInterval: metadataDelay)
+            try await Task.sleep(for: .seconds(metadataDelay))
         }
 
         let file = try AVAudioFile(forReading: url)

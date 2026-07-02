@@ -1,13 +1,13 @@
 import AVFoundation
 import Foundation
 
-protocol AudioFileLoading {
-    func loadTrackMetadata(from url: URL) throws -> LoadedTrack
+protocol AudioFileLoading: Sendable {
+    func loadTrackMetadata(from url: URL) async throws -> LoadedTrack
     func makeAudioFile(from url: URL) throws -> AVAudioFile
 }
 
 struct AudioFileLoader: AudioFileLoading {
-    func loadTrackMetadata(from url: URL) throws -> LoadedTrack {
+    func loadTrackMetadata(from url: URL) async throws -> LoadedTrack {
         do {
             let file = try AVAudioFile(forReading: url)
             let format = file.processingFormat
@@ -23,7 +23,7 @@ struct AudioFileLoader: AudioFileLoading {
                 duration: duration,
                 sampleRate: format.sampleRate,
                 channelCount: format.channelCount,
-                bitRate: estimatedBitRate(for: url)
+                bitRate: await estimatedBitRate(for: url)
             )
         } catch let error as PlaybackError {
             throw error
@@ -36,16 +36,15 @@ struct AudioFileLoader: AudioFileLoading {
     /// Returns `0` when no rate is available (e.g. some lossless files) so the UI
     /// can drop the bit-rate segment rather than show "0 kbps". Any failure degrades
     /// to `0`.
-    ///
-    /// Uses the synchronous `tracks`/`estimatedDataRate` accessors (deprecated in
-    /// favour of the async `load(_:)` variants) because `loadTrackMetadata` is a
-    /// synchronous, `throws`-only entry point; the target is always a fully
-    /// available local file, so the synchronous read is safe here.
-    private func estimatedBitRate(for url: URL) -> Double {
+    private func estimatedBitRate(for url: URL) async -> Double {
         let asset = AVURLAsset(url: url)
-        guard let track = asset.tracks(withMediaType: .audio).first else { return 0 }
-        let rate = Double(track.estimatedDataRate)
-        return rate.isFinite && rate > 0 ? rate : 0
+        do {
+            guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return 0 }
+            let rate = Double(try await track.load(.estimatedDataRate))
+            return rate.isFinite && rate > 0 ? rate : 0
+        } catch {
+            return 0
+        }
     }
 
     func makeAudioFile(from url: URL) throws -> AVAudioFile {
