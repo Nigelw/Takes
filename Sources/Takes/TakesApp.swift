@@ -1,4 +1,6 @@
 import AppKit
+import Combine
+import MediaPlayer
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -80,6 +82,104 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         fileOpenRouter.open(urls)
+    }
+}
+
+@MainActor
+final class RemotePlaybackCommandController: ObservableObject {
+    private struct CommandTarget {
+        let command: MPRemoteCommand
+        let target: Any
+    }
+
+    private weak var controller: PlaybackController?
+    private let commandCenter: MPRemoteCommandCenter
+    private let nowPlayingInfoCenter: MPNowPlayingInfoCenter
+    private var commandTargets: [CommandTarget] = []
+    private var sessionCancellable: AnyCancellable?
+
+    init(
+        commandCenter: MPRemoteCommandCenter = .shared(),
+        nowPlayingInfoCenter: MPNowPlayingInfoCenter = .default()
+    ) {
+        self.commandCenter = commandCenter
+        self.nowPlayingInfoCenter = nowPlayingInfoCenter
+    }
+
+    func connect(to controller: PlaybackController) {
+        guard self.controller == nil else { return }
+        self.controller = controller
+        configureCommands()
+        sessionCancellable = controller.$session.sink { [weak self] session in
+            self?.updateRemoteState(for: session)
+        }
+        updateRemoteState(for: controller.session)
+    }
+
+    private func configureCommands() {
+        addHandler(to: commandCenter.playCommand) { [weak self] in
+            guard let controller = self?.controller, controller.session.isPlayable else { return }
+            controller.play()
+        }
+        addHandler(to: commandCenter.pauseCommand) { [weak self] in
+            guard let controller = self?.controller, controller.session.isPlaying else { return }
+            controller.pause()
+        }
+        addHandler(to: commandCenter.togglePlayPauseCommand) { [weak self] in
+            guard let controller = self?.controller, controller.session.isPlayable else { return }
+            controller.session.isPlaying ? controller.pause() : controller.play()
+        }
+        addHandler(to: commandCenter.nextTrackCommand) { [weak self] in
+            guard let controller = self?.controller, controller.session.canSwitchPlayback else { return }
+            controller.selectNextTrack()
+        }
+        addHandler(to: commandCenter.previousTrackCommand) { [weak self] in
+            guard let controller = self?.controller, controller.session.canSwitchPlayback else { return }
+            controller.selectPreviousTrack()
+        }
+    }
+
+    private func addHandler(to command: MPRemoteCommand, perform action: @escaping @MainActor () -> Void) {
+        let target = command.addTarget { _ in
+            Task { @MainActor in
+                action()
+            }
+            return .success
+        }
+        commandTargets.append(CommandTarget(command: command, target: target))
+    }
+
+    private func updateRemoteState(for session: ComparisonSession) {
+        commandCenter.playCommand.isEnabled = session.isPlayable && !session.isPlaying
+        commandCenter.pauseCommand.isEnabled = session.isPlayable && session.isPlaying
+        commandCenter.togglePlayPauseCommand.isEnabled = session.isPlayable
+        commandCenter.nextTrackCommand.isEnabled = session.canSwitchPlayback
+        commandCenter.previousTrackCommand.isEnabled = session.canSwitchPlayback
+
+        if session.isPlayable {
+            nowPlayingInfoCenter.nowPlayingInfo = nowPlayingInfo(for: session)
+            nowPlayingInfoCenter.playbackState = session.isPlaying ? .playing : .paused
+        } else {
+            nowPlayingInfoCenter.nowPlayingInfo = nil
+            nowPlayingInfoCenter.playbackState = .stopped
+        }
+    }
+
+    private func nowPlayingInfo(for session: ComparisonSession) -> [String: Any] {
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: session.activeTrack?.loadedTrack.displayName ?? "Takes",
+            MPMediaItemPropertyPlaybackDuration: session.playbackEnd - session.playbackStart,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: session.transportPosition - session.playbackStart,
+            MPNowPlayingInfoPropertyPlaybackRate: session.isPlaying ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue
+        ]
+
+        if let activeTrackIndex = session.activeTrackIndex {
+            info[MPMediaItemPropertyAlbumTrackNumber] = activeTrackIndex + 1
+            info[MPMediaItemPropertyAlbumTrackCount] = session.tracks.count
+        }
+
+        return info
     }
 }
 
@@ -225,6 +325,7 @@ enum TakesWindowPolicy {
 struct TakesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var controller = PlaybackController()
+    @StateObject private var remotePlaybackCommands = RemotePlaybackCommandController()
     @StateObject private var settings = AppSettings()
     @StateObject private var updater = SoftwareUpdater()
 
@@ -238,6 +339,7 @@ struct TakesApp: App {
                 .environmentObject(settings)
                 .environmentObject(updater)
                 .onAppear {
+                    remotePlaybackCommands.connect(to: controller)
                     appDelegate.fileOpenRouter.setHandler { urls in
                         Task { await controller.loadImportedFiles(urls) }
                     }
