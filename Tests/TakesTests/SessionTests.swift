@@ -271,7 +271,7 @@ struct SessionTests {
 
     @Test
     func windowPolicyUsesNarrowerMinimumWidthThanDefaultWidth() {
-        #expect(TakesWindowPolicy.minimumContentWidth == 500)
+        #expect(TakesWindowPolicy.minimumContentWidth == 600)
         #expect(TakesWindowPolicy.defaultWindowWidth > TakesWindowPolicy.minimumContentWidth)
     }
 

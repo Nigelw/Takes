@@ -88,7 +88,7 @@ enum TakesWindowPolicy {
     static let appearanceTunerWindowID = "appearance-tuner"
     static let replacesDefaultNewItemCommands = true
     static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
-    static let minimumContentWidth: CGFloat = 500
+    static let minimumContentWidth: CGFloat = 600
     static let defaultWindowWidth: CGFloat = 700
     static let trackRowHeight: CGFloat = 96
     static let trackTimelineDividerHeight: CGFloat = 1

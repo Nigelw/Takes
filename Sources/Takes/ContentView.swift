@@ -547,14 +547,14 @@ struct ContentView: View {
 
     private var transportBar: some View {
         GeometryReader { proxy in
-            let leftRegionWidth = max((proxy.size.width - transportReadoutWidth) / 2, 0)
+            let sideRegionWidth = max((proxy.size.width - transportReadoutWidth) / 2, 0)
 
             ZStack {
                 HStack(spacing: 12) {
                     playButton
                     switchTrackButton
                 }
-                .frame(width: leftRegionWidth, alignment: .center)
+                .frame(width: sideRegionWidth, alignment: .center)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Pinned to the true window center, independent of the side clusters.
@@ -575,11 +575,14 @@ struct ContentView: View {
                 // drag area — the readout shouldn't be a dead spot in the titlebar.
                 .allowsHitTesting(false)
 
-                HStack(spacing: 12) {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
                     repeatButton
+                    Spacer(minLength: 0)
                     zoomControls
                 }
                 .padding(.trailing, 18)
+                .frame(width: sideRegionWidth, alignment: .trailing)
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
@@ -660,7 +663,7 @@ struct ContentView: View {
                 in: 0...1
             )
             .controlSize(.small)
-            .frame(width: 96)
+            .frame(width: 72)
             .disabled(!enabled)
             .accessibilityLabel("Timeline Zoom")
 
