@@ -420,7 +420,8 @@ struct ContentView: View {
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
     @State private var reorderInsertionTarget: TrackReorderInsertionTarget?
-    @State private var emptyTrackIsDropTargeted = false
+    @State private var windowIsDropTargeted = false
+    @State private var emptyStateIsHovered = false
     @State private var hoveredTrackID: SessionTrack.ID?
     @State private var focusedOffsetTrackID: SessionTrack.ID?
     @State private var didConfigureMainWindow = false
@@ -543,7 +544,7 @@ struct ContentView: View {
         } message: {
             Text(controller.playbackError?.localizedDescription ?? "")
         }
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $windowIsDropTargeted) { providers in
             loadDroppedURLs(from: providers)
         }
         .fileImporter(
@@ -822,16 +823,19 @@ struct ContentView: View {
         GeometryReader { proxy in
             let waveformWidth = max(proxy.size.width - trackInfoWidth, 1)
             VStack(alignment: .leading, spacing: 0) {
-                trackTimelineHeader(waveformWidth: waveformWidth)
-                    .frame(width: proxy.size.width, height: trackHeaderHeight)
-                Divider()
+                if controller.session.tracks.isEmpty {
+                    // The empty state owns the whole section — no header, no
+                    // column split — one centered drop/click target.
+                    trackAreaEmptyState
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    trackTimelineHeader(waveformWidth: waveformWidth)
+                        .frame(width: proxy.size.width, height: trackHeaderHeight)
+                    Divider()
 
-                ScrollView(.vertical) {
-                    ZStack(alignment: .topLeading) {
-                        VStack(spacing: 0) {
-                            if controller.session.tracks.isEmpty {
-                                emptyTrackRow(infoWidth: trackInfoWidth)
-                            } else {
+                    ScrollView(.vertical) {
+                        ZStack(alignment: .topLeading) {
+                            VStack(spacing: 0) {
                                 ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
                                     trackRow(index: index, sessionTrack: sessionTrack, infoWidth: trackInfoWidth)
                                     if index < controller.session.tracks.count - 1 {
@@ -840,38 +844,44 @@ struct ContentView: View {
                                     }
                                 }
                             }
-                        }
 
-                        if controller.session.isPlayable {
-                            loopSelectionOverlay(waveformWidth: waveformWidth)
+                            if controller.session.isPlayable {
+                                loopSelectionOverlay(waveformWidth: waveformWidth)
+                            }
                         }
+                        .frame(width: proxy.size.width)
                     }
-                    .frame(width: proxy.size.width)
+                    .frame(maxHeight: .infinity)
                 }
-                .frame(maxHeight: .infinity)
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             .overlay(alignment: .topLeading) {
-                TimelineScrollOverlay(
-                    visibleStart: controller.session.visibleStart,
-                    visibleSpan: visibleSpan,
-                    contentStart: controller.session.timelineStart,
-                    contentEnd: controller.session.timelineEnd,
-                    onScroll: { controller.scrollTimeline(toVisibleStart: $0) },
-                    onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
-                )
-                .frame(width: waveformWidth, height: proxy.size.height)
-                .offset(x: trackInfoWidth)
+                if !controller.session.tracks.isEmpty {
+                    TimelineScrollOverlay(
+                        visibleStart: controller.session.visibleStart,
+                        visibleSpan: visibleSpan,
+                        contentStart: controller.session.timelineStart,
+                        contentEnd: controller.session.timelineEnd,
+                        onScroll: { controller.scrollTimeline(toVisibleStart: $0) },
+                        onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
+                    )
+                    .frame(width: waveformWidth, height: proxy.size.height)
+                    .offset(x: trackInfoWidth)
+                }
             }
             .overlay(alignment: .topLeading) {
                 // Frozen-column edge: one continuous hairline at the info/waveform
                 // boundary, running the full height so the header's control|ruler
                 // border and the rows' info|waveform border are the same line.
-                Rectangle()
-                    .fill(Theme.frozenColumnEdge)
-                    .frame(width: 1, height: proxy.size.height)
-                    .offset(x: trackInfoWidth)
-                    .allowsHitTesting(false)
+                // With no tracks the whole section is the empty state, so there
+                // is no column boundary to draw.
+                if !controller.session.tracks.isEmpty {
+                    Rectangle()
+                        .fill(Theme.frozenColumnEdge)
+                        .frame(width: 1, height: proxy.size.height)
+                        .offset(x: trackInfoWidth)
+                        .allowsHitTesting(false)
+                }
             }
             // Playhead drawn last so the grabber and line sit ON TOP of the
             // frozen-column and header/row dividers rather than under them.
@@ -1168,26 +1178,60 @@ struct ContentView: View {
         }
     }
 
-    private func emptyTrackRow(infoWidth: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Track 1")
-                    .font(.headline)
-                Text("No file loaded")
-                    .foregroundStyle(.secondary)
+    /// Kaleidoscope-style empty state: one centered composition — a soft
+    /// circular badge holding a waveform glyph, a single line of text below —
+    /// owning the whole track section with no header or column split. Hovering
+    /// darkens the badge and swaps the drag prompt for a click prompt; clicking
+    /// anywhere opens the file dialog. Dragging files over any part of the
+    /// window tints the badge, glyph, and background with the indigo brand
+    /// color (drops are handled by the window-wide `onDrop`).
+    private var trackAreaEmptyState: some View {
+        let isTargeted = windowIsDropTargeted
+        return VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(badgeFill(isTargeted: isTargeted))
+                Image(systemName: "waveform")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(isTargeted ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(.secondary))
             }
-            .padding(12)
-            .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
-            .background(backgroundStyle(for: TrackDropHighlight.empty(isTargeted: emptyTrackIsDropTargeted)))
+            .frame(width: 52, height: 52)
 
-            waveformLane(index: 0, sessionTrack: nil)
-                .frame(maxWidth: .infinity)
-                .frame(height: trackRowHeight)
+            // Both prompts stay mounted and crossfade so the swap doesn't
+            // reflow the layout.
+            ZStack {
+                Text("Drag Audio Files Here to Compare")
+                    .opacity(emptyStateIsHovered && !isTargeted ? 0 : 1)
+                Text("Click Here to Compare")
+                    .opacity(emptyStateIsHovered && !isTargeted ? 1 : 0)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.secondary)
         }
-        .frame(height: trackRowHeight)
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $emptyTrackIsDropTargeted) { providers in
-            loadDroppedURLs(from: providers)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.primary.opacity(isTargeted ? 0.08 : 0))
+        .animation(.easeInOut(duration: 0.15), value: emptyStateIsHovered)
+        .animation(.easeInOut(duration: 0.15), value: isTargeted)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            emptyStateIsHovered = inside
         }
+        .onTapGesture {
+            performImportAction(.open)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Add audio files to compare")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private func badgeFill(isTargeted: Bool) -> AnyShapeStyle {
+        if isTargeted {
+            return AnyShapeStyle(Theme.primary.opacity(0.16))
+        }
+        if emptyStateIsHovered {
+            return AnyShapeStyle(.tertiary.opacity(0.55))
+        }
+        return AnyShapeStyle(.quaternary.opacity(0.6))
     }
 
     private func trackInfoArea(index: Int, sessionTrack: SessionTrack, showsTrash: Bool) -> some View {
@@ -1379,7 +1423,7 @@ struct ContentView: View {
         return ruler.majorTicks.map { xPosition(for: $0.time, width: width) }
     }
 
-    private func waveformLane(index: Int, sessionTrack: SessionTrack?) -> some View {
+    private func waveformLane(index: Int, sessionTrack: SessionTrack) -> some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Rectangle()
@@ -1395,18 +1439,11 @@ struct ContentView: View {
                         .accessibilityHidden(true)
                 }
 
-                if let sessionTrack {
-                    let loaded = sessionTrack.loadedTrack
-                    let isActive = controller.session.activeTrackID == sessionTrack.id
-                    waveformShape(for: waveformStore.waveform(for: sessionTrack.id), track: loaded)
-                        .frame(width: proxy.size.width, height: 58)
-                        .foregroundStyle(isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7))
-                } else {
-                    Text("Drop audio file here")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 16)
-                }
+                let loaded = sessionTrack.loadedTrack
+                let isActive = controller.session.activeTrackID == sessionTrack.id
+                waveformShape(for: waveformStore.waveform(for: sessionTrack.id), track: loaded)
+                    .frame(width: proxy.size.width, height: 58)
+                    .foregroundStyle(isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7))
 
                 Rectangle()
                     .fill(.secondary.opacity(0.25))
