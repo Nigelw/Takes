@@ -18,6 +18,38 @@ struct WindowBackground: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
+/// Invisible AppKit view that makes the transport bar behave like a titlebar:
+/// it sits behind the SwiftUI controls, so buttons and sliders above it keep
+/// their clicks, while presses on empty bar space fall through here and drag
+/// the window. Double-clicks honour the system "double-click a window's title
+/// bar to" preference.
+struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { DragView() }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class DragView: NSView {
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            if event.clickCount == 2 {
+                switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+                case "Minimize":
+                    window?.performMiniaturize(nil)
+                case "None":
+                    break
+                default:
+                    window?.performZoom(nil)
+                }
+                return
+            }
+            super.mouseUp(with: event)
+        }
+    }
+}
+
 /// Live-tunable surface treatment for the transport buttons. Defaults match the
 /// shipped look; the Debug ▸ Appearance Tuner panel binds these for adjustment.
 struct TransportButtonAppearance: Equatable {
@@ -264,6 +296,9 @@ struct DigitalTimeReadout: View {
             // backlight to evoke an LCD without tipping into neon.
             .shadow(color: Theme.readoutHighlight, radius: 0, y: 0.5)
             .shadow(color: Theme.secondary.opacity(0.22), radius: 3.5)
+            // The digits' layout box lands 1pt high inside the fixed-height
+            // panel, so nudge the glyphs down to true-center them.
+            .offset(y: 1)
             .padding(.horizontal, 28)
             .frame(minWidth: 180)
             .frame(height: Self.panelHeight)
