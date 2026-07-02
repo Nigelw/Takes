@@ -336,48 +336,264 @@ struct CircleTransportButtonStyle: ButtonStyle {
     }
 }
 
-/// "Digital readout" showing elapsed time, styled as a beveled inset panel on a
-/// piece of hardware: an evenly recessed well with the digits engraved into it.
+/// "Digital readout" showing elapsed time as a seven-segment LED display set
+/// behind dark glass — slanted glowing digits over faint ghost segments, the
+/// way an 80s rack unit or tape deck counter reads.
 struct DigitalTimeReadout: View {
     /// Fixed panel height. Shared with the Play button diameter so the two line
-    /// up exactly. Comfortably clears the 30pt digits with breathing room above
-    /// and below.
+    /// up exactly.
     static let panelHeight: CGFloat = 56
 
     let elapsed: String
 
     private let cornerRadius: CGFloat = 10
+    /// Width of the raised bezel ring the glass window is sunk into.
+    private let bezelWidth: CGFloat = 3
+
+    private var glassCornerRadius: CGFloat { cornerRadius - bezelWidth }
 
     var body: some View {
-        Text(elapsed)
-            .font(.system(size: 30, weight: .semibold, design: .monospaced))
-            .foregroundStyle(.primary)
-            // Engraved digits: a faint light copy pressed just below the glyphs
-            // so they read as debossed into the panel, plus a hint of teal
-            // backlight to evoke an LCD without tipping into neon.
-            .shadow(color: Theme.readoutHighlight, radius: 0, y: 0.5)
-            .shadow(color: Theme.secondary.opacity(0.22), radius: 3.5)
-            // The digits' layout box lands 1pt high inside the fixed-height
-            // panel, so nudge the glyphs down to true-center them.
-            .offset(y: 1)
+        SevenSegmentDisplay(text: elapsed, digitHeight: 27)
             .padding(.horizontal, 28)
             .frame(minWidth: 180)
             .frame(height: Self.panelHeight)
-            .background {
-                // Even, all-sides recess: one inner shadow rings the whole well
-                // instead of a top-only edge, so the bevel looks uniform.
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(
-                        Theme.readoutSurface
-                            .shadow(.inner(color: Theme.readoutShadow, radius: 2.5, y: 0.5))
-                    )
-            }
+            .background { panel }
             .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Theme.readoutStroke, lineWidth: 1)
+                // Glass sheen: a soft reflection catching the top of the window.
+                RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .white.opacity(0.08), location: 0),
+                                .init(color: .white.opacity(0.02), location: 0.35),
+                                .init(color: .clear, location: 0.5)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .padding(bezelWidth)
+                    .allowsHitTesting(false)
             }
             .accessibilityLabel("Elapsed Time")
             .accessibilityValue(elapsed)
+    }
+
+    /// Bezel plate plus the dark glass window sunk into it.
+    private var panel: some View {
+        ZStack {
+            // Raised metal ring: lit from above, falling into shadow at the
+            // bottom, like the machined surround on a rack unit's counter.
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Theme.transportButtonFill)
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Theme.readoutBezelHighlight, .clear, Theme.readoutBezelShadow],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Theme.readoutStroke, lineWidth: 1)
+                }
+
+            // Dark glass window recessed into the bezel: an even inner shadow
+            // rings the whole well so the recess looks uniform.
+            RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
+                .fill(
+                    Theme.readoutGlass
+                        .shadow(.inner(color: .black.opacity(0.65), radius: 3, y: 1))
+                )
+                .overlay {
+                    // Lip where the glass meets the bezel: dark top edge, light
+                    // bottom edge, so the window reads as sunk below the ring.
+                    RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [.black.opacity(0.45), .white.opacity(0.22)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                }
+                .padding(bezelWidth)
+        }
+    }
+}
+
+/// Draws a string of digits, colons, and minus signs as a slanted
+/// seven-segment LED display: every cell shows all of its segments as faint
+/// "ghosts" (the unlit LED material) with the active ones lit and glowing.
+/// Understands `0`–`9`, `:`, and `-`; anything else renders as a blank cell.
+struct SevenSegmentDisplay: View {
+    let text: String
+    var digitHeight: CGFloat
+
+    // MARK: Metrics (all derived from digitHeight so the display scales as one)
+
+    private var digitWidth: CGFloat { digitHeight * 0.56 }
+    private var colonWidth: CGFloat { digitHeight * 0.24 }
+    private var thickness: CGFloat { digitHeight * 0.15 }
+    private var cellSpacing: CGFloat { digitHeight * 0.24 }
+    /// Rightward lean of the digits (tangent of the slant angle), the classic
+    /// italic cant of LED clock faces.
+    private var skew: CGFloat { 0.10 }
+
+    private var glyphs: [Character] { Array(text) }
+
+    private func width(of glyph: Character) -> CGFloat {
+        glyph == ":" ? colonWidth : digitWidth
+    }
+
+    private var intrinsicWidth: CGFloat {
+        let cells = glyphs.reduce(CGFloat.zero) { $0 + width(of: $1) }
+        let gaps = cellSpacing * CGFloat(max(glyphs.count - 1, 0))
+        // The slant pushes the top of the leftmost cell past the layout origin,
+        // so reserve the overhang.
+        return cells + gaps + digitHeight * skew
+    }
+
+    /// Extra canvas margin on every side so the glow blur can trail off
+    /// smoothly instead of being clipped hard at the digits' layout edge.
+    /// Trimmed back out with negative padding so layout is unaffected.
+    private var bleed: CGFloat { digitHeight * 0.5 }
+
+    var body: some View {
+        Canvas { context, size in
+            context.translateBy(x: bleed, y: bleed)
+            // Shear so cells lean right at the top while their baselines stay put.
+            context.concatenate(CGAffineTransform(
+                a: 1, b: 0, c: -skew, d: 1, tx: skew * digitHeight, ty: 0
+            ))
+
+            var ghost = context
+            ghost.addFilter(.blur(radius: thickness * 0.12))
+
+            var glow = context
+            glow.addFilter(.blur(radius: digitHeight * 0.17))
+
+            var x: CGFloat = 0
+            for glyph in glyphs {
+                let cell = CGRect(x: x, y: 0, width: width(of: glyph), height: digitHeight)
+                let lit = litPaths(for: glyph, in: cell)
+                for path in unlitPaths(for: glyph, in: cell) {
+                    ghost.fill(path, with: .color(Theme.readoutGlow.opacity(0.14)))
+                }
+                for path in lit {
+                    glow.fill(path, with: .color(Theme.readoutGlow.opacity(0.95)))
+                }
+                for path in lit {
+                    context.fill(path, with: .color(Theme.readoutGlow))
+                }
+                x = cell.maxX + cellSpacing
+            }
+        }
+        .frame(width: intrinsicWidth + bleed * 2, height: digitHeight + bleed * 2)
+        .padding(-bleed)
+    }
+
+    // MARK: Segment geometry
+
+    private enum Segment: CaseIterable {
+        case top, topRight, bottomRight, bottom, bottomLeft, topLeft, middle
+    }
+
+    private static let segmentMap: [Character: Set<Segment>] = [
+        "0": [.top, .topRight, .bottomRight, .bottom, .bottomLeft, .topLeft],
+        "1": [.topRight, .bottomRight],
+        "2": [.top, .topRight, .middle, .bottomLeft, .bottom],
+        "3": [.top, .topRight, .middle, .bottomRight, .bottom],
+        "4": [.topLeft, .middle, .topRight, .bottomRight],
+        "5": [.top, .topLeft, .middle, .bottomRight, .bottom],
+        "6": [.top, .topLeft, .middle, .bottomLeft, .bottomRight, .bottom],
+        "7": [.top, .topRight, .bottomRight],
+        "8": Set(Segment.allCases),
+        "9": [.top, .topRight, .bottomRight, .bottom, .topLeft, .middle],
+        "-": [.middle]
+    ]
+
+    private func litPaths(for glyph: Character, in cell: CGRect) -> [Path] {
+        if glyph == ":" { return colonDots(in: cell) }
+        guard let segments = Self.segmentMap[glyph] else { return [] }
+        return segments.map { path(for: $0, in: cell) }
+    }
+
+    private func unlitPaths(for glyph: Character, in cell: CGRect) -> [Path] {
+        if glyph == ":" { return [] }
+        let lit = Self.segmentMap[glyph] ?? []
+        return Segment.allCases.filter { !lit.contains($0) }.map { path(for: $0, in: cell) }
+    }
+
+    private func path(for segment: Segment, in cell: CGRect) -> Path {
+        let half = thickness / 2
+        // Breathing room between segment tips so they don't fuse at the corners.
+        let gap = thickness * 0.42
+        let left = cell.minX + half
+        let right = cell.maxX - half
+        let top = cell.minY + half
+        let mid = cell.midY
+        let bottom = cell.maxY - half
+
+        switch segment {
+        case .top:
+            return horizontalSegment(fromX: left + gap, toX: right - gap, centerY: top)
+        case .middle:
+            return horizontalSegment(fromX: left + gap, toX: right - gap, centerY: mid)
+        case .bottom:
+            return horizontalSegment(fromX: left + gap, toX: right - gap, centerY: bottom)
+        case .topLeft:
+            return verticalSegment(fromY: top + gap, toY: mid - gap, centerX: left)
+        case .topRight:
+            return verticalSegment(fromY: top + gap, toY: mid - gap, centerX: right)
+        case .bottomLeft:
+            return verticalSegment(fromY: mid + gap, toY: bottom - gap, centerX: left)
+        case .bottomRight:
+            return verticalSegment(fromY: mid + gap, toY: bottom - gap, centerX: right)
+        }
+    }
+
+    /// Elongated hexagon with pointed ends, the canonical LED segment shape.
+    private func horizontalSegment(fromX xa: CGFloat, toX xb: CGFloat, centerY y: CGFloat) -> Path {
+        let half = thickness / 2
+        var path = Path()
+        path.move(to: CGPoint(x: xa, y: y))
+        path.addLine(to: CGPoint(x: xa + half, y: y - half))
+        path.addLine(to: CGPoint(x: xb - half, y: y - half))
+        path.addLine(to: CGPoint(x: xb, y: y))
+        path.addLine(to: CGPoint(x: xb - half, y: y + half))
+        path.addLine(to: CGPoint(x: xa + half, y: y + half))
+        path.closeSubpath()
+        return path
+    }
+
+    private func verticalSegment(fromY ya: CGFloat, toY yb: CGFloat, centerX x: CGFloat) -> Path {
+        let half = thickness / 2
+        var path = Path()
+        path.move(to: CGPoint(x: x, y: ya))
+        path.addLine(to: CGPoint(x: x + half, y: ya + half))
+        path.addLine(to: CGPoint(x: x + half, y: yb - half))
+        path.addLine(to: CGPoint(x: x, y: yb))
+        path.addLine(to: CGPoint(x: x - half, y: yb - half))
+        path.addLine(to: CGPoint(x: x - half, y: ya + half))
+        path.closeSubpath()
+        return path
+    }
+
+    private func colonDots(in cell: CGRect) -> [Path] {
+        let side = thickness
+        return [cell.height * 0.32, cell.height * 0.68].map { y in
+            Path(ellipseIn: CGRect(
+                x: cell.midX - side / 2,
+                y: cell.minY + y - side / 2,
+                width: side,
+                height: side
+            ))
+        }
     }
 }
 

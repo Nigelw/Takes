@@ -101,6 +101,21 @@ enum Theme {
     /// Bright light edge of the readout, also used to engrave the digits.
     static let readoutHighlight = whiteAlpha(light: 0.72, dark: 0.08)
 
+    /// Dark glass window of the transport time readout. Dark in both modes —
+    /// a display window reads as unlit glass no matter what hardware surrounds
+    /// it — but a touch lighter in light mode so it doesn't punch a hole in the bar.
+    static let readoutGlass = dynamic(
+        light: (0.086, 0.098, 0.125), // #161920
+        dark: (0.027, 0.031, 0.043)   // #07080B
+    )
+
+    /// LED hue of the seven-segment digits. Same cyan in both modes; the glass
+    /// behind it is always dark so it never needs a light-mode variant.
+    static let readoutGlow = dynamic(
+        light: (0.220, 0.831, 0.902), // #38D4E6
+        dark: (0.220, 0.831, 0.902)
+    )
+
     /// Soft recessed inner-shadow edge of the readout.
     static let readoutShadow = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.isDark
@@ -110,4 +125,12 @@ enum Theme {
 
     /// Outer hairline around the readout panel.
     static let readoutStroke = whiteAlpha(light: 0.76, dark: 0.08)
+
+    /// Bright top edge of the raised bezel ring around the readout glass.
+    static let readoutBezelHighlight = whiteAlpha(light: 0.65, dark: 0.14)
+
+    /// Shadowed bottom edge of the bezel ring.
+    static let readoutBezelShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.45 : 0.16)
+    })
 }
