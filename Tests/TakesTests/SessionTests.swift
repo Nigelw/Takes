@@ -111,6 +111,23 @@ struct SessionTests {
         #expect(controller.playbackError == nil)
     }
 
+    @MainActor
+    @Test
+    func trackLimitErrorSummarizesLargeSkippedFileLists() {
+        let skippedFileNames = (0..<40).map { "track-\($0).wav" }
+        let description = PlaybackError.trackLimitExceeded(
+            limit: PlaybackController.maximumTrackCount,
+            skippedFileNames: skippedFileNames
+        ).localizedDescription
+
+        #expect(description.contains("Takes currently supports up to 32 loaded tracks."))
+        #expect(description.contains("Skipped 40 files (showing first 8):"))
+        #expect(description.contains("track-0.wav"))
+        #expect(description.contains("track-7.wav"))
+        #expect(!description.contains("track-8.wav"))
+        #expect(description.contains("... and 32 more."))
+    }
+
     @Test
     func unsignedTimestampClampsNegativeTimes() {
         #expect(TimeInterval(-12).formattedTimestamp == "00:00")
