@@ -864,33 +864,50 @@ struct ContentView: View {
     private var playheadGrabberArt: some View {
         PlayheadHandle(tipWidth: 2)
             .fill(Theme.secondary)
-            // Beveled dimension: a light top highlight fading to a dark bottom shadow,
-            // blended over the accent fill. Adaptive so it reads in light and dark mode.
+            // Gloss cap over the upper body plus a shadowed taper, the same
+            // top-lit treatment as the transport buttons' faces.
             .overlay {
                 PlayheadHandle(tipWidth: 2)
                     .fill(
                         LinearGradient(
-                            colors: [.white.opacity(0.35), .clear, .black.opacity(0.22)],
+                            stops: [
+                                .init(color: .white.opacity(0.20), location: 0),
+                                .init(color: .white.opacity(0.14), location: 0.38),
+                                .init(color: .clear, location: 0.55),
+                                .init(color: .black.opacity(0.18), location: 1)
+                            ],
                             startPoint: .top,
                             endPoint: .bottom
                         )
                     )
             }
-            // Thin light edge along the top to sharpen the bevel.
+            // Beveled rim: a bright lit top edge falling into shadow at the
+            // tip, mirroring the transport buttons' bevel rings.
             .overlay {
                 PlayheadHandle(tipWidth: 2)
-                    .stroke(.white.opacity(0.30), lineWidth: 0.5)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.80), .white.opacity(0.12), .black.opacity(0.35)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.75
+                    )
             }
             .overlay {
-                // Two vertical grip lines to mimic GarageBand's grabber texture.
+                // Two engraved grip lines: dark grooves with a light catch on
+                // their lower lip, cut into the glossy cap.
                 HStack(spacing: 3) {
                     Capsule().frame(width: 1, height: 6)
                     Capsule().frame(width: 1, height: 6)
                 }
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(.black.opacity(0.32))
+                .shadow(color: .white.opacity(0.45), radius: 0.2, y: 0.6)
                 // Sit the grips in the rectangular upper body, above the tapered tip.
                 .offset(y: -1)
             }
+            // Slight lift off the ruler, like the raised transport controls.
+            .shadow(color: .black.opacity(0.30), radius: 1, y: 0.5)
             .accessibilityHidden(true)
     }
 
@@ -1335,8 +1352,7 @@ struct ContentView: View {
     /// loop, spanning all lanes across the waveform column. Clipped to the column
     /// so an off-screen loop never spills into the track-info column.
     private func loopSelectionOverlay(waveformWidth: CGFloat) -> some View {
-        let laneHeight = trackTimelineHeight - 16
-        return ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topLeading) {
             // Drag to select a loop; click to seek (and deselect if outside the loop).
             Color.clear
                 .contentShape(Rectangle())
@@ -1347,8 +1363,8 @@ struct ContentView: View {
                     .fill(Theme.secondary.opacity(0.16))
                     .overlay(alignment: .leading) { loopEdge() }
                     .overlay(alignment: .trailing) { loopEdge() }
-                    .frame(width: max(1, range.upperBound - range.lowerBound), height: laneHeight)
-                    .offset(x: range.lowerBound, y: 8)
+                    .frame(width: max(1, range.upperBound - range.lowerBound), height: trackTimelineHeight)
+                    .offset(x: range.lowerBound)
                     .allowsHitTesting(false)
             }
 
@@ -1368,14 +1384,15 @@ struct ContentView: View {
         .offset(x: trackInfoWidth)
     }
 
-    /// Grab handle drawn at each loop edge. Deliberately unlike the thin solid
-    /// playhead: a wider white capsule with an accent outline, so it reads as
-    /// draggable and stays distinguishable when the playhead sits on top of it.
+    /// Grab handle drawn at each loop edge: a slim accent rod inside a soft
+    /// accent halo. Deliberately unlike the flat solid playhead line, so it
+    /// reads as draggable and stays distinguishable when the playhead sits on
+    /// top of it.
     private func loopEdge() -> some View {
         Capsule()
-            .fill(Color.white)
-            .overlay(Capsule().strokeBorder(Theme.secondary, lineWidth: 1.5))
-            .frame(width: 6)
+            .fill(Theme.secondary)
+            .shadow(color: Theme.secondary.opacity(0.85), radius: 3)
+            .frame(width: 2)
     }
 
     /// x-span (points, within the waveform column) of the draft loop while
@@ -1406,9 +1423,9 @@ struct ContentView: View {
         let hitWidth: CGFloat = 12
         return Rectangle()
             .fill(Color.white.opacity(0.001))
-            .frame(width: hitWidth, height: trackTimelineHeight - 16)
+            .frame(width: hitWidth, height: trackTimelineHeight)
             .contentShape(Rectangle())
-            .offset(x: x - hitWidth / 2, y: 8)
+            .offset(x: x - hitWidth / 2)
             .onHover { inside in
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
             }
