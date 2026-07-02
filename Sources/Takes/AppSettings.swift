@@ -1,4 +1,51 @@
-import Foundation
+import AppKit
+
+/// The app's overall light/dark appearance. `.system` defers to the OS setting.
+enum AppearanceTheme: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: return "Match System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    /// The AppKit appearance to force, or `nil` to follow the system.
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
+/// Visual treatment for the transport time readout.
+enum ReadoutStyle: String, CaseIterable, Identifiable {
+    /// Seven-segment LED/LCD display behind dark glass, styled like an 80s rack
+    /// unit's counter — glowing digits in dark mode, an amber-backlit LCD in light.
+    case retro
+
+    /// A convex glass tile resting directly on the transport bar: no bezel, a
+    /// domed highlight where the glass catches the light, edges dipping just
+    /// below the surrounding surface.
+    case glass
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .retro: return "Retro"
+        case .glass: return "Glass"
+        }
+    }
+}
 
 /// User-facing preferences that persist across launches.
 ///
@@ -15,6 +62,8 @@ final class AppSettings: ObservableObject {
 
     nonisolated static let offsetStepKey = "offsetNudgeStep"
     nonisolated static let offsetLargeStepKey = "offsetLargeNudgeStep"
+    nonisolated static let appearanceThemeKey = "appearanceTheme"
+    nonisolated static let readoutStyleKey = "readoutStyle"
 
     private let defaults: UserDefaults
 
@@ -40,6 +89,17 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// The app's light/dark appearance. Persisted; applied app-wide via
+    /// `NSApp.appearance`.
+    @Published var appearanceTheme: AppearanceTheme {
+        didSet { defaults.set(appearanceTheme.rawValue, forKey: Self.appearanceThemeKey) }
+    }
+
+    /// The transport readout's visual style. Persisted.
+    @Published var readoutStyle: ReadoutStyle {
+        didSet { defaults.set(readoutStyle.rawValue, forKey: Self.readoutStyleKey) }
+    }
+
     /// When enabled, the main window overlays each major UI component with a
     /// labelled badge naming its region. A developer aid for discussing the
     /// layout during redesign work; toggled from the Help menu. Intentionally
@@ -58,6 +118,8 @@ final class AppSettings: ObservableObject {
         self.defaults = defaults
         offsetStep = Self.storedOffsetStep(defaults)
         offsetLargeStep = Self.storedOffsetLargeStep(defaults)
+        appearanceTheme = Self.storedAppearanceTheme(defaults)
+        readoutStyle = Self.storedReadoutStyle(defaults)
     }
 
     /// The offset control configuration reflecting the user's chosen nudge amounts.
@@ -89,5 +151,13 @@ final class AppSettings: ObservableObject {
 
     nonisolated static func storedOffsetLargeStep(_ defaults: UserDefaults = .standard) -> Int {
         clamp(defaults.object(forKey: offsetLargeStepKey) as? Int ?? offsetLargeStepDefault)
+    }
+
+    nonisolated static func storedAppearanceTheme(_ defaults: UserDefaults = .standard) -> AppearanceTheme {
+        defaults.string(forKey: appearanceThemeKey).flatMap(AppearanceTheme.init(rawValue:)) ?? .system
+    }
+
+    nonisolated static func storedReadoutStyle(_ defaults: UserDefaults = .standard) -> ReadoutStyle {
+        defaults.string(forKey: readoutStyleKey).flatMap(ReadoutStyle.init(rawValue:)) ?? .retro
     }
 }

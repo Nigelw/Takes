@@ -516,6 +516,10 @@ struct ContentView: View {
         .onAppear {
             setupKeyMonitor()
             waveformStore.sync(tracks: controller.session.tracks)
+            NSApp.appearance = settings.appearanceTheme.nsAppearance
+        }
+        .onChange(of: settings.appearanceTheme) { _, theme in
+            NSApp.appearance = theme.nsAppearance
         }
         .onChange(of: controller.session.tracks) { _, tracks in
             waveformStore.sync(tracks: tracks)
@@ -554,6 +558,7 @@ struct ContentView: View {
 
                 // Pinned to the true window center, independent of the side clusters.
                 DigitalTimeReadout(
+                    style: settings.readoutStyle,
                     elapsed: controller.session.transportPosition.formattedSignedTimestamp
                 )
                 .background {

@@ -344,6 +344,7 @@ struct DigitalTimeReadout: View {
     /// up exactly.
     static let panelHeight: CGFloat = 56
 
+    let style: ReadoutStyle
     let elapsed: String
 
     /// Light mode's LCD is backlit, so its glass gets a soft bloom overlay;
@@ -352,49 +353,141 @@ struct DigitalTimeReadout: View {
 
     private let cornerRadius: CGFloat = 10
     /// Width of the raised bezel ring the glass window is sunk into.
-    private let bezelWidth: CGFloat = 3
+    private let bezelWidth: CGFloat = 4
 
     private var glassCornerRadius: CGFloat { cornerRadius - bezelWidth }
+
+    /// Corner radius of the convex glass tile.
+    private let convexCornerRadius: CGFloat = 11
 
     var body: some View {
         SevenSegmentDisplay(text: elapsed, digitHeight: 27)
             .padding(.horizontal, 28)
             .frame(minWidth: 180)
             .frame(height: Self.panelHeight)
-            .background { panel }
+            .background {
+                switch style {
+                case .retro: retroPanel
+                case .glass: convexGlassPanel
+                }
+            }
             .overlay {
-                // Glass sheen: a soft reflection catching the top of the window.
-                RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            stops: [
-                                .init(color: .white.opacity(0.08), location: 0),
-                                .init(color: .white.opacity(0.02), location: 0.35),
-                                .init(color: .clear, location: 0.5)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .padding(bezelWidth)
-                    .allowsHitTesting(false)
+                switch style {
+                case .retro: retroSheen
+                case .glass: convexGlassLight
+                }
             }
             .accessibilityLabel("Elapsed Time")
             .accessibilityValue(elapsed)
     }
 
+    /// Glass sheen: a soft reflection catching the top of the retro window.
+    private var retroSheen: some View {
+        RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
+            .fill(
+                LinearGradient(
+                    stops: [
+                        .init(color: .white.opacity(0.08), location: 0),
+                        .init(color: .white.opacity(0.02), location: 0.35),
+                        .init(color: .clear, location: 0.5)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .padding(bezelWidth)
+            .allowsHitTesting(false)
+    }
+
+    /// A convex glass tile sitting directly on the bar surface. The tile
+    /// itself is just the glass and its backlight; the raised look comes from
+    /// the rim lighting in `convexGlassLight`.
+    private var convexGlassPanel: some View {
+        let shape = RoundedRectangle(cornerRadius: convexCornerRadius, style: .continuous)
+        return shape
+            .fill(Theme.readoutGlass)
+            .overlay {
+                // Same backlight bloom as the retro LCD: the light-mode pane
+                // is lit from within, brightest at the center.
+                if colorScheme == .light {
+                    shape.fill(
+                        EllipticalGradient(
+                            colors: [.white.opacity(0.24), .clear],
+                            center: .center,
+                            startRadiusFraction: 0,
+                            endRadiusFraction: 0.85
+                        )
+                    )
+                }
+            }
+    }
+
+    /// The convex tile's lighting, drawn over the digits since the glass sits
+    /// above them: a domed specular bloom high on the tile where the curved
+    /// surface faces the light, and a rim line that's brightest along the top
+    /// edge with a fainter reflected catch along the bottom.
+    private var convexGlassLight: some View {
+        let shape = RoundedRectangle(cornerRadius: convexCornerRadius, style: .continuous)
+        return shape
+            .fill(
+                EllipticalGradient(
+                    stops: [
+                        .init(color: .white.opacity(colorScheme == .light ? 0.28 : 0.13), location: 0),
+                        .init(color: .white.opacity(colorScheme == .light ? 0.10 : 0.04), location: 0.55),
+                        .init(color: .clear, location: 1)
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0.16),
+                    startRadiusFraction: 0,
+                    endRadiusFraction: 0.95
+                )
+            )
+            .overlay {
+                // Thin bezel: a narrow band where the dome curves away from
+                // the light at the perimeter, darkening the glass rim evenly.
+                shape.strokeBorder(
+                    .black.opacity(colorScheme == .light ? 0.10 : 0.28),
+                    lineWidth: 1
+                )
+            }
+            .overlay {
+                // Raised rim: the top edge catches the light, the bottom edge
+                // falls into shadow — the cue that the tile stands proud of
+                // the bar surface.
+                shape.strokeBorder(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .white.opacity(colorScheme == .light ? 0.60 : 0.30), location: 0),
+                            .init(color: .clear, location: 0.5),
+                            .init(color: .black.opacity(colorScheme == .light ? 0.22 : 0.45), location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+            }
+            .allowsHitTesting(false)
+    }
+
     /// Bezel plate plus the dark glass window sunk into it.
-    private var panel: some View {
+    private var retroPanel: some View {
         ZStack {
-            // Raised metal ring: lit from above, falling into shadow at the
-            // bottom, like the machined surround on a rack unit's counter.
+            // Polished metal surround: a chrome-style sweep — bright where the
+            // light catches the top, darkening through the middle, then a faint
+            // reflected glow along the bottom edge, the way a buffed ring picks
+            // up light from below.
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(Theme.transportButtonFill)
                 .overlay {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .fill(
                             LinearGradient(
-                                colors: [Theme.readoutBezelHighlight, .clear, Theme.readoutBezelShadow],
+                                stops: [
+                                    .init(color: Theme.readoutBezelHighlight, location: 0),
+                                    .init(color: .clear, location: 0.32),
+                                    .init(color: Theme.readoutBezelShadow, location: 0.82),
+                                    .init(color: Theme.readoutBezelReflection, location: 1)
+                                ],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
@@ -404,6 +497,22 @@ struct DigitalTimeReadout: View {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .strokeBorder(Theme.readoutStroke, lineWidth: 1)
                 }
+                .overlay {
+                    // Chamfer glint: a hairline just inside the frame that
+                    // catches light along its bottom edge, where the machined
+                    // ring turns down toward the glass.
+                    RoundedRectangle(cornerRadius: glassCornerRadius + 1, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [.clear, Theme.readoutBezelReflection],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                        .padding(bezelWidth - 1)
+                }
+                .shadow(color: Theme.readoutFrameShadow, radius: 2, y: 1)
 
             // Glass window recessed into the bezel: an even inner shadow rings
             // the whole well so the recess looks uniform.

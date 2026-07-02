@@ -143,4 +143,13 @@ enum Theme {
     static let readoutBezelShadow = Color(nsColor: NSColor(name: nil) { appearance in
         NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.45 : 0.16)
     })
+
+    /// Faint reflected light along the bezel's bottom edge — the glint that
+    /// makes the ring read as polished rather than matte.
+    static let readoutBezelReflection = whiteAlpha(light: 0.55, dark: 0.10)
+
+    /// Soft drop shadow seating the readout panel on the transport bar.
+    static let readoutFrameShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.5 : 0.14)
+    })
 }
