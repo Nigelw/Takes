@@ -100,6 +100,7 @@ struct ComparisonSession: Equatable {
     var timelineEnd: TimeInterval = 0
 
     var repeatMode: RepeatMode = .off
+    var isBlindListeningModeEnabled = false
 
     /// The active loop, if any. When set, playback is confined to this range and
     /// wraps at its end. See `playbackStart` / `playbackEnd`.
@@ -119,6 +120,7 @@ struct ComparisonSession: Equatable {
         timelineStart: TimeInterval = 0,
         timelineEnd: TimeInterval = 0,
         repeatMode: RepeatMode = .off,
+        isBlindListeningModeEnabled: Bool = false,
         loopRegion: LoopRegion? = nil,
         visibleStart: TimeInterval = 0,
         visibleSpan: TimeInterval = 0
@@ -130,6 +132,7 @@ struct ComparisonSession: Equatable {
         self.timelineStart = timelineStart
         self.timelineEnd = timelineEnd
         self.repeatMode = repeatMode
+        self.isBlindListeningModeEnabled = isBlindListeningModeEnabled
         self.loopRegion = loopRegion
         self.visibleStart = visibleStart
         self.visibleSpan = visibleSpan

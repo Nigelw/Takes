@@ -166,8 +166,15 @@ final class RemotePlaybackCommandController: ObservableObject {
     }
 
     private func nowPlayingInfo(for session: ComparisonSession) -> [String: Any] {
+        let title: String
+        if session.isBlindListeningModeEnabled, let activeTrackIndex = session.activeTrackIndex {
+            title = "Track \(activeTrackIndex + 1)"
+        } else {
+            title = session.activeTrack?.loadedTrack.displayName ?? "Takes"
+        }
+
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle: session.activeTrack?.loadedTrack.displayName ?? "Takes",
+            MPMediaItemPropertyTitle: title,
             MPMediaItemPropertyPlaybackDuration: session.playbackEnd - session.playbackStart,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: session.transportPosition - session.playbackStart,
             MPNowPlayingInfoPropertyPlaybackRate: session.isPlaying ? 1.0 : 0.0,
@@ -545,6 +552,19 @@ private struct ViewCommands: Commands {
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
 
     var body: some Commands {
+        CommandGroup(before: .toolbar) {
+            Toggle(
+                "Blind Listening Mode",
+                isOn: Binding(
+                    get: { controller.session.isBlindListeningModeEnabled },
+                    set: { controller.setBlindListeningMode($0) }
+                )
+            )
+            .keyboardShortcut("b", modifiers: [.command])
+
+            Divider()
+        }
+
         CommandGroup(after: .toolbar) {
             Button("Zoom In") {
                 controller.stepZoom(zoomingIn: true)
