@@ -20,6 +20,7 @@ final class PlaybackController: ObservableObject {
     private var playbackStartedFromTransport: TimeInterval = 0
     private var transportStoppedAtTimelineStart = true
     private var timer: Timer?
+    private var engineConfigurationObserver: NotificationObserverToken?
     private var scrollAnimationTimer: Timer?
     private var scrollAnimation: ScrollAnimation?
 
@@ -51,12 +52,33 @@ final class PlaybackController: ObservableObject {
         let file: AVAudioFile
     }
 
+    private final class NotificationObserverToken {
+        private let token: NSObjectProtocol
+
+        init(_ token: NSObjectProtocol) {
+            self.token = token
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
+
     init(
         loader: AudioFileLoading = AudioFileLoader(),
         libraryTrackSelector: LibraryTrackSelecting = LibraryTrackSelectionLoader()
     ) {
         self.loader = loader
         self.libraryTrackSelector = libraryTrackSelector
+        engineConfigurationObserver = NotificationObserverToken(NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleAudioEngineConfigurationChange()
+            }
+        })
     }
 
     func loadImportedFiles(_ urls: [URL]) async {
@@ -886,6 +908,26 @@ final class PlaybackController: ObservableObject {
             } catch {
                 throw PlaybackError.engineStartFailed
             }
+        }
+    }
+
+    func handleAudioEngineConfigurationChange() {
+        guard session.isPlaying else { return }
+
+        let resumePosition = currentTransportPosition()
+        session.transportPosition = resumePosition
+
+        do {
+            try ensureEngineRunning()
+            try reschedulePlayers(startingAt: resumePosition)
+            startScheduledPlayers()
+            playbackStartedFromTransport = session.transportPosition
+            playbackStartedAt = CACurrentMediaTime()
+            applyAudibility()
+        } catch let error as PlaybackError {
+            failImportPlaybackResume(with: error, at: resumePosition)
+        } catch {
+            failImportPlaybackResume(with: .schedulingFailed, at: resumePosition)
         }
     }
 

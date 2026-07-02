@@ -1035,6 +1035,25 @@ struct SessionTests {
         #expect(controller.session.transportPosition > 0.25)
     }
 
+    @MainActor
+    @Test
+    func audioEngineConfigurationChangeReschedulesWhilePlaying() async throws {
+        let url = try makeTemporaryAudioFile(name: "device-change.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+        controller.play()
+        controller.seek(to: 0.35)
+
+        controller.handleAudioEngineConfigurationChange()
+
+        #expect(controller.session.isPlaying == true)
+        #expect(controller.session.transportPosition >= 0.35)
+        #expect(controller.playbackError == nil)
+        controller.pause()
+    }
+
     @Test
     func loadRecalculationPrefersZeroWhenStoppedAtPreviousNegativeStart() {
         let position = PlaybackController.transportPositionAfterTimelineRecalculation(
