@@ -46,6 +46,14 @@ final class AppSettings: ObservableObject {
     /// not persisted so it never leaks into a normal launch.
     @Published var showsComponentDebugLabels = false
 
+    /// Live-tunable transport button surface treatment (separate primary and
+    /// secondary values), adjusted from the Appearance Tuner. Session-only.
+    @Published var transportAppearance = TransportAppearance()
+
+    /// Live-tunable index-badge bevel/shadow, adjusted from the Appearance
+    /// Tuner. Session-only (not persisted) — a developer aid.
+    @Published var indexBadgeAppearance = IndexBadgeAppearance()
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         offsetStep = Self.storedOffsetStep(defaults)

@@ -121,9 +121,15 @@ struct SessionTests {
     func loadedTrackMetadataSummaryIncludesKeyFacts() {
         let track = makeTrack(name: "master.wav")
 
-        #expect(track.metadataSummary.contains("WAV"))
-        #expect(track.metadataSummary.contains("44100"))
-        #expect(track.metadataSummary.contains("02:00"))
+        #expect(track.metadataSummary == "02:00 • 256 kbps • 44.1 kHz")
+    }
+
+    @Test
+    func loadedTrackMetadataSummaryOmitsBitRateWhenUnavailable() {
+        var track = makeTrack(name: "lossless.wav")
+        track.bitRate = 0
+
+        #expect(track.metadataSummary == "02:00 • 44.1 kHz")
     }
 
     @Test
@@ -1278,6 +1284,7 @@ struct SessionTests {
             duration: 120,
             sampleRate: 44_100,
             channelCount: 2,
+            bitRate: 256_000,
             gainDB: 0,
             offsetSeconds: 0
         )

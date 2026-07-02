@@ -8,12 +8,23 @@ struct LoadedTrack: Equatable {
     let duration: TimeInterval
     let sampleRate: Double
     let channelCount: AVAudioChannelCount
+    /// Estimated data rate in bits per second, sourced from the asset's audio
+    /// track. `0` (or non-finite) means the file reported no usable rate — the
+    /// bit-rate segment is then omitted from `metadataSummary`.
+    var bitRate: Double = 0
 
     var gainDB: Float = 0
     var offsetSeconds: TimeInterval = 0
 
+    /// `[duration] • [bit rate] • [sample rate]`, e.g. `03:59 • 256 kbps • 44.1 kHz`.
+    /// The bit-rate segment drops out when the source reports no usable rate.
     var metadataSummary: String {
-        "\(fileFormatDescription) • \(Int(sampleRate)) Hz • \(channelCount) ch • \(duration.formattedTimestamp)"
+        var segments: [String] = [duration.formattedTimestamp]
+        if bitRate.isFinite, bitRate > 0 {
+            segments.append("\(Int((bitRate / 1000).rounded())) kbps")
+        }
+        segments.append(String(format: "%.1f kHz", sampleRate / 1000))
+        return segments.joined(separator: " • ")
     }
 }
 
