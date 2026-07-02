@@ -3,6 +3,31 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>2.5</title>
+            <pubDate>Thu, 02 Jul 2026 15:04:45 -0400</pubDate>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>2.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## New Features
+- Major redesign with a brand new look and feel, every pixel reworked
+  - New appearance settings: choose light or dark theme, and pick your preferred time readout display style
+  - Redesigned track rows with clearer info at a glance
+  - Redesigned timeline ruler and playhead, with an interactive grabber you can drag to scrub
+  - Polished buttons and controls with satisfying pressed states and better dark mode contrast
+- Control playback with your keyboard's media keys
+
+## Improved
+- A cleaner empty state — just drop your files onto the target to get started
+- Shift-click the Switch Track button to switch to previous
+- New menu commands for timeline zoom and track removal
+
+## Fixed
+- Fixed timeline overscroll getting stuck if an input field is active
+- Various layout, contrast, and window-sizing refinements
+]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.5/Takes.dmg" length="2984360" type="application/octet-stream" sparkle:edSignature="AkxZcSZrUTzbn/Ijhw9EkahNg+fxGZum5QVUvDWkkX/2QMozwUjkGsoVsYRDIEzgls75Lje5udVnfZdXHHFBBQ=="/>
+        </item>
+        <item>
             <title>2.1</title>
             <pubDate>Wed, 01 Jul 2026 21:32:43 -0400</pubDate>
             <sparkle:version>6</sparkle:version>
@@ -35,17 +60,6 @@
 - The playhead position is preserved when opening a new track while paused
 - Adjusted default window position]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0/Takes.dmg" length="2668066" type="application/octet-stream" sparkle:edSignature="kTkXdegL/pSIr3QZC7jL0YtoG9dlgkv3Xr1dj22gbJFAmt58uLLplS78R9ryPV6txKvda9WgY/0ontIyZzY/Dg=="/>
-        </item>
-        <item>
-            <title>2.0a3</title>
-            <pubDate>Fri, 19 Jun 2026 07:31:39 -0400</pubDate>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>2.0a3</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[- Each track now shows real waveforms instead of a placeholder mockup
-- Rendering doesn't block the UI
-]]></description>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0a3/Takes.dmg" length="2629939" type="application/octet-stream" sparkle:edSignature="EfHo/vyzU5aAdnGqc5wbNAiA+mKd7LUU1cosThxeIenX45pa/DyCbXv2MUTUhBNaispit6WcHweEG/cnU6ucAg=="/>
         </item>
     </channel>
 </rss>
