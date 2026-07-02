@@ -3,6 +3,16 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>2.6</title>
+            <pubDate>Thu, 02 Jul 2026 15:58:57 -0400</pubDate>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>2.6</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## New Features
+- Blind listening mode: compare takes without seeing which is which, so your ears decide]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.6/Takes.dmg" length="3008162" type="application/octet-stream" sparkle:edSignature="rvXPeZnJR8ngwkpqsyVGKviIK5EpuiKx8eN6KUnxcVOysa2tjrwr2UKHcWu8CLgXTnuVjRUEXegcWrBJpoqrAA=="/>
+        </item>
+        <item>
             <title>2.5</title>
             <pubDate>Thu, 02 Jul 2026 15:04:45 -0400</pubDate>
             <sparkle:version>7</sparkle:version>
@@ -41,25 +51,6 @@
 ## Fixes
 - Starting playback at the end of a track now restarts playback from the beginning]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.1/Takes.dmg" length="2722048" type="application/octet-stream" sparkle:edSignature="PnvS4YfNyfv7kgsetTSVoPkgfvEDZzJSfWIChKogAspp7TY2+PoW56lP4k5t1BkAwBQXPfYXioJAnGb1vRWfBg=="/>
-        </item>
-        <item>
-            <title>2.0</title>
-            <pubDate>Wed, 01 Jul 2026 01:43:10 -0400</pubDate>
-            <sparkle:version>5</sparkle:version>
-            <sparkle:shortVersionString>2.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[## Improvements
-- Timeline zooming
-  - Pinch to zoom or use the zoom control
-  - Waveform area uses native scroll inertia and bounce behavior
-  - View smoothly slides to keep playhead in view while zoomed in
-- Improved timeline ruler tick marks and labeling, including dynamic scale when zoomed
-- Added link to release notes in Help menu
-
-## Fixes
-- The playhead position is preserved when opening a new track while paused
-- Adjusted default window position]]></description>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.0/Takes.dmg" length="2668066" type="application/octet-stream" sparkle:edSignature="kTkXdegL/pSIr3QZC7jL0YtoG9dlgkv3Xr1dj22gbJFAmt58uLLplS78R9ryPV6txKvda9WgY/0ontIyZzY/Dg=="/>
         </item>
     </channel>
 </rss>
