@@ -556,7 +556,12 @@ struct ContentView: View {
         } label: {
             Image(systemName: controller.session.isPlaying ? "pause.fill" : "play.fill")
         }
-        .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: DigitalTimeReadout.panelHeight, glyphSize: 22))
+        .buttonStyle(CircleTransportButtonStyle(
+            kind: .primary,
+            diameter: DigitalTimeReadout.panelHeight,
+            glyphSize: 22,
+            pressedGlyphOffset: 1.5
+        ))
         .disabled(!controller.session.isPlayable)
         .help(controller.session.isPlaying ? "Pause" : "Play")
         .accessibilityLabel(controller.session.isPlaying ? "Pause" : "Play")
@@ -1111,6 +1116,7 @@ struct ContentView: View {
 
                 offsetControl(sessionTrack: sessionTrack)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 12)
         .frame(maxHeight: .infinity, alignment: .center)
@@ -1247,7 +1253,7 @@ struct ContentView: View {
                 // ruler's labeled ticks above.
                 ForEach(Array(laneMajorTickXs(width: proxy.size.width).enumerated()), id: \.offset) { _, tickX in
                     Rectangle()
-                        .fill(Theme.hairline.opacity(0.25))
+                        .fill(Theme.hairline.opacity(0.5))
                         .frame(width: 1)
                         .offset(x: tickX)
                         .accessibilityHidden(true)

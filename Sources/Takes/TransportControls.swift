@@ -32,6 +32,13 @@ struct TransportButtonAppearance: Equatable {
     /// Fill for the secondary (Switch/Repeat) buttons when not engaged.
     /// Defaults to the adaptive theme token; a picked color overrides it.
     var secondaryFill: Color = Theme.transportButtonFill
+    /// Primary-tinted fill opacity used when a secondary button is active
+    /// (currently the Repeat button).
+    var activeFillOpacity: Double = 0.18
+    /// Primary-tinted shadow emitted by the glyph when a secondary button is
+    /// active.
+    var activeGlyphGlowOpacity: Double = 0
+    var activeGlyphGlowRadius: Double = 0
     /// Dark outer shadow above the button (recessed/pressed-in cue).
     var insetDarkOpacity: Double = 0.16
     var insetDarkRadius: Double = 1.5
@@ -70,6 +77,9 @@ struct TransportAppearance: Equatable {
         glossOpacity: 0.70,
         bevelWidth: 1.0,
         bevelBottomOpacity: 0.20,
+        activeFillOpacity: 0.04,
+        activeGlyphGlowOpacity: 0.49,
+        activeGlyphGlowRadius: 9.46,
         insetDarkRadius: 1.0,
         insetDarkY: -0.75,
         insetLightRadius: 0.75,
@@ -88,6 +98,9 @@ struct TransportAppearance: Equatable {
         bevelWidth: 1.0,
         bevelTopOpacity: 0.35,
         bevelBottomOpacity: 0.50,
+        activeFillOpacity: 0.10,
+        activeGlyphGlowOpacity: 0.83,
+        activeGlyphGlowRadius: 3.34,
         insetDarkOpacity: 0.45,
         insetDarkRadius: 1.0,
         insetDarkY: -0.75,
@@ -123,6 +136,7 @@ struct CircleTransportButtonStyle: ButtonStyle {
     var isOn: Bool = false
     var diameter: CGFloat
     var glyphSize: CGFloat
+    var pressedGlyphOffset: CGFloat = 0.75
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.colorScheme) private var colorScheme
@@ -145,8 +159,10 @@ struct CircleTransportButtonStyle: ButtonStyle {
         return configuration.label
             .font(.system(size: glyphSize, weight: .semibold))
             .foregroundStyle(foreground)
+            .shadow(color: activeGlyphGlowColor(opacityScale: 0.85), radius: activeGlyphTightGlowRadius)
+            .shadow(color: activeGlyphGlowColor(), radius: activeGlyphGlowRadius)
             // Pressed: the glyph sinks with the surface instead of shrinking.
-            .offset(y: pressed ? 0.75 : 0)
+            .offset(y: pressed ? pressedGlyphOffset : 0)
             .frame(width: diameter, height: diameter)
             .background(background(pressed: pressed))
             .overlay(border(pressed: pressed))
@@ -170,6 +186,19 @@ struct CircleTransportButtonStyle: ButtonStyle {
         }
     }
 
+    private var activeGlyphGlowRadius: CGFloat {
+        kind == .secondary && isOn ? CGFloat(appearance.activeGlyphGlowRadius) : 0
+    }
+
+    private var activeGlyphTightGlowRadius: CGFloat {
+        max(activeGlyphGlowRadius * 0.45, 0)
+    }
+
+    private func activeGlyphGlowColor(opacityScale: Double = 1) -> Color {
+        guard kind == .secondary, isOn else { return .clear }
+        return Theme.primary.opacity(appearance.activeGlyphGlowOpacity * opacityScale)
+    }
+
     /// Top-of-button gloss laid over the fill. Tweak these stops to adjust how
     /// glossy/shiny the transport buttons look. Dims while pressed so the face
     /// reads as tilted away from the light.
@@ -188,7 +217,7 @@ struct CircleTransportButtonStyle: ButtonStyle {
             Circle().fill(Theme.primary).overlay(Circle().fill(surfaceGloss(pressed: pressed)))
         case .secondary:
             Circle()
-                .fill(isOn ? AnyShapeStyle(Theme.primary.opacity(0.18)) : AnyShapeStyle(appearance.secondaryFill))
+                .fill(isOn ? AnyShapeStyle(Theme.primary.opacity(appearance.activeFillOpacity)) : AnyShapeStyle(appearance.secondaryFill))
                 .overlay(Circle().fill(surfaceGloss(pressed: pressed)))
         }
     }
@@ -307,6 +336,9 @@ struct AppearanceTunerView: View {
                     Spacer()
                     resetButton(disabled: false) { b.secondaryFill.wrappedValue = d.secondaryFill }
                 }
+                tuner("Active highlight", value: b.activeFillOpacity, in: 0...1, default: d.activeFillOpacity)
+                tuner("Active glyph glow", value: b.activeGlyphGlowOpacity, in: 0...1, default: d.activeGlyphGlowOpacity)
+                tuner("Active glow radius", value: b.activeGlyphGlowRadius, in: 0...12, default: d.activeGlyphGlowRadius)
             }
             tuner("Inset dark opacity", value: b.insetDarkOpacity, in: 0...1, default: d.insetDarkOpacity)
             tuner("Inset dark radius", value: b.insetDarkRadius, in: 0...8, default: d.insetDarkRadius)
