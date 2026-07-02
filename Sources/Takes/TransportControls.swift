@@ -79,6 +79,13 @@ struct TransportButtonAppearance: Equatable {
     var insetLightOpacity: Double = 0.60
     var insetLightRadius: Double = 1.0
     var insetLightY: Double = 1.5
+    /// Dark inner shadow cast across the top of the face while pressed. The
+    /// primary's saturated fill needs this to read as sunk below its rim; the
+    /// secondaries' fill matches the window surface, so the bevel inversion
+    /// alone already sells their press.
+    var pressedInnerShadowOpacity: Double = 0
+    var pressedInnerShadowRadius: Double = 3.0
+    var pressedInnerShadowY: Double = 2.0
 }
 
 /// Live-tunable bevel/shadow for the track index badge.
@@ -103,7 +110,9 @@ struct TransportAppearance: Equatable {
     var lightPrimary = TransportButtonAppearance(
         bevelTopOpacity: 0.70,
         insetDarkOpacity: 0.25,
-        insetDarkY: -0.75
+        insetDarkY: -0.75,
+        pressedInnerShadowOpacity: 0.80,
+        pressedInnerShadowRadius: 2.0
     )
     var lightSecondary = TransportButtonAppearance(
         glossOpacity: 0.70,
@@ -115,7 +124,14 @@ struct TransportAppearance: Equatable {
         insetDarkRadius: 1.0,
         insetDarkY: -0.75,
         insetLightRadius: 0.75,
-        insetLightY: 1.0
+        insetLightY: 1.0,
+        // The light secondary's bevel bottom is faint (0.20), so its pressed rim
+        // inversion barely darkens the top edge — a modest inner shadow, scaled
+        // to the smaller 40pt face, restores the sunk-in read. Dark mode skips
+        // this: its heavier bevel (0.50) inverts convincingly on its own.
+        pressedInnerShadowOpacity: 0.20,
+        pressedInnerShadowRadius: 2.0,
+        pressedInnerShadowY: 1.5
     )
     var darkPrimary = TransportButtonAppearance(
         glossOpacity: 0.32,
@@ -123,7 +139,8 @@ struct TransportAppearance: Equatable {
         bevelBottomOpacity: 0.60,
         insetDarkOpacity: 0.50,
         insetDarkY: -0.75,
-        insetLightOpacity: 0.12
+        insetLightOpacity: 0.12,
+        pressedInnerShadowOpacity: 0.55
     )
     var darkSecondary = TransportButtonAppearance(
         glossOpacity: 0.15,
@@ -204,7 +221,9 @@ struct CircleTransportButtonStyle: ButtonStyle {
             .shadow(color: .black.opacity(isEnabled ? appearance.insetDarkOpacity : 0), radius: CGFloat(appearance.insetDarkRadius), y: CGFloat(appearance.insetDarkY))
             .shadow(color: .white.opacity(isEnabled ? appearance.insetLightOpacity : 0), radius: CGFloat(appearance.insetLightRadius), y: CGFloat(appearance.insetLightY))
             .opacity(isEnabled ? 1 : 0.4)
-            .brightness(pressed ? -0.06 : 0)
+            // The primary's saturated fill swallows a light dim, so it darkens
+            // harder than the near-background secondaries.
+            .brightness(pressed ? (kind == .primary ? -0.10 : -0.06) : 0)
             .animation(.easeOut(duration: 0.12), value: pressed)
             .contentShape(Circle())
     }
@@ -246,12 +265,24 @@ struct CircleTransportButtonStyle: ButtonStyle {
     private func background(pressed: Bool) -> some View {
         switch kind {
         case .primary:
-            Circle().fill(Theme.primary).overlay(Circle().fill(surfaceGloss(pressed: pressed)))
+            Circle().fill(pressedWell(Theme.primary, pressed: pressed))
+                .overlay(Circle().fill(surfaceGloss(pressed: pressed)))
         case .secondary:
             Circle()
-                .fill(isOn ? AnyShapeStyle(Theme.primary.opacity(appearance.activeFillOpacity)) : AnyShapeStyle(appearance.secondaryFill))
+                .fill(pressedWell(isOn ? AnyShapeStyle(Theme.primary.opacity(appearance.activeFillOpacity)) : AnyShapeStyle(appearance.secondaryFill), pressed: pressed))
                 .overlay(Circle().fill(surfaceGloss(pressed: pressed)))
         }
+    }
+
+    /// Wraps a fill so it casts a dark inner shadow from the top while pressed,
+    /// making the face read as sunk below the rim rather than merely dimmed.
+    private func pressedWell(_ style: some ShapeStyle, pressed: Bool) -> AnyShapeStyle {
+        guard pressed, appearance.pressedInnerShadowOpacity > 0 else { return AnyShapeStyle(style) }
+        return AnyShapeStyle(style.shadow(.inner(
+            color: .black.opacity(appearance.pressedInnerShadowOpacity),
+            radius: appearance.pressedInnerShadowRadius,
+            y: appearance.pressedInnerShadowY
+        )))
     }
 
     // Crisp beveled rim matching the track index badge: bright along the top
@@ -381,6 +412,9 @@ struct AppearanceTunerView: View {
             tuner("Inset light opacity", value: b.insetLightOpacity, in: 0...1, default: d.insetLightOpacity)
             tuner("Inset light radius", value: b.insetLightRadius, in: 0...8, default: d.insetLightRadius)
             tuner("Inset light y", value: b.insetLightY, in: -4...4, default: d.insetLightY)
+            tuner("Pressed inner shadow", value: b.pressedInnerShadowOpacity, in: 0...1, default: d.pressedInnerShadowOpacity)
+            tuner("Pressed inner radius", value: b.pressedInnerShadowRadius, in: 0...8, default: d.pressedInnerShadowRadius)
+            tuner("Pressed inner y", value: b.pressedInnerShadowY, in: -4...4, default: d.pressedInnerShadowY)
         }
     }
 
