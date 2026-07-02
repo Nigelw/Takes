@@ -60,10 +60,21 @@ final class PlaybackController: ObservableObject {
     }
 
     func loadImportedFiles(_ urls: [URL]) async {
-        await loadImportedFiles(urls, additionalFailures: [])
+        await loadImportedFiles(urls, additionalFailures: [], blindShuffle: { $0.shuffled() })
     }
 
-    private func loadImportedFiles(_ urls: [URL], additionalFailures: [ImportFailure]) async {
+    func loadImportedFiles(
+        _ urls: [URL],
+        blindShuffle: ([SessionTrack]) -> [SessionTrack]
+    ) async {
+        await loadImportedFiles(urls, additionalFailures: [], blindShuffle: blindShuffle)
+    }
+
+    private func loadImportedFiles(
+        _ urls: [URL],
+        additionalFailures: [ImportFailure],
+        blindShuffle: ([SessionTrack]) -> [SessionTrack]
+    ) async {
         guard !urls.isEmpty || !additionalFailures.isEmpty else { return }
 
         let wasPlaying = session.isPlaying
@@ -98,9 +109,10 @@ final class PlaybackController: ObservableObject {
         }
 
         if !preparedLoads.isEmpty {
-            preparedLoads.forEach(appendPreparedTrackLoad)
+            let appendedTrackIDs = preparedLoads.map(appendPreparedTrackLoad)
             finishTrackLoading(preferZero: !wasPlaying && transportStoppedAtTimelineStart)
-            if let resumePosition, !restorePlaybackAfterImportAppend(at: resumePosition) {
+            shuffleForBlindListeningIfNeeded(using: blindShuffle)
+            if let resumePosition, !startAppendedTracksDuringPlayback(appendedTrackIDs, at: resumePosition) {
                 return
             }
         }
@@ -126,7 +138,7 @@ final class PlaybackController: ObservableObject {
     }
 
     @discardableResult
-    private func restorePlaybackAfterImportAppend(at resumePosition: TimeInterval) -> Bool {
+    private func startAppendedTracksDuringPlayback(_ trackIDs: [SessionTrack.ID], at resumePosition: TimeInterval) -> Bool {
         let restoredPosition = TransportMapping.clampedTransport(
             resumePosition,
             timelineStart: session.timelineStart,
@@ -134,17 +146,16 @@ final class PlaybackController: ObservableObject {
         )
         session.transportPosition = restoredPosition
 
-        if engineConfigured {
-            do {
-                try reschedulePlayers(startingAt: restoredPosition)
-                startScheduledPlayers()
-            } catch let error as PlaybackError {
-                failImportPlaybackResume(with: error, at: restoredPosition)
-                return false
-            } catch {
-                failImportPlaybackResume(with: .schedulingFailed, at: restoredPosition)
-                return false
-            }
+        do {
+            try ensureEngineRunning()
+            try scheduleTracks(trackIDs, startingAt: restoredPosition, stoppingExistingSchedule: false)
+            startScheduledPlayers(for: trackIDs)
+        } catch let error as PlaybackError {
+            failImportPlaybackResume(with: error, at: restoredPosition)
+            return false
+        } catch {
+            failImportPlaybackResume(with: .schedulingFailed, at: restoredPosition)
+            return false
         }
 
         session.isPlaying = true
@@ -193,7 +204,11 @@ final class PlaybackController: ObservableObject {
     func loadSelectedLibraryTracks() async {
         do {
             let selection = try libraryTrackSelector.selectedTracks()
-            await loadImportedFiles(selection.urls, additionalFailures: selection.failures)
+            await loadImportedFiles(
+                selection.urls,
+                additionalFailures: selection.failures,
+                blindShuffle: { $0.shuffled() }
+            )
         } catch let error as PlaybackError {
             playbackError = error
         } catch {
@@ -215,7 +230,8 @@ final class PlaybackController: ObservableObject {
         return PreparedTrackLoad(metadata: metadata, file: file)
     }
 
-    private func appendPreparedTrackLoad(_ preparedLoad: PreparedTrackLoad) {
+    @discardableResult
+    private func appendPreparedTrackLoad(_ preparedLoad: PreparedTrackLoad) -> SessionTrack.ID {
         let sessionTrack = SessionTrack(loadedTrack: preparedLoad.metadata)
         session.tracks.append(sessionTrack)
         configureEngine()
@@ -223,6 +239,7 @@ final class PlaybackController: ObservableObject {
         if session.activeTrackID == nil {
             session.activeTrackID = sessionTrack.id
         }
+        return sessionTrack.id
     }
 
     private func finishTrackLoading(preferZero: Bool = true) {
@@ -394,10 +411,6 @@ final class PlaybackController: ObservableObject {
         let wasActive = session.activeTrackID == trackID
         let resumePosition = wasPlaying ? currentTransportPosition() : nil
 
-        if wasActive {
-            pause()
-        }
-
         session.tracks.remove(at: removedIndex)
         detachRuntimeTrack(for: trackID)
 
@@ -411,8 +424,22 @@ final class PlaybackController: ObservableObject {
 
         recalculateSessionDuration()
 
-        if wasPlaying, !wasActive, let resumePosition {
-            restorePlaybackAfterTrackMutation(at: resumePosition)
+        if wasPlaying, let resumePosition {
+            let restoredPosition = TransportMapping.clampedTransport(
+                resumePosition,
+                timelineStart: session.timelineStart,
+                timelineEnd: session.timelineEnd
+            )
+            guard session.isPlayable, restoredPosition < session.playbackEnd else {
+                stopAtEnd()
+                return
+            }
+            session.isPlaying = true
+            session.transportPosition = restoredPosition
+            playbackStartedFromTransport = restoredPosition
+            playbackStartedAt = CACurrentMediaTime()
+            startTimer()
+            applyAudibility()
         } else {
             applyAudibility()
         }
@@ -428,6 +455,7 @@ final class PlaybackController: ObservableObject {
         runtimeTracksByID.removeAll()
         session.tracks.removeAll()
         session.activeTrackID = nil
+        session.isBlindListeningModeEnabled = false
         clearLoop()
         session.isPlaying = false
         transportStoppedAtTimelineStart = true
@@ -446,13 +474,15 @@ final class PlaybackController: ObservableObject {
 
     func setOffset(_ trackID: SessionTrack.ID, seconds: TimeInterval) {
         guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        guard session.tracks[index].loadedTrack.offsetSeconds != seconds else { return }
+        let resumePosition = session.isPlaying ? currentTransportPosition() : session.transportPosition
         session.tracks[index].loadedTrack.offsetSeconds = seconds
 
         recalculateSessionDuration()
 
         guard session.isPlaying else { return }
         do {
-            try reschedulePlayers(startingAt: session.transportPosition)
+            try reschedulePlayers(startingAt: resumePosition)
             startScheduledPlayers()
             playbackStartedFromTransport = session.transportPosition
             playbackStartedAt = CACurrentMediaTime()
@@ -466,6 +496,66 @@ final class PlaybackController: ObservableObject {
 
     func skip(by delta: TimeInterval) {
         seek(to: session.transportPosition + delta)
+    }
+
+    // MARK: - Blind listening
+
+    func setBlindListeningMode(_ isEnabled: Bool) {
+        setBlindListeningMode(isEnabled) { tracks in
+            tracks.shuffled()
+        }
+    }
+
+    func toggleBlindListeningMode() {
+        setBlindListeningMode(!session.isBlindListeningModeEnabled)
+    }
+
+    func setBlindListeningMode(
+        _ isEnabled: Bool,
+        shuffle: ([SessionTrack]) -> [SessionTrack]
+    ) {
+        guard session.isBlindListeningModeEnabled != isEnabled else { return }
+
+        session.isBlindListeningModeEnabled = isEnabled
+        if isEnabled {
+            session.tracks = Self.blindListeningOrder(
+                currentTracks: session.tracks,
+                shuffledTracks: shuffle(session.tracks)
+            )
+            session.activeTrackID = session.tracks.first?.id
+        }
+        applyAudibility()
+    }
+
+    private func shuffleForBlindListeningIfNeeded(using shuffle: ([SessionTrack]) -> [SessionTrack]) {
+        guard session.isBlindListeningModeEnabled else { return }
+        session.tracks = Self.blindListeningOrder(
+            currentTracks: session.tracks,
+            shuffledTracks: shuffle(session.tracks)
+        )
+        session.activeTrackID = session.tracks.first?.id
+    }
+
+    nonisolated static func blindListeningOrder(
+        currentTracks: [SessionTrack],
+        shuffledTracks: [SessionTrack]
+    ) -> [SessionTrack] {
+        guard currentTracks.count > 1 else { return currentTracks }
+
+        let currentIDs = currentTracks.map(\.id)
+        let shuffledIDs = shuffledTracks.map(\.id)
+        guard Set(currentIDs) == Set(shuffledIDs), shuffledIDs.count == currentIDs.count else {
+            return currentTracks
+        }
+
+        if shuffledIDs != currentIDs {
+            return shuffledTracks
+        }
+
+        var rotated = currentTracks
+        let first = rotated.removeFirst()
+        rotated.append(first)
+        return rotated
     }
 
     // MARK: - Repeat & loop
@@ -504,10 +594,16 @@ final class PlaybackController: ObservableObject {
 
     /// Clear the loop and turn repeat off.
     func deselectLoop() {
-        guard session.loopRegion != nil else { return }
+        guard let previousLoop = session.loopRegion else { return }
+        let wasPlaying = session.isPlaying
+        let resumePosition = wasPlaying ? currentTransportPosition() : nil
         clearLoop()
-        // Rebind audio to the full timeline if we're mid-playback.
-        seek(to: session.transportPosition)
+        guard wasPlaying, let resumePosition else { return }
+
+        session.transportPosition = resumePosition
+        if resumePosition < previousLoop.end {
+            appendPlaybackAfterDeselectingLoop(previousLoop, currentPosition: resumePosition)
+        }
     }
 
     /// Drop the loop and turn repeat off, without touching the transport. Used by
@@ -794,35 +890,92 @@ final class PlaybackController: ObservableObject {
     }
 
     private func reschedulePlayers(startingAt globalTime: TimeInterval) throws {
-        guard session.isPlayable else {
-            throw PlaybackError.schedulingFailed
-        }
-
         let transport = TransportMapping.clampedTransport(
             globalTime,
             timelineStart: session.timelineStart,
             timelineEnd: session.timelineEnd
         )
 
-        for sessionTrack in session.tracks {
-            guard let runtime = runtimeTracksByID[sessionTrack.id] else { continue }
-            runtime.player.stop()
-            scheduleTrack(
-                sessionTrack.loadedTrack,
-                file: runtime.file,
-                on: runtime.player,
-                atGlobalTime: transport
-            )
-        }
+        try scheduleTracks(
+            session.tracks.map(\.id),
+            startingAt: transport,
+            stoppingExistingSchedule: true
+        )
 
         session.transportPosition = transport
     }
 
     private func startScheduledPlayers() {
         guard session.isPlayable else { return }
-        for runtime in runtimeTracksInSessionOrder() {
+        startScheduledPlayers(for: session.tracks.map(\.id))
+    }
+
+    private func startScheduledPlayers(for trackIDs: [SessionTrack.ID]) {
+        guard session.isPlayable else { return }
+        for trackID in trackIDs {
+            guard let runtime = runtimeTracksByID[trackID] else { continue }
             runtime.player.play()
         }
+    }
+
+    private func scheduleTracks(
+        _ trackIDs: [SessionTrack.ID],
+        startingAt globalTime: TimeInterval,
+        stoppingExistingSchedule: Bool
+    ) throws {
+        guard session.isPlayable else {
+            throw PlaybackError.schedulingFailed
+        }
+
+        for trackID in trackIDs {
+            guard let sessionTrack = session.tracks.first(where: { $0.id == trackID }),
+                  let runtime = runtimeTracksByID[trackID] else {
+                continue
+            }
+            if stoppingExistingSchedule {
+                runtime.player.stop()
+            }
+            scheduleTrack(
+                sessionTrack.loadedTrack,
+                file: runtime.file,
+                on: runtime.player,
+                atGlobalTime: globalTime
+            )
+        }
+    }
+
+    private func appendPlaybackAfterDeselectingLoop(_ previousLoop: LoopRegion, currentPosition: TimeInterval) {
+        guard session.isPlayable else { return }
+        do {
+            for sessionTrack in session.tracks {
+                let continuationStart = trackHadPlaybackScheduledThroughLoopEnd(
+                    sessionTrack.loadedTrack,
+                    loop: previousLoop,
+                    currentPosition: currentPosition
+                ) ? previousLoop.end : currentPosition
+                try scheduleTracks(
+                    [sessionTrack.id],
+                    startingAt: continuationStart,
+                    stoppingExistingSchedule: false
+                )
+            }
+        } catch let error as PlaybackError {
+            playbackError = error
+            stopAtEnd()
+        } catch {
+            playbackError = .schedulingFailed
+            stopAtEnd()
+        }
+    }
+
+    private func trackHadPlaybackScheduledThroughLoopEnd(
+        _ track: LoadedTrack,
+        loop: LoopRegion,
+        currentPosition: TimeInterval
+    ) -> Bool {
+        let trackStart = track.offsetSeconds
+        let trackEnd = track.offsetSeconds + track.duration
+        return trackStart < loop.end && trackEnd > currentPosition
     }
 
     private func recalculateSessionDuration(preferZero: Bool = false) {

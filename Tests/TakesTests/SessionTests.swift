@@ -121,7 +121,7 @@ struct SessionTests {
         ).localizedDescription
 
         #expect(description.contains("Takes currently supports up to 32 loaded tracks."))
-        #expect(description.contains("Skipped 40 files (showing first 8):"))
+        #expect(description.contains("Skipped 40 files:"))
         #expect(description.contains("track-0.wav"))
         #expect(description.contains("track-7.wav"))
         #expect(!description.contains("track-8.wav"))
@@ -742,7 +742,101 @@ struct SessionTests {
 
     @MainActor
     @Test
-    func removingActiveTrackPausesAndSelectsNextOrPrevious() async throws {
+    func enablingBlindListeningModeShufflesVisibleOrderAndSelectsFirstTrack() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "blind-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+        let ids = controller.session.tracks.map(\.id)
+        controller.selectActiveTrack(ids[1])
+        controller.seek(to: 0.5)
+
+        controller.setBlindListeningMode(true) { tracks in
+            [tracks[2], tracks[1], tracks[0]]
+        }
+
+        #expect(controller.session.isBlindListeningModeEnabled)
+        #expect(controller.session.tracks.map(\.id) == [ids[2], ids[1], ids[0]])
+        #expect(controller.session.activeTrackID == ids[2])
+        #expect(controller.session.transportPosition == 0.5)
+    }
+
+    @MainActor
+    @Test
+    func disablingBlindListeningModeKeepsShuffledOrder() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "blind-off-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+        let ids = controller.session.tracks.map(\.id)
+
+        controller.setBlindListeningMode(true) { tracks in
+            [tracks[1], tracks[2], tracks[0]]
+        }
+        controller.setBlindListeningMode(false)
+
+        #expect(!controller.session.isBlindListeningModeEnabled)
+        #expect(controller.session.tracks.map(\.id) == [ids[1], ids[2], ids[0]])
+    }
+
+    @MainActor
+    @Test
+    func blindListeningModeFallbackChangesOrderWhenShuffleReturnsSameOrder() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "blind-same-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+        let ids = controller.session.tracks.map(\.id)
+
+        controller.setBlindListeningMode(true) { $0 }
+
+        #expect(controller.session.tracks.map(\.id) == [ids[1], ids[2], ids[0]])
+    }
+
+    @MainActor
+    @Test
+    func preEnabledBlindListeningModeShufflesTracksAfterLoad() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "blind-preload-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        controller.setBlindListeningMode(true)
+
+        await controller.loadImportedFiles(urls) { tracks in
+            [tracks[2], tracks[0], tracks[1]]
+        }
+
+        #expect(controller.session.isBlindListeningModeEnabled)
+        #expect(controller.session.tracks.map { $0.loadedTrack.displayName } == [
+            "blind-preload-2.wav",
+            "blind-preload-0.wav",
+            "blind-preload-1.wav"
+        ])
+        #expect(controller.session.activeTrackID == controller.session.tracks[0].id)
+    }
+
+    @MainActor
+    @Test
+    func removingActiveTrackKeepsPlayingAndSelectsNextOrPrevious() async throws {
         let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
         defer {
             for url in urls {
@@ -758,13 +852,12 @@ struct SessionTests {
 
         controller.removeTrack(ids[1])
 
-        #expect(!controller.session.isPlaying)
+        #expect(controller.session.isPlaying)
         #expect(controller.session.activeTrackID == ids[2])
 
-        controller.play()
         controller.removeTrack(ids[2])
 
-        #expect(!controller.session.isPlaying)
+        #expect(controller.session.isPlaying)
         #expect(controller.session.activeTrackID == ids[0])
     }
 
@@ -835,6 +928,43 @@ struct SessionTests {
         #expect(controller.session.tracks[0].loadedTrack.gainDB == 0)
         #expect(controller.session.tracks[0].loadedTrack.offsetSeconds == 0)
         #expect(controller.session.activeTrackID == id)
+    }
+
+    @MainActor
+    @Test
+    func settingUnchangedOffsetWhilePlayingDoesNotRestartPlaybackClock() async throws {
+        let url = try makeTemporaryAudioFile(name: "unchanged-offset.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+        let id = try #require(controller.session.tracks.first?.id)
+        controller.play()
+
+        try await Task.sleep(for: .milliseconds(120))
+        controller.setOffset(id, seconds: 0)
+        try await Task.sleep(for: .milliseconds(120))
+        controller.pause()
+
+        #expect(controller.session.transportPosition >= 0.2)
+    }
+
+    @MainActor
+    @Test
+    func settingOffsetWhilePlayingReschedulesFromCurrentTransport() async throws {
+        let url = try makeTemporaryAudioFile(name: "changed-offset.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+        let id = try #require(controller.session.tracks.first?.id)
+        controller.play()
+
+        try await Task.sleep(for: .milliseconds(120))
+        controller.setOffset(id, seconds: 0.1)
+
+        #expect(controller.session.transportPosition >= 0.1)
+        controller.pause()
     }
 
     @MainActor
@@ -968,6 +1098,23 @@ struct SessionTests {
         controller.beginLoop(LoopRegion(start: 0.2, end: 0.5))
         controller.deselectLoop()
 
+        #expect(controller.session.loopRegion == nil)
+        #expect(controller.session.repeatMode == .off)
+    }
+
+    @MainActor
+    @Test
+    func deselectLoopWhilePlayingKeepsPlaybackRunning() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop-playing.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.beginLoop(LoopRegion(start: 0.2, end: 0.8))
+        controller.play()
+        controller.deselectLoop()
+
+        #expect(controller.session.isPlaying)
         #expect(controller.session.loopRegion == nil)
         #expect(controller.session.repeatMode == .off)
     }
