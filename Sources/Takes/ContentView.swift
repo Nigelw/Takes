@@ -488,6 +488,10 @@ struct ContentView: View {
             Divider()
             trackTimelineSection
                 .frame(maxHeight: .infinity)
+                // Recessed well: a faint dark scrim distinguishes the timeline from
+                // the raised transport bar, giving the bar's drop shadow a lower
+                // surface to land on.
+                .background(Theme.timelineWellShade)
                 // A soft shadow gradient hugging the top edge of the content makes the
                 // timeline header read as recessed beneath the transport bar. Drawn as an
                 // overlay (adaptive color, stronger in dark mode) rather than a hard line.
@@ -635,6 +639,9 @@ struct ContentView: View {
             guard width > 0, abs(width - transportReadoutWidth) > 0.5 else { return }
             transportReadoutWidth = width
         }
+        // Raised deck: a light wash lifts the bar off the shared window
+        // material, pairing with `timelineWellShade` below the divider.
+        .background(Theme.transportBarLift)
         // The transport bar is the titlebar: any click on empty bar space
         // (not claimed by a control above) drags the window.
         .background(WindowDragArea())
