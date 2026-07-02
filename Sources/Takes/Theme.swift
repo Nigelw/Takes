@@ -46,6 +46,21 @@ enum Theme {
     /// Fill behind an active track row (info + lane).
     static let activeRowFill = primary.opacity(0.12)
 
+    /// Neutral fill for the index badge on an inactive row (the active row uses
+    /// `primary`). Kept subtle so the number reads without competing with the title.
+    static let indexBadgeInactiveFill = dynamic(
+        light: (0.90, 0.90, 0.92),
+        dark: (0.24, 0.24, 0.27)
+    )
+
+    /// Surface fill for the secondary transport buttons (Switch Track, Repeat)
+    /// when not engaged. Distinct from the window background so they read as
+    /// tactile controls rather than blending in.
+    static let transportButtonFill = dynamic(
+        light: (0.965, 0.968, 0.98),
+        dark: (0.22, 0.23, 0.27)
+    )
+
     /// Waveform color for inactive (non-selected) tracks.
     static let waveformInactive = dynamic(
         light: (0.52, 0.52, 0.56),

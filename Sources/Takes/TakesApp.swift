@@ -85,17 +85,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 enum TakesWindowPolicy {
     static let mainWindowID = "main"
+    static let appearanceTunerWindowID = "appearance-tuner"
     static let replacesDefaultNewItemCommands = true
     static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
     static let minimumContentWidth: CGFloat = 500
     static let defaultWindowWidth: CGFloat = 700
-    static let trackRowHeight: CGFloat = 124
+    static let trackRowHeight: CGFloat = 96
     static let trackTimelineDividerHeight: CGFloat = 1
     static let trackTimelineHeaderHeight: CGFloat = 34
     static let contentPadding: CGFloat = 0
     static let rootVerticalSpacing: CGFloat = 1
     static let timelineHeaderSpacing: CGFloat = 1
-    static let transportBarReservedHeight: CGFloat = 70
+    // Play button / readout (56) + vertical padding (12 × 2).
+    static let transportBarReservedHeight: CGFloat = 80
     static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
     static let defaultContentHeight = contentHeight(displayingTrackRows: 1)
     // The transparent full-size-content titlebar overlaps the content, so the
@@ -336,14 +338,32 @@ struct TakesApp: App {
 
                 Menu("Debug") {
                     Toggle("Show Component Names", isOn: $settings.showsComponentDebugLabels)
+                    OpenAppearanceTunerButton()
                 }
             }
         }
+
+        Window("Appearance Tuner", id: TakesWindowPolicy.appearanceTunerWindowID) {
+            AppearanceTunerView(settings: settings)
+        }
+        .defaultSize(width: 320, height: 680)
 
         Settings {
             SettingsView()
                 .environmentObject(settings)
                 .environmentObject(updater)
+        }
+    }
+}
+
+/// Opens the standalone Appearance Tuner window from the Debug menu. A tiny
+/// view (rather than an inline command button) so it can read `openWindow`.
+private struct OpenAppearanceTunerButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Appearance Tuner…") {
+            openWindow(id: TakesWindowPolicy.appearanceTunerWindowID)
         }
     }
 }

@@ -379,7 +379,7 @@ struct ContentView: View {
     @State private var mouseMonitor: MouseMonitor?
     @State private var reorderInsertionTarget: TrackReorderInsertionTarget?
     @State private var emptyTrackIsDropTargeted = false
-    @State private var gainPopoverTrackID: SessionTrack.ID?
+    @State private var hoveredTrackID: SessionTrack.ID?
     @State private var didConfigureMainWindow = false
     @State private var mainWindow: NSWindow?
     @State private var loopDraft: LoopDraft?
@@ -457,6 +457,7 @@ struct ContentView: View {
             minWidth: TakesWindowPolicy.minimumContentWidth,
             minHeight: TakesWindowPolicy.minimumContentHeight
         )
+        .environment(\.transportAppearance, settings.transportAppearance)
         .background(WindowBackground().ignoresSafeArea())
         .background {
             MainWindowConfigurationView { window in
@@ -964,7 +965,7 @@ struct ContentView: View {
             // Number on top.
             if labelLayout.isVisible {
                 Text(marker.label)
-                    .font(.caption2.monospacedDigit())
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -988,10 +989,11 @@ struct ContentView: View {
         sessionTrack: SessionTrack,
         infoWidth: CGFloat
     ) -> some View {
-        HStack(spacing: 0) {
-            trackInfoArea(index: index, sessionTrack: sessionTrack)
+        let isActive = controller.session.activeTrackID == sessionTrack.id
+        let isHovered = hoveredTrackID == sessionTrack.id
+        return HStack(spacing: 0) {
+            trackInfoArea(index: index, sessionTrack: sessionTrack, showsTrash: isHovered)
                 .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
-                .background(backgroundStyle(for: .normal))
                 .contentShape(Rectangle())
                 .overlay(alignment: .top) {
                     reorderInsertionIndicator(for: sessionTrack.id, placement: .before)
@@ -1024,6 +1026,22 @@ struct ContentView: View {
                 .frame(height: trackRowHeight)
         }
         .frame(height: trackRowHeight)
+        // Active highlight spans the whole row (info + lane) as one continuous
+        // band; a leading accent bar anchors the active track to the left edge.
+        // Drawn at the HStack level so the frozen-column edge (a top-level overlay)
+        // reads as crossing a single tinted band rather than two boxes.
+        .background(isActive ? Theme.activeRowFill : Color.clear)
+        .overlay(alignment: .leading) {
+            if isActive {
+                Rectangle()
+                    .fill(Theme.primary)
+                    .frame(width: 3)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onHover { inside in
+            hoveredTrackID = inside ? sessionTrack.id : (hoveredTrackID == sessionTrack.id ? nil : hoveredTrackID)
+        }
     }
 
     private func emptyTrackRow(infoWidth: CGFloat) -> some View {
@@ -1048,113 +1066,175 @@ struct ContentView: View {
         }
     }
 
-    private func trackInfoArea(index: Int, sessionTrack: SessionTrack) -> some View {
+    private func trackInfoArea(index: Int, sessionTrack: SessionTrack, showsTrash: Bool) -> some View {
         let track = sessionTrack.loadedTrack
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Track \(index + 1)")
-                    .font(.headline)
-                if controller.session.activeTrackID == sessionTrack.id {
-                    Text("Active")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.primary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(Theme.primary.opacity(0.15), in: Capsule())
-                }
-                Spacer()
-                Button {
-                    if gainPopoverTrackID == sessionTrack.id {
-                        gainPopoverTrackID = nil
+        let isActive = controller.session.activeTrackID == sessionTrack.id
+        // Badge on the left; filename, metadata, and the Offset row form a single
+        // left-aligned column to its right so all three share the filename's left
+        // edge. Vertically centered so the info column matches the waveform lane.
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            trackIndexBadge(index: index, isActive: isActive)
+                // Baseline is technically aligned, but the fixed badge frame makes
+                // the centered number read a touch low; nudge it up 1pt.
+                .offset(y: -1)
+
+            // Outer spacing (12) pushes the Offset row down; the inner group's
+            // spacing (2) keeps the filename and metadata tightly associated.
+            // Tweak these two numbers to taste.
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(track.displayName)
+                            .font(.headline.weight(.medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        Spacer(minLength: 0)
+
+                        Button {
+                            controller.removeTrack(sessionTrack.id)
+                        } label: {
+                            Image(systemName: "trash")
+                                .accessibilityLabel("Remove Track \(index + 1)")
+                        }
+                        .buttonStyle(.borderless)
+                        // Only surfaces on hover; kept mounted (opacity, not removed) so it
+                        // stays reachable by accessibility/keyboard.
+                        .opacity(showsTrash ? 1 : 0)
                     }
-                    controller.removeTrack(sessionTrack.id)
-                } label: {
-                    Image(systemName: "trash")
-                        .accessibilityLabel("Remove Track \(index + 1)")
+
+                    Text(track.metadataSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .buttonStyle(.borderless)
 
-                gainButton(sessionTrack: sessionTrack)
+                offsetControl(sessionTrack: sessionTrack)
             }
-
-            Text(track.displayName)
-                .font(.callout.weight(.medium))
-                .lineLimit(1)
-            Text(track.metadataSummary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            offsetControl(sessionTrack: sessionTrack)
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .frame(maxHeight: .infinity, alignment: .center)
         .componentDebugLabel("Track Info", enabled: settings.showsComponentDebugLabels, color: .green)
     }
 
-    private func gainButton(sessionTrack: SessionTrack) -> some View {
-        Button {
-            gainPopoverTrackID = sessionTrack.id
-        } label: {
-            Image(systemName: "gearshape")
-                .accessibilityLabel("\(sessionTrack.loadedTrack.displayName) Settings")
-        }
-        .buttonStyle(.borderless)
-        .popover(
-            isPresented: Binding(
-                get: { gainPopoverTrackID == sessionTrack.id },
-                set: { isPresented in
-                    gainPopoverTrackID = isPresented ? sessionTrack.id : nil
-                }
-            ),
-            arrowEdge: .trailing
-        ) {
-            gainPopoverContent(sessionTrack: sessionTrack)
-                .padding()
-                .frame(width: 300)
-        }
-    }
-
-    private func gainPopoverContent(sessionTrack: SessionTrack) -> some View {
-        let gainValue = Int(sessionTrack.loadedTrack.gainDB.rounded())
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Track Gain")
-                .font(.headline)
-            Text("\(gainValue) dB")
-                .foregroundStyle(.secondary)
-            HStack(spacing: 10) {
-                ResettableSlider(
-                    value: Binding(
-                        get: { Double(gainValue) },
-                        set: { controller.setGain(sessionTrack.id, db: Float(Int($0.rounded()))) }
+    /// The rounded index badge: filled with the primary color when the row is
+    /// active (white number), a neutral fill otherwise (secondary number).
+    private func trackIndexBadge(index: Int, isActive: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let badge = settings.indexBadgeAppearance
+        return Text("\(index + 1)")
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(isActive ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+            .frame(width: 20, height: 20)
+            .background {
+                shape.fill(isActive ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(Theme.indexBadgeInactiveFill))
+            }
+            // A crisp beveled rim all around: bright along the top edge fading to a
+            // dark bottom edge, so the badge reads as a raised, chiseled button.
+            .overlay {
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(badge.bevelTopOpacity),
+                            .white.opacity(badge.bevelTopOpacity * 0.24),
+                            .black.opacity(badge.bevelBottomOpacity)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
                     ),
-                    range: -24...24,
-                    resetValue: 0
-                )
-                NumericControlRow(
-                    value: Binding(
-                        get: { gainValue },
-                        set: { controller.setGain(sessionTrack.id, db: Float($0)) }
-                    ),
-                    configuration: .gain
+                    lineWidth: badge.bevelWidth
                 )
             }
-        }
+            .clipShape(shape)
+            .shadow(color: .black.opacity(badge.shadowOpacity), radius: CGFloat(badge.shadowRadius), y: CGFloat(badge.shadowY))
+            .accessibilityHidden(true)
     }
 
     private func offsetControl(sessionTrack: SessionTrack) -> some View {
         let offsetMs = Int((sessionTrack.loadedTrack.offsetSeconds * 1000).rounded())
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("Offset \(offsetMs) ms")
+        let binding = Binding(
+            get: { offsetMs },
+            set: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) }
+        )
+        // firstTextBaseline so the "Offset" caption sits on the same line as the
+        // field's numeric text; both use .caption so their baselines match.
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("Offset")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            NumericControlRow(
-                value: Binding(
-                    get: { offsetMs },
-                    set: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) }
-                ),
+
+            offsetField(binding: binding)
+        }
+    }
+
+    /// Composite offset control: a single rounded, bordered box holding the
+    /// borderless numeric field, a static "ms" unit, and an embedded stepper — so
+    /// it reads as one input `[  0  ms  ⌃⌄ ]`. Typed-entry/clamping and the
+    /// Shift-large-step behavior come from `IntegerInputField`; the stepper mirrors
+    /// the same step amounts.
+    private func offsetField(binding: Binding<Int>) -> some View {
+        HStack(spacing: 4) {
+            IntegerInputField(
+                value: binding,
                 configuration: settings.offsetConfiguration
             )
+            .frame(width: 44)
+
+            Text("ms")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Stepper(
+                "Offset",
+                onIncrement: { stepOffset(binding: binding, direction: 1) },
+                onDecrement: { stepOffset(binding: binding, direction: -1) }
+            )
+            .labelsHidden()
+            .controlSize(.small)
         }
+        .padding(.leading, 6)
+        .padding(.trailing, 3)
+        .padding(.vertical, 2)
+        // Recessed field: a filled surface with a soft top inner shadow, ringed by
+        // an inset bevel (dark top edge fading to a light bottom edge).
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Theme.readoutSurface.shadow(.inner(color: .black.opacity(0.15), radius: 1.5, y: 1)))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [.black.opacity(0.14), .white.opacity(0.45)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+        }
+    }
+
+    private func stepOffset(binding: Binding<Int>, direction: Int) {
+        binding.wrappedValue = settings.offsetConfiguration.steppedValue(
+            from: binding.wrappedValue,
+            direction: direction,
+            largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
+        )
+    }
+
+    /// Major-tick x-positions (points) across a lane of the given width, using the
+    /// same ruler computation the header draws so the faint lane lines line up with
+    /// the labeled ticks and scroll/zoom in lockstep.
+    private func laneMajorTickXs(width: CGFloat) -> [CGFloat] {
+        let rulerStart = max(visibleStart, controller.session.timelineStart)
+        let rulerEnd = min(controller.session.visibleEnd, controller.session.timelineEnd)
+        let ruler = TimelineHeaderMarker.ruler(
+            timelineStart: rulerStart,
+            timelineEnd: rulerEnd,
+            targetMarkerCount: timelineHeaderTargetMarkerCount,
+            leadingMajorTicks: 1
+        )
+        return ruler.majorTicks.map { xPosition(for: $0.time, width: width) }
     }
 
     private func waveformLane(index: Int, sessionTrack: SessionTrack?) -> some View {
@@ -1162,6 +1242,16 @@ struct ContentView: View {
             ZStack(alignment: .leading) {
                 Rectangle()
                     .fill(.background.opacity(0.01))
+
+                // Faint major-tick guides behind the waveform, aligned with the
+                // ruler's labeled ticks above.
+                ForEach(Array(laneMajorTickXs(width: proxy.size.width).enumerated()), id: \.offset) { _, tickX in
+                    Rectangle()
+                        .fill(Theme.hairline.opacity(0.25))
+                        .frame(width: 1)
+                        .offset(x: tickX)
+                        .accessibilityHidden(true)
+                }
 
                 if let sessionTrack {
                     let loaded = sessionTrack.loadedTrack
@@ -2167,55 +2257,6 @@ private struct TrackRowDropDelegate: DropDelegate {
     }
 }
 
-private struct NumericControlRow: View {
-    @Binding var value: Int
-    let configuration: NumericControlConfiguration
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Button {
-                value = configuration.steppedValue(
-                    from: value,
-                    direction: -1,
-                    largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
-                )
-            } label: {
-                Image(systemName: "minus")
-            }
-            .buttonStyle(.bordered)
-
-            IntegerInputField(
-                value: $value,
-                configuration: configuration
-            )
-                .frame(width: 70)
-
-            Text(configuration.suffix)
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .leading)
-
-            Button {
-                value = configuration.steppedValue(
-                    from: value,
-                    direction: 1,
-                    largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
-                )
-            } label: {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(.bordered)
-
-            Button {
-                value = 0
-            } label: {
-                Image(systemName: "arrow.counterclockwise")
-            }
-            .accessibilityLabel("Reset")
-            .buttonStyle(.bordered)
-        }
-    }
-}
-
 private struct IntegerInputField: NSViewRepresentable {
     @Binding var value: Int
     let configuration: NumericControlConfiguration
@@ -2230,8 +2271,12 @@ private struct IntegerInputField: NSViewRepresentable {
     func makeNSView(context: Context) -> NSTextField {
         let textField = NumericInputTextField(frame: .zero)
         textField.alignment = .right
-        textField.isBordered = true
-        textField.focusRingType = .default
+        // Borderless and transparent so the field blends into the composite
+        // offset box that surrounds it; the box supplies the border.
+        textField.isBordered = false
+        textField.drawsBackground = false
+        textField.focusRingType = .none
+        textField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         textField.delegate = context.coordinator
         textField.stringValue = "\(value)"
         return textField
@@ -2443,69 +2488,6 @@ private struct IntegerInputField: NSViewRepresentable {
             fieldEditor.interpretKeyEvents([event])
             return true
         }
-    }
-}
-
-private struct ResettableSlider: NSViewRepresentable {
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-    let resetValue: Double
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(value: $value)
-    }
-
-    func makeNSView(context: Context) -> DoubleClickResetSlider {
-        let slider = DoubleClickResetSlider(value: value, minValue: range.lowerBound, maxValue: range.upperBound, target: context.coordinator, action: #selector(Coordinator.valueChanged(_:)))
-        slider.doubleActionHandler = {
-            context.coordinator.reset(to: resetValue)
-        }
-        return slider
-    }
-
-    func updateNSView(_ nsView: DoubleClickResetSlider, context: Context) {
-        nsView.minValue = range.lowerBound
-        nsView.maxValue = range.upperBound
-        if nsView.doubleValue != value {
-            nsView.doubleValue = value
-        }
-        nsView.doubleActionHandler = {
-            context.coordinator.reset(to: resetValue)
-        }
-    }
-
-    final class Coordinator: NSObject {
-        @Binding private var value: Double
-
-        init(value: Binding<Double>) {
-            _value = value
-        }
-
-        @MainActor
-        @objc func valueChanged(_ sender: NSSlider) {
-            value = sender.doubleValue
-        }
-
-        @MainActor
-        func reset(to resetValue: Double) {
-            value = resetValue
-        }
-    }
-}
-
-private final class DoubleClickResetSlider: NSSlider {
-    var doubleActionHandler: (() -> Void)?
-
-    override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 2 {
-            let resetValue = min(max(0, minValue), maxValue)
-            doubleValue = resetValue
-            doubleActionHandler?()
-            sendAction(action, to: target)
-            return
-        }
-
-        super.mouseDown(with: event)
     }
 }
 
