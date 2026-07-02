@@ -100,9 +100,10 @@ enum TakesWindowPolicy {
     static let transportBarReservedHeight: CGFloat = 80
     static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
     static let defaultContentHeight = contentHeight(displayingTrackRows: 1)
-    // The transparent full-size-content titlebar overlaps the content, so the
-    // window height equals the content height (no separate chrome band).
-    static let windowChromeHeight: CGFloat = 0
+    // SwiftUI still lays out the root view inside the titlebar-safe content
+    // layout rect, even though AppKit lets the background draw under the
+    // transparent full-size titlebar.
+    static let windowChromeHeight: CGFloat = 28
     static let defaultWindowHeight = defaultContentHeight + windowChromeHeight
     static let minimumWindowSize = CGSize(
         width: minimumContentWidth,

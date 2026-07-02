@@ -159,12 +159,12 @@ struct SessionTests {
     }
 
     @Test
-    func windowPolicyOmitsChromeFromDefaultWindowHeight() {
-        // The transparent full-size-content titlebar overlaps the content, so the
-        // window height equals the content height (no separate chrome band).
-        #expect(TakesWindowPolicy.windowChromeHeight == 0)
+    func windowPolicyAddsTitlebarLayoutInsetToDefaultWindowHeight() {
+        // The background draws under the transparent titlebar, but SwiftUI lays
+        // out the content inside AppKit's titlebar-safe content layout rect.
+        #expect(TakesWindowPolicy.windowChromeHeight == 28)
         #expect(TakesWindowPolicy.defaultWindowHeight == TakesWindowPolicy.defaultContentHeight + TakesWindowPolicy.windowChromeHeight)
-        #expect(TakesWindowPolicy.defaultWindowHeight == TakesWindowPolicy.defaultContentHeight)
+        #expect(TakesWindowPolicy.defaultWindowHeight > TakesWindowPolicy.defaultContentHeight)
     }
 
     @Test
