@@ -3,6 +3,28 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>2.7</title>
+            <pubDate>Fri, 03 Jul 2026 13:20:55 -0400</pubDate>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>2.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## New Features
+- Auto-Align tracks! A single button lines your tracks up automatically by listening to the audio itself
+- Auto-Align can also handle tracks recorded at slightly different speeds, offering a deeper tempo analysis when the quick pass can't find a match
+- If tracks have tempo drift, you can auto-align anytime at the current playhead
+- Added setting to auto-align by default when opening files
+
+## Improvements
+- Takes remembers its window position between launches
+- Folders can be dropped on the app window
+- Clearer error messages when files can't be loaded
+- Small wording polish on the empty state
+
+## Fixes
+- App window can be moved by dragging anywhere in the control area]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.7/Takes.dmg" length="3123238" type="application/octet-stream" sparkle:edSignature="QnKKTcK1qg9Jift6VStt+6rEyFomagJRtcOKm0zsuDt1CIi51EcCSfSPo9L+OS0mgTxsD5GmXXQFp/xvlW7IBw=="/>
+        </item>
+        <item>
             <title>2.6.1</title>
             <pubDate>Thu, 02 Jul 2026 17:15:06 -0400</pubDate>
             <sparkle:version>9</sparkle:version>
@@ -26,31 +48,6 @@
             <description sparkle:format="markdown"><![CDATA[## New Features
 - Blind listening mode: compare takes without seeing which is which, so your ears decide]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.6/Takes.dmg" length="3008162" type="application/octet-stream" sparkle:edSignature="rvXPeZnJR8ngwkpqsyVGKviIK5EpuiKx8eN6KUnxcVOysa2tjrwr2UKHcWu8CLgXTnuVjRUEXegcWrBJpoqrAA=="/>
-        </item>
-        <item>
-            <title>2.5</title>
-            <pubDate>Thu, 02 Jul 2026 15:04:45 -0400</pubDate>
-            <sparkle:version>7</sparkle:version>
-            <sparkle:shortVersionString>2.5</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[## New Features
-- Major redesign with a brand new look and feel, every pixel reworked
-  - New appearance settings: choose light or dark theme, and pick your preferred time readout display style
-  - Redesigned track rows with clearer info at a glance
-  - Redesigned timeline ruler and playhead, with an interactive grabber you can drag to scrub
-  - Polished buttons and controls with satisfying pressed states and better dark mode contrast
-- Control playback with your keyboard's media keys
-
-## Improved
-- A cleaner empty state — just drop your files onto the target to get started
-- Shift-click the Switch Track button to switch to previous
-- New menu commands for timeline zoom and track removal
-
-## Fixed
-- Fixed timeline overscroll getting stuck if an input field is active
-- Various layout, contrast, and window-sizing refinements
-]]></description>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.5/Takes.dmg" length="2984360" type="application/octet-stream" sparkle:edSignature="AkxZcSZrUTzbn/Ijhw9EkahNg+fxGZum5QVUvDWkkX/2QMozwUjkGsoVsYRDIEzgls75Lje5udVnfZdXHHFBBQ=="/>
         </item>
     </channel>
 </rss>

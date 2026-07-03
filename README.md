@@ -31,6 +31,8 @@ The app currently supports:
 - Dragging files anywhere in the window to append to the track list
 - Placeholder waveform lanes for each loaded track
 - Signed global timeline playback with a playhead over the waveform lanes
+- Automatic track alignment that derives per-track offsets from the audio itself, with an optional deeper tempo analysis for takes recorded at slightly different speeds
+- Optional automatic alignment when opening files
 - Independent offset adjustment for each loaded track
 - Independent gain trim per track through the track settings popup
 - Importing the current selection from Music.app
@@ -44,7 +46,6 @@ Out of scope at the moment:
 
 - Real waveform extraction and caching
 - Loudness analysis
-- Automatic alignment
 - Session persistence
 - Export / rendering
 
