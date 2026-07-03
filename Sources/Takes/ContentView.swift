@@ -2021,6 +2021,17 @@ struct ContentView: View {
                 return true
             }
 
+            if let direction = TrackSwitchArrowHotkey.direction(forKeyCode: event.keyCode, modifierFlags: event.modifierFlags),
+               controller.session.canSwitchPlayback {
+                switch direction {
+                case .previous:
+                    controller.selectPreviousTrack()
+                case .next:
+                    controller.selectNextTrack()
+                }
+                return true
+            }
+
             switch event.keyCode {
             case 49:
                 guard !event.modifierFlags.contains(.command),

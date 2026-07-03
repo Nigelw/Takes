@@ -1390,10 +1390,10 @@ final class PlaybackController: ObservableObject {
     }
 
     private func trackIndex(forHotkey hotkey: Int) -> Int? {
-        guard (1...9).contains(hotkey) else { return nil }
+        guard (0...9).contains(hotkey) else { return nil }
 
-        if hotkey == 9 {
-            guard session.tracks.count > 8 else { return nil }
+        if hotkey == 0 {
+            guard !session.tracks.isEmpty else { return nil }
             return session.tracks.index(before: session.tracks.endIndex)
         }
 

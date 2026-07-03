@@ -701,8 +701,8 @@ struct SessionTests {
 
     @MainActor
     @Test
-    func numericTrackHotkeyNineSelectsLastTrackWhenMoreThanEightTracksAreLoaded() async throws {
-        let urls = try (0..<9).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
+    func numericTrackHotkeyNineSelectsNinthTrack() async throws {
+        let urls = try (0..<10).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
         defer {
             for url in urls {
                 try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
@@ -716,6 +716,25 @@ struct SessionTests {
 
         controller.selectTrackForHotkey(9)
         #expect(controller.session.activeTrackID == ids[8])
+    }
+
+    @MainActor
+    @Test
+    func numericTrackHotkeyZeroSelectsLastTrack() async throws {
+        let urls = try (0..<3).map { try makeTemporaryAudioFile(name: "track-\($0).wav") }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let controller = PlaybackController()
+        await controller.loadImportedFiles(urls)
+
+        let ids = controller.session.tracks.map(\.id)
+
+        controller.selectTrackForHotkey(0)
+        #expect(controller.session.activeTrackID == ids[2])
     }
 
     @MainActor
@@ -1559,9 +1578,11 @@ struct SessionTests {
         #expect(TrackNumberHotkey.hotkey(forKeyCode: 18, modifierFlags: []) == 1)
         #expect(TrackNumberHotkey.hotkey(forKeyCode: 28, modifierFlags: []) == 8)
         #expect(TrackNumberHotkey.hotkey(forKeyCode: 25, modifierFlags: []) == 9)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 29, modifierFlags: []) == 0)
         #expect(TrackNumberHotkey.hotkey(forKeyCode: 83, modifierFlags: []) == 1)
         #expect(TrackNumberHotkey.hotkey(forKeyCode: 91, modifierFlags: []) == 8)
         #expect(TrackNumberHotkey.hotkey(forKeyCode: 92, modifierFlags: []) == 9)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 82, modifierFlags: []) == 0)
     }
 
     @Test
@@ -1570,7 +1591,23 @@ struct SessionTests {
         #expect(TrackNumberHotkey.hotkey(forKeyCode: 18, modifierFlags: .command) == nil)
         #expect(TrackNumberHotkey.hotkey(forKeyCode: 18, modifierFlags: .control) == nil)
         #expect(TrackNumberHotkey.hotkey(forKeyCode: 18, modifierFlags: .option) == nil)
-        #expect(TrackNumberHotkey.hotkey(forKeyCode: 29, modifierFlags: []) == nil)
+        #expect(TrackNumberHotkey.hotkey(forKeyCode: 29, modifierFlags: .shift) == nil)
+    }
+
+    @Test
+    func trackSwitchArrowHotkeyMapsPlainUpAndDownArrows() {
+        #expect(TrackSwitchArrowHotkey.direction(forKeyCode: 126, modifierFlags: []) == .previous)
+        #expect(TrackSwitchArrowHotkey.direction(forKeyCode: 125, modifierFlags: []) == .next)
+    }
+
+    @Test
+    func trackSwitchArrowHotkeyIgnoresModifiedAndHorizontalArrows() {
+        #expect(TrackSwitchArrowHotkey.direction(forKeyCode: 126, modifierFlags: .shift) == nil)
+        #expect(TrackSwitchArrowHotkey.direction(forKeyCode: 126, modifierFlags: .command) == nil)
+        #expect(TrackSwitchArrowHotkey.direction(forKeyCode: 126, modifierFlags: .control) == nil)
+        #expect(TrackSwitchArrowHotkey.direction(forKeyCode: 126, modifierFlags: .option) == nil)
+        #expect(TrackSwitchArrowHotkey.direction(forKeyCode: 123, modifierFlags: []) == nil)
+        #expect(TrackSwitchArrowHotkey.direction(forKeyCode: 124, modifierFlags: []) == nil)
     }
 
     private func makeTrack(name: String) -> LoadedTrack {
