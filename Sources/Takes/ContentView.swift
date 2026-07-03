@@ -448,6 +448,8 @@ struct ContentView: View {
     @State private var mainWindow: NSWindow?
     @State private var loopDraft: LoopDraft?
     @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
+    @State private var showsAlignmentAttentionPopover = false
+    @State private var alignmentOutcomePulse = false
 
     /// An in-progress loop drag, in absolute seconds. `start` is where the drag
     /// began; `current` tracks the pointer. Committed to a `LoopRegion` on mouse-up.
@@ -563,48 +565,6 @@ struct ContentView: View {
             }
         } message: {
             Text(controller.playbackError?.localizedDescription ?? "")
-        }
-        .alert(
-            "Couldn't Align Some Tracks",
-            isPresented: Binding(
-                get: { controller.tempoAnalysisOffer != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        controller.declineTempoAnalysis()
-                    }
-                }
-            )
-        ) {
-            Button("Analyze Tempo") {
-                controller.startTempoAnalysis()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            let names = controller.tempoAnalysisOffer?.trackNames.joined(separator: "\n") ?? ""
-            Text("""
-            No matching audio was found for:
-            \(names)
-            They might match at a different playback speed. Run tempo \
-            analysis? This can take a while; the Auto-Align button shows \
-            its progress.
-            """)
-        }
-        .alert(
-            "Tracks Aligned",
-            isPresented: Binding(
-                get: { controller.alignmentNotice != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        controller.clearAlignmentNotice()
-                    }
-                }
-            )
-        ) {
-            Button("OK") {
-                controller.clearAlignmentNotice()
-            }
-        } message: {
-            Text(controller.alignmentNotice ?? "")
         }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $windowIsDropTargeted) { providers in
             loadDroppedURLs(from: providers)
@@ -832,6 +792,9 @@ struct ContentView: View {
                     ProgressView()
                         .controlSize(.small)
                         .scaleEffect(0.7)
+                } else if let outcome = controller.alignmentOutcome {
+                    Image(systemName: outcome == .success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(outcome == .success ? Color.green : Color.red)
                 } else {
                     Image(systemName: "arrow.right.and.line.vertical.and.arrow.left")
                 }
@@ -843,7 +806,68 @@ struct ContentView: View {
         .help("Auto-Align Tracks")
         .accessibilityLabel("Auto-Align Tracks")
         .accessibilityValue(controller.isAligning ? "Aligning" : "")
+        .shadow(
+            color: alignmentOutcomeGlowColor.opacity(alignmentOutcomePulse ? 0.9 : 0.0),
+            radius: alignmentOutcomePulse ? 7 : 0
+        )
+        .onChange(of: controller.alignmentOutcome) { _, outcome in
+            if outcome == nil {
+                withAnimation(.easeOut(duration: 0.3)) { alignmentOutcomePulse = false }
+            } else {
+                alignmentOutcomePulse = false
+                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                    alignmentOutcomePulse = true
+                }
+            }
+        }
+        .popover(isPresented: $showsAlignmentAttentionPopover, arrowEdge: .bottom) {
+            alignmentOfferPopoverContent
+        }
+        .onChange(of: controller.tempoAnalysisOffer) { _, offer in
+            // Surface the offer automatically when the quick pass leaves
+            // unaligned tracks.
+            if offer != nil { showsAlignmentAttentionPopover = true }
+        }
+        .onChange(of: showsAlignmentAttentionPopover) { _, isShowing in
+            if !isShowing { controller.dismissAlignmentAttention() }
+        }
         .componentDebugLabel("Auto-Align", enabled: settings.showsComponentDebugLabels)
+    }
+
+    private var alignmentOutcomeGlowColor: Color {
+        switch controller.alignmentOutcome {
+        case .success: return .green
+        case .failure: return .red
+        case nil: return .clear
+        }
+    }
+
+    @ViewBuilder
+    private var alignmentOfferPopoverContent: some View {
+        if let offer = controller.tempoAnalysisOffer {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Couldn't Align Tracks")
+                    .font(.headline)
+                Text("No matching audio was found for:")
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(offer.trackNames.joined(separator: "\n"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Deeper analysis can align audio across differing tempos, but it takes longer.")
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Spacer()
+                    Button("Analyze Further") {
+                        controller.startTempoAnalysis()
+                        showsAlignmentAttentionPopover = false
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding()
+            .frame(width: 300)
+        }
     }
 
     private var blindListeningButton: some View {

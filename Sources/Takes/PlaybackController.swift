@@ -14,12 +14,13 @@ final class PlaybackController: ObservableObject {
     /// Progress (0...1) of the tempo-analysis pass, or `nil` while idle or
     /// during the quick first pass (which shows an indeterminate spinner).
     @Published private(set) var alignmentProgress: Double?
-    /// Set when the quick pass leaves unaligned tracks: the UI asks whether to
-    /// run the slower tempo analysis on them.
+    /// Set when the quick pass leaves unaligned tracks: the UI surfaces a
+    /// warning control beside the button whose popover offers the slower tempo
+    /// analysis on them.
     @Published private(set) var tempoAnalysisOffer: TempoAnalysisOffer?
-    /// Post-alignment information for the user (e.g. a detected speed
-    /// difference and its drift implications).
-    @Published private(set) var alignmentNotice: String?
+    /// A brief success/failure flash on the Auto-Align button, auto-cleared a
+    /// couple seconds after an alignment run finishes.
+    @Published private(set) var alignmentOutcome: AlignmentOutcome?
 
     /// Tracks the quick alignment pass couldn't match, held while the user
     /// decides whether to run tempo analysis on them.
@@ -27,6 +28,13 @@ final class PlaybackController: ObservableObject {
         let trackIDs: [SessionTrack.ID]
         let trackNames: [String]
     }
+
+    enum AlignmentOutcome: Equatable {
+        case success
+        case failure
+    }
+
+    private var alignmentOutcomeClearTask: Task<Void, Never>?
 
     private let loader: AudioFileLoading
     private let libraryTrackSelector: LibraryTrackSelecting
@@ -581,6 +589,9 @@ final class PlaybackController: ObservableObject {
         )
 
         isAligning = true
+        // A fresh run supersedes any lingering flash from the last one.
+        alignmentOutcome = nil
+        alignmentOutcomeClearTask?.cancel()
         // `align` is nonisolated async, so it hops off the main actor on its
         // own; the task only returns here to publish the results.
         Task { [weak self] in
@@ -614,22 +625,35 @@ final class PlaybackController: ObservableObject {
 
         setOffsets(updates)
         if !unalignedTrackIDs.isEmpty {
-            // Rather than alerting outright, offer the slower tempo analysis:
-            // the tracks may be the same material at a different speed.
+            // Rather than alerting outright, offer the slower tempo analysis via
+            // a warning control: the tracks may be the same material at a
+            // different speed. Flash red for consistent failure feedback.
             tempoAnalysisOffer = TempoAnalysisOffer(
                 trackIDs: unalignedTrackIDs,
                 trackNames: unalignedTrackNames
             )
+            flashOutcome(.failure)
+        } else {
+            flashOutcome(.success)
         }
     }
 
-    /// Dismiss the tempo-analysis offer without running it.
-    func declineTempoAnalysis() {
+    /// Dismiss the tempo-analysis offer (e.g. when the popover is closed without
+    /// acting on it).
+    func dismissAlignmentAttention() {
         tempoAnalysisOffer = nil
     }
 
-    func clearAlignmentNotice() {
-        alignmentNotice = nil
+    /// Briefly flash the Auto-Align button green (success) or red (failure),
+    /// clearing the flash after a couple seconds.
+    private func flashOutcome(_ outcome: AlignmentOutcome) {
+        alignmentOutcome = outcome
+        alignmentOutcomeClearTask?.cancel()
+        alignmentOutcomeClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.alignmentOutcome = nil
+        }
     }
 
     /// Run the slow tempo-search pass on the tracks the quick pass couldn't
@@ -668,6 +692,8 @@ final class PlaybackController: ObservableObject {
 
         isAligning = true
         alignmentProgress = 0
+        alignmentOutcome = nil
+        alignmentOutcomeClearTask?.cancel()
         let publishProgress: @Sendable (Double) -> Void = { [weak self] progress in
             guard let self else { return }
             Task { @MainActor in
@@ -691,36 +717,20 @@ final class PlaybackController: ObservableObject {
         )
 
         var updates: [SessionTrack.ID: TimeInterval] = [:]
-        var unalignedTrackNames: [String] = []
-        var speedNotes: [String] = []
+        var hasFailure = false
         for track in session.tracks {
             guard let result = resultsByTrackID[track.id] else { continue }
             guard let newOffset = result.newOffsetSeconds else {
-                unalignedTrackNames.append(result.displayName)
+                hasFailure = true
                 continue
             }
             updates[track.id] = newOffset
-            if let ratio = result.speedRatio, abs(ratio - 1) > 0.001 {
-                let percent = abs(ratio - 1) * 100
-                let direction = ratio > 1 ? "slower" : "faster"
-                speedNotes.append(String(
-                    format: "%@ plays about %.1f%% %@.",
-                    result.displayName, percent, direction
-                ))
-            }
         }
 
         setOffsets(updates)
-        if !speedNotes.isEmpty {
-            alignmentNotice = speedNotes.joined(separator: "\n") + """
-            \nTracks are aligned at the current position, but the speed \
-            difference makes them drift apart from there. Press Auto-Align \
-            again to re-sync wherever you're listening.
-            """
-        }
-        if !unalignedTrackNames.isEmpty {
-            playbackError = .alignmentFailed(unalignedTrackNames: unalignedTrackNames)
-        }
+        // Success or failure, the button pulse is the only feedback the user
+        // needs — no lingering popover or badge.
+        flashOutcome(hasFailure ? .failure : .success)
     }
 
     func skip(by delta: TimeInterval) {
