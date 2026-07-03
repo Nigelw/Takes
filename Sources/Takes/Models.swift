@@ -324,6 +324,7 @@ enum PlaybackError: LocalizedError, Equatable {
     case engineStartFailed
     case schedulingFailed
     case librarySelectionFailed(String)
+    case alignmentFailed(unalignedTrackNames: [String])
     case importFailures([ImportFailure])
     case trackLimitExceeded(limit: Int, skippedFileNames: [String])
     case importSummary(failures: [ImportFailure], skippedFileNames: [String], limit: Int)
@@ -342,6 +343,12 @@ enum PlaybackError: LocalizedError, Equatable {
             return "Audio playback could not be scheduled."
         case let .librarySelectionFailed(message):
             return message
+        case let .alignmentFailed(unalignedTrackNames):
+            return """
+            Couldn't find matching audio to align:
+            \(unalignedTrackNames.joined(separator: "\n"))
+            Their offsets were left unchanged.
+            """
         case let .importFailures(failures):
             let details = failures.map { "\($0.fileName): \($0.message)" }.joined(separator: "\n")
             return "Some files could not be loaded.\n\(details)"

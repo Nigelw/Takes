@@ -564,6 +564,48 @@ struct ContentView: View {
         } message: {
             Text(controller.playbackError?.localizedDescription ?? "")
         }
+        .alert(
+            "Couldn't Align Some Tracks",
+            isPresented: Binding(
+                get: { controller.tempoAnalysisOffer != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        controller.declineTempoAnalysis()
+                    }
+                }
+            )
+        ) {
+            Button("Analyze Tempo") {
+                controller.startTempoAnalysis()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            let names = controller.tempoAnalysisOffer?.trackNames.joined(separator: "\n") ?? ""
+            Text("""
+            No matching audio was found for:
+            \(names)
+            They might match at a different playback speed. Run tempo \
+            analysis? This can take a while; the Auto-Align button shows \
+            its progress.
+            """)
+        }
+        .alert(
+            "Tracks Aligned",
+            isPresented: Binding(
+                get: { controller.alignmentNotice != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        controller.clearAlignmentNotice()
+                    }
+                }
+            )
+        ) {
+            Button("OK") {
+                controller.clearAlignmentNotice()
+            }
+        } message: {
+            Text(controller.alignmentNotice ?? "")
+        }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $windowIsDropTargeted) { providers in
             loadDroppedURLs(from: providers)
         }
@@ -771,6 +813,39 @@ struct ContentView: View {
         .componentDebugLabel("Repeat", enabled: settings.showsComponentDebugLabels)
     }
 
+    /// Header-sized companion to the import control: a native bordered button
+    /// (matching "Remove All") whose glyph swaps for a progress indicator
+    /// while an alignment run is in flight — an indeterminate spinner during
+    /// the quick pass, a determinate circle during tempo analysis. The fixed
+    /// label frame keeps the button from resizing during the swap.
+    private var autoAlignButton: some View {
+        Button {
+            controller.autoAlignTracks()
+        } label: {
+            Group {
+                if let progress = controller.alignmentProgress {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                } else if controller.isAligning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                } else {
+                    Image(systemName: "arrow.right.and.line.vertical.and.arrow.left")
+                }
+            }
+            .frame(width: 18, height: 16)
+        }
+        .controlSize(.regular)
+        .disabled(!controller.session.canSwitchPlayback || controller.isAligning)
+        .help("Auto-Align Tracks")
+        .accessibilityLabel("Auto-Align Tracks")
+        .accessibilityValue(controller.isAligning ? "Aligning" : "")
+        .componentDebugLabel("Auto-Align", enabled: settings.showsComponentDebugLabels)
+    }
+
     private var blindListeningButton: some View {
         let isOn = controller.session.isBlindListeningModeEnabled
         return Button {
@@ -932,11 +1007,14 @@ struct ContentView: View {
 
     private func trackTimelineHeader(waveformWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
-            ImportActionSplitButton(
-                dropdownItems: ImportActionMenuItem.dropdownItems,
-                performAction: performImportAction(_:)
-            )
-            .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
+            HStack(spacing: 8) {
+                ImportActionSplitButton(
+                    dropdownItems: ImportActionMenuItem.dropdownItems,
+                    performAction: performImportAction(_:)
+                )
+                .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
+                autoAlignButton
+            }
             .padding(.leading, 8)
             // Center the button cluster in the taller header rather than pinning it up top.
             .frame(width: trackInfoWidth, height: trackHeaderHeight, alignment: .leading)

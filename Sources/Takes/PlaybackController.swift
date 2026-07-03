@@ -8,6 +8,25 @@ final class PlaybackController: ObservableObject {
 
     @Published private(set) var session = ComparisonSession()
     @Published private(set) var playbackError: PlaybackError?
+    /// Whether an auto-align run is in flight (drives the toolbar button's
+    /// spinner and blocks re-entry).
+    @Published private(set) var isAligning = false
+    /// Progress (0...1) of the tempo-analysis pass, or `nil` while idle or
+    /// during the quick first pass (which shows an indeterminate spinner).
+    @Published private(set) var alignmentProgress: Double?
+    /// Set when the quick pass leaves unaligned tracks: the UI asks whether to
+    /// run the slower tempo analysis on them.
+    @Published private(set) var tempoAnalysisOffer: TempoAnalysisOffer?
+    /// Post-alignment information for the user (e.g. a detected speed
+    /// difference and its drift implications).
+    @Published private(set) var alignmentNotice: String?
+
+    /// Tracks the quick alignment pass couldn't match, held while the user
+    /// decides whether to run tempo analysis on them.
+    struct TempoAnalysisOffer: Equatable {
+        let trackIDs: [SessionTrack.ID]
+        let trackNames: [String]
+    }
 
     private let loader: AudioFileLoading
     private let libraryTrackSelector: LibraryTrackSelecting
@@ -495,10 +514,23 @@ final class PlaybackController: ObservableObject {
     }
 
     func setOffset(_ trackID: SessionTrack.ID, seconds: TimeInterval) {
-        guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
-        guard session.tracks[index].loadedTrack.offsetSeconds != seconds else { return }
+        setOffsets([trackID: seconds])
+    }
+
+    /// Set several track offsets as a single edit: the timeline is
+    /// recalculated and — when playing — the players rescheduled once, not
+    /// once per track. Unchanged or unknown track IDs are ignored.
+    func setOffsets(_ offsetsByTrackID: [SessionTrack.ID: TimeInterval]) {
         let resumePosition = session.isPlaying ? currentTransportPosition() : session.transportPosition
-        session.tracks[index].loadedTrack.offsetSeconds = seconds
+
+        var changed = false
+        for (trackID, seconds) in offsetsByTrackID {
+            guard let index = session.tracks.firstIndex(where: { $0.id == trackID }),
+                  session.tracks[index].loadedTrack.offsetSeconds != seconds else { continue }
+            session.tracks[index].loadedTrack.offsetSeconds = seconds
+            changed = true
+        }
+        guard changed else { return }
 
         recalculateSessionDuration()
 
@@ -513,6 +545,181 @@ final class PlaybackController: ObservableObject {
             playbackError = error
         } catch {
             playbackError = .schedulingFailed
+        }
+    }
+
+    // MARK: - Auto-align
+
+    /// Compute and apply offsets that align every other track's audio with the
+    /// active track (which stays put), correlating around the current playhead.
+    /// Runs in the background; `isAligning` is true until results land. Tracks
+    /// with no confident match keep their offsets and are named in an alert.
+    func autoAlignTracks() {
+        guard !isAligning, session.canSwitchPlayback, let anchor = session.activeTrack else { return }
+
+        let anchorTrack = anchor.loadedTrack
+        let playheadFileTime = min(
+            max(currentTransportPosition() - anchorTrack.offsetSeconds, 0),
+            anchorTrack.duration
+        )
+        let request = TrackAligner.Request(
+            anchor: TrackAligner.Source(
+                id: anchor.id,
+                url: anchorTrack.url,
+                displayName: anchorTrack.displayName,
+                currentOffsetSeconds: anchorTrack.offsetSeconds
+            ),
+            anchorPlayheadFileTime: playheadFileTime,
+            others: session.tracks.filter { $0.id != anchor.id }.map { track in
+                TrackAligner.Source(
+                    id: track.id,
+                    url: track.loadedTrack.url,
+                    displayName: track.loadedTrack.displayName,
+                    currentOffsetSeconds: track.loadedTrack.offsetSeconds
+                )
+            }
+        )
+
+        isAligning = true
+        // `align` is nonisolated async, so it hops off the main actor on its
+        // own; the task only returns here to publish the results.
+        Task { [weak self] in
+            let results = await TrackAligner.align(request)
+            self?.finishAlignment(results)
+        }
+    }
+
+    private func finishAlignment(_ results: [TrackAligner.Result]) {
+        isAligning = false
+
+        let resultsByTrackID = Dictionary(
+            results.map { ($0.trackID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var updates: [SessionTrack.ID: TimeInterval] = [:]
+        var unalignedTrackIDs: [SessionTrack.ID] = []
+        var unalignedTrackNames: [String] = []
+        // Walk the session's current tracks so removed ones are skipped and
+        // the alert lists names in track order.
+        for track in session.tracks {
+            guard let result = resultsByTrackID[track.id] else { continue }
+            if let newOffset = result.newOffsetSeconds {
+                updates[track.id] = newOffset
+            } else {
+                unalignedTrackIDs.append(track.id)
+                unalignedTrackNames.append(result.displayName)
+            }
+        }
+
+        setOffsets(updates)
+        if !unalignedTrackIDs.isEmpty {
+            // Rather than alerting outright, offer the slower tempo analysis:
+            // the tracks may be the same material at a different speed.
+            tempoAnalysisOffer = TempoAnalysisOffer(
+                trackIDs: unalignedTrackIDs,
+                trackNames: unalignedTrackNames
+            )
+        }
+    }
+
+    /// Dismiss the tempo-analysis offer without running it.
+    func declineTempoAnalysis() {
+        tempoAnalysisOffer = nil
+    }
+
+    func clearAlignmentNotice() {
+        alignmentNotice = nil
+    }
+
+    /// Run the slow tempo-search pass on the tracks the quick pass couldn't
+    /// align (user-confirmed from the offer alert). Progress is published via
+    /// `alignmentProgress` for the toolbar button's progress circle.
+    func startTempoAnalysis() {
+        guard let offer = tempoAnalysisOffer else { return }
+        tempoAnalysisOffer = nil
+
+        guard !isAligning, let anchor = session.activeTrack else { return }
+        let targets = session.tracks.filter { offer.trackIDs.contains($0.id) && $0.id != anchor.id }
+        guard !targets.isEmpty else { return }
+
+        let anchorTrack = anchor.loadedTrack
+        let playheadFileTime = min(
+            max(currentTransportPosition() - anchorTrack.offsetSeconds, 0),
+            anchorTrack.duration
+        )
+        let request = TrackAligner.Request(
+            anchor: TrackAligner.Source(
+                id: anchor.id,
+                url: anchorTrack.url,
+                displayName: anchorTrack.displayName,
+                currentOffsetSeconds: anchorTrack.offsetSeconds
+            ),
+            anchorPlayheadFileTime: playheadFileTime,
+            others: targets.map { track in
+                TrackAligner.Source(
+                    id: track.id,
+                    url: track.loadedTrack.url,
+                    displayName: track.loadedTrack.displayName,
+                    currentOffsetSeconds: track.loadedTrack.offsetSeconds
+                )
+            }
+        )
+
+        isAligning = true
+        alignmentProgress = 0
+        let publishProgress: @Sendable (Double) -> Void = { [weak self] progress in
+            guard let self else { return }
+            Task { @MainActor in
+                // Callbacks hop over independently; keep the bar monotonic.
+                self.alignmentProgress = max(self.alignmentProgress ?? 0, progress)
+            }
+        }
+        Task { [weak self] in
+            let results = await TrackAligner.alignTempo(request, onProgress: publishProgress)
+            self?.finishTempoAnalysis(results)
+        }
+    }
+
+    private func finishTempoAnalysis(_ results: [TrackAligner.TempoResult]) {
+        isAligning = false
+        alignmentProgress = nil
+
+        let resultsByTrackID = Dictionary(
+            results.map { ($0.trackID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var updates: [SessionTrack.ID: TimeInterval] = [:]
+        var unalignedTrackNames: [String] = []
+        var speedNotes: [String] = []
+        for track in session.tracks {
+            guard let result = resultsByTrackID[track.id] else { continue }
+            guard let newOffset = result.newOffsetSeconds else {
+                unalignedTrackNames.append(result.displayName)
+                continue
+            }
+            updates[track.id] = newOffset
+            if let ratio = result.speedRatio, abs(ratio - 1) > 0.001 {
+                let percent = abs(ratio - 1) * 100
+                let direction = ratio > 1 ? "slower" : "faster"
+                speedNotes.append(String(
+                    format: "%@ plays about %.1f%% %@.",
+                    result.displayName, percent, direction
+                ))
+            }
+        }
+
+        setOffsets(updates)
+        if !speedNotes.isEmpty {
+            alignmentNotice = speedNotes.joined(separator: "\n") + """
+            \nTracks are aligned at the current position, but the speed \
+            difference makes them drift apart from there. Press Auto-Align \
+            again to re-sync wherever you're listening.
+            """
+        }
+        if !unalignedTrackNames.isEmpty {
+            playbackError = .alignmentFailed(unalignedTrackNames: unalignedTrackNames)
         }
     }
 
