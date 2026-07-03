@@ -149,7 +149,7 @@ struct SessionTests {
     func loadedTrackMetadataSummaryIncludesKeyFacts() {
         let track = makeTrack(name: "master.wav")
 
-        #expect(track.metadataSummary == "02:00 • 256 kbps • 44.1 kHz")
+        #expect(track.metadataSummary == "02:00 • 44.1 kHz • 256 kbps")
     }
 
     @Test

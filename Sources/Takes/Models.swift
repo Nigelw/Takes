@@ -16,14 +16,14 @@ struct LoadedTrack: Equatable {
     var gainDB: Float = 0
     var offsetSeconds: TimeInterval = 0
 
-    /// `[duration] • [bit rate] • [sample rate]`, e.g. `03:59 • 256 kbps • 44.1 kHz`.
+    /// `[duration] • [sample rate] • [bit rate]`, e.g. `03:59 • 44.1 kHz • 256 kbps`.
     /// The bit-rate segment drops out when the source reports no usable rate.
     var metadataSummary: String {
         var segments: [String] = [duration.formattedTimestamp]
+        segments.append(String(format: "%.1f kHz", sampleRate / 1000))
         if bitRate.isFinite, bitRate > 0 {
             segments.append("\(Int((bitRate / 1000).rounded())) kbps")
         }
-        segments.append(String(format: "%.1f kHz", sampleRate / 1000))
         return segments.joined(separator: " • ")
     }
 }
