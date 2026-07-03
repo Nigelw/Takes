@@ -381,6 +381,33 @@ private struct TrackReorderDropDelegate: DropDelegate {
     }
 }
 
+/// The window-wide audio-file import target. Accepts genuine external file drags
+/// (append). A track being reordered also carries a file URL, so it's excluded in
+/// `validateDrop` — dragging a reorder over the window's chrome (transport bar,
+/// header) is then a non-target and reads as a cancel, matching the menu bar,
+/// rather than flashing a stray copy badge.
+private struct WindowFileImportDropDelegate: DropDelegate {
+    @Binding var isTargeted: Bool
+    let loadDroppedURLs: ([NSItemProvider]) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [UTType.fileURL.identifier])
+            && !info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier])
+    }
+
+    func dropEntered(info: DropInfo) { isTargeted = true }
+    func dropExited(info: DropInfo) { isTargeted = false }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .copy)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        isTargeted = false
+        return loadDroppedURLs(info.itemProviders(for: [UTType.fileURL.identifier]))
+    }
+}
+
 /// AppKit-backed drag source for a track row. SwiftUI's `onDrag` can't express a
 /// move-inside / copy-outside operation, so the row's drag is run here as an
 /// `NSDraggingSession`: **move** (reorder) within the app, **copy** the audio file
@@ -822,16 +849,13 @@ struct ContentView: View {
         } message: {
             Text(controller.playbackError?.localizedDescription ?? "")
         }
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $windowIsDropTargeted) { providers in
-            // A track being reordered also carries a file URL; ignore it here so
-            // dropping one in the window's slack doesn't re-import the same file.
-            guard !providers.contains(where: {
-                $0.hasItemConformingToTypeIdentifier(TrackReorderDrag.contentType.identifier)
-            }) else {
-                return false
-            }
-            return loadDroppedURLs(from: providers)
-        }
+        .onDrop(
+            of: [UTType.fileURL.identifier],
+            delegate: WindowFileImportDropDelegate(
+                isTargeted: $windowIsDropTargeted,
+                loadDroppedURLs: { loadDroppedURLs(from: $0) }
+            )
+        )
         .fileImporter(
             isPresented: $openFileCommandState.isImportingTracks,
             allowedContentTypes: [.audio],
@@ -1668,9 +1692,10 @@ struct ContentView: View {
         // A pronounced shadow sells the lift; heavier in dark mode where a soft
         // shadow would otherwise vanish against the dark surface.
         .shadow(color: Theme.reorderCardShadow, radius: 18, y: 9)
-        // Rendered to an NSImage for the drag; pad transparently so the shadow has
-        // room within the image bounds instead of being clipped.
-        .padding(EdgeInsets(top: 12, leading: 8, bottom: 20, trailing: 8))
+        // Rendered to an NSImage for the drag; pad transparently so the shadow
+        // (radius 18, offset down 9) has room within the image bounds instead of
+        // being clipped. Extra room below for the downward offset.
+        .padding(EdgeInsets(top: 24, leading: 24, bottom: 34, trailing: 24))
     }
 
     /// Renders the reorder preview card to an `NSImage` for the AppKit drag session.
@@ -1747,11 +1772,16 @@ struct ContentView: View {
         // Badge on the left; filename, metadata, and the Offset row form a single
         // left-aligned column to its right so all three share the filename's left
         // edge. Vertically centered so the info column matches the waveform lane.
+        // The badge, filename, and metadata opt out of hit-testing so the drag
+        // source behind the column receives their clicks (a drag anywhere but the
+        // trash button and offset field starts a reorder). The trash button and
+        // offset field keep hit-testing so they still work.
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             trackIndexBadge(index: index, isActive: isActive)
                 // Baseline is technically aligned, but the fixed badge frame makes
                 // the centered number read a touch low; nudge it up 1pt.
                 .offset(y: -1)
+                .allowsHitTesting(false)
 
             // Outer spacing (12) pushes the Offset row down; the inner group's
             // spacing (2) keeps the filename and metadata tightly associated.
@@ -1764,6 +1794,7 @@ struct ContentView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .help(title)
+                            .allowsHitTesting(false)
 
                         Spacer(minLength: 0)
 
@@ -1787,6 +1818,7 @@ struct ContentView: View {
                         .lineLimit(1)
                         .opacity(isBlind ? 0 : 1)
                         .accessibilityHidden(isBlind)
+                        .allowsHitTesting(false)
                 }
 
                 offsetControl(sessionTrack: sessionTrack)
