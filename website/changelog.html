@@ -4,17 +4,37 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Takes — Changelog</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <style>
-    :root { color-scheme: light dark; }
+    :root {
+      color-scheme: light dark;
+      --ink: #1d1d1f;
+      --muted: #6e6e73;
+      --line: #e5e5e7;
+      --accent: #4f3ec6;
+      --surface: #fbfbfd;
+    }
+    * { box-sizing: border-box; }
     body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-           max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; color: #1d1d1f; }
-    header { display: flex; align-items: center; gap: .75rem; margin-bottom: 2.5rem; }
-    header img { width: 48px; height: 48px; border-radius: 11px; }
-    header h1 { font-size: 1.5rem; margin: 0; }
-    .release { padding: 1.5rem 0; border-top: 1px solid #e5e5e7; }
+           margin: 0; color: var(--ink); background: var(--surface); }
+    a { color: inherit; text-decoration: none; }
+    .nav { align-items: center; display: flex; justify-content: space-between;
+            margin: 0 auto; max-width: 48rem; padding: 1.25rem; }
+    .brand { align-items: center; display: inline-flex; gap: .65rem; font-size: .95rem; font-weight: 700; }
+    .brand img { width: 34px; height: 34px; border-radius: 9px; }
+    .nav-links { align-items: center; color: var(--muted); display: flex; gap: 1rem; font-size: .88rem; font-weight: 600; }
+    .nav-links a[aria-current="page"] { color: var(--accent); }
+    .brand:hover, .nav-links a:hover { color: var(--accent); }
+    .page { max-width: 48rem; margin: 0 auto; padding: 0 1.25rem 5rem; }
+    .hero { padding: 3.2rem 0 2.4rem; }
+    .hero h1 { font-size: clamp(2.4rem, 8vw, 3.9rem); letter-spacing: 0; line-height: .98; margin: 0; }
+    .hero p { color: var(--muted); font-size: clamp(1.05rem, 2.5vw, 1.35rem); line-height: 1.35;
+               margin: 1rem 0 0; max-width: 34rem; }
+    .release { padding: 1.5rem 0; border-top: 1px solid var(--line); }
     .release:first-of-type { border-top: none; }
-    .release h2 { font-size: 1.2rem; margin: 0 0 .25rem; display: flex; align-items: baseline; gap: .6rem; }
-    .meta { color: #6e6e73; font-size: .85rem; margin: 0 0 .75rem; }
+    .release-heading { align-items: center; display: flex; gap: 1rem; justify-content: space-between; margin: 0 0 .75rem; }
+    .release h2 { font-size: 1.2rem; margin: 0; display: flex; align-items: baseline; gap: .6rem; }
+    .meta { color: var(--muted); flex: 0 0 auto; font-size: .85rem; margin: 0; text-align: right; }
     .badge { font-size: .65rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
              color: #b25000; background: #ffefe0; padding: .15rem .45rem; border-radius: 5px; }
     .notes ul { margin: 0; padding-left: 1.25rem; }
@@ -22,24 +42,46 @@
     .notes h3, .notes h4 { font-size: .95rem; margin: 1rem 0 .35rem; }
     .notes > :first-child { margin-top: 0; }
     .empty { color: #8e8e93; font-style: italic; }
-    footer { margin-top: 3rem; font-size: .85rem; color: #6e6e73; }
+    footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
     footer a { color: inherit; }
     @media (prefers-color-scheme: dark) {
-      body { color: #f5f5f7; }
-      .release { border-color: #2c2c2e; }
-      .meta, footer { color: #98989d; }
+      :root {
+        --ink: #f5f5f7;
+        --muted: #98989d;
+        --line: #2c2c2e;
+        --accent: #a79dff;
+        --surface: #111114;
+      }
+      .release { border-color: var(--line); }
       .badge { color: #ffb066; background: #3a2410; }
+    }
+    @media (max-width: 440px) {
+      .release-heading { align-items: flex-start; flex-direction: column; gap: .15rem; }
+      .meta { text-align: left; }
     }
   </style>
 </head>
 <body>
-  <header>
-    <img src="icon.png" alt="Takes icon">
-    <h1>Takes — Changelog</h1>
-  </header>
+  <nav class="nav" aria-label="Main navigation">
+    <a class="brand" href="index.html" aria-label="Takes homepage">
+      <img src="icon.png" alt="">
+      <span>Takes</span>
+    </a>
+    <div class="nav-links">
+      <a href="changelog.html" aria-current="page">Changelog</a>
+      <a href="https://github.com/Nigelw/Takes">GitHub</a>
+    </div>
+  </nav>
+  <main class="page">
+    <header class="hero">
+      <h1>Changelog</h1>
+      <p>Everything shipped in Takes for Mac, newest first.</p>
+    </header>
     <section class="release">
-      <h2>2.6.1</h2>
-      <p class="meta">July 2, 2026 · build 9</p>
+      <div class="release-heading">
+        <h2>2.6.1</h2>
+        <p class="meta">2 July, 2026</p>
+      </div>
       <div class="notes"><h3>Improvements</h3>
 <ul>
 <li>Double-click the &quot;ms&quot; label in the offset text field to reset it to zero</li>
@@ -51,16 +93,20 @@
 </ul></div>
     </section>
     <section class="release">
-      <h2>2.6</h2>
-      <p class="meta">July 2, 2026 · build 8</p>
+      <div class="release-heading">
+        <h2>2.6</h2>
+        <p class="meta">2 July, 2026</p>
+      </div>
       <div class="notes"><h3>New Features</h3>
 <ul>
 <li>Blind listening mode: compare takes without seeing which is which, so your ears decide</li>
 </ul></div>
     </section>
     <section class="release">
-      <h2>2.5</h2>
-      <p class="meta">July 2, 2026 · build 7</p>
+      <div class="release-heading">
+        <h2>2.5</h2>
+        <p class="meta">2 July, 2026</p>
+      </div>
       <div class="notes"><h3>New Features</h3>
 <ul>
 <li>Major redesign with a brand new look and feel, every pixel reworked</li>
@@ -82,8 +128,93 @@
 <li>Various layout, contrast, and window-sizing refinements</li>
 </ul></div>
     </section>
-  <footer>
-    <a href="https://github.com/Nigelw/Takes/releases">All releases on GitHub</a>
-  </footer>
+    <section class="release">
+      <div class="release-heading">
+        <h2>2.1</h2>
+        <p class="meta">2 July, 2026</p>
+      </div>
+      <div class="notes"><h3>New Features</h3>
+<ul>
+<li>Loop audio by dragging or shift+clicking to select a range</li>
+<li>Resize selection by dragging the selection handles</li>
+<li>Repeat modes: Off, Repeat One, and Switch &amp; Repeat (to compare tracks back-to-back by toggling to the next track on each loop)</li>
+</ul>
+<h3>Fixes</h3>
+<ul>
+<li>Starting playback at the end of a track now restarts playback from the beginning</li>
+</ul></div>
+    </section>
+    <section class="release">
+      <div class="release-heading">
+        <h2>2.0</h2>
+        <p class="meta">1 July, 2026</p>
+      </div>
+      <div class="notes"><h3>Improvements</h3>
+<ul>
+<li>Timeline zooming</li>
+<li>Pinch to zoom or use the zoom control</li>
+<li>Waveform area uses native scroll inertia and bounce behavior</li>
+<li>View smoothly slides to keep playhead in view while zoomed in</li>
+<li>Improved timeline ruler tick marks and labeling, including dynamic scale when zoomed</li>
+<li>Added link to release notes in Help menu</li>
+</ul>
+<h3>Fixes</h3>
+<ul>
+<li>The playhead position is preserved when opening a new track while paused</li>
+<li>Adjusted default window position</li>
+</ul></div>
+    </section>
+    <section class="release">
+      <div class="release-heading">
+        <h2>2.0a3<span class="badge">Pre-release</span></h2>
+        <p class="meta">19 June, 2026</p>
+      </div>
+      <div class="notes"><ul>
+<li>Each track now shows real waveforms instead of a placeholder mockup</li>
+<li>Rendering doesn&#x27;t block the UI</li>
+</ul></div>
+    </section>
+    <section class="release">
+      <div class="release-heading">
+        <h2>2.0a2<span class="badge">Pre-release</span></h2>
+        <p class="meta">18 June, 2026</p>
+      </div>
+      <div class="notes"><h4>Major Improvements</h4>
+<ul>
+<li>Renamed to Takes</li>
+<li>New UI</li>
+<li>New icon</li>
+<li>Compare up to 32 tracks</li>
+<li>Auto-updates via Sparkle</li>
+</ul>
+<h4>Smaller Changes</h4>
+<ul>
+<li>Drag to reorder tracks</li>
+<li>Quick Open from Finder and Apple Music selection</li>
+<li>Hidden shortcuts: use number keys 1–8 to quickly switch to correspondingly numbered track. Hitting 9 switches to the last track.</li>
+<li>Input field behavior improvements (Esc key reverts to previous value, up/down arrow keys increment value, arrow key insertion point navigation takes precedence over playback keyboard shortcuts when input field is active)</li>
+<li>Added settings for offset nudging intervals &amp; auto-update behavior</li>
+<li>Added proper menubar</li>
+<li>Added full set of keyboard shortcuts</li>
+<li>Improved drag and drop support (drop files and folders on app icon to open, simplified behavior when dropping on app window)</li>
+<li>Improved window sizing behavior (more compact, smart resizing, single window)</li>
+<li>Signed &amp; notarized for public distribution</li>
+</ul></div>
+    </section>
+    <section class="release">
+      <div class="release-heading">
+        <h2>1.0.2</h2>
+        <p class="meta">18 June, 2026</p>
+      </div>
+      <div class="notes"><p>Signed and packaged for public distribution.</p></div>
+    </section>
+    <section class="release">
+      <div class="release-heading">
+        <h2>1.0.0</h2>
+        <p class="meta">26 April, 2026</p>
+      </div>
+      <div class="notes"><p>Initial release of TrackSwitch. Load two audio tracks and toggle between them.</p></div>
+    </section>
+  </main>
 </body>
 </html>
