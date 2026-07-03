@@ -499,6 +499,7 @@ struct TakesApp: App {
             }
 
             CommandGroup(replacing: .help) {
+                Link("Visit Website", destination: URL(string: "https://takes.nigelwarren.com")!)
                 Link("Release Notes", destination: URL(string: "https://takes.nigelwarren.com/changelog.html")!)
 
                 Divider()
