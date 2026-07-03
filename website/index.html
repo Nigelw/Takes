@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Takes - Compare audio tracks on Mac</title>
+  <meta name="description" content="Takes is a native macOS app for comparing multiple versions of audio tracks.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #15151d;
+      --muted: #676774;
+      --quiet: #8c8d98;
+      --line: rgba(26, 26, 34, 0.12);
+      --panel: rgba(255, 255, 255, 0.72);
+      --panel-strong: #ffffff;
+      --brand: #6b55f0;
+      --brand-dark: #4f3ec6;
+      --brand-soft: #eeeaff;
+      --gold: #f6bd62;
+      --surface: #f7f6fb;
+      --shadow: 0 26px 70px rgba(40, 30, 90, 0.20);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background:
+        radial-gradient(circle at 18% 0%, rgba(121, 104, 255, 0.18), transparent 34rem),
+        radial-gradient(circle at 82% 10%, rgba(246, 189, 98, 0.20), transparent 31rem),
+        var(--surface);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+    }
+
+    .site {
+      overflow: hidden;
+    }
+
+    .nav {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+      margin: 0 auto;
+      max-width: 1120px;
+      padding: 22px 24px;
+    }
+
+    .brand {
+      align-items: center;
+      display: inline-flex;
+      gap: 10px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .brand img {
+      border-radius: 10px;
+      height: 34px;
+      width: 34px;
+    }
+
+    .nav-links {
+      align-items: center;
+      display: flex;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .nav-links a:hover,
+    .brand:hover {
+      color: var(--brand-dark);
+    }
+
+    .hero {
+      margin: 0 auto;
+      max-width: 1120px;
+      padding: 76px 24px 96px;
+      text-align: center;
+    }
+
+    .hero-icon {
+      border-radius: 28px;
+      box-shadow: 0 16px 42px rgba(78, 61, 197, 0.24);
+      height: 118px;
+      margin: 0 auto 28px;
+      width: 118px;
+    }
+
+    h1 {
+      font-size: clamp(52px, 8vw, 104px);
+      letter-spacing: 0;
+      line-height: 0.95;
+      margin: 0;
+    }
+
+    .summary {
+      color: var(--muted);
+      font-size: clamp(21px, 3vw, 32px);
+      line-height: 1.22;
+      margin: 22px auto 0;
+      max-width: 760px;
+    }
+
+    .actions {
+      align-items: center;
+      display: flex;
+      flex-direction: column;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 34px;
+    }
+
+    .button {
+      align-items: center;
+      background: var(--brand);
+      border-radius: 12px;
+      box-shadow: 0 14px 34px rgba(91, 72, 216, 0.24);
+      color: white;
+      display: inline-flex;
+      font-size: 16px;
+      font-weight: 750;
+      min-height: 48px;
+      padding: 0 23px;
+      gap: 8px;
+    }
+
+    .button:hover {
+      background: var(--brand-dark);
+    }
+
+    .apple-logo {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-size: 18px;
+      line-height: 1;
+      transform: translateY(-1px);
+    }
+
+    .secondary {
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .shot-wrap {
+      margin: 72px auto 0;
+      max-width: 980px;
+    }
+
+    .hero-shot {
+      border-radius: 12px;
+      box-shadow:
+        0 34px 70px rgba(40, 30, 90, 0.24),
+        0 12px 24px rgba(91, 72, 216, 0.15);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero-shot img {
+      width: 100%;
+    }
+
+    .features-band {
+      background: rgba(255, 255, 255, 0.58);
+      border-top: 1px solid rgba(255, 255, 255, 0.65);
+      padding: 92px 24px 108px;
+    }
+
+    .features {
+      margin: 0 auto;
+      max-width: 1120px;
+    }
+
+    .section-heading {
+      margin-bottom: 36px;
+      max-width: 620px;
+    }
+
+    .eyebrow {
+      color: var(--brand-dark);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      margin: 0 0 10px;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      font-size: clamp(34px, 5vw, 60px);
+      letter-spacing: 0;
+      line-height: 1;
+      margin: 0;
+    }
+
+    .feature-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .feature {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-height: 190px;
+      padding: 24px;
+    }
+
+    .feature:nth-child(2),
+    .feature:nth-child(4),
+    .feature:nth-child(7) {
+      background: var(--panel-strong);
+    }
+
+    .mark {
+      align-items: center;
+      background: var(--brand-soft);
+      border-radius: 8px;
+      color: var(--brand-dark);
+      display: inline-flex;
+      font-size: 18px;
+      font-weight: 800;
+      height: 36px;
+      justify-content: center;
+      margin-bottom: 22px;
+      width: 36px;
+    }
+
+    .feature h3 {
+      font-size: 20px;
+      letter-spacing: 0;
+      line-height: 1.15;
+      margin: 0 0 10px;
+    }
+
+    .feature p {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.52;
+      margin: 0;
+    }
+
+    .footer {
+      align-items: center;
+      color: var(--quiet);
+      display: flex;
+      font-size: 13px;
+      justify-content: space-between;
+      margin: 0 auto;
+      max-width: 1120px;
+      padding: 28px 24px 36px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 16px;
+    }
+
+    @media (max-width: 780px) {
+      .nav {
+        padding: 18px 18px;
+      }
+
+      .nav-links {
+        gap: 12px;
+      }
+
+      .hero {
+        padding: 52px 18px 72px;
+      }
+
+      .hero-icon {
+        border-radius: 22px;
+        height: 92px;
+        width: 92px;
+      }
+
+      .shot-wrap {
+        margin-top: 54px;
+      }
+
+      .hero-shot {
+        border-radius: 16px;
+      }
+
+      .features-band {
+        padding: 68px 18px 78px;
+      }
+
+      .feature-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .feature {
+        min-height: 0;
+      }
+
+      .footer {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 12px;
+        padding-left: 18px;
+        padding-right: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="site">
+    <nav class="nav" aria-label="Main navigation">
+      <a class="brand" href="index.html" aria-label="Takes homepage">
+        <img src="icon.png" alt="">
+        <span>Takes</span>
+      </a>
+      <div class="nav-links">
+        <a href="changelog.html">Changelog</a>
+        <a href="https://github.com/Nigelw/Takes">GitHub</a>
+      </div>
+    </nav>
+
+    <main>
+      <section class="hero">
+        <img class="hero-icon" src="icon.png" alt="Takes app icon">
+        <h1>Takes</h1>
+        <p class="summary">Compare multiple versions of the same track, pick your favorite take.</p>
+        <div class="actions">
+          <a class="button" href="https://github.com/Nigelw/Takes/releases/latest/download/Takes.dmg"><span class="apple-logo" aria-hidden="true">&#63743;</span>Download for macOS</a>
+          <a class="secondary" href="changelog.html">See latest changes</a>
+        </div>
+
+        <div class="shot-wrap" aria-label="Takes app screenshot">
+          <div class="hero-shot">
+            <img src="screenshot_noshadow.png" alt="Takes showing two aligned audio waveforms in a native Mac window">
+          </div>
+        </div>
+      </section>
+
+      <section class="features-band">
+        <div class="features">
+          <div class="section-heading">
+            <p class="eyebrow">Built for listening decisions</p>
+            <h2>Move fast, keep your ears honest.</h2>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature">
+              <div class="mark">1</div>
+              <h3>Instant take switching</h3>
+              <p>Stay in sync as you toggle between takes, without restarting playback or losing your place.</p>
+            </article>
+
+            <article class="feature">
+              <div class="mark">2</div>
+              <h3>Auto-align</h3>
+              <p>Line up different recordings, masters, bounces, and exports so the comparison starts from a fair place.</p>
+            </article>
+
+            <article class="feature">
+              <div class="mark">3</div>
+              <h3>Blind listening mode</h3>
+              <p>Hide details, shuffle the order, and reveal the identities after the decision is made.</p>
+            </article>
+
+            <article class="feature">
+              <div class="mark">4</div>
+              <h3>Beautiful native UI</h3>
+              <p>Designed for macOS with a polished native interface and full light and dark mode support.</p>
+            </article>
+
+            <article class="feature">
+              <div class="mark">5</div>
+              <h3>Compare up to 32 tracks</h3>
+              <p>Load a full set of mixes, masters, revisions, or references and move through them from one shared timeline.</p>
+            </article>
+
+            <article class="feature">
+              <div class="mark">6</div>
+              <h3>Selection looping</h3>
+              <p>Loop the exact section you care about so small arrangement, mix, or mastering differences are easier to hear.</p>
+            </article>
+
+            <article class="feature">
+              <div class="mark">7</div>
+              <h3>Rapid navigation</h3>
+              <p>Quick open from Finder and Apple Music, drag and drop support, and full keyboard shortcuts keep the workflow moving.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Takes for macOS</span>
+      <div class="footer-links">
+        <a href="changelog.html">Changelog</a>
+        <a href="https://github.com/Nigelw/Takes">GitHub</a>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

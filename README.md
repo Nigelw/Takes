@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="website/screenshot.jpg" alt="Takes main UI" width="800">
+  <img src="website/screenshot_shadow.png" alt="Takes main UI" width="800">
 </p>
 
 Takes is a native macOS app for comparing multiple versions of the same audio track. It lets you rapidly switch between tracks during playback to evaluate mastering differences at the same point in the song.
