@@ -776,7 +776,7 @@ struct ContentView: View {
     /// Header-sized companion to the import control: a native bordered button
     /// (matching "Remove All") whose glyph swaps for a progress indicator
     /// while an alignment run is in flight — an indeterminate spinner during
-    /// the quick pass, a determinate circle during tempo analysis. The fixed
+    /// the quick pass, a determinate ring during tempo analysis. The fixed
     /// label frame keeps the button from resizing during the swap.
     private var autoAlignButton: some View {
         Button {
@@ -784,14 +784,21 @@ struct ContentView: View {
         } label: {
             Group {
                 if let progress = controller.alignmentProgress {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.circular)
-                        .controlSize(.small)
-                        .scaleEffect(0.7)
+                    ZStack {
+                        Circle()
+                            .stroke(Theme.secondary.opacity(0.25), lineWidth: 2)
+                        Circle()
+                            .trim(from: 0, to: max(0.02, progress))
+                            .stroke(Theme.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 13, height: 13)
+                    .animation(.easeInOut(duration: 0.2), value: progress)
                 } else if controller.isAligning {
                     ProgressView()
                         .controlSize(.small)
                         .scaleEffect(0.7)
+                        .tint(Theme.secondary)
                 } else if let outcome = controller.alignmentOutcome {
                     Image(systemName: outcome == .success ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(outcome == .success ? Color.green : Color.red)

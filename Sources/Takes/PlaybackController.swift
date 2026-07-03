@@ -560,8 +560,9 @@ final class PlaybackController: ObservableObject {
 
     /// Compute and apply offsets that align every other track's audio with the
     /// active track (which stays put), correlating around the current playhead.
-    /// Runs in the background; `isAligning` is true until results land. Tracks
-    /// with no confident match keep their offsets and are named in an alert.
+    /// Runs in the background; `isAligning` is true until results land (an
+    /// indeterminate spinner). Tracks with no confident match keep their offsets
+    /// and surface the tempo-analysis offer.
     func autoAlignTracks() {
         guard !isAligning, session.canSwitchPlayback, let anchor = session.activeTrack else { return }
 
@@ -694,16 +695,21 @@ final class PlaybackController: ObservableObject {
         alignmentProgress = 0
         alignmentOutcome = nil
         alignmentOutcomeClearTask?.cancel()
-        let publishProgress: @Sendable (Double) -> Void = { [weak self] progress in
-            guard let self else { return }
-            Task { @MainActor in
-                // Callbacks hop over independently; keep the bar monotonic.
-                self.alignmentProgress = max(self.alignmentProgress ?? 0, progress)
-            }
-        }
+        let publishProgress = makeProgressPublisher()
         Task { [weak self] in
             let results = await TrackAligner.alignTempo(request, onProgress: publishProgress)
             self?.finishTempoAnalysis(results)
+        }
+    }
+
+    /// A background-thread-safe sink that drives `alignmentProgress`, kept
+    /// monotonic since align callbacks can hop over independently.
+    private func makeProgressPublisher() -> @Sendable (Double) -> Void {
+        { [weak self] progress in
+            guard let self else { return }
+            Task { @MainActor in
+                self.alignmentProgress = max(self.alignmentProgress ?? 0, progress)
+            }
         }
     }
 
