@@ -400,6 +400,12 @@ struct TakesApp: App {
 
                 Divider()
 
+                Button("Auto-Align Tracks") {
+                    controller.autoAlignTracks()
+                }
+                .keyboardShortcut("a", modifiers: [.command, .option])
+                .disabled(!controller.session.canSwitchPlayback || controller.isAligning)
+
                 Menu("Repeat") {
                     Picker("Repeat", selection: Binding(
                         get: { controller.session.repeatMode },
