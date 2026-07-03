@@ -1363,7 +1363,7 @@ struct ContentView: View {
             // Both prompts stay mounted and crossfade so the swap doesn't
             // reflow the layout.
             ZStack {
-                Text("Drag Audio Files Here to Compare")
+                Text("Drag Files Here to Compare")
                     .opacity(emptyStateIsHovered && !isTargeted ? 0 : 1)
                 Text("Click Here to Compare")
                     .opacity(emptyStateIsHovered && !isTargeted ? 1 : 0)
