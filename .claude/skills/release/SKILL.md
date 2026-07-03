@@ -83,19 +83,94 @@ git commit -m "Bump version to <MARKETING_VERSION> (build <BUILD_NUMBER>)"
 git push origin main
 ```
 
-## Step 5 — Build and publish
+## Step 5 — Build and publish (defer the push)
 
 ```bash
-scripts/build-release.sh --publish --notes-file build/release-notes.md
+scripts/build-release.sh --publish --no-commit --notes-file build/release-notes.md
 ```
 
-This archives, exports (Developer ID), notarizes + staples the app, builds the styled signed DMG, notarizes + staples it, generates the signed appcast (with the notes embedded), regenerates `website/changelog.html` from the appcast, creates the `v<MARKETING_VERSION>` GitHub release (auto-flagged prerelease for alpha/beta strings) with the DMG attached, then commits and pushes `website/appcast.xml` + `website/changelog.html`. Takes several minutes (two notarization round-trips). All failure-prone work happens **before** anything is published, so a notarization failure aborts cleanly with no release/tag created.
+This archives, exports (Developer ID), notarizes + staples the app, builds the styled signed DMG, notarizes + staples it, generates the signed appcast (with the notes embedded), regenerates `website/changelog.html` from the appcast, and creates the `v<MARKETING_VERSION>` GitHub release (auto-flagged prerelease for alpha/beta strings) with the DMG attached. Takes several minutes (two notarization round-trips). All failure-prone work happens **before** anything is published, so a notarization failure aborts cleanly with no release/tag created.
 
-Optional safety: run once **without** `--publish` first to confirm the build + notarize half, then re-run with `--publish`. Costs an extra build cycle.
+`--no-commit` is the key to a **single push**: the script stages `website/appcast.xml` + `website/changelog.html` but leaves them uncommitted, so they get folded into one commit with the fresh screenshots and README in Step 8 (instead of a separate appcast push here and another for the website). The GitHub release is live at this point, but the Sparkle feed isn't served until that combined push lands.
 
-## Step 6 — Verify the live feed
+Optional safety: run once with **neither** `--publish` nor `--no-commit` first to confirm the build + notarize half, then re-run with both. Costs an extra build cycle.
 
-Pages redeploys on the appcast push (~1 min, CDN cache may lag). Confirm the new build is actually being served:
+## Step 6 — Capture screenshots (local, transient)
+
+These screenshots feed the archive (Step 7) and the website/README update (Step 8). Capture two versions of the main window — **with** and **without** the background shadow — into `build/` (gitignored, transient). They're deleted at the end of Step 8.
+
+Launch the build just produced (`build/export/Takes.app` — the notarized release app) with the dedicated screenshot tracks already loaded, then screenshot the window. Use the **computer-use** tools only for the screenshot — loading the files doesn't need them.
+
+1. Quit any running instance (`pkill -x Takes`).
+2. Open the app directly with the screenshot tracks as arguments — this loads them into the track slots without any UI navigation, so skip the file picker/drag-and-drop dance entirely. **Always use the tracks in `Private/Audio Samples/Screenshot Tracks/`** for visual consistency across releases:
+   ```bash
+   APP="$PWD/build/export/Takes.app"
+   open -a "$APP" "$PWD/Private/Audio Samples/Screenshot Tracks/"*
+   ```
+   Wait for the app to appear (`pgrep -x Takes`).
+3. `request_access` for `["Takes"]`, then `screenshot` to confirm both tracks show as loaded.
+4. Capture **just the Takes window**, twice, into `build/`. Get the window id (and exact bounds) with the helper — no need to eyeball anything:
+   ```bash
+   read WID X Y W H < <(swift .claude/skills/release/window-info.swift Takes)
+   ```
+   - **With shadow** (default — includes the window drop shadow):
+     ```bash
+     screencapture -l"$WID" build/screenshot_shadow.png
+     ```
+   - **Without shadow** (`-o` omits the shadow — tight crop to the window bounds):
+     ```bash
+     screencapture -o -l"$WID" build/screenshot_noshadow.png
+     ```
+   `screencapture` needs **Screen Recording** permission for the process that runs it (System Settings → Privacy & Security → Screen Recording). Granting it to the terminal you release from is a one-time step that makes this the whole capture.
+   - **Fallback if `screencapture` is blocked** (e.g. the agent's shell lacks that permission — it fails with `could not create image from window`): take a computer-use `screenshot` with `save_to_disk` (that path has screen access). Crop to the helper's `$X $Y $W $H` rectangle for the no-shadow version; expand each edge by ~60 px (staying within the display) for the shadow version.
+5. Quit the app (`pkill -x Takes`).
+
+Confirm both `build/screenshot_shadow.png` and `build/screenshot_noshadow.png` exist.
+
+## Step 7 — Archive the build (local)
+
+Local archival only — `Private/` is gitignored, so nothing is pushed. Both items use the `<MARKETING_VERSION>` filename convention (note the space, matching existing files like `Private/Builds/TrackSwitch v1.0.dmg`).
+
+**7a — Archive the disk image.** Copy the notarized release DMG into `Private/Builds/`:
+
+```bash
+cp build/Takes.dmg "Private/Builds/Takes v<MARKETING_VERSION>.dmg"
+```
+
+**7b — Archive the screenshot.** Copy the **with-shadow** screenshot into `Private/Screenshots/`:
+
+```bash
+cp build/screenshot_shadow.png "Private/Screenshots/Takes v<MARKETING_VERSION>.png"
+```
+
+Confirm both artifacts exist and report their paths.
+
+## Step 8 — Update the website and README, then push (single commit)
+
+Refresh the public screenshots, keep the developer-facing README aligned with the current build, and push **everything in one commit** — the appcast + changelog the build script staged in Step 5, plus the screenshots and README. This is the only outward-facing push of the web feed, and it's what makes the new build go live.
+
+1. Copy both screenshots into `website/`, overwriting the previous release's:
+   ```bash
+   cp build/screenshot_shadow.png   website/screenshot_shadow.png
+   cp build/screenshot_noshadow.png website/screenshot_noshadow.png
+   ```
+   `website/index.html` embeds `screenshot_noshadow.png` (it applies its own frame); the `README.md` marketing header embeds `screenshot_shadow.png`. Both update automatically once the files are replaced.
+2. Review the README section **below the marketing header** — everything after the `---` divider (the developer-facing "Current Scope", requirements, behavior notes, operator guide, etc.). Compare it against what actually shipped in this build (use the release notes from Step 3 and the commits since the last tag) and make any edits needed to keep it accurate: features moved in/out of scope, removed constraints, changed keyboard shortcuts, etc. Leave the marketing header (icon, title, tagline, download links) untouched.
+3. Commit and push in one shot. `appcast.xml` + `changelog.html` are already staged from Step 5; add the screenshots and README to the same commit:
+   ```bash
+   git add website/appcast.xml website/changelog.html \
+           website/screenshot_shadow.png website/screenshot_noshadow.png README.md
+   git commit -m "Release <MARKETING_VERSION> (build <BUILD_NUMBER>): appcast, changelog, screenshots, README"
+   git push origin main
+   ```
+4. Clean up the transient screenshots:
+   ```bash
+   rm -f build/screenshot_shadow.png build/screenshot_noshadow.png
+   ```
+
+## Step 9 — Verify the live feed
+
+The Step 8 push is what publishes the appcast; Pages redeploys on it (~1 min, CDN cache may lag). Confirm the new build is actually being served:
 
 > **If the Pages deploy fails, never `gh run rerun --failed`.** The `pages.yml` workflow uses `upload-pages-artifact@v5` / `deploy-pages@v5`, whose v4+ artifact backend makes artifacts **immutable** — a re-run uploads a *second* `github-pages` artifact instead of overwriting, and `deploy-pages` then aborts with `Multiple artifacts named "github-pages"... count is 2`. GitHub Pages also fails transiently on its own (`Deployment failed, try again later.`), so a failed deploy is common and expected. The correct recovery in both cases is a **fresh** run — `gh workflow run pages.yml --ref main` — which builds one clean artifact. Watch it with `gh run list --workflow pages.yml --limit 1` / `gh run view <id>`. (Seen live during the v2.6 release, 2026-07-02.)
 
@@ -119,42 +194,10 @@ curl -sL https://nigelw.github.io/Takes/changelog.html | grep -m1 '<h2>'
 
 Report the released version, the release URL, and the live-feed confirmation back to the user.
 
-## Step 7 — Archive the build and capture a screenshot (local)
-
-Local archival only — `Private/` is gitignored, so nothing is pushed. Both items use the `<MARKETING_VERSION>` filename convention (note the space, matching existing files like `Private/Builds/TrackSwitch v1.0.dmg`).
-
-**7a — Archive the disk image.** Copy the notarized release DMG into `Private/Builds/`:
-
-```bash
-cp build/Takes.dmg "Private/Builds/Takes v<MARKETING_VERSION>.dmg"
-```
-
-**7b — Capture the main window.** Launch the build just produced (`build/export/Takes.app` — the notarized release app) with the two sample tracks already loaded, then screenshot the window. Use the **computer-use** tools only for the screenshot — loading the files doesn't need them.
-
-1. Quit any running instance (`pkill -x Takes`).
-2. Open the app directly with the two sample files as arguments — this loads them into the two track slots without any UI navigation, so skip the file picker/drag-and-drop dance entirely:
-   ```bash
-   APP="$PWD/build/export/Takes.app"
-   open -a "$APP" "$PWD/Private/Audio Samples/2-18 I'm Not There.mp3" "$PWD/Private/Audio Samples/3-11 I'm Not There.m4a"
-   ```
-   For visual consistency across releases, load the **same two** files each time. Wait for the app to appear (`pgrep -x Takes`).
-3. `request_access` for `["Takes"]`, then `screenshot` to confirm both tracks show as loaded.
-4. Capture **just the Takes window** to `Private/Screenshots/Takes v<MARKETING_VERSION>.png`. Get the window id (and exact bounds) with the helper — no need to eyeball anything:
-   ```bash
-   read WID X Y W H < <(swift .claude/skills/release/window-info.swift Takes)
-   ```
-   Then, in order of preference:
-   - **By window id (cleanest, no bounds needed):**
-     ```bash
-     screencapture -o -l"$WID" "Private/Screenshots/Takes v<MARKETING_VERSION>.png"
-     ```
-     `screencapture` needs **Screen Recording** permission for the process that runs it (System Settings → Privacy & Security → Screen Recording). Granting it to the terminal you release from is a one-time step that makes this the whole capture.
-   - **Fallback if `screencapture` is blocked** (e.g. the agent's shell lacks that permission — it fails with `could not create image from window`): take a computer-use `screenshot` with `save_to_disk` (that path has screen access), then crop to the helper's `$X $Y $W $H` rectangle.
-5. Quit the app (`pkill -x Takes`).
-
-Confirm both artifacts exist and report their paths.
-
 ## Notes
 
-- This is an outward-facing, hard-to-reverse operation. Pause for the user's confirmation at Step 2 (version) and Step 3 (notes) before the irreversible Step 5.
+- This is an outward-facing, hard-to-reverse operation. Pause for the user's confirmation at Step 2 (version) and Step 3 (notes) before Step 5 — that's where the GitHub release is created (irreversible), even though the feed doesn't go live until the Step 8 push.
+- **Recovery — if you stop between Step 5 and the Step 8 push:** the GitHub release `v<MARKETING_VERSION>` exists and the DMG is uploaded, but the appcast is only *staged*, so Sparkle users aren't offered the update yet — nothing is broken, the release is just dormant. Two ways forward:
+  - **Finish it:** complete Steps 6–8 (or, to skip the screenshots, just `git add website/appcast.xml website/changelog.html && git commit && git push origin main`) so the feed goes live, then verify with Step 9.
+  - **Abandon it:** delete the release + tag (`gh release delete v<MARKETING_VERSION> --cleanup-tag`), reset the staged web files (`git restore --staged website/appcast.xml website/changelog.html && git checkout -- website/appcast.xml website/changelog.html`), and re-run from Step 5 when ready. The build number was already consumed, so on the next attempt bump `CURRENT_PROJECT_VERSION` again (Step 2) — never reuse it.
 - The definitive end-to-end check (install an older build → "Check for Updates" → verify it updates) is manual and can't be automated here — remind the user it's worth doing after the first release of a new pipeline.

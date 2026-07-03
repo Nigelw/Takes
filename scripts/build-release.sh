@@ -26,6 +26,10 @@
 #
 # --notes-file <path>  Markdown release notes. Embedded in the Sparkle appcast
 #                      (rendered to HTML) and used as the GitHub release body.
+# --no-commit          With --publish, create the release and stage
+#                      appcast.xml + changelog.html but do NOT commit/push them.
+#                      Lets the caller fold them into a single combined commit
+#                      (e.g. alongside updated screenshots + README).
 
 set -euo pipefail
 
@@ -47,10 +51,12 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 
 PUBLISH=0
+NO_COMMIT=0
 NOTES_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --publish) PUBLISH=1; shift ;;
+    --no-commit) NO_COMMIT=1; shift ;;
     --notes-file) NOTES_FILE="${2:-}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -214,10 +220,17 @@ DMG_SIZE="$(stat -f%z "$DMG")"
 ASSET_SIZE="$(curl -sL -o /dev/null -w '%{size_download}' "$URL")"
 [[ "$DMG_SIZE" == "$ASSET_SIZE" ]] || die "uploaded asset size ($ASSET_SIZE) != local DMG ($DMG_SIZE)"
 
-step "Publishing appcast + changelog (commit + push)"
 git add "$WEBSITE_DIR/appcast.xml" "$WEBSITE_DIR/changelog.html"
-git commit -m "Publish $MARKETING_VERSION (build $BUILD_NUMBER): appcast + changelog"
-git push origin "$DEFAULT_BRANCH"
-
-step "Released $TAG"
-echo "Feed: https://nigelw.github.io/Takes/appcast.xml (Pages redeploys on push)"
+if [[ $NO_COMMIT -eq 1 ]]; then
+  step "Staged appcast + changelog (--no-commit: not committing/pushing)"
+  echo "  $WEBSITE_DIR/appcast.xml and $WEBSITE_DIR/changelog.html are staged."
+  echo "  Caller must commit + push (combine with screenshots/README into one commit)."
+  step "Released $TAG (appcast not yet live)"
+  echo "Feed goes live once the staged appcast is pushed."
+else
+  step "Publishing appcast + changelog (commit + push)"
+  git commit -m "Publish $MARKETING_VERSION (build $BUILD_NUMBER): appcast + changelog"
+  git push origin "$DEFAULT_BRANCH"
+  step "Released $TAG"
+  echo "Feed: https://nigelw.github.io/Takes/appcast.xml (Pages redeploys on push)"
+fi
