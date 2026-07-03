@@ -28,33 +28,23 @@ This README is written for someone working on the repo. It covers project layout
 The app currently supports:
 
 - Loading up to 32 local audio files through the Open control, Finder selection, Music.app selection, drag-and-drop, or files opened from Finder
+- Shared transport playback with only one track audible at a time
+- Switching playback through loaded tracks in list order during playback, through the transport, Playback menu, number hotkeys, or media remote commands
 - Dragging files anywhere in the window to append to the track list
-- Replacing individual track rows by dropping a file on the row
 - Reordering loaded tracks by dragging rows
-- Progressive waveform extraction and rendering for each loaded track, with anonymized placeholder waveforms in Blind Listening Mode
+- Progressive waveform extraction and rendering for each loaded track
 - Signed global timeline playback with a playhead over the waveform lanes
 - Automatic track alignment that derives per-track offsets from the audio itself, with an optional deeper tempo analysis for takes recorded at slightly different speeds
 - Optional automatic alignment when opening files
 - Independent offset adjustment for each loaded track
-- Independent gain trim per track through the track settings popup
-- Importing the current selection from Music.app
-- Loading one or more selected Finder or Music tracks, ordered by the source app's current selection/view order
-- Shared transport playback with only one track audible at a time
-- Switching playback through loaded tracks in list order during playback, through the transport, Playback menu, number hotkeys, or media remote commands
 - Repeat Off, Repeat One, and Switch & Repeat modes
-- Timeline loop selection, repeat playback inside a selected loop, and zoom-to-selection
-- Timeline zooming, trackpad horizontal scroll, pinch zoom, zoom-to-fit, and playhead-following during playback
-- Blind Listening Mode, which hides source filenames/metadata and reshuffles visible track order while keeping playback on the same file
+- Timeline loop selection constrains playback inside a selected loop
+- Timeline zooming, trackpad horizontal scroll, pinch zoom, zoom-to-fit, zoom-to-selection, and playhead-following during playback
+- Blind Listening Mode, which hides source filenames/metadata/anonymizes placeholder waveforms and reshuffles visible track order while keeping playback on the same file
 - Seeking across the full session range, including negative time when tracks have negative offsets
 - Silence on a track when the current transport position falls outside that track's valid range
 - App settings for theme, readout style, offset nudge sizes, auto-align-on-open, and software updates
 - Developer-only Debug menu tools for component labels, window-size reset, and transport appearance tuning
-
-Out of scope at the moment:
-
-- Loudness analysis
-- Session persistence
-- Export / rendering
 
 ## Requirements
 
@@ -142,7 +132,7 @@ Takes/
 ### UI
 
 - `TakesApp.swift` creates the app windows, wires app/menu commands, handles files opened from Finder, configures remote media commands, and owns main-window sizing policy.
-- `ContentView.swift` contains the SwiftUI interface, file importers, drag-and-drop handling, local keyboard monitoring, waveform/timeline UI, loop gestures, and the gain/offset control UI.
+- `ContentView.swift` contains the SwiftUI interface, file importers, drag-and-drop handling, local keyboard monitoring, waveform/timeline UI, loop gestures, and the offset control UI.
 - `AppSettings.swift` and `SettingsView.swift` own persisted user preferences and the Settings window.
 
 ### Playback
@@ -197,8 +187,7 @@ Current transport behavior:
 
 - Playback is allowed with only one loaded track.
 - Switching playback requires at least two loaded tracks.
-- Replacing a track row resets that row's gain and offset values.
-- Removing a track preserves the remaining tracks' gain and offset values.
+- Removing a track preserves the remaining tracks' offset values.
 - Removing all tracks clears the loop, blind listening state, transport state, and loaded waveform state.
 - Enabling Blind Listening Mode reshuffles visible row order and hides track names/metadata; disabling it restores filename/metadata visibility.
 - If Blind Listening Mode is already on when tracks are imported, the session reshuffles again after import.
@@ -215,8 +204,8 @@ Current transport behavior:
 - Drag files anywhere in the window to append them to the track list.
 - Drop a file on a specific row to replace that track.
 - Drag track rows to reorder them.
-- Use File > Open Finder Selection or `Shift+Cmd+F` to import selected audio files from Finder.
-- Use the `+` menu above the track info area and choose `Open Apple Music Selection` to import the current Music.app selection.
+- Use File > Quick Open from Finder or `Shift+Cmd+F` to import selected audio files from Finder.
+- Use the `+` menu above the track info area and choose `Quick Open from Apple Music` to import the current Music.app selection.
 - Use File > Show in Finder or `Shift+Cmd+R` to reveal the active track.
 - Use File > Remove Track (`Delete`) or File > Remove All Tracks (`Cmd+Delete`) to clear tracks from the session.
 
@@ -232,8 +221,8 @@ Finder and Music import rules:
 - `Space`: play/pause
 - `X`: switch playback to the next loaded track in list order
 - `Shift+X`: switch playback to the previous loaded track in list order
-- `1`...`8`: make the matching row active
-- `9`: make the last loaded row active when there are more than eight tracks
+- `1`...`9`: make the matching row active
+- `0`: make the last loaded row active when there are more than eight tracks
 - `Left` / `Right`: seek by 1 second
 - `Shift+Left` / `Shift+Right`: seek by 10 seconds
 - `Cmd+Left` / `Cmd+Right`: jump to the start/end of the timeline
@@ -255,16 +244,13 @@ The Playback menu mirrors the main transport actions and includes Auto-Align Tra
 - Use the zoom buttons, menu commands, trackpad pinch, or horizontal scroll to inspect the visible timeline window.
 - During playback, the timeline follows the playhead when zoomed in.
 
-### Gain And Offset Controls
+### Offset Controls
 
 - Each loaded track has an offset control.
-- Each track's settings popup contains gain trim.
 - Sliders and numeric fields stay in sync.
 - Numeric fields support arrow-key stepping:
-  - gain: `Up/Down = 1 dB`, `Shift+Up/Down = 10 dB`
   - offset: `Up/Down = the configured nudge`, `Shift+Up/Down = the configured large nudge`
-- `Reset` returns the value to `0`.
-- Double-clicking a slider thumb also resets it to `0`.
+- Double-clicking the `ms` input field laber resets the value to `0`.
 - Press `Enter` or click outside a numeric field to end editing and return keyboard control to transport shortcuts.
 
 ### Settings And Debug Tools
@@ -280,32 +266,29 @@ The Playback menu mirrors the main transport actions and includes Auto-Align Tra
 Useful spot checks after changing playback or UI behavior:
 
 1. Confirm the top transport shows play/pause, switch, blind listening, auto-align, zoom, repeat, and signed time readout controls.
-2. Confirm the `+` dropdown above the track info area contains `Open Finder Selection` and `Open Apple Music Selection`.
-3. Use the `+` button with one file and confirm it creates Track 1 and makes it active.
-4. Use the `+` button with additional files and confirm they append in order.
-5. Use the `+` button with more than 32 files and confirm the app loads available slots and reports skipped files.
-6. Use a mixed valid/invalid import and confirm successful files append while failures are reported together.
-7. Confirm `Switch Playback` is disabled with one loaded track and cycles through three or more tracks in row order.
-8. Confirm waveform lanes render progressively for loaded tracks.
-9. Confirm positive offset creates leading blank space.
-10. Confirm negative offset extends the visible timeline left of zero.
-11. Confirm the playhead line spans the visible track lanes.
-12. Click and drag in a waveform lane and confirm it seeks.
-13. Click the track info area and confirm it changes the active track.
-14. Confirm the gear popup contains gain only.
-15. Confirm offset controls are visible for each loaded track.
-16. Drop a file anywhere in the window and confirm it appends to the track list.
-17. Drop a file on a row and confirm it replaces that row.
-18. Drop multiple files anywhere in the window and confirm they append.
-19. Drag a row and confirm the session order changes without changing the active file unexpectedly.
-20. Remove a non-active track during playback and confirm playback continues.
-21. Remove the active track and confirm playback pauses and selects the next track, or previous if the removed track was last.
-22. Toggle Repeat Off, One, and Switch & Repeat and confirm end-of-range behavior.
-23. Drag a loop selection, play through it, resize it, then deselect it.
-24. Zoom in/out, zoom to fit, and zoom to selection; confirm scroll/pinch keep the playhead and ruler aligned.
-25. Toggle Blind Listening Mode and confirm rows show anonymous labels/placeholder waveforms without shifting layout.
-26. Use Finder selection import, Music selection import, and Show in Finder from both the UI/menu paths where applicable.
-27. Open a file or folder from Finder and confirm audio files route into the running app.
+1. Confirm the + dropdown above the track info area contains Quick Open from Finder and Quick Open from Apple Music.
+1. Use the + button with one file and confirm it creates Track 1 and makes it active.
+1. Use the + button with additional files and confirm they append in order.
+1. Use the + button with more than 32 files and confirm the app loads available slots and reports skipped files.
+1. Use a mixed valid/invalid import and confirm successful files append while failures are reported together.
+1. Confirm Switch Playback is disabled with one loaded track and cycles through three or more tracks in row order.
+1. Confirm waveform lanes render progressively for loaded tracks.
+1. Confirm positive offset creates leading blank space.
+1. Confirm negative offset extends the visible timeline left of zero.
+1. Confirm the playhead line spans the visible track lanes.
+1. Click in a waveform lane and confirm it seeks.
+1. Click the track info area and confirm it changes the active track.
+1. Confirm offset controls are visible for each loaded track.
+1. Drop a file anywhere in the window and confirm it appends to the track list.
+1. Drop multiple files anywhere in the window and confirm they append.
+1. Drag a row and confirm the session order changes without changing the active file unexpectedly.
+1. Remove a non-active track during playback and confirm playback continues.
+1. Remove the active track and confirm playback pauses and selects the next track, or previous if the removed track was last.
+1. Toggle Repeat Off, One, and Switch & Repeat and confirm end-of-range behavior.
+1. Drag a loop selection, play through it, resize it, then deselect it.
+1. Zoom in/out, zoom to fit, and zoom to selection; confirm scroll/pinch keep the playhead and ruler aligned.
+1. Toggle Blind Listening Mode and confirm rows show anonymous labels/placeholder waveforms without shifting layout.
+1. Use Finder selection import, Music selection import, and Show in Finder from both the UI/menu paths where applicable.
 
 ## Known Constraints
 

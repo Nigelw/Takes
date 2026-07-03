@@ -276,9 +276,9 @@ enum ImportActionMenuItem: CaseIterable {
         case .open:
             "Open..."
         case .finderSelection:
-            "Open Finder Selection"
+            "Quick Open from Finder"
         case .musicSelection:
-            "Open Apple Music Selection"
+            "Quick Open from Apple Music"
         }
     }
 }

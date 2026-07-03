@@ -8,19 +8,19 @@
             <sparkle:version>10</sparkle:version>
             <sparkle:shortVersionString>2.7</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[## New Features
-- Auto-Align tracks! A single button lines your tracks up automatically by listening to the audio itself
+            <description sparkle:format="markdown"><![CDATA[## New
+- Auto-Align tracks: a single button lines your tracks up automatically by listening to the audio itself
 - Auto-Align can also handle tracks recorded at slightly different speeds, offering a deeper tempo analysis when the quick pass can't find a match
 - If tracks have tempo drift, you can auto-align anytime at the current playhead
 - Added setting to auto-align by default when opening files
 
-## Improvements
+## Improved
 - Takes remembers its window position between launches
 - Folders can be dropped on the app window
 - Clearer error messages when files can't be loaded
 - Small wording polish on the empty state
 
-## Fixes
+## Fixed
 - App window can be moved by dragging anywhere in the control area]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.7/Takes.dmg" length="3123238" type="application/octet-stream" sparkle:edSignature="QnKKTcK1qg9Jift6VStt+6rEyFomagJRtcOKm0zsuDt1CIi51EcCSfSPo9L+OS0mgTxsD5GmXXQFp/xvlW7IBw=="/>
         </item>
@@ -30,10 +30,10 @@
             <sparkle:version>9</sparkle:version>
             <sparkle:shortVersionString>2.6.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[## Improvements
+            <description sparkle:format="markdown"><![CDATA[## Improved
 - Double-click the "ms" label in the offset text field to reset it to zero
 
-## Fixes
+## Fixed
 - Playback now continues when the system audio device changes, such as when putting in AirPods
 - The mouse cursor now resets correctly after interacting with a text field
 ]]></description>
@@ -46,7 +46,7 @@
             <sparkle:shortVersionString>2.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <description sparkle:format="markdown"><![CDATA[## New Features
-- Blind listening mode: compare takes without seeing which is which, so your ears decide]]></description>
+- Blind listening mode: hide track details and shuffle playback order to compare takes without seeing which is which]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.6/Takes.dmg" length="3008162" type="application/octet-stream" sparkle:edSignature="rvXPeZnJR8ngwkpqsyVGKviIK5EpuiKx8eN6KUnxcVOysa2tjrwr2UKHcWu8CLgXTnuVjRUEXegcWrBJpoqrAA=="/>
         </item>
     </channel>

@@ -79,8 +79,8 @@ struct TrackDropHighlightTests {
     @Test
     func importActionMenuOffersFinderSelectionAndMusicSelection() {
         #expect(ImportActionMenuItem.dropdownItems.map(\.title) == [
-            "Open Finder Selection",
-            "Open Apple Music Selection"
+            "Quick Open from Finder",
+            "Quick Open from Apple Music"
         ])
     }
 
@@ -180,7 +180,7 @@ struct TrackDropHighlightTests {
     func finderSelectionResolverRejectsSelectionWithNoAudioFiles() {
         let text = URL(fileURLWithPath: "/tmp/notes.txt")
 
-        #expect(throws: PlaybackError.librarySelectionFailed("Finder selection does not include any audio files.")) {
+        #expect(throws: PlaybackError.librarySelectionFailed("No audio files are selected in the Finder.")) {
             try FinderSelectionResolver.audioFileURLs(from: [text])
         }
     }

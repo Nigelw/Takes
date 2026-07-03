@@ -23,7 +23,7 @@ enum FinderSelectionResolver {
 
         let audioURLs = urls.filter(isAudioFile(_:))
         guard !audioURLs.isEmpty else {
-            throw PlaybackError.librarySelectionFailed("Finder selection does not include any audio files.")
+            throw PlaybackError.librarySelectionFailed("No audio files are selected in the Finder.")
         }
 
         return audioURLs
@@ -92,7 +92,7 @@ struct LibraryTrackSelectionLoader: LibraryTrackSelecting {
     static let musicSelectionScript = """
     tell application id "com.apple.Music"
         set selectedTracks to selection
-        if selectedTracks is {} then error "No track is selected in Music."
+        if selectedTracks is {} then error "No tracks are selected in Music."
 
         set outputLines to {}
         repeat with selectedTrack in selectedTracks
