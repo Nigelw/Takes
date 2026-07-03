@@ -301,264 +301,199 @@ enum TrackReorderGeometry {
         }
         return .before(targetIndex)
     }
-
-    /// Vertical auto-scroll velocity (points/sec; negative scrolls up) for a
-    /// pointer at `pointerY` within a `viewportHeight`-tall scroll area. Inside a
-    /// `band`-point margin at either edge the speed ramps from 0 up to `maxSpeed`.
-    static func autoScrollVelocity(
-        pointerY: CGFloat,
-        viewportHeight: CGFloat,
-        band: CGFloat,
-        maxSpeed: CGFloat
-    ) -> CGFloat {
-        guard viewportHeight > band * 2 else { return 0 }
-        if pointerY < band {
-            let depth = min(max(band - pointerY, 0), band) / band
-            return -maxSpeed * depth
-        }
-        if pointerY > viewportHeight - band {
-            let depth = min(max(pointerY - (viewportHeight - band), 0), band) / band
-            return maxSpeed * depth
-        }
-        return 0
-    }
 }
 
-/// Holds a weak reference to the vertical track list's underlying `NSScrollView`
-/// so the reorder drag can read the scroll offset and drive edge auto-scrolling —
-/// behaviors SwiftUI's `ScrollView` doesn't expose on macOS 14.
-final class VerticalScrollProxy {
-    weak var scrollView: NSScrollView?
+/// The single reorder drop target spanning the row list. It opens the gap as the
+/// dragged row moves and commits the move on drop — committing nothing until then.
+/// Cleanup is reliable: `dropExited` restores the row when the drag leaves the
+/// list (e.g. on its way out of the window to an external target), and
+/// `performDrop` restores it on a landing drop.
+private struct TrackReorderDropDelegate: DropDelegate {
+    @ObservedObject var controller: PlaybackController
+    let rowStep: CGFloat
+    @Binding var draggingID: SessionTrack.ID?
+    @Binding var targetIndex: Int?
+    @Binding var gapGeneration: Int
 
-    /// Scroll distance from the top of the content, in points.
-    var offsetY: CGFloat { scrollView?.contentView.bounds.origin.y ?? 0 }
-    /// Visible height of the scroll area.
-    var viewportHeight: CGFloat { scrollView?.contentView.bounds.height ?? 0 }
-    /// Largest valid scroll offset.
-    var maxOffsetY: CGFloat {
-        guard let scrollView, let documentView = scrollView.documentView else { return 0 }
-        return max(0, documentView.bounds.height - scrollView.contentView.bounds.height)
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier])
     }
 
-    /// Scroll to an absolute offset, clamped to the valid range.
-    func scroll(toOffsetY y: CGFloat) {
-        guard let scrollView else { return }
-        let clamped = min(max(y, 0), maxOffsetY)
-        scrollView.contentView.scroll(to: NSPoint(x: 0, y: clamped))
-        scrollView.reflectScrolledClipView(scrollView.contentView)
-    }
-}
-
-/// Captures the enclosing `NSScrollView` of the SwiftUI `ScrollView` it is placed
-/// inside and hands it to a proxy.
-private struct EnclosingScrollViewCapture: NSViewRepresentable {
-    let proxy: VerticalScrollProxy
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async { proxy.scrollView = view.enclosingScrollView }
-        return view
+    func dropEntered(info: DropInfo) {
+        updateGap(info: info)
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        if proxy.scrollView == nil {
-            DispatchQueue.main.async { proxy.scrollView = nsView.enclosingScrollView }
-        }
-    }
-}
-
-/// Drives edge auto-scrolling during a reorder drag: while the pointer sits in a
-/// top/bottom band the list scrolls a little each frame, and the drag recomputes
-/// its target against the new offset. Runs in `.common` mode so it keeps firing
-/// while the mouse is tracked.
-final class ReorderAutoScroller {
-    private var timer: Timer?
-    private let proxy: VerticalScrollProxy
-    private var velocity: CGFloat = 0
-    private let onScroll: () -> Void
-
-    init(proxy: VerticalScrollProxy, onScroll: @escaping () -> Void) {
-        self.proxy = proxy
-        self.onScroll = onScroll
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        updateGap(info: info)
+        return DropProposal(operation: .move)
     }
 
-    /// Update the scroll velocity (points/sec; negative scrolls up). Zero stops.
-    func setVelocity(_ velocity: CGFloat) {
-        self.velocity = velocity
-        if velocity == 0 {
-            stop()
-        } else if timer == nil {
-            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-                self?.tick()
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            self.timer = timer
-        }
+    func dropExited(info: DropInfo) {
+        // The drag left the list (e.g. headed out of the window): close the gap so
+        // the rows return to rest, but keep the row hidden so re-entering resumes
+        // the reorder. The drag source's `endedAt` restores it if the drop lands
+        // elsewhere.
+        guard targetIndex != nil else { return }
+        gapGeneration += 1
+        targetIndex = nil
     }
 
-    func stop() {
-        timer?.invalidate()
-        timer = nil
-        velocity = 0
-    }
-
-    private func tick() {
-        guard velocity != 0 else { return }
-        let before = proxy.offsetY
-        proxy.scroll(toOffsetY: before + velocity / 60.0)
-        guard proxy.offsetY != before else { return } // Hit an edge; nothing to recompute.
-        onScroll()
-    }
-}
-
-/// Owns the interactive track-reorder drag: the floating card's position, the gap
-/// the other rows open, and edge auto-scrolling. A reference type (not View
-/// state) so the auto-scroll timer can push updates back in without capturing a
-/// stale `View` value. Nothing is committed to the session until the drag lands.
-@MainActor
-final class TrackReorderController: ObservableObject {
-    struct Session: Equatable {
-        let trackID: SessionTrack.ID
-        let sourceIndex: Int
-        /// Pointer Y in the section's fixed coordinate space.
-        var pointerY: CGFloat
-        var targetIndex: Int
-        /// Set on release while the card glides to its landing slot.
-        var isLanding = false
-    }
-
-    @Published private(set) var session: Session?
-    /// Bumped only when the gap moves during an active drag. The row offsets
-    /// animate keyed on this, so the instant teardown at commit (offsets snap
-    /// back to zero as the model reorders) is *not* animated — avoiding a stutter
-    /// where a row's base index jumps while its offset is still easing.
-    @Published private(set) var gapGeneration = 0
-
-    let scrollProxy = VerticalScrollProxy()
-
-    private weak var playback: PlaybackController?
-    private var rowStep: CGFloat = 1
-    private var listTop: CGFloat = 0
-    private var rowHeight: CGFloat = 0
-    private var trackCount = 0
-    private var autoScroller: ReorderAutoScroller?
-
-    func configure(playback: PlaybackController, rowStep: CGFloat, listTop: CGFloat, rowHeight: CGFloat) {
-        self.playback = playback
-        self.rowStep = rowStep
-        self.listTop = listTop
-        self.rowHeight = rowHeight
-    }
-
-    /// Called continuously while the pointer moves during a drag.
-    func update(pointerSectionY: CGFloat, sourceIndex: Int, trackID: SessionTrack.ID) {
-        guard session?.isLanding != true else { return }
-        trackCount = playback?.session.tracks.count ?? 0
-        let target = targetIndex(forPointerSectionY: pointerSectionY)
-
-        if var current = session, current.trackID == trackID {
-            if current.targetIndex != target { gapGeneration += 1 }
-            current.pointerY = pointerSectionY
-            current.targetIndex = target
-            session = current
-        } else {
-            session = Session(
-                trackID: trackID,
-                sourceIndex: sourceIndex,
-                pointerY: pointerSectionY,
-                targetIndex: target
-            )
-            startAutoScroller()
+    func performDrop(info: DropInfo) -> Bool {
+        defer { clear() }
+        guard let draggingID, let targetIndex,
+              let sourceIndex = controller.session.tracks.firstIndex(where: { $0.id == draggingID })
+        else {
+            return false
         }
 
-        updateAutoScroll(pointerSectionY: pointerSectionY)
-    }
-
-    /// Called on release: glide the card to its landing slot, then commit.
-    func end() {
-        guard var current = session, !current.isLanding else {
-            session = nil
-            return
-        }
-        autoScroller?.setVelocity(0)
-
-        current.isLanding = true
-        current.pointerY = cardDestinationY(targetIndex: current.targetIndex)
-        let landed = current
-
-        withAnimation(.snappy(duration: 0.26)) {
-            session = current
-        } completion: {
-            self.commit(landed)
-            self.session = nil
-            self.autoScroller = nil
-        }
-    }
-
-    /// Vertical offset for the row at `index` so the gap opens at the target slot.
-    func rowOffset(index: Int) -> CGFloat {
-        guard let session else { return 0 }
-        return TrackReorderGeometry.rowOffset(
-            index: index,
-            sourceIndex: session.sourceIndex,
-            targetIndex: session.targetIndex,
-            rowStep: rowStep
-        )
-    }
-
-    private func targetIndex(forPointerSectionY pointerSectionY: CGFloat) -> Int {
-        let contentY = pointerSectionY - listTop + scrollProxy.offsetY
-        return TrackReorderGeometry.slot(forContentY: contentY, rowStep: rowStep, count: trackCount)
-    }
-
-    /// Section-space Y for the center of the target slot, used as the card's
-    /// landing point.
-    private func cardDestinationY(targetIndex: Int) -> CGFloat {
-        let slotTopContentY = CGFloat(targetIndex) * rowStep
-        let slotTopViewportY = slotTopContentY - scrollProxy.offsetY
-        return listTop + slotTopViewportY + rowHeight / 2
-    }
-
-    private func startAutoScroller() {
-        autoScroller = ReorderAutoScroller(proxy: scrollProxy) { [weak self] in
-            // Pointer is stationary during auto-scroll; recompute the target
-            // against the freshly scrolled offset so the gap keeps pace.
-            guard let self, var current = self.session, !current.isLanding else { return }
-            let target = self.targetIndex(forPointerSectionY: current.pointerY)
-            guard target != current.targetIndex else { return }
-            self.gapGeneration += 1
-            current.targetIndex = target
-            self.session = current
-        }
-    }
-
-    private func updateAutoScroll(pointerSectionY: CGFloat) {
-        let viewportY = pointerSectionY - listTop
-        let velocity = TrackReorderGeometry.autoScrollVelocity(
-            pointerY: viewportY,
-            viewportHeight: scrollProxy.viewportHeight,
-            band: 52,
-            maxSpeed: 950
-        )
-        autoScroller?.setVelocity(velocity)
-    }
-
-    private func commit(_ session: Session) {
-        guard let playback else { return }
-        let tracks = playback.session.tracks
-        switch TrackReorderGeometry.destination(
-            sourceIndex: session.sourceIndex,
-            targetIndex: session.targetIndex,
-            count: tracks.count
-        ) {
+        let tracks = controller.session.tracks
+        // No animation: the gap is already open at the target, so committing the
+        // reorder while the offsets snap back to zero leaves every row exactly
+        // where it already sits — a seamless swap rather than a re-animated slide.
+        switch TrackReorderGeometry.destination(sourceIndex: sourceIndex, targetIndex: targetIndex, count: tracks.count) {
         case .noChange:
             break
         case .append:
-            playback.reorderTrack(session.trackID, before: nil)
+            controller.reorderTrack(draggingID, before: nil)
         case .before(let destinationIndex):
             let destinationID = tracks.indices.contains(destinationIndex) ? tracks[destinationIndex].id : nil
-            playback.reorderTrack(session.trackID, before: destinationID)
+            controller.reorderTrack(draggingID, before: destinationID)
         }
+        return true
+    }
+
+    private func updateGap(info: DropInfo) {
+        guard draggingID != nil else { return }
+        let slot = TrackReorderGeometry.slot(
+            forContentY: info.location.y,
+            rowStep: rowStep,
+            count: controller.session.tracks.count
+        )
+        if targetIndex != slot {
+            gapGeneration += 1
+            targetIndex = slot
+        }
+    }
+
+    private func clear() {
+        draggingID = nil
+        targetIndex = nil
+    }
+}
+
+/// AppKit-backed drag source for a track row. SwiftUI's `onDrag` can't express a
+/// move-inside / copy-outside operation, so the row's drag is run here as an
+/// `NSDraggingSession`: **move** (reorder) within the app, **copy** the audio file
+/// out to Finder / other apps / another Takes window, and **cancel** on the menu
+/// bar or any non-target. A plain click (no drag) selects the row.
+///
+/// Placed as the info column's background so the badge/name/metadata forward their
+/// clicks here while the column's own controls (trash, offset field) still work.
+struct TrackRowDragSource: NSViewRepresentable {
+    let fileURL: URL
+    let trackID: SessionTrack.ID
+    let onSelect: () -> Void
+    let onDragBegan: () -> Void
+    let onDragEnded: () -> Void
+    let makeDragImage: () -> NSImage?
+
+    func makeNSView(context: Context) -> DragSourceNSView {
+        DragSourceNSView()
+    }
+
+    func updateNSView(_ nsView: DragSourceNSView, context: Context) {
+        nsView.fileURL = fileURL
+        nsView.trackID = trackID
+        nsView.onSelect = onSelect
+        nsView.onDragBegan = onDragBegan
+        nsView.onDragEnded = onDragEnded
+        nsView.makeDragImage = makeDragImage
+    }
+}
+
+final class DragSourceNSView: NSView, NSDraggingSource {
+    var fileURL: URL?
+    var trackID: SessionTrack.ID?
+    var onSelect: (() -> Void)?
+    var onDragBegan: (() -> Void)?
+    var onDragEnded: (() -> Void)?
+    var makeDragImage: (() -> NSImage?)?
+
+    private var mouseDownPoint: NSPoint?
+    private var isDragging = false
+    private static let dragThreshold: CGFloat = 6
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        isDragging = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !isDragging, let start = mouseDownPoint else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard abs(point.x - start.x) > Self.dragThreshold || abs(point.y - start.y) > Self.dragThreshold else {
+            return
+        }
+        isDragging = true
+        beginDrag(with: event, at: start)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if !isDragging { onSelect?() }
+        mouseDownPoint = nil
+    }
+
+    private func beginDrag(with event: NSEvent, at origin: NSPoint) {
+        guard let fileURL, let trackID else { return }
+
+        let pasteboardItem = NSPasteboardItem()
+        // File URL so external targets (Finder, other apps) receive the audio file.
+        pasteboardItem.setData(fileURL.dataRepresentation, forType: .fileURL)
+        // Own reorder id (plain text) so the in-window drop target recognizes it.
+        pasteboardItem.setString(
+            trackID.uuidString,
+            forType: NSPasteboard.PasteboardType(TrackReorderDrag.contentType.identifier)
+        )
+
+        let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
+        let image = makeDragImage?() ?? NSImage(size: NSSize(width: 1, height: 1))
+        let size = image.size
+        // Center the card on the grabbed point.
+        let frame = NSRect(
+            x: origin.x - size.width / 2,
+            y: origin.y - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+        draggingItem.setDraggingFrame(frame, contents: image)
+
+        onDragBegan?()
+        beginDraggingSession(with: [draggingItem], event: event, source: self)
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        switch context {
+        case .withinApplication:
+            return .move
+        case .outsideApplication:
+            return .copy
+        @unknown default:
+            return .copy
+        }
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        // Reliable end-of-drag signal regardless of where the drop landed (a row,
+        // an external app, or nowhere): restore the row. An in-window reorder has
+        // already committed via the drop delegate's `performDrop`.
+        onDragEnded?()
     }
 }
 
@@ -753,7 +688,15 @@ struct ContentView: View {
     @StateObject private var waveformStore = WaveformStore()
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
-    @StateObject private var reorderController = TrackReorderController()
+    /// Which row is being dragged for reorder (hidden in place; its floating
+    /// preview is the OS drag image). Set at drag start, cleared when the drag
+    /// commits or is abandoned.
+    @State private var reorderDraggingID: SessionTrack.ID?
+    /// The slot the dragged row will land in, driving the gap the other rows open.
+    @State private var reorderTargetIndex: Int?
+    /// Bumped only when the gap moves during a drag, so the offset animation fires
+    /// on gap changes but not on the instant teardown at commit.
+    @State private var reorderGapGeneration = 0
     @State private var windowIsDropTargeted = false
     @State private var emptyStateIsHovered = false
     @State private var hoveredTrackID: SessionTrack.ID?
@@ -772,11 +715,7 @@ struct ContentView: View {
         var current: TimeInterval
     }
 
-    /// Coordinate space anchored to the track section (fixed to the viewport), so
-    /// pointer Y is reported relative to the section top regardless of scrolling.
-    private static let reorderSpace = "trackReorder"
-    /// Top inset of the scrollable row list within the section (header + divider).
-    private var reorderListTop: CGFloat { trackHeaderHeight + trackTimelineDividerHeight }
+    /// Height of one row plus its divider — the step between reorder target slots.
     private var reorderRowStep: CGFloat { trackRowHeight + trackTimelineDividerHeight }
 
     /// Coordinate space for the waveform column, so loop gestures report x in
@@ -884,7 +823,14 @@ struct ContentView: View {
             Text(controller.playbackError?.localizedDescription ?? "")
         }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $windowIsDropTargeted) { providers in
-            loadDroppedURLs(from: providers)
+            // A track being reordered also carries a file URL; ignore it here so
+            // dropping one in the window's slack doesn't re-import the same file.
+            guard !providers.contains(where: {
+                $0.hasItemConformingToTypeIdentifier(TrackReorderDrag.contentType.identifier)
+            }) else {
+                return false
+            }
+            return loadDroppedURLs(from: providers)
         }
         .fileImporter(
             isPresented: $openFileCommandState.isImportingTracks,
@@ -909,12 +855,6 @@ struct ContentView: View {
             setupKeyMonitor()
             waveformStore.sync(tracks: controller.session.tracks)
             NSApp.appearance = settings.appearanceTheme.nsAppearance
-            reorderController.configure(
-                playback: controller,
-                rowStep: reorderRowStep,
-                listTop: reorderListTop,
-                rowHeight: trackRowHeight
-            )
         }
         .onChange(of: settings.appearanceTheme) { _, theme in
             NSApp.appearance = theme.nsAppearance
@@ -1311,19 +1251,19 @@ struct ContentView: View {
                         ZStack(alignment: .topLeading) {
                             VStack(spacing: 0) {
                                 ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
-                                    let isDragging = reorderController.session?.trackID == sessionTrack.id
+                                    let isDragging = reorderDraggingID == sessionTrack.id
                                     trackRow(index: index, sessionTrack: sessionTrack, infoWidth: trackInfoWidth)
-                                        // The dragged row's floating card stands in for
-                                        // it; its slot stays reserved so it becomes the
-                                        // gap the other rows slide around.
+                                        // The dragged row's floating preview stands in
+                                        // for it; its slot stays reserved as the gap the
+                                        // other rows slide around.
                                         .opacity(isDragging ? 0 : 1)
-                                        .offset(y: reorderController.rowOffset(index: index))
-                                        .animation(.snappy(duration: 0.26), value: reorderController.gapGeneration)
+                                        .offset(y: reorderRowOffset(index: index))
+                                        .animation(.snappy(duration: 0.26), value: reorderGapGeneration)
                                     if index < controller.session.tracks.count - 1 {
                                         Divider()
                                             .frame(height: trackTimelineDividerHeight)
-                                            .offset(y: reorderController.rowOffset(index: index))
-                                            .animation(.snappy(duration: 0.26), value: reorderController.gapGeneration)
+                                            .offset(y: reorderRowOffset(index: index))
+                                            .animation(.snappy(duration: 0.26), value: reorderGapGeneration)
                                     }
                                 }
                             }
@@ -1333,29 +1273,25 @@ struct ContentView: View {
                             }
                         }
                         .frame(width: proxy.size.width)
-                        // Reach into the underlying NSScrollView so the reorder drag
-                        // can read the scroll offset and auto-scroll near the edges.
-                        .background(EnclosingScrollViewCapture(proxy: reorderController.scrollProxy))
+                        // One reorder drop target spanning the rows: it opens the gap
+                        // as the pointer moves and commits on drop. A single target
+                        // (rather than per-row) keeps the target slot stable while the
+                        // rows shift, and lets the enclosing NSScrollView auto-scroll.
+                        .onDrop(
+                            of: [TrackReorderDrag.contentType.identifier],
+                            delegate: TrackReorderDropDelegate(
+                                controller: controller,
+                                rowStep: reorderRowStep,
+                                draggingID: $reorderDraggingID,
+                                targetIndex: $reorderTargetIndex,
+                                gapGeneration: $reorderGapGeneration
+                            )
+                        )
                     }
                     .frame(maxHeight: .infinity)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-            .coordinateSpace(name: Self.reorderSpace)
-            // The dragged card floats above the list in the section's fixed space,
-            // so it stays glued to the pointer while the rows scroll beneath it.
-            .overlay(alignment: .topLeading) {
-                if let reorder = reorderController.session,
-                   let sessionTrack = controller.session.tracks.first(where: { $0.id == reorder.trackID }) {
-                    reorderPreviewCard(
-                        index: reorder.sourceIndex,
-                        sessionTrack: sessionTrack,
-                        width: trackInfoWidth
-                    )
-                    .position(x: trackInfoWidth / 2, y: reorder.pointerY)
-                    .allowsHitTesting(false)
-                }
-            }
             .overlay(alignment: .topLeading) {
                 if !controller.session.tracks.isEmpty {
                     TimelineScrollOverlay(
@@ -1391,6 +1327,23 @@ struct ContentView: View {
             }
             .coordinateSpace(name: Self.playheadSpace)
         }
+    }
+
+    /// Vertical offset for the row at `index` so a gap opens at the drag's target
+    /// slot while the dragged row's own slot collapses into it.
+    private func reorderRowOffset(index: Int) -> CGFloat {
+        guard let draggingID = reorderDraggingID,
+              let sourceIndex = controller.session.tracks.firstIndex(where: { $0.id == draggingID }),
+              let targetIndex = reorderTargetIndex
+        else {
+            return 0
+        }
+        return TrackReorderGeometry.rowOffset(
+            index: index,
+            sourceIndex: sourceIndex,
+            targetIndex: targetIndex,
+            rowStep: reorderRowStep
+        )
     }
 
     private func trackTimelineHeader(waveformWidth: CGFloat) -> some View {
@@ -1632,20 +1585,26 @@ struct ContentView: View {
         return HStack(spacing: 0) {
             trackInfoArea(index: index, sessionTrack: sessionTrack, showsTrash: isHovered)
                 .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
-                .contentShape(Rectangle())
-                // Press-and-drag the info column to reorder. The gesture owns the
-                // whole interaction — a floating card, the gap that opens beneath
-                // the pointer, and edge auto-scroll — and commits nothing until
-                // release. A small activation distance leaves room for a plain
-                // click (select) and for the nested offset controls.
-                .gesture(reorderGesture(index: index, sessionTrack: sessionTrack))
-                .onDrop(
-                    of: [UTType.fileURL.identifier],
-                    delegate: TrackRowDropDelegate(loadDroppedURLs: loadDroppedURLs)
+                // Drag the info column to reorder in place (a move), or out of the
+                // window to copy the track's audio file onto Finder / another app /
+                // another Takes window. An AppKit drag source (behind the column's
+                // content, so its own controls still work) runs the drag with the
+                // right move-inside / copy-outside operation; a plain click selects.
+                .background(
+                    TrackRowDragSource(
+                        fileURL: sessionTrack.loadedTrack.url,
+                        trackID: sessionTrack.id,
+                        onSelect: { controller.selectActiveTrack(sessionTrack.id) },
+                        onDragBegan: { reorderDraggingID = sessionTrack.id },
+                        onDragEnded: {
+                            reorderDraggingID = nil
+                            reorderTargetIndex = nil
+                        },
+                        makeDragImage: {
+                            reorderCardDragImage(index: index, sessionTrack: sessionTrack, width: infoWidth)
+                        }
+                    )
                 )
-                .onTapGesture {
-                    controller.selectActiveTrack(sessionTrack.id)
-                }
 
             waveformLane(index: index, sessionTrack: sessionTrack)
                 .frame(maxWidth: .infinity)
@@ -1707,23 +1666,21 @@ struct ContentView: View {
                 )
         )
         // A pronounced shadow sells the lift; heavier in dark mode where a soft
-        // shadow would otherwise vanish against the dark surface. As a normal
-        // overlay (not a drag-image snapshot) it isn't clipped at the edges.
+        // shadow would otherwise vanish against the dark surface.
         .shadow(color: Theme.reorderCardShadow, radius: 18, y: 9)
+        // Rendered to an NSImage for the drag; pad transparently so the shadow has
+        // room within the image bounds instead of being clipped.
+        .padding(EdgeInsets(top: 12, leading: 8, bottom: 20, trailing: 8))
     }
 
-    private func reorderGesture(index: Int, sessionTrack: SessionTrack) -> some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.reorderSpace))
-            .onChanged { value in
-                reorderController.update(
-                    pointerSectionY: value.location.y,
-                    sourceIndex: index,
-                    trackID: sessionTrack.id
-                )
-            }
-            .onEnded { _ in
-                reorderController.end()
-            }
+    /// Renders the reorder preview card to an `NSImage` for the AppKit drag session.
+    private func reorderCardDragImage(index: Int, sessionTrack: SessionTrack, width: CGFloat) -> NSImage? {
+        let renderer = ImageRenderer(
+            content: reorderPreviewCard(index: index, sessionTrack: sessionTrack, width: width)
+                .environmentObject(settings)
+        )
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        return renderer.nsImage
     }
 
     /// Kaleidoscope-style empty state: one centered composition — a soft
@@ -2907,23 +2864,6 @@ private struct MainWindowConfigurationView: NSViewRepresentable {
     }
 }
 
-/// Handles audio files dragged onto a track row from Finder. In-app reordering is
-/// a custom gesture (see `reorderGesture`), so this delegate only accepts files.
-private struct TrackRowDropDelegate: DropDelegate {
-    let loadDroppedURLs: ([NSItemProvider]) -> Bool
-
-    func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [UTType.fileURL.identifier])
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .copy)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        loadDroppedURLs(info.itemProviders(for: [UTType.fileURL.identifier]))
-    }
-}
 
 private struct IntegerInputField: NSViewRepresentable {
     @Binding var value: Int
