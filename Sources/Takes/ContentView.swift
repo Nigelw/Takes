@@ -763,6 +763,32 @@ struct ContentView: View {
         .componentDebugLabel("Repeat", enabled: settings.showsComponentDebugLabels)
     }
 
+    /// Header-sized companion to the import control: a native bordered button
+    /// (matching "Remove All") whose glyph swaps for a spinner while an
+    /// alignment run is in flight. The fixed label frame keeps the button from
+    /// resizing during the swap.
+    private var autoAlignButton: some View {
+        Button {
+            controller.autoAlignTracks()
+        } label: {
+            Group {
+                if controller.isAligning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                } else {
+                    Image(systemName: "arrow.right.and.line.vertical.and.arrow.left")
+                }
+            }
+            .frame(width: 18, height: 16)
+        }
+        .controlSize(.regular)
+        .disabled(!controller.session.canSwitchPlayback || controller.isAligning)
+        .help("Auto-Align Tracks")
+        .accessibilityLabel("Auto-Align Tracks")
+        .componentDebugLabel("Auto-Align", enabled: settings.showsComponentDebugLabels)
+    }
+
     private var blindListeningButton: some View {
         let isOn = controller.session.isBlindListeningModeEnabled
         return Button {
@@ -924,11 +950,14 @@ struct ContentView: View {
 
     private func trackTimelineHeader(waveformWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
-            ImportActionSplitButton(
-                dropdownItems: ImportActionMenuItem.dropdownItems,
-                performAction: performImportAction(_:)
-            )
-            .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
+            HStack(spacing: 8) {
+                ImportActionSplitButton(
+                    dropdownItems: ImportActionMenuItem.dropdownItems,
+                    performAction: performImportAction(_:)
+                )
+                .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
+                autoAlignButton
+            }
             .padding(.leading, 8)
             // Center the button cluster in the taller header rather than pinning it up top.
             .frame(width: trackInfoWidth, height: trackHeaderHeight, alignment: .leading)

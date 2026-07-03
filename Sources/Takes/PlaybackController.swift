@@ -8,6 +8,9 @@ final class PlaybackController: ObservableObject {
 
     @Published private(set) var session = ComparisonSession()
     @Published private(set) var playbackError: PlaybackError?
+    /// Whether an auto-align run is in flight (drives the toolbar button's
+    /// spinner and blocks re-entry).
+    @Published private(set) var isAligning = false
 
     private let loader: AudioFileLoading
     private let libraryTrackSelector: LibraryTrackSelecting
@@ -495,10 +498,23 @@ final class PlaybackController: ObservableObject {
     }
 
     func setOffset(_ trackID: SessionTrack.ID, seconds: TimeInterval) {
-        guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
-        guard session.tracks[index].loadedTrack.offsetSeconds != seconds else { return }
+        setOffsets([trackID: seconds])
+    }
+
+    /// Set several track offsets as a single edit: the timeline is
+    /// recalculated and — when playing — the players rescheduled once, not
+    /// once per track. Unchanged or unknown track IDs are ignored.
+    func setOffsets(_ offsetsByTrackID: [SessionTrack.ID: TimeInterval]) {
         let resumePosition = session.isPlaying ? currentTransportPosition() : session.transportPosition
-        session.tracks[index].loadedTrack.offsetSeconds = seconds
+
+        var changed = false
+        for (trackID, seconds) in offsetsByTrackID {
+            guard let index = session.tracks.firstIndex(where: { $0.id == trackID }),
+                  session.tracks[index].loadedTrack.offsetSeconds != seconds else { continue }
+            session.tracks[index].loadedTrack.offsetSeconds = seconds
+            changed = true
+        }
+        guard changed else { return }
 
         recalculateSessionDuration()
 
@@ -513,6 +529,74 @@ final class PlaybackController: ObservableObject {
             playbackError = error
         } catch {
             playbackError = .schedulingFailed
+        }
+    }
+
+    // MARK: - Auto-align
+
+    /// Compute and apply offsets that align every other track's audio with the
+    /// active track (which stays put), correlating around the current playhead.
+    /// Runs in the background; `isAligning` is true until results land. Tracks
+    /// with no confident match keep their offsets and are named in an alert.
+    func autoAlignTracks() {
+        guard !isAligning, session.canSwitchPlayback, let anchor = session.activeTrack else { return }
+
+        let anchorTrack = anchor.loadedTrack
+        let playheadFileTime = min(
+            max(currentTransportPosition() - anchorTrack.offsetSeconds, 0),
+            anchorTrack.duration
+        )
+        let request = TrackAligner.Request(
+            anchor: TrackAligner.Source(
+                id: anchor.id,
+                url: anchorTrack.url,
+                displayName: anchorTrack.displayName,
+                currentOffsetSeconds: anchorTrack.offsetSeconds
+            ),
+            anchorPlayheadFileTime: playheadFileTime,
+            others: session.tracks.filter { $0.id != anchor.id }.map { track in
+                TrackAligner.Source(
+                    id: track.id,
+                    url: track.loadedTrack.url,
+                    displayName: track.loadedTrack.displayName,
+                    currentOffsetSeconds: track.loadedTrack.offsetSeconds
+                )
+            }
+        )
+
+        isAligning = true
+        // `align` is nonisolated async, so it hops off the main actor on its
+        // own; the task only returns here to publish the results.
+        Task { [weak self] in
+            let results = await TrackAligner.align(request)
+            self?.finishAlignment(results)
+        }
+    }
+
+    private func finishAlignment(_ results: [TrackAligner.Result]) {
+        isAligning = false
+
+        let resultsByTrackID = Dictionary(
+            results.map { ($0.trackID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var updates: [SessionTrack.ID: TimeInterval] = [:]
+        var unalignedTrackNames: [String] = []
+        // Walk the session's current tracks so removed ones are skipped and
+        // the alert lists names in track order.
+        for track in session.tracks {
+            guard let result = resultsByTrackID[track.id] else { continue }
+            if let newOffset = result.newOffsetSeconds {
+                updates[track.id] = newOffset
+            } else {
+                unalignedTrackNames.append(result.displayName)
+            }
+        }
+
+        setOffsets(updates)
+        if !unalignedTrackNames.isEmpty {
+            playbackError = .alignmentFailed(unalignedTrackNames: unalignedTrackNames)
         }
     }
 
