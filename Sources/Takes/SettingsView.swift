@@ -45,8 +45,8 @@ private struct GeneralSettingsView: View {
 
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Align Tracks on Open", isOn: $settings.alignTracksOnOpen)
-                    OffsetHint("Automatically align audio files when opening in Takes")
+                    Toggle("Auto-Align Tracks on Open", isOn: $settings.alignTracksOnOpen)
+                    OffsetHint("Align audio files when opening in Takes")
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
