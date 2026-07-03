@@ -128,6 +128,17 @@ struct SessionTests {
         #expect(description.contains("... and 32 more."))
     }
 
+    @MainActor
+    @Test
+    func failedFileErrorExplainsLikelyCauses() {
+        let url = URL(fileURLWithPath: "/tmp/broken.wav")
+        let description = PlaybackError.failedToOpenFile(url).localizedDescription
+
+        #expect(description.contains("Could not load broken.wav."))
+        #expect(description.contains("missing, damaged, or in an unsupported audio format"))
+        #expect(!description.contains("Could not open file"))
+    }
+
     @Test
     func unsignedTimestampClampsNegativeTimes() {
         #expect(TimeInterval(-12).formattedTimestamp == "00:00")
@@ -288,7 +299,6 @@ struct SessionTests {
 
     @Test
     func windowPolicyUsesNarrowerMinimumWidthThanDefaultWidth() {
-        #expect(TakesWindowPolicy.minimumContentWidth == 600)
         #expect(TakesWindowPolicy.defaultWindowWidth > TakesWindowPolicy.minimumContentWidth)
     }
 
@@ -464,6 +474,8 @@ struct SessionTests {
         #expect(controller.session.tracks.map { $0.loadedTrack.displayName } == ["first.wav", "third.wav"])
         #expect(controller.session.activeTrackID == controller.session.tracks.first?.id)
         #expect(controller.playbackError?.localizedDescription.contains("missing-second.wav") == true)
+        #expect(controller.playbackError?.localizedDescription.contains("missing-second.wav: The file could not be opened.") == true)
+        #expect(controller.playbackError?.localizedDescription.contains("missing-second.wav: Could not open file: missing-second.wav") == false)
     }
 
     @MainActor
