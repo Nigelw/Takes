@@ -77,6 +77,27 @@ enum TrackAligner {
     /// clamped to it.
     static let maximumOffsetSeconds: TimeInterval = 300
 
+    // MARK: Tempo-search pass tuning
+
+    /// Range of the speed-ratio search: ±6% covers analog transfer and
+    /// mastering speed discrepancies (the well-known ones run 2–6%).
+    static let tempoSearchMaximumDeviation = 0.06
+
+    /// Grid step of the ratio search (0.25%). Coarse-smoothed whole-track
+    /// correlation tolerates roughly this much ratio error before the peak
+    /// collapses, so the grid can't miss a real match between points.
+    static let tempoSearchStepDeviation = 0.0025
+
+    /// Successive refinement steps around the best grid ratio, sharpening the
+    /// detected ratio (and with it the offset) beyond the grid resolution.
+    static let tempoRefinementStepDeviations: [Double] = [0.001, 0.000_5]
+
+    /// Contrast gate for the tempo pass, stricter than `minimumPeakContrast`:
+    /// searching ~50 candidate ratios inflates the fluke background (unrelated
+    /// songs reach contrast ~1.5 over the search; a genuine tempo match
+    /// measures ~2.6).
+    static let minimumTempoPeakContrast: Float = 1.7
+
     /// Frames decoded per pass, mirroring `WaveformSource`.
     private static let framesPerChunk: AVAudioFrameCount = 65_536
 
@@ -222,6 +243,183 @@ enum TrackAligner {
         let raw = anchorOffsetSeconds + Double(windowStartIndex - matchLag) * hopSeconds
         let rounded = (raw * 1000).rounded() / 1000
         return min(max(rounded, -maximumOffsetSeconds), maximumOffsetSeconds)
+    }
+
+    // MARK: - Tempo-search pass
+
+    struct TempoResult: Equatable, Sendable {
+        let trackID: SessionTrack.ID
+        let displayName: String
+        /// The offset that aligns this track with the anchor *at the playhead*,
+        /// or `nil` when no confident match was found at any candidate ratio.
+        let newOffsetSeconds: TimeInterval?
+        /// Detected speed ratio (this track's musical time per unit of anchor
+        /// musical time): > 1 means this track plays slower than the anchor.
+        /// `nil` when no confident match was found.
+        let speedRatio: Double?
+        /// Coarse correlation peak at the best ratio, for diagnostics.
+        let score: Float
+    }
+
+    /// Second-pass alignment for tracks the plain pass rejected: search over
+    /// candidate speed ratios, correlating the *whole* time-stretched anchor
+    /// envelope against each track (a playhead window can't integrate enough
+    /// evidence once the ratio is also unknown). Far slower than `align` —
+    /// ~50 whole-track correlations per track — hence `onProgress` (0...1),
+    /// called from a background thread.
+    ///
+    /// A detected ratio is reported, not corrected: playback stays at normal
+    /// speed, so the returned offset aligns exactly at the playhead and
+    /// drifts away from it at `|ratio − 1|` seconds per second.
+    static func alignTempo(
+        _ request: Request,
+        onProgress: @escaping @Sendable (Double) -> Void
+    ) async -> [TempoResult] {
+        func failure(_ source: Source) -> TempoResult {
+            TempoResult(trackID: source.id, displayName: source.displayName, newOffsetSeconds: nil, speedRatio: nil, score: 0)
+        }
+
+        guard let anchorNovelty = noveltyEnvelope(url: request.anchor.url) else {
+            onProgress(1)
+            return request.others.map(failure)
+        }
+
+        let gridDeviations = Array(stride(
+            from: -tempoSearchMaximumDeviation,
+            through: tempoSearchMaximumDeviation,
+            by: tempoSearchStepDeviation
+        ))
+        let stepsPerTrack = gridDeviations.count + tempoRefinementStepDeviations.count * 2
+        let totalSteps = max(1, stepsPerTrack * request.others.count)
+        var completedSteps = 0
+
+        // Tracks run serially so progress is monotonic and memory stays flat;
+        // the per-ratio FFTs inside already use the machine's vector units.
+        var results: [TempoResult] = []
+        for (trackIndex, other) in request.others.enumerated() {
+            let result = tempoAlignTrack(
+                other,
+                anchorNovelty: anchorNovelty,
+                anchorPlayheadFileTime: request.anchorPlayheadFileTime,
+                anchorOffsetSeconds: request.anchor.currentOffsetSeconds,
+                gridDeviations: gridDeviations
+            ) {
+                completedSteps += 1
+                onProgress(Double(completedSteps) / Double(totalSteps))
+            }
+            results.append(result)
+            // Realign progress at track boundaries so early-outs (unreadable
+            // file, no refinement) don't leave the bar short.
+            completedSteps = stepsPerTrack * (trackIndex + 1)
+            onProgress(Double(completedSteps) / Double(totalSteps))
+        }
+        return results
+    }
+
+    private static func tempoAlignTrack(
+        _ source: Source,
+        anchorNovelty: [Float],
+        anchorPlayheadFileTime: TimeInterval,
+        anchorOffsetSeconds: TimeInterval,
+        gridDeviations: [Double],
+        step: () -> Void
+    ) -> TempoResult {
+        guard let novelty = noveltyEnvelope(url: source.url) else {
+            return TempoResult(trackID: source.id, displayName: source.displayName, newOffsetSeconds: nil, speedRatio: nil, score: 0)
+        }
+
+        func evaluate(_ ratio: Double) -> Match? {
+            defer { step() }
+            return bestAlignment(reference: stretchedEnvelope(anchorNovelty, ratio: ratio), target: novelty)
+        }
+
+        var best: (ratio: Double, match: Match)?
+        for deviation in gridDeviations {
+            let ratio = 1 + deviation
+            if let match = evaluate(ratio), best == nil || match.score > best!.match.score {
+                best = (ratio, match)
+            }
+        }
+
+        // Sharpen the winning ratio: at ±0.125% residual error the offset can
+        // still be off by >100 ms far from the track center.
+        if let coarse = best {
+            var current = coarse
+            for refinementStep in tempoRefinementStepDeviations {
+                for direction in [-1.0, 1.0] {
+                    if let match = evaluate(current.ratio + direction * refinementStep),
+                       match.score > current.match.score {
+                        current = (current.ratio + direction * refinementStep, match)
+                    }
+                }
+            }
+            best = current
+        }
+
+        guard let best, isTempoConfident(best.match) else {
+            return TempoResult(
+                trackID: source.id,
+                displayName: source.displayName,
+                newOffsetSeconds: nil,
+                speedRatio: nil,
+                score: best?.match.score ?? 0
+            )
+        }
+
+        let offset = tempoAlignedOffsetSeconds(
+            anchorOffsetSeconds: anchorOffsetSeconds,
+            anchorPlayheadFileTime: anchorPlayheadFileTime,
+            speedRatio: best.ratio,
+            matchLag: best.match.lag
+        )
+        return TempoResult(
+            trackID: source.id,
+            displayName: source.displayName,
+            newOffsetSeconds: offset,
+            speedRatio: best.ratio,
+            score: best.match.score
+        )
+    }
+
+    /// Whether a tempo-search match clears the (stricter) confidence gates.
+    static func isTempoConfident(_ match: Match) -> Bool {
+        match.score >= minimumConfidence && match.contrast >= minimumTempoPeakContrast
+    }
+
+    /// The offset that aligns the track with the anchor at the playhead, given
+    /// a whole-track match of the `speedRatio`-stretched anchor.
+    ///
+    /// Anchor file time `t` corresponds to track file time
+    /// `matchLag·hop + t·ratio`; equating global times at `t = playhead`
+    /// gives `offset = anchorOffset + playhead·(1 − ratio) − matchLag·hop`.
+    static func tempoAlignedOffsetSeconds(
+        anchorOffsetSeconds: TimeInterval,
+        anchorPlayheadFileTime: TimeInterval,
+        speedRatio: Double,
+        matchLag: Int
+    ) -> TimeInterval {
+        let raw = anchorOffsetSeconds
+            + anchorPlayheadFileTime * (1 - speedRatio)
+            - Double(matchLag) * hopSeconds
+        let rounded = (raw * 1000).rounded() / 1000
+        return min(max(rounded, -maximumOffsetSeconds), maximumOffsetSeconds)
+    }
+
+    /// Linear-interpolation time stretch of an envelope: `ratio > 1`
+    /// lengthens it. Element `i` of the result samples the input at `i/ratio`.
+    static func stretchedEnvelope(_ values: [Float], ratio: Double) -> [Float] {
+        guard ratio > 0, !values.isEmpty else { return values }
+
+        let count = Int(Double(values.count) * ratio)
+        var stretched = [Float](repeating: 0, count: count)
+        for index in 0..<count {
+            let source = Double(index) / ratio
+            let lower = Int(source)
+            guard lower + 1 < values.count else { break }
+            let fraction = Float(source - Double(lower))
+            stretched[index] = values[lower] * (1 - fraction) + values[lower + 1] * fraction
+        }
+        return stretched
     }
 
     // MARK: - Reference window

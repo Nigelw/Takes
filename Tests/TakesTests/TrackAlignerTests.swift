@@ -222,6 +222,146 @@ struct TrackAlignerTests {
         #expect(results.first?.newOffsetSeconds == nil)
     }
 
+    // MARK: - Tempo pass
+
+    @Test
+    func stretchedEnvelopeResamplesLinearly() {
+        let values: [Float] = [0, 1, 2, 3]
+
+        let stretched = TrackAligner.stretchedEnvelope(values, ratio: 2)
+
+        #expect(stretched.count == 8)
+        #expect(abs(stretched[2] - 1) < 0.000_1)
+        #expect(abs(stretched[3] - 1.5) < 0.000_1)
+    }
+
+    @Test
+    func tempoAlignedOffsetMatchesPlainOffsetAtUnitRatio() {
+        let tempo = TrackAligner.tempoAlignedOffsetSeconds(
+            anchorOffsetSeconds: 0.5,
+            anchorPlayheadFileTime: 42,
+            speedRatio: 1,
+            matchLag: 1_250
+        )
+        let plain = TrackAligner.alignedOffsetSeconds(
+            anchorOffsetSeconds: 0.5,
+            windowStartIndex: 0,
+            matchLag: 1_250
+        )
+        #expect(tempo == plain)
+    }
+
+    @Test
+    func tempoAlignedOffsetAnchorsAtThePlayhead() {
+        // The other track runs 3% slower with its content 0.4 s late: anchor
+        // time t sits at track time 0.4 + 1.03·t. Aligning at playhead 10 s
+        // must put track time 10.7 at global time anchorOffset + 10.
+        let offset = TrackAligner.tempoAlignedOffsetSeconds(
+            anchorOffsetSeconds: 0,
+            anchorPlayheadFileTime: 10,
+            speedRatio: 1.03,
+            matchLag: 400
+        )
+        #expect(abs(offset - (10 - 10.7)) < 0.000_1)
+    }
+
+    @Test
+    func tempoSearchDetectsSpeedDifference() async throws {
+        // Same burst pattern, second file 3% slower (times and duration
+        // scaled) plus 0.4 s of extra lead-in.
+        let bursts: [TimeInterval] = [0.5, 0.9, 1.35, 2.0, 2.3, 3.05, 3.7, 4.4, 4.9, 5.6]
+        let ratio = 1.03
+        let lead = 0.4
+
+        let anchorURL = try Self.writeBurstFile(sampleRate: 44_100, duration: 6.2, burstTimes: bursts)
+        let otherURL = try Self.writeBurstFile(
+            sampleRate: 44_100,
+            duration: 6.2 * ratio + lead,
+            burstTimes: bursts.map { $0 * ratio + lead }
+        )
+        defer {
+            try? FileManager.default.removeItem(at: anchorURL)
+            try? FileManager.default.removeItem(at: otherURL)
+        }
+
+        let otherID = UUID()
+        let request = TrackAligner.Request(
+            anchor: TrackAligner.Source(id: UUID(), url: anchorURL, displayName: "anchor", currentOffsetSeconds: 0),
+            anchorPlayheadFileTime: 0,
+            others: [
+                TrackAligner.Source(id: otherID, url: otherURL, displayName: "other", currentOffsetSeconds: 0)
+            ]
+        )
+
+        let recorder = ProgressRecorder()
+        let results = await TrackAligner.alignTempo(request) { progress in
+            recorder.record(progress)
+        }
+
+        let result = try #require(results.first)
+        #expect(result.trackID == otherID)
+        let detectedRatio = try #require(result.speedRatio)
+        #expect(abs(detectedRatio - ratio) < 0.005)
+        // Playhead at 0: content aligns when the other track is pulled the
+        // lead-in earlier.
+        let newOffset = try #require(result.newOffsetSeconds)
+        #expect(abs(newOffset - -lead) < 0.05)
+
+        let progressValues = recorder.snapshot()
+        #expect(progressValues == progressValues.sorted())
+        #expect(abs((progressValues.last ?? 0) - 1) < 0.000_1)
+    }
+
+    @Test
+    func tempoSearchRejectsUnrelatedAudio() async throws {
+        let anchorURL = try Self.writeBurstFile(
+            sampleRate: 44_100,
+            duration: 6,
+            burstTimes: [0.317, 0.851, 1.204, 1.793, 2.118, 2.677, 3.241, 3.598, 4.166, 4.723, 5.291, 5.644]
+        )
+        let otherURL = try Self.writeBurstFile(
+            sampleRate: 44_100,
+            duration: 6,
+            burstTimes: [0.402, 0.939, 1.487, 1.862, 2.539, 2.941, 3.376, 3.812, 4.408, 4.856, 5.137, 5.783],
+            seed: 99
+        )
+        defer {
+            try? FileManager.default.removeItem(at: anchorURL)
+            try? FileManager.default.removeItem(at: otherURL)
+        }
+
+        let request = TrackAligner.Request(
+            anchor: TrackAligner.Source(id: UUID(), url: anchorURL, displayName: "anchor", currentOffsetSeconds: 0),
+            anchorPlayheadFileTime: 0,
+            others: [
+                TrackAligner.Source(id: UUID(), url: otherURL, displayName: "other", currentOffsetSeconds: 0)
+            ]
+        )
+
+        let results = await TrackAligner.alignTempo(request) { _ in }
+
+        #expect(results.first?.newOffsetSeconds == nil)
+        #expect(results.first?.speedRatio == nil)
+    }
+
+    /// Collects progress callbacks from any thread.
+    private final class ProgressRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [Double] = []
+
+        func record(_ value: Double) {
+            lock.lock()
+            values.append(value)
+            lock.unlock()
+        }
+
+        func snapshot() -> [Double] {
+            lock.lock()
+            defer { lock.unlock() }
+            return values
+        }
+    }
+
     // MARK: - Helpers
 
     /// Deterministic sparse spike train resembling an onset-novelty envelope.

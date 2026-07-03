@@ -558,6 +558,48 @@ struct ContentView: View {
         } message: {
             Text(controller.playbackError?.localizedDescription ?? "")
         }
+        .alert(
+            "Couldn't Align Some Tracks",
+            isPresented: Binding(
+                get: { controller.tempoAnalysisOffer != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        controller.declineTempoAnalysis()
+                    }
+                }
+            )
+        ) {
+            Button("Analyze Tempo") {
+                controller.startTempoAnalysis()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            let names = controller.tempoAnalysisOffer?.trackNames.joined(separator: "\n") ?? ""
+            Text("""
+            No matching audio was found for:
+            \(names)
+            They might match at a different playback speed. Run tempo \
+            analysis? This can take a while; the Auto-Align button shows \
+            its progress.
+            """)
+        }
+        .alert(
+            "Tracks Aligned",
+            isPresented: Binding(
+                get: { controller.alignmentNotice != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        controller.clearAlignmentNotice()
+                    }
+                }
+            )
+        ) {
+            Button("OK") {
+                controller.clearAlignmentNotice()
+            }
+        } message: {
+            Text(controller.alignmentNotice ?? "")
+        }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $windowIsDropTargeted) { providers in
             loadDroppedURLs(from: providers)
         }
@@ -764,15 +806,21 @@ struct ContentView: View {
     }
 
     /// Header-sized companion to the import control: a native bordered button
-    /// (matching "Remove All") whose glyph swaps for a spinner while an
-    /// alignment run is in flight. The fixed label frame keeps the button from
-    /// resizing during the swap.
+    /// (matching "Remove All") whose glyph swaps for a progress indicator
+    /// while an alignment run is in flight — an indeterminate spinner during
+    /// the quick pass, a determinate circle during tempo analysis. The fixed
+    /// label frame keeps the button from resizing during the swap.
     private var autoAlignButton: some View {
         Button {
             controller.autoAlignTracks()
         } label: {
             Group {
-                if controller.isAligning {
+                if let progress = controller.alignmentProgress {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                } else if controller.isAligning {
                     ProgressView()
                         .controlSize(.small)
                         .scaleEffect(0.7)
@@ -786,6 +834,7 @@ struct ContentView: View {
         .disabled(!controller.session.canSwitchPlayback || controller.isAligning)
         .help("Auto-Align Tracks")
         .accessibilityLabel("Auto-Align Tracks")
+        .accessibilityValue(controller.isAligning ? "Aligning" : "")
         .componentDebugLabel("Auto-Align", enabled: settings.showsComponentDebugLabels)
     }
 
