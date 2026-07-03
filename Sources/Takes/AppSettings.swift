@@ -61,11 +61,13 @@ final class AppSettings: ObservableObject {
     nonisolated static let offsetStepDefault = NumericControlConfiguration.offset.step
     nonisolated static let offsetLargeStepDefault = NumericControlConfiguration.offset.largeStep
     nonisolated static let offsetStepRange = 1...10_000
+    nonisolated static let alignTracksOnOpenDefault = false
     nonisolated static let appearanceThemeDefault: AppearanceTheme = .system
     nonisolated static let readoutStyleDefault: ReadoutStyle = .glass
 
     nonisolated static let offsetStepKey = "offsetNudgeStep"
     nonisolated static let offsetLargeStepKey = "offsetLargeNudgeStep"
+    nonisolated static let alignTracksOnOpenKey = "alignTracksOnOpen"
     nonisolated static let appearanceThemeKey = "appearanceTheme"
     nonisolated static let readoutStyleKey = "readoutStyle"
 
@@ -91,6 +93,10 @@ final class AppSettings: ObservableObject {
             }
             defaults.set(offsetLargeStep, forKey: Self.offsetLargeStepKey)
         }
+    }
+
+    @Published var alignTracksOnOpen: Bool {
+        didSet { defaults.set(alignTracksOnOpen, forKey: Self.alignTracksOnOpenKey) }
     }
 
     /// The app's light/dark appearance. Persisted; applied app-wide via
@@ -122,6 +128,7 @@ final class AppSettings: ObservableObject {
         self.defaults = defaults
         offsetStep = Self.storedOffsetStep(defaults)
         offsetLargeStep = Self.storedOffsetLargeStep(defaults)
+        alignTracksOnOpen = Self.storedAlignTracksOnOpen(defaults)
         appearanceTheme = Self.storedAppearanceTheme(defaults)
         readoutStyle = Self.storedReadoutStyle(defaults)
     }
@@ -139,6 +146,7 @@ final class AppSettings: ObservableObject {
     func restoreDefaults() {
         offsetStep = Self.offsetStepDefault
         offsetLargeStep = Self.offsetLargeStepDefault
+        alignTracksOnOpen = Self.alignTracksOnOpenDefault
         appearanceTheme = Self.appearanceThemeDefault
         readoutStyle = Self.readoutStyleDefault
         transportAppearance = TransportAppearance()
@@ -148,6 +156,7 @@ final class AppSettings: ObservableObject {
     var settingsAreDefault: Bool {
         offsetStep == Self.offsetStepDefault
             && offsetLargeStep == Self.offsetLargeStepDefault
+            && alignTracksOnOpen == Self.alignTracksOnOpenDefault
             && appearanceTheme == Self.appearanceThemeDefault
             && readoutStyle == Self.readoutStyleDefault
             && transportAppearance == TransportAppearance()
@@ -164,6 +173,10 @@ final class AppSettings: ObservableObject {
 
     nonisolated static func storedOffsetLargeStep(_ defaults: UserDefaults = .standard) -> Int {
         clamp(defaults.object(forKey: offsetLargeStepKey) as? Int ?? offsetLargeStepDefault)
+    }
+
+    nonisolated static func storedAlignTracksOnOpen(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: alignTracksOnOpenKey) as? Bool ?? alignTracksOnOpenDefault
     }
 
     nonisolated static func storedAppearanceTheme(_ defaults: UserDefaults = .standard) -> AppearanceTheme {

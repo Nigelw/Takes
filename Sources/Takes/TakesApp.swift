@@ -383,6 +383,7 @@ struct TakesApp: App {
                 .environmentObject(settings)
                 .environmentObject(updater)
                 .onAppear {
+                    controller.settings = settings
                     remotePlaybackCommands.connect(to: controller)
                     appDelegate.fileOpenRouter.setHandler { urls in
                         Task { await controller.loadImportedFiles(urls) }
@@ -520,6 +521,7 @@ struct TakesApp: App {
                 .environmentObject(settings)
                 .environmentObject(updater)
         }
+        .windowResizability(.contentSize)
     }
 }
 

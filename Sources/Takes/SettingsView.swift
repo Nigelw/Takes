@@ -17,6 +17,7 @@ struct SettingsView: View {
                 }
         }
         .frame(width: 460)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -44,6 +45,11 @@ private struct GeneralSettingsView: View {
 
             Section {
                 VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Align Tracks on Open", isOn: $settings.alignTracksOnOpen)
+                    OffsetHint("Automatically align audio files when opening in Takes")
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
                     LabeledContent("Nudge") {
                         OffsetAmountField(value: $settings.offsetStep, stepperIncrement: 10)
                     }
@@ -57,7 +63,7 @@ private struct GeneralSettingsView: View {
                     OffsetHint("Hold Shift while using steppers or arrow keys to adjust by a larger amount.")
                 }
             } header: {
-                Text("Track Offset")
+                Text("Track Alignment")
             }
 
             Section {
@@ -72,6 +78,7 @@ private struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -146,6 +153,7 @@ private struct UpdateSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
         .onAppear {
             updater.refreshLastCheckDate()
         }

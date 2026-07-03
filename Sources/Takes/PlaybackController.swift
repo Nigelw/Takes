@@ -21,6 +21,7 @@ final class PlaybackController: ObservableObject {
     /// A brief success/failure flash on the Auto-Align button, auto-cleared a
     /// couple seconds after an alignment run finishes.
     @Published private(set) var alignmentOutcome: AlignmentOutcome?
+    weak var settings: AppSettings?
 
     /// Tracks the quick alignment pass couldn't match, held while the user
     /// decides whether to run tempo analysis on them.
@@ -153,6 +154,7 @@ final class PlaybackController: ObservableObject {
         }
 
         var resumePosition: TimeInterval?
+        var shouldAutoAlignAfterOpening = false
         if wasPlaying, !preparedLoads.isEmpty {
             resumePosition = currentTransportPosition()
         }
@@ -161,6 +163,7 @@ final class PlaybackController: ObservableObject {
             let appendedTrackIDs = preparedLoads.map(appendPreparedTrackLoad)
             finishTrackLoading(preferZero: !wasPlaying && transportStoppedAtTimelineStart)
             shuffleForBlindListeningIfNeeded(using: blindShuffle)
+            shouldAutoAlignAfterOpening = settings?.alignTracksOnOpen == true
             if let resumePosition, !startAppendedTracksDuringPlayback(appendedTrackIDs, at: resumePosition) {
                 return
             }
@@ -179,6 +182,10 @@ final class PlaybackController: ObservableObject {
             playbackError = .trackLimitExceeded(limit: Self.maximumTrackCount, skippedFileNames: skippedFileNames)
         case (true, true):
             break
+        }
+
+        if shouldAutoAlignAfterOpening {
+            autoAlignTracks()
         }
     }
 
