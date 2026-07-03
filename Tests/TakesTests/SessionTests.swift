@@ -223,6 +223,38 @@ struct SessionTests {
     }
 
     @Test
+    func windowPolicyResetsLaunchHeightWhilePreservingWidthAndTopLeft() {
+        let currentFrame = CGRect(x: 96, y: 360, width: 920, height: TakesWindowPolicy.windowHeight(displayingTrackRows: 4))
+        let visibleFrame = CGRect(x: 0, y: 80, width: 1200, height: 800)
+
+        let resetFrame = TakesWindowPolicy.frameResettingHeight(
+            currentFrame: currentFrame,
+            visibleFrame: visibleFrame
+        )
+
+        #expect(resetFrame.minX == currentFrame.minX)
+        #expect(resetFrame.maxY == currentFrame.maxY)
+        #expect(resetFrame.width == currentFrame.width)
+        #expect(resetFrame.height == TakesWindowPolicy.defaultWindowHeight)
+    }
+
+    @Test
+    func windowPolicyResetSizeUsesDefaultSizeWhilePreservingTopLeft() {
+        let currentFrame = CGRect(x: 96, y: 360, width: 920, height: TakesWindowPolicy.windowHeight(displayingTrackRows: 4))
+        let visibleFrame = CGRect(x: 0, y: 80, width: 1200, height: 800)
+
+        let resetFrame = TakesWindowPolicy.frameResettingSize(
+            currentFrame: currentFrame,
+            visibleFrame: visibleFrame
+        )
+
+        #expect(resetFrame.minX == currentFrame.minX)
+        #expect(resetFrame.maxY == currentFrame.maxY)
+        #expect(resetFrame.width == TakesWindowPolicy.defaultWindowWidth)
+        #expect(resetFrame.height == TakesWindowPolicy.defaultWindowHeight)
+    }
+
+    @Test
     func windowPolicyCapsResizedFrameAtVisibleMonitorBottom() {
         let currentFrame = CGRect(x: 80, y: 300, width: 700, height: TakesWindowPolicy.defaultWindowHeight)
         let visibleFrame = CGRect(x: 0, y: 260, width: 1200, height: 800)
@@ -303,13 +335,14 @@ struct SessionTests {
     }
 
     @Test
-    func windowPolicyClearsSavedMainWindowFrame() {
+    func windowPolicyDetectsSavedMainWindowFrame() {
         let defaults = UserDefaults(suiteName: "TakesWindowPolicyTests-\(UUID().uuidString)")!
+
+        #expect(!TakesWindowPolicy.hasSavedMainWindowFrame(defaults: defaults))
+
         defaults.set("10 20 900 568 0 0 1512 944", forKey: TakesWindowPolicy.mainWindowFrameAutosaveName)
 
-        TakesWindowPolicy.clearSavedMainWindowFrame(defaults: defaults)
-
-        #expect(defaults.string(forKey: TakesWindowPolicy.mainWindowFrameAutosaveName) == nil)
+        #expect(TakesWindowPolicy.hasSavedMainWindowFrame(defaults: defaults))
     }
 
     @Test

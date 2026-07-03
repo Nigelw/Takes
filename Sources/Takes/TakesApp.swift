@@ -270,6 +270,26 @@ enum TakesWindowPolicy {
         )
     }
 
+    static func frameResettingHeight(currentFrame: CGRect, visibleFrame: CGRect) -> CGRect {
+        let height = min(defaultWindowHeight, max(currentFrame.maxY - visibleFrame.minY, 0))
+        return CGRect(
+            x: currentFrame.minX,
+            y: currentFrame.maxY - height,
+            width: currentFrame.width,
+            height: height
+        )
+    }
+
+    static func frameResettingSize(currentFrame: CGRect, visibleFrame: CGRect) -> CGRect {
+        let height = min(defaultWindowHeight, max(currentFrame.maxY - visibleFrame.minY, 0))
+        return CGRect(
+            x: currentFrame.minX,
+            y: currentFrame.maxY - height,
+            width: defaultWindowWidth,
+            height: height
+        )
+    }
+
     static func shouldAutoGrowWindow(
         previousTrackRowCount: Int,
         newTrackRowCount: Int,
@@ -292,13 +312,14 @@ enum TakesWindowPolicy {
         return desiredHeight < currentWindowHeight - 0.5
     }
 
-    static func clearSavedMainWindowFrame(defaults: UserDefaults = .standard) {
-        defaults.removeObject(forKey: mainWindowFrameAutosaveName)
+    static func hasSavedMainWindowFrame(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: mainWindowFrameAutosaveName) != nil
     }
 
     @MainActor
-    static func configureMainWindow(_ window: NSWindow) {
-        window.setFrameAutosaveName("")
+    static func configureMainWindow(_ window: NSWindow, defaults: UserDefaults = .standard) {
+        let hasSavedFrame = hasSavedMainWindowFrame(defaults: defaults)
+        window.setFrameAutosaveName(mainWindowID)
         window.minSize = minimumWindowSize
 
         // Unify the titlebar with the transport bar: let content draw up
@@ -310,8 +331,12 @@ enum TakesWindowPolicy {
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = false
 
-        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-        window.setFrame(defaultFrame(visibleFrame: visibleFrame), display: true)
+        if !hasSavedFrame {
+            let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+            window.setFrame(defaultFrame(visibleFrame: visibleFrame), display: true)
+        } else {
+            resetMainWindowHeight(window, animate: false)
+        }
     }
 
     @MainActor
@@ -326,6 +351,22 @@ enum TakesWindowPolicy {
         guard abs(resizedFrame.height - window.frame.height) > 0.5 else { return }
         window.setFrame(resizedFrame, display: true, animate: true)
     }
+
+    @MainActor
+    static func resetMainWindowHeight(_ window: NSWindow, animate: Bool) {
+        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+        let resetFrame = frameResettingHeight(currentFrame: window.frame, visibleFrame: visibleFrame)
+        guard abs(resetFrame.height - window.frame.height) > 0.5 else { return }
+        window.setFrame(resetFrame, display: true, animate: animate)
+    }
+
+    @MainActor
+    static func resetMainWindowSize(_ window: NSWindow, animate: Bool = true) {
+        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+        let resetFrame = frameResettingSize(currentFrame: window.frame, visibleFrame: visibleFrame)
+        guard resetFrame != window.frame else { return }
+        window.setFrame(resetFrame, display: true, animate: animate)
+    }
 }
 
 @main
@@ -335,10 +376,6 @@ struct TakesApp: App {
     @StateObject private var remotePlaybackCommands = RemotePlaybackCommandController()
     @StateObject private var settings = AppSettings()
     @StateObject private var updater = SoftwareUpdater()
-
-    init() {
-        TakesWindowPolicy.clearSavedMainWindowFrame()
-    }
 
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
@@ -467,6 +504,7 @@ struct TakesApp: App {
 
                 Menu("Debug") {
                     Toggle("Show Component Names", isOn: $settings.showsComponentDebugLabels)
+                    ResetMainWindowSizeButton()
                     OpenAppearanceTunerButton()
                 }
             }
@@ -494,6 +532,17 @@ private struct OpenAppearanceTunerButton: View {
         Button("Appearance Tuner") {
             openWindow(id: TakesWindowPolicy.appearanceTunerWindowID)
         }
+    }
+}
+
+private struct ResetMainWindowSizeButton: View {
+    @FocusedValue(\.mainWindowCommandState) private var mainWindowCommandState
+
+    var body: some View {
+        Button("Reset Window Size") {
+            mainWindowCommandState?.resetWindowSize()
+        }
+        .disabled(mainWindowCommandState == nil)
     }
 }
 

@@ -375,8 +375,16 @@ final class OpenFileCommandState: ObservableObject {
     }
 }
 
+struct MainWindowCommandState {
+    let resetWindowSize: @MainActor () -> Void
+}
+
 private struct OpenFileCommandStateKey: FocusedValueKey {
     typealias Value = OpenFileCommandState
+}
+
+private struct MainWindowCommandStateKey: FocusedValueKey {
+    typealias Value = MainWindowCommandState
 }
 
 private struct CanClearTracksKey: FocusedValueKey {
@@ -407,6 +415,11 @@ extension FocusedValues {
     var openFileCommandState: OpenFileCommandState? {
         get { self[OpenFileCommandStateKey.self] }
         set { self[OpenFileCommandStateKey.self] = newValue }
+    }
+
+    var mainWindowCommandState: MainWindowCommandState? {
+        get { self[MainWindowCommandStateKey.self] }
+        set { self[MainWindowCommandStateKey.self] = newValue }
     }
 
     var canClearTracks: Bool? {
@@ -543,10 +556,6 @@ struct ContentView: View {
                 guard !didConfigureMainWindow else { return }
                 didConfigureMainWindow = true
                 TakesWindowPolicy.configureMainWindow(window)
-                TakesWindowPolicy.resizeMainWindow(
-                    window,
-                    displayingTrackRows: controller.session.tracks.count
-                )
             }
         }
         .alert(
@@ -577,6 +586,13 @@ struct ContentView: View {
             handleImport(result)
         }
         .focusedSceneValue(\.openFileCommandState, openFileCommandState)
+        .focusedSceneValue(
+            \.mainWindowCommandState,
+            MainWindowCommandState {
+                guard let mainWindow else { return }
+                TakesWindowPolicy.resetMainWindowSize(mainWindow)
+            }
+        )
         .focusedSceneValue(\.canShowActiveTrackInFinder, controller.session.activeTrack != nil)
         .focusedSceneValue(\.canRemoveActiveTrack, controller.session.activeTrackID != nil)
         .focusedSceneValue(\.canUseGlobalMenuShortcuts, focusedOffsetTrackID == nil)
