@@ -215,6 +215,12 @@ enum DroppedFileImportAction: Equatable {
     }
 }
 
+enum DroppedFileURLResolver {
+    static func audioFileURLs(from urls: [URL], fileManager: FileManager = .default) -> [URL] {
+        AppOpenedURLResolver.audioFileURLs(from: urls, fileManager: fileManager)
+    }
+}
+
 enum TrackReorderDrag {
     static let contentType = UTType.plainText
 }
@@ -1975,7 +1981,8 @@ struct ContentView: View {
         }
 
         group.notify(queue: .main) {
-            let urls = urlsByProvider.compactMap(\.self)
+            let urls = DroppedFileURLResolver.audioFileURLs(from: urlsByProvider.compactMap(\.self))
+            guard !urls.isEmpty else { return }
             Task { @MainActor in
                 switch DroppedFileImportAction.action(targetTrackID: nil) {
                 case .append:

@@ -119,9 +119,9 @@ final class PlaybackController: ObservableObject {
             do {
                 preparedLoads.append(try await prepareTrackLoad(from: url))
             } catch let error as PlaybackError {
-                failures.append(ImportFailure(url: url, message: error.localizedDescription))
+                failures.append(ImportFailure(url: url, message: error.importFailureMessage))
             } catch {
-                failures.append(ImportFailure(url: url, message: PlaybackError.failedToOpenFile(url).localizedDescription))
+                failures.append(ImportFailure(url: url, message: PlaybackError.failedToOpenFile(url).importFailureMessage))
             }
         }
 

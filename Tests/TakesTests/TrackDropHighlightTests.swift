@@ -51,6 +51,32 @@ struct TrackDropHighlightTests {
     }
 
     @Test
+    func droppedFolderRecursivelyResolvesAudioFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let nested = root.appending(path: "nested", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let directAudio = root.appending(path: "direct.wav")
+        let ignoredText = root.appending(path: "notes.txt")
+        let nestedAudio = nested.appending(path: "nested.m4a")
+        let directInputAudio = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".mp3")
+        try Data().write(to: directAudio)
+        try Data().write(to: ignoredText)
+        try Data().write(to: nestedAudio)
+        try Data().write(to: directInputAudio)
+        defer { try? FileManager.default.removeItem(at: directInputAudio) }
+
+        let resolvedURLs = DroppedFileURLResolver.audioFileURLs(from: [root, directInputAudio])
+
+        #expect(
+            resolvedURLs.map { $0.resolvingSymlinksInPath() }
+                == [directAudio, nestedAudio, directInputAudio].map { $0.resolvingSymlinksInPath() }
+        )
+    }
+
+    @Test
     func importActionMenuOffersFinderSelectionAndMusicSelection() {
         #expect(ImportActionMenuItem.dropdownItems.map(\.title) == [
             "Open Finder Selection",

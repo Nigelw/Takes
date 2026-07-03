@@ -333,7 +333,7 @@ enum PlaybackError: LocalizedError, Equatable {
         case let .unsupportedFormat(url):
             return "Unsupported audio format: \(url.lastPathComponent)"
         case let .failedToOpenFile(url):
-            return "Could not open file: \(url.lastPathComponent)"
+            return "Could not load \(url.lastPathComponent). The file may be missing, damaged, or in an unsupported audio format."
         case .invalidSeekPosition:
             return "Seek position is outside the valid compare range."
         case .engineStartFailed:
@@ -353,6 +353,17 @@ enum PlaybackError: LocalizedError, Equatable {
                 skippedFileNames: skippedFileNames,
                 limit: limit
             )
+        }
+    }
+
+    var importFailureMessage: String {
+        switch self {
+        case .unsupportedFormat:
+            return "The file is not a supported audio format."
+        case .failedToOpenFile:
+            return "The file could not be opened. It may be missing, damaged, or in an unsupported audio format."
+        default:
+            return localizedDescription
         }
     }
 
