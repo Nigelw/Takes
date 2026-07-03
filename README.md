@@ -5,7 +5,7 @@
 <h1 align="center">Takes</h1>
 
 <p align="center">
-  An app for comparing multiple versions of the same audio track.
+  A beautiful native macOS app for comparing multiple versions of audio tracks.
 </p>
 
 <p align="center">
