@@ -39,7 +39,7 @@
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Takes needs to get the current selection from Finder and Apple Music.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026 Nigel Warren. All rights reserved.</string>
+	<string>Copyright © 2026 Nigel M. Warren. All rights reserved.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>SUEnableAutomaticChecks</key>

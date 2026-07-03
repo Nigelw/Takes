@@ -58,8 +58,8 @@
 		A1000000000000000000001B /* LibraryTrackSelectionLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryTrackSelectionLoader.swift; sourceTree = "<group>"; };
 		A1000000000000000000001C /* Assets/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets/Assets.xcassets; sourceTree = "<group>"; };
 		A1000000000000000000001D /* TrackDropHighlightTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackDropHighlightTests.swift; sourceTree = "<group>"; };
-		A1000000000000000000001F /* WaveformSourceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformSourceTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000001E /* Takes.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Takes.entitlements; sourceTree = "<group>"; };
+		A1000000000000000000001F /* WaveformSourceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformSourceTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000C001 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		A1000000000000000000C002 /* SoftwareUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftwareUpdater.swift; sourceTree = "<group>"; };
 		A1000000000000000000C003 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
