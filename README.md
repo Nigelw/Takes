@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Nigelw/Takes/releases/latest/download/Takes.dmg"><strong>Download Latest</strong></a> &middot;
-  <a href=“https://takes.nigelwarren.com”>Visit Website</a>
+  <a href="https://takes.nigelwarren.com">Visit Website</a>
 </p>
 
 <p align="center">
