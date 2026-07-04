@@ -622,10 +622,12 @@ final class DragSourceNSView: NSView, NSDraggingSource {
 
 enum ImportActionMenuItem: CaseIterable {
     case open
+    case streamingURL
     case finderSelection
     case musicSelection
 
     static let dropdownItems: [ImportActionMenuItem] = [
+        .streamingURL,
         .finderSelection,
         .musicSelection
     ]
@@ -634,6 +636,8 @@ enum ImportActionMenuItem: CaseIterable {
         switch self {
         case .open:
             "Open..."
+        case .streamingURL:
+            "Open Streaming URL..."
         case .finderSelection:
             "Quick Open from Finder"
         case .musicSelection:
@@ -684,7 +688,11 @@ enum ImportActionSplitButtonMenuPlacement {
 @MainActor
 final class OpenFileCommandState: ObservableObject {
     @Published var isImportingTracks = false
+    @Published var isPromptingForStreamingURL = false
+    @Published var streamingURLText = ""
+    @Published var streamingURLStatus: StreamingURLPromptStatus = .idle
 
+    private let loadStreamingURLAction: @MainActor (String, OpenFileCommandState) -> Void
     private let loadAppleMusicSelection: @MainActor () -> Void
     private let loadFinderSelection: @MainActor () -> Void
     private let showActiveTrackInFinderAction: @MainActor () -> Void
@@ -692,12 +700,14 @@ final class OpenFileCommandState: ObservableObject {
     private let clearAllTracksAction: @MainActor () -> Void
 
     init(
+        loadStreamingURL: @escaping @MainActor (String, OpenFileCommandState) -> Void = { _, _ in },
         loadAppleMusicSelection: @escaping @MainActor () -> Void = {},
         loadFinderSelection: @escaping @MainActor () -> Void = {},
         showActiveTrackInFinder: @escaping @MainActor () -> Void = {},
         removeActiveTrack: @escaping @MainActor () -> Void = {},
         clearAllTracks: @escaping @MainActor () -> Void = {}
     ) {
+        self.loadStreamingURLAction = loadStreamingURL
         self.loadAppleMusicSelection = loadAppleMusicSelection
         self.loadFinderSelection = loadFinderSelection
         self.showActiveTrackInFinderAction = showActiveTrackInFinder
@@ -711,6 +721,34 @@ final class OpenFileCommandState: ObservableObject {
 
     func dismissOpenDialog() {
         isImportingTracks = false
+    }
+
+    func presentStreamingURLPrompt() {
+        streamingURLText = ""
+        streamingURLStatus = .idle
+        isPromptingForStreamingURL = true
+    }
+
+    func openStreamingURL(_ urlString: String) {
+        guard !streamingURLStatus.isWorking else { return }
+        streamingURLText = urlString
+        streamingURLStatus = .idle
+        isPromptingForStreamingURL = true
+        submitStreamingURL()
+    }
+
+    func dismissStreamingURLPrompt() {
+        isPromptingForStreamingURL = false
+        streamingURLText = ""
+        streamingURLStatus = .idle
+    }
+
+    func submitStreamingURL() {
+        guard !streamingURLStatus.isWorking else { return }
+        let urlString = streamingURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !urlString.isEmpty else { return }
+        streamingURLStatus = .readingMetadata("streaming")
+        loadStreamingURLAction(urlString, self)
     }
 
     func openAppleMusicSelection() {
@@ -806,6 +844,7 @@ extension FocusedValues {
 struct ContentView: View {
     @ObservedObject var controller: PlaybackController
     @EnvironmentObject private var settings: AppSettings
+    private let appFileOpenRouter: AppFileOpenRouter?
 
     @StateObject private var openFileCommandState = OpenFileCommandState()
     @StateObject private var waveformStore = WaveformStore()
@@ -828,6 +867,7 @@ struct ContentView: View {
     @State private var emptyStateIsHovered = false
     @State private var hoveredTrackID: SessionTrack.ID?
     @State private var focusedOffsetTrackID: SessionTrack.ID?
+    @FocusState private var streamingURLFieldIsFocused: Bool
     @State private var didConfigureMainWindow = false
     @State private var mainWindow: NSWindow?
     @State private var mainWindowIsKey = true
@@ -858,10 +898,28 @@ struct ContentView: View {
     /// Horizontal travel (points) that turns a click into a loop drag.
     private static let loopDragThreshold: CGFloat = 4
 
-    init(controller: PlaybackController) {
+    init(controller: PlaybackController, appFileOpenRouter: AppFileOpenRouter? = nil) {
         self.controller = controller
+        self.appFileOpenRouter = appFileOpenRouter
         _openFileCommandState = StateObject(
             wrappedValue: OpenFileCommandState(
+                loadStreamingURL: { urlString, commandState in
+                    Task {
+                        let didLoad = await controller.loadStreamingTrack(
+                            from: urlString,
+                            statusHandler: { status in
+                                await MainActor.run {
+                                    commandState.streamingURLStatus = status
+                                }
+                            }
+                        )
+                        if didLoad {
+                            await MainActor.run {
+                                commandState.dismissStreamingURLPrompt()
+                            }
+                        }
+                    }
+                },
                 loadAppleMusicSelection: {
                     Task { await controller.loadSelectedLibraryTracks() }
                 },
@@ -949,6 +1007,9 @@ struct ContentView: View {
             ) { result in
                 handleImport(result)
             }
+            .sheet(isPresented: $openFileCommandState.isPromptingForStreamingURL) {
+                streamingURLPrompt
+            }
             .focusedSceneValue(\.openFileCommandState, openFileCommandState)
             .focusedSceneValue(
                 \.mainWindowCommandState,
@@ -959,10 +1020,14 @@ struct ContentView: View {
             )
             .focusedSceneValue(\.canShowActiveTrackInFinder, controller.session.activeTrack != nil)
             .focusedSceneValue(\.canRemoveActiveTrack, controller.session.activeTrackID != nil)
-            .focusedSceneValue(\.canUseGlobalMenuShortcuts, focusedOffsetTrackID == nil)
-            .focusedSceneValue(\.canClearTracks, !controller.session.tracks.isEmpty)
+            .focusedSceneValue(
+                \.canUseGlobalMenuShortcuts,
+                focusedOffsetTrackID == nil && !streamingURLFieldIsFocused
+            )
+            .focusedSceneValue(\.canClearTracks, controller.displayedTrackRowCount > 0)
             .onAppear {
                 setupKeyMonitor()
+                configureAppOpenRouter()
                 waveformStore.sync(tracks: controller.session.tracks)
                 NSApp.appearance = settings.appearanceTheme.nsAppearance
             }
@@ -980,7 +1045,7 @@ struct ContentView: View {
             .onChange(of: controller.session.tracks) { _, tracks in
                 waveformStore.sync(tracks: tracks)
             }
-            .onChange(of: controller.session.tracks.count) { previousTrackCount, trackCount in
+            .onChange(of: controller.displayedTrackRowCount) { previousTrackCount, trackCount in
                 guard let mainWindow else { return }
                 let shouldResize = TakesWindowPolicy.shouldAutoGrowWindow(
                     previousTrackRowCount: previousTrackCount,
@@ -993,6 +1058,9 @@ struct ContentView: View {
                 )
                 guard shouldResize else { return }
                 TakesWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                controller.cleanupStreamingDownloads()
             }
             .onDisappear {
                 keyMonitor?.stop()
@@ -1377,7 +1445,7 @@ struct ContentView: View {
     }
 
     private var trackTimelineHeight: CGFloat {
-        TakesWindowPolicy.trackTimelineHeight(displayingTrackRows: controller.session.tracks.count)
+        TakesWindowPolicy.trackTimelineHeight(displayingTrackRows: controller.displayedTrackRowCount)
     }
 
     private func globalTime(atX x: CGFloat, width: CGFloat) -> TimeInterval {
@@ -1399,8 +1467,9 @@ struct ContentView: View {
     private var trackTimelineSection: some View {
         GeometryReader { proxy in
             let waveformWidth = max(proxy.size.width - trackInfoWidth, 1)
+            let displayedTrackRowCount = controller.displayedTrackRowCount
             VStack(alignment: .leading, spacing: 0) {
-                if controller.session.tracks.isEmpty {
+                if displayedTrackRowCount == 0 {
                     // The empty state owns the whole section — no header, no
                     // column split — one centered drop/click target.
                     trackAreaEmptyState
@@ -1427,7 +1496,7 @@ struct ContentView: View {
                                         .opacity(isLifted ? 0 : 1)
                                         .offset(y: reorderRowOffset(index: index))
                                         .animation(.snappy(duration: 0.26), value: reorderGapGeneration)
-                                    if index < controller.session.tracks.count - 1 {
+                                    if index < displayedTrackRowCount - 1 {
                                         Divider()
                                             .frame(height: trackTimelineDividerHeight)
                                             .offset(y: reorderRowOffset(index: index))
@@ -1490,7 +1559,7 @@ struct ContentView: View {
                 // border and the rows' info|waveform border are the same line.
                 // With no tracks the whole section is the empty state, so there
                 // is no column boundary to draw.
-                if !controller.session.tracks.isEmpty {
+                if displayedTrackRowCount > 0 {
                     Rectangle()
                         .fill(Theme.frozenColumnEdge)
                         .frame(width: 1, height: proxy.size.height)
@@ -1563,7 +1632,7 @@ struct ContentView: View {
                     controller.clearTracks()
                 }
                 .controlSize(.regular)
-                .disabled(controller.session.tracks.isEmpty)
+                .disabled(controller.displayedTrackRowCount == 0)
                 .help("Remove all tracks")
                 .padding(.trailing, 8)
             }
@@ -1976,6 +2045,77 @@ struct ContentView: View {
             return AnyShapeStyle(.tertiary.opacity(0.55))
         }
         return AnyShapeStyle(.quaternary.opacity(0.6))
+    }
+
+    private var streamingURLPrompt: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Open Streaming URL")
+                .font(.headline)
+
+            TextField("https://...", text: $openFileCommandState.streamingURLText)
+                .textFieldStyle(.roundedBorder)
+                .focused($streamingURLFieldIsFocused)
+                .disabled(openFileCommandState.streamingURLStatus.isWorking)
+                .onSubmit {
+                    openFileCommandState.submitStreamingURL()
+                }
+
+            if let message = openFileCommandState.streamingURLStatus.message {
+                if openFileCommandState.streamingURLStatus.isFailed {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        streamingURLPromptStatusText(message)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 16, height: 16)
+                            .alignmentGuide(.firstTextBaseline) { dimensions in
+                                dimensions[VerticalAlignment.center] + 4
+                            }
+                        streamingURLPromptStatusText(message)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                Text("Supports Apple Music, Spotify, YouTube, and YouTube Music URLs.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    openFileCommandState.dismissStreamingURLPrompt()
+                }
+                .disabled(openFileCommandState.streamingURLStatus.isWorking)
+                Button("Open") {
+                    openFileCommandState.submitStreamingURL()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(
+                    openFileCommandState.streamingURLStatus.isWorking
+                        || openFileCommandState.streamingURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+        .onAppear {
+            streamingURLFieldIsFocused = true
+        }
+    }
+
+    private func streamingURLPromptStatusText(_ message: String) -> some View {
+        Text(message)
+            .font(.caption)
+            .foregroundStyle(openFileCommandState.streamingURLStatus.isFailed ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func trackInfoArea(index: Int, sessionTrack: SessionTrack, showsTrash: Bool) -> some View {
@@ -2546,6 +2686,8 @@ struct ContentView: View {
         switch item {
         case .open:
             openFileCommandState.presentOpenDialog()
+        case .streamingURL:
+            openFileCommandState.presentStreamingURLPrompt()
         case .finderSelection:
             openFileCommandState.openFinderSelection()
         case .musicSelection:
@@ -2647,6 +2789,17 @@ struct ContentView: View {
         }
         clickMonitor.start()
         mouseMonitor = clickMonitor
+    }
+
+    private func configureAppOpenRouter() {
+        appFileOpenRouter?.setHandler { urls in
+            Task { await controller.loadImportedFiles(urls) }
+        }
+        appFileOpenRouter?.setStreamingURLHandler { urlStrings in
+            for urlString in urlStrings {
+                openFileCommandState.openStreamingURL(urlString)
+            }
+        }
     }
 
     private func loadDroppedURLs(from providers: [NSItemProvider]) -> Bool {

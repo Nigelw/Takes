@@ -422,6 +422,27 @@ struct SessionTests {
     }
 
     @Test
+    func infoPlistDeclaresTakesAutomationURLScheme() throws {
+        let plistURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Config")
+            .appending(path: "Takes-Info.plist")
+
+        let data = try Data(contentsOf: plistURL)
+        let plist = try #require(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        let urlTypes = try #require(plist["CFBundleURLTypes"] as? [[String: Any]])
+        let schemes = urlTypes.flatMap { urlType in
+            urlType["CFBundleURLSchemes"] as? [String] ?? []
+        }
+
+        #expect(schemes.contains("takes"))
+    }
+
+    @Test
     func musicSelectionParsingSortsTwoTracksByViewOrder() throws {
         let tempDirectory = FileManager.default.temporaryDirectory
         let laterURL = tempDirectory.appending(path: UUID().uuidString + ".m4a")
