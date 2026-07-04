@@ -211,7 +211,9 @@ case "analyze":
     for path in arguments.dropFirst() {
         let url = URL(fileURLWithPath: path)
         do {
-            let report = try AudioAnalysisEngine.analyze(fileAt: url, includeSpectrogram: false)
+            // Spectrogram included so ad-hoc runs exercise the full app path
+            // (benchmark mode skips it purely for speed).
+            let report = try AudioAnalysisEngine.analyze(fileAt: url, includeSpectrogram: true)
             print(describe(report))
         } catch {
             print("\(url.lastPathComponent): FAILED — \(error.localizedDescription)")

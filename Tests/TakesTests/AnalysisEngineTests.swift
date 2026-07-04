@@ -122,6 +122,27 @@ final class AnalysisEngineTests: XCTestCase {
         XCTAssertLessThan(balance.spectralCentroidHz, 900)
     }
 
+    // MARK: Spectrogram
+
+    func testSpectrogramAccumulatorSurvivesHopLargerThanFFTSize() {
+        // Files longer than ~51 s derive a hop larger than the FFT size;
+        // regression test for the removeFirst overrun that crashed on them.
+        let totalFrames = Int(300 * sampleRate)
+        let accumulator = SpectrogramAccumulator(sampleRate: sampleRate, expectedFrameCount: totalFrames)
+        let chunk = whiteNoise(amplitude: 0.1, seconds: 1)
+        var fed = 0
+        while fed < totalFrames {
+            accumulator.process(monoSamples: chunk)
+            fed += chunk.count
+        }
+        let spectrogram = accumulator.finalize(durationSeconds: 300)
+        XCTAssertNotNil(spectrogram)
+        // Column count should land near the target, not explode or collapse.
+        let width = spectrogram!.image.width
+        XCTAssertGreaterThan(width, SpectrogramAccumulator.targetColumnCount / 2)
+        XCTAssertLessThan(width, SpectrogramAccumulator.targetColumnCount * 2)
+    }
+
     // MARK: Noise floor
 
     func testQuietFramesFindHissUnderMusic() {

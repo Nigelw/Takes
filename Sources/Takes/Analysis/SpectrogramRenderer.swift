@@ -17,6 +17,9 @@ final class SpectrogramAccumulator {
     private let hop: Int
     private let sampleRate: Double
     private var pending: [Float] = []
+    /// Samples still to discard before the next window when the hop is
+    /// larger than the FFT size (long files) and overshoots the buffer.
+    private var pendingSkip = 0
     private var columnsPower: [[Float]] = []
     private var scratch: [Float]
 
@@ -29,6 +32,13 @@ final class SpectrogramAccumulator {
 
     func process(monoSamples: [Float]) {
         pending.append(contentsOf: monoSamples)
+        if pendingSkip > 0 {
+            let dropped = min(pendingSkip, pending.count)
+            pending.removeFirst(dropped)
+            pendingSkip -= dropped
+            if pendingSkip > 0 { return }
+        }
+
         var start = 0
         while pending.count - start >= Self.fftSize {
             for index in scratch.indices { scratch[index] = 0 }
@@ -41,7 +51,12 @@ final class SpectrogramAccumulator {
             columnsPower.append(scratch)
             start += hop
         }
-        pending.removeFirst(start)
+        // When hop > fftSize the final advance can pass the end of the
+        // buffer; carry the overshoot into the next chunk instead of
+        // over-removing (which trapped on files longer than ~51 s).
+        let removable = min(start, pending.count)
+        pendingSkip = start - removable
+        pending.removeFirst(removable)
     }
 
     func finalize(durationSeconds: Double) -> SpectrogramImage? {
