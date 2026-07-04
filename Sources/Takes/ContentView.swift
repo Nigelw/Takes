@@ -325,6 +325,7 @@ private struct TrackListDropDelegate: DropDelegate {
     @Binding var draggingID: SessionTrack.ID?
     @Binding var targetIndex: Int?
     @Binding var gapGeneration: Int
+    @Binding var revealingID: SessionTrack.ID?
     @Binding var isImportTargeted: Bool
     let loadDroppedURLs: ([NSItemProvider]) -> Bool
 
@@ -418,6 +419,10 @@ private struct TrackListDropDelegate: DropDelegate {
     }
 
     private func clear() {
+        // Hand the row to the reveal phase rather than unhiding it here: the
+        // reorder must land unanimated first, then the drag source's ended
+        // callback fades the row in at its new position.
+        revealingID = draggingID
         draggingID = nil
         targetIndex = nil
     }
@@ -814,6 +819,10 @@ struct ContentView: View {
     /// Bumped only when the gap moves during a drag, so the offset animation fires
     /// on gap changes but not on the instant teardown at commit.
     @State private var reorderGapGeneration = 0
+    /// The just-dropped row, held invisible for one more tick after the reorder
+    /// commits so it can fade in at its landed position (in sync with the system
+    /// fading out the drag image) instead of sliding there from its old slot.
+    @State private var reorderRevealingID: SessionTrack.ID?
     @State private var windowIsDropTargeted = false
     @State private var emptyStateIsHovered = false
     @State private var hoveredTrackID: SessionTrack.ID?
@@ -903,6 +912,14 @@ struct ContentView: View {
                     )
                     .frame(height: 8)
                     .allowsHitTesting(false)
+                }
+                // Import highlight above the transport bar's shadow gradient
+                // (both drawn here at the root, in order) so the highlight's top
+                // border isn't dimmed under the recessed-edge shading. Shown for
+                // the populated list and the empty state alike; the empty state
+                // adds its own badge/prompt treatment on top.
+                .overlay {
+                    trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
                 }
         }
         .frame(
@@ -1365,12 +1382,17 @@ struct ContentView: View {
                         ZStack(alignment: .topLeading) {
                             VStack(spacing: 0) {
                                 ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
-                                    let isDragging = reorderDraggingID == sessionTrack.id
+                                    let isLifted = reorderDraggingID == sessionTrack.id
+                                        || reorderRevealingID == sessionTrack.id
                                     trackRow(index: index, sessionTrack: sessionTrack, infoWidth: trackInfoWidth)
                                         // The dragged row's floating preview stands in
                                         // for it; its slot stays reserved as the gap the
-                                        // other rows slide around.
-                                        .opacity(isDragging ? 0 : 1)
+                                        // other rows slide around. It stays hidden one
+                                        // tick past the commit (`reorderRevealingID`),
+                                        // then fades in at its landed position — the
+                                        // fade itself is applied by `withAnimation` in
+                                        // the drag-ended handler.
+                                        .opacity(isLifted ? 0 : 1)
                                         .offset(y: reorderRowOffset(index: index))
                                         .animation(.snappy(duration: 0.26), value: reorderGapGeneration)
                                     if index < controller.session.tracks.count - 1 {
@@ -1400,6 +1422,7 @@ struct ContentView: View {
                                 draggingID: $reorderDraggingID,
                                 targetIndex: $reorderTargetIndex,
                                 gapGeneration: $reorderGapGeneration,
+                                revealingID: $reorderRevealingID,
                                 isImportTargeted: $windowIsDropTargeted,
                                 loadDroppedURLs: { loadDroppedURLs(from: $0) }
                             )
@@ -1444,6 +1467,27 @@ struct ContentView: View {
             }
             .coordinateSpace(name: Self.playheadSpace)
         }
+    }
+
+    /// The drop-landing highlight for the track section (populated list and
+    /// empty state alike): a brand wash with a soft glow bleeding in from the
+    /// edges — a blurred edge band rather than a solid border, so there's no
+    /// crisp line whose corners could visibly deviate from the window's corner
+    /// curve (the window mask itself rounds the bottom corners). Kept mounted
+    /// and driven by opacity so it fades smoothly as drags enter and leave the
+    /// window.
+    private func trackAreaImportHighlight(isTargeted: Bool) -> some View {
+        Rectangle()
+            .fill(Theme.primary.opacity(0.11))
+            .overlay(
+                Rectangle()
+                    .strokeBorder(Theme.primary.opacity(0.65), lineWidth: 4)
+                    .blur(radius: 5)
+            )
+            .clipped()
+            .opacity(isTargeted ? 1 : 0)
+            .animation(.easeInOut(duration: 0.15), value: isTargeted)
+            .allowsHitTesting(false)
     }
 
     /// Vertical offset for the row at `index` so a gap opens at the drag's target
@@ -1698,7 +1742,10 @@ struct ContentView: View {
         infoWidth: CGFloat
     ) -> some View {
         let isActive = controller.session.activeTrackID == sessionTrack.id
-        let isHovered = hoveredTrackID == sessionTrack.id
+        // Suppress the hover trash button while a reorder drag is in flight: the
+        // drag drives the pointer across rows, so their hover states would flash
+        // the button on each one in passing.
+        let isHovered = hoveredTrackID == sessionTrack.id && reorderDraggingID == nil
         return HStack(spacing: 0) {
             trackInfoArea(index: index, sessionTrack: sessionTrack, showsTrash: isHovered)
                 .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
@@ -1717,8 +1764,23 @@ struct ContentView: View {
                         onSelect: { controller.selectActiveTrack(sessionTrack.id) },
                         onDragBegan: { reorderDraggingID = sessionTrack.id },
                         onDragEnded: {
-                            reorderDraggingID = nil
+                            // A committed reorder has already moved the row into
+                            // the reveal phase via the drop delegate; a cancelled
+                            // or copied-out drag reveals in place the same way.
+                            if let draggingID = reorderDraggingID {
+                                reorderRevealingID = draggingID
+                                reorderDraggingID = nil
+                            }
                             reorderTargetIndex = nil
+                            // Next tick: the (possibly reordered) layout has
+                            // landed unanimated, so only the opacity animates —
+                            // a fade-in at the row's final position, timed to
+                            // the system's fade-out of the drag image.
+                            DispatchQueue.main.async {
+                                withAnimation(.easeInOut(duration: 0.24)) {
+                                    reorderRevealingID = nil
+                                }
+                            }
                         },
                         makeDragImage: {
                             reorderCardDragImage(index: index, sessionTrack: sessionTrack, width: infoWidth)
@@ -1757,8 +1819,11 @@ struct ContentView: View {
         let track = sessionTrack.loadedTrack
         let isBlind = controller.session.isBlindListeningModeEnabled
         let title = isBlind ? "Track \(index + 1)" : track.displayName
-        return HStack(spacing: 8) {
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
             trackIndexBadge(index: index, isActive: controller.session.activeTrackID == sessionTrack.id)
+                // Same 1pt optical nudge as the in-row badge: baseline-aligned to
+                // the filename, but the fixed badge frame reads a touch low.
+                .offset(y: -1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.headline.weight(.medium))
@@ -1774,9 +1839,11 @@ struct ContentView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
-        // Inset a touch from the full row height so the card reads as lifted off
-        // the surface rather than filling the lane edge to edge.
-        .frame(width: width - 12, height: trackRowHeight - 14, alignment: .leading)
+        .padding(.vertical, 10)
+        // Width matches the info column so the card reads as the row's identity
+        // lifting off the surface; height hugs the badge/name/metadata content so
+        // the card stays a compact pill rather than an empty row-height slab.
+        .frame(width: width - 12, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Theme.reorderCardFill)
@@ -1795,13 +1862,24 @@ struct ContentView: View {
     }
 
     /// Renders the reorder preview card to an `NSImage` for the AppKit drag session.
+    /// `ImageRenderer` renders in light appearance by default, so the app's actual
+    /// appearance is threaded in explicitly — both as the SwiftUI color scheme and
+    /// as the drawing appearance for the dynamic `NSColor`-backed theme colors —
+    /// or the card comes out light in dark mode.
     private func reorderCardDragImage(index: Int, sessionTrack: SessionTrack, width: CGFloat) -> NSImage? {
+        let appearance = NSApp.effectiveAppearance
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let renderer = ImageRenderer(
             content: reorderPreviewCard(index: index, sessionTrack: sessionTrack, width: width)
                 .environmentObject(settings)
+                .environment(\.colorScheme, isDark ? .dark : .light)
         )
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
-        return renderer.nsImage
+        var image: NSImage?
+        appearance.performAsCurrentDrawingAppearance {
+            image = renderer.nsImage
+        }
+        return image
     }
 
     /// Kaleidoscope-style empty state: one centered composition — a soft
@@ -1809,8 +1887,9 @@ struct ContentView: View {
     /// owning the whole track section with no header or column split. Hovering
     /// darkens the badge and swaps the drag prompt for a click prompt; clicking
     /// anywhere opens the file dialog. Dragging files over any part of the
-    /// window tints the badge, glyph, and background with the indigo brand
-    /// color (drops are handled by the window-wide `onDrop`).
+    /// window tints the badge and glyph with the indigo brand color, with the
+    /// area wash and edge glow supplied by the shared track-area import
+    /// highlight (drops are handled by the window-wide `onDrop`).
     private var trackAreaEmptyState: some View {
         let isTargeted = windowIsDropTargeted
         return VStack(spacing: 10) {
@@ -1835,7 +1914,8 @@ struct ContentView: View {
             .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.primary.opacity(isTargeted ? 0.08 : 0))
+        // The area wash and edge glow come from the shared track-area import
+        // highlight (drawn at the root); here only the badge and glyph tint.
         .animation(.easeInOut(duration: 0.15), value: emptyStateIsHovered)
         .animation(.easeInOut(duration: 0.15), value: isTargeted)
         .contentShape(Rectangle())
