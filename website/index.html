@@ -309,7 +309,7 @@
 
     .shot-wrap {
       margin: 72px auto 0;
-      max-width: 980px;
+      max-width: 1120px;
     }
 
     .hero-shot {
@@ -333,7 +333,7 @@
 
     .features {
       margin: 0 auto;
-      max-width: 1120px;
+      max-width: calc(1120px - (var(--page-gutter) * 2));
     }
 
     .section-heading {
@@ -428,178 +428,6 @@
       margin: 0;
     }
 
-    .faq-band {
-      padding: 92px var(--page-gutter) 108px;
-    }
-
-    .faq {
-      margin: 0 auto;
-      max-width: 1120px;
-    }
-
-    .faq-grid {
-      display: grid;
-      gap: 14px;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .faq-item {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 24px;
-    }
-
-    .faq-item h3 {
-      font-size: 20px;
-      letter-spacing: 0;
-      line-height: 1.2;
-      margin: 0 0 10px;
-    }
-
-    .faq-item p {
-      color: var(--muted);
-      font-size: 15px;
-      line-height: 1.58;
-      margin: 0;
-    }
-
-    .help-band {
-      background: var(--band);
-      border-top: 1px solid var(--band-line);
-      padding: 92px var(--page-gutter) 108px;
-    }
-
-    .help {
-      margin: 0 auto;
-      max-width: 1120px;
-    }
-
-    .help-stack {
-      display: grid;
-      gap: 14px;
-      margin: 0 auto;
-      max-width: 620px;
-    }
-
-    .help-card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 24px;
-    }
-
-    .help-card h3 {
-      font-size: 20px;
-      letter-spacing: 0;
-      line-height: 1.2;
-      margin: 0 0 14px;
-    }
-
-    .help-card p,
-    .help-card li {
-      color: var(--muted);
-      font-size: 15px;
-      line-height: 1.58;
-    }
-
-    .help-card p {
-      margin: 0;
-    }
-
-    .help-card p + p {
-      margin-top: 8px;
-    }
-
-    .help-card ul {
-      margin: 0;
-      padding-left: 18px;
-    }
-
-    .help-card p + ul {
-      margin-top: 10px;
-    }
-
-    .help-card li + li {
-      margin-top: 4px;
-    }
-
-    .help-card + .help-card {
-      margin-top: 0;
-    }
-
-    .help-card-grid {
-      display: grid;
-      gap: 14px;
-    }
-
-    .shortcut-groups {
-      display: grid;
-      gap: 22px;
-    }
-
-    .shortcut-group h4 {
-      font-size: 14px;
-      letter-spacing: 0.08em;
-      margin: 0 0 12px;
-      text-transform: uppercase;
-      color: var(--brand-dark);
-    }
-
-    .shortcut-list {
-      border-top: 1px solid var(--line-soft);
-    }
-
-    .shortcut-row {
-      align-items: center;
-      border-bottom: 1px solid var(--line-soft);
-      display: grid;
-      gap: 16px;
-      grid-template-columns: minmax(0, 1fr) auto;
-      padding: 12px 0;
-    }
-
-    .shortcut-desc {
-      color: var(--muted);
-      font-size: 15px;
-      line-height: 1.45;
-    }
-
-    .shortcut-keys {
-      align-items: center;
-      display: inline-flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      justify-content: flex-end;
-    }
-
-    kbd {
-      background: var(--key-bg);
-      border: 1px solid var(--key-border);
-      border-bottom-color: var(--key-border-bottom);
-      border-radius: 8px;
-      box-shadow:
-        inset 0 1px 0 var(--key-inset),
-        0 1px 0 var(--key-lift),
-        0 3px 0 var(--key-depth);
-      color: var(--ink);
-      display: inline-block;
-      font-family: inherit;
-      font-size: 0.92em;
-      font-weight: 700;
-      line-height: 1;
-      min-width: 34px;
-      padding: 6px 9px;
-      text-align: center;
-      white-space: nowrap;
-    }
-
-    .key-sep {
-      color: var(--quiet);
-      font-size: 12px;
-      font-weight: 700;
-    }
-
     .footer {
       align-items: center;
       color: var(--quiet);
@@ -654,34 +482,12 @@
         padding-bottom: 78px;
       }
 
-      .faq-band {
-        padding-top: 0;
-        padding-bottom: 78px;
-      }
-
-      .help-band {
-        padding-top: 68px;
-        padding-bottom: 78px;
-      }
-
       .feature-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .faq-grid {
         grid-template-columns: 1fr;
       }
 
       .feature {
         min-height: 0;
-      }
-
-      .shortcut-row {
-        grid-template-columns: 1fr;
-      }
-
-      .shortcut-keys {
-        justify-content: flex-start;
       }
 
       .footer {
@@ -710,6 +516,7 @@
           </svg>
         </button>
         <div class="nav-links">
+          <a href="support.html">Support</a>
           <a href="changelog.html">Changelog</a>
           <a href="https://github.com/Nigelw/Takes">GitHub</a>
         </div>
@@ -794,141 +601,12 @@
           </div>
         </div>
       </section>
-
-      <section class="faq-band" id="faq">
-        <div class="faq">
-          <div class="section-heading">
-            <h2><a class="anchor-link" href="#faq">Frequently asked questions</a></h2>
-          </div>
-
-          <div class="faq-grid">
-            <article class="faq-item">
-              <h3>Does Takes work with streaming services?</h3>
-              <p>Takes supports Apple Music, Spotify, and YouTube in a slightly creative way. To work around streaming limitations, when you give it Apple Music and Spotify URLs it automatically sources a version from YouTube.</p>
-            </article>
-
-            <article class="faq-item">
-              <h3>How much does Takes cost?</h3>
-              <p>Takes is free and open source. You can download it, use it, and inspect the code on GitHub.</p>
-            </article>
-
-            <article class="faq-item">
-              <h3>Why did you build Takes?</h3>
-              <p>I built Takes to scratch my own itch. I've always wanted a tool like <a class="text-link" href="kaleidoscope">Kaleidoscope</a>, but for audio files. I love hearing the differences between original releases and remasters, and I wanted an app that lets me listen and toggle between them. I built a quick utility, then decided to turn it into a polished app because I love old school native apps that sweat the details. I'm sharing it in case others find it useful too.</p>
-            </article>
-
-            <article class="faq-item">
-              <h3>Do you offer support?</h3>
-              <p>Just the <a class="text-link" href="#help">help section below</a>.</p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="help-band" id="help">
-        <div class="help">
-          <div class="section-heading">
-            <h2><a class="anchor-link" href="#help">Help</a></h2>
-          </div>
-
-          <div class="help-stack">
-            <article class="help-card">
-              <h3>Getting audio into Takes</h3>
-              <ul>
-                <li>Drag files and folders onto the app, use Quick Open to grab your current selection from Finder or Apple Music, or use the Open dialog box like a normie.</li>
-                <li>You can also open streaming music. Give it a URL from Spotify, Apple Music, or YouTube and you're good to go.
-                <li>Takes supports up to 32 loaded audio files at once.</li>
-                <li>Takes plays a wide range of audio formats.
-              </ul>
-            </article>
-
-            <div class="help-card-grid">
-              <article class="help-card">
-                <h3>Selection looping</h3>
-                <p>Use selection looping to focus on a specific passage. Drag or <kbd>Shift</kbd><span class="key-sep">+</span><kbd>Click</kbd> in the timeline area to create a loop. "Switch & Repeat" mode is automatically enabled when looping. This changes tracks eachtime playback loops so you can compare the same passage across tracks.</p>
-                <ul>
-                  <li>You can also repeat one, to keep looping the same track.</li>
-                  <li>Clearing a loop automatically switches repeat back off.</li>
-                </ul>
-              </article>
-
-              <article class="help-card">
-                <h3>Blind listening mode</h3>
-                <p>Decide which take sounds best without the bias of knowing which version you're listening to. Blind listening mode hides names and metadata, anonymizes the waveforms, and shuffles the track order. It even hides the track name from the Now Playing widget in Control Center. No cheating! 😜</p>
-                <ul>
-                  <li>Turn off blind listening mode to reveal your the name of your favorite. The track order stays in place when turning it off.</li>
-                </ul>
-              </article>
-
-              <article class="help-card">
-                <h3>Auto-align</h3>
-                <p>Different copies of a track don't always line up perfectly. An extra bit of silence at the start of one can make toggling back and forth jarring, as each switch between tracks jumps the music backward and forward.</p>
-                <p>Auto-align analyzes the audio to find matching sections, and adjusts offsets so tracks line up perfectly.</p>
-                <ul>
-                  <li>If tracks fall out of sync over time due to a difference in recordings, you can re-run auto-align at any time. It sync offsets based on the current playhead position.</li>
-                  <li>Auto-align only accepts confident matches and avoids false positives, so it won't set crazy offsets if file matching is ambiguous.</li>
-                  <li>For tracks with larger tempo differences, auto-align offers a deeper analysis mode that searches tempo deviations, up to about 6 percent, before applying an alignment.</li>
-                  <li>If auto-align can't sync up your tracks, Takes is designed to make manual alignment as fast as possible. A great workflow is to start playback, nudge alignment, toggle back and forth between tracks, and repeat if necessary.</li>
-                  <li>The Takes UI is specifically designed for quick keyboard navigation to make this easy: <kbd>tab</kbd> into the offset field, nudge the offset with <kbd>Shift</kbd> + <kbd>↑/↓</kbd>, hit <kbd>tab</kbd> or <kbd>enter</kbd>, hit <kbd>X</kbd> to toggle tracks.</li>
-                </ul>
-              </article>
-            </div>
-
-            <article class="help-card" id="shortcuts">
-              <h3>Tips & tricks</h3>
-              <div class="shortcut-groups">
-                <section class="shortcut-group">
-                  <h4>Hidden keyboard shortcuts</h4>
-                  <div class="shortcut-list">
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Jump directly to tracks 1 through 9</div>
-                      <div class="shortcut-keys"><kbd>1</kbd><span class="key-sep">…</span><kbd>9</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Jump to the last track</div>
-                      <div class="shortcut-keys"><kbd>0</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Nudge offset by a little</div>
-                      <div class="shortcut-keys">When input field is active: <kbd>↑</kbd><kbd>↓</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Nudge offset by a lot</div>
-                      <div class="shortcut-keys">When input field is active: <kbd>Shift</kbd><span class="key-sep">+</span><kbd>↑</kbd><kbd>↓</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Reset offset to 0</div>
-                      <div class="shortcut-keys"><kbd>Double-click</kbd> on <code>ms</code> label</div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Control playback system-wide</div>
-                      <div class="shortcut-keys">Media keys: <kbd>⏮</kbd><kbd>⏯</kbd><kbd>⏭</kbd></div>
-                    </div>
-                  </div>
-                </section>
-
-                <section class="shortcut-group">
-                  <h4>Other details</h4>
-                  <p>Drag a track out of Takes to copy it elsewhere.</p>
-                </section>
-              </div>
-            </article>
-
-            <article class="help-card">
-              <h3>API</h3>
-              <ul>
-                <li>Open files: <code>takes://open-files?url=&lt;file 1 URL&gt;&amp;url=&lt;file 2 URL&gt;</code></li>
-                <li>Open a URL: <code>open 'takes://open-url?url=&lt;streaming URL&gt;'</code></li>
-              </ul>
-            </article>
-          </div>
-        </div>
-      </section>
     </main>
 
     <footer class="footer">
       <span>&copy; 2026 Nigel M. Warren. Takes for macOS.</span>
       <div class="footer-links">
+        <a href="support.html">Support</a>
         <a href="changelog.html">Changelog</a>
         <a href="https://github.com/Nigelw/Takes">GitHub</a>
       </div>
