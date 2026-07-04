@@ -34,6 +34,11 @@ enum AudioAnalysisEngine {
         let loudnessMeter = LoudnessMeter(sampleRate: sampleRate, channelCount: channelCount)
         let welch = WelchSpectrumAccumulator(sampleRate: sampleRate)
         let quietFrames = QuietFrameCollector(sampleRate: sampleRate)
+        // Stereo analyzers see at most two channels; surround content is
+        // rare in Takes and the front pair carries the evidence they need.
+        let analyzedChannelCount = min(channelCount, 2)
+        let analogSource = AnalogSourceAnalyzer(sampleRate: sampleRate, channelCount: analyzedChannelCount)
+        let lossyArtifacts = LossyArtifactAnalyzer(sampleRate: sampleRate, channelCount: analyzedChannelCount)
         let spectrogram = includeSpectrogram
             ? SpectrogramAccumulator(sampleRate: sampleRate, expectedFrameCount: totalFrames)
             : nil
@@ -67,6 +72,10 @@ enum AudioAnalysisEngine {
             welch.process(monoSamples: monoMix)
             quietFrames.process(monoSamples: monoMix)
             spectrogram?.process(monoSamples: monoMix)
+
+            let channelArrays = channels.prefix(analyzedChannelCount).map(Array.init)
+            analogSource.process(channels: channelArrays)
+            lossyArtifacts.process(channels: channelArrays)
         }
 
         let loudnessResult = loudnessMeter.finalize()
@@ -74,6 +83,11 @@ enum AudioAnalysisEngine {
         let noiseFloor = quietFrames.finalize()
         let tonalBalance = SpectrumMetrics.tonalBalance(from: spectrum)
         let bandwidth = SpectrumMetrics.bandwidth(from: spectrum, sampleRate: sampleRate)
+        let analogSourceMetrics = analogSource.finalize()
+        let lossyArtifactMetrics = lossyArtifacts.finalize()
+        // Bitstream inspection failing (I/O aside) just means "not an MP3";
+        // provenance evidence is additive, never required.
+        let mp3Stream = try? MP3BitstreamInspector.inspect(fileAt: url)
 
         let loudness = LoudnessMetrics(
             integratedLUFS: loudnessResult.integratedLUFS,
@@ -88,8 +102,20 @@ enum AudioAnalysisEngine {
             tonalBalance: tonalBalance,
             noiseFloor: noiseFloor,
             bandwidth: bandwidth,
+            analogSource: analogSourceMetrics,
+            lossyArtifacts: lossyArtifactMetrics,
+            mp3Stream: mp3Stream ?? nil,
             averageSpectrum: spectrum,
             spectrogram: spectrogram?.finalize(durationSeconds: durationSeconds),
+            conclusions: SourceInference.conclusions(
+                fileInfo: fileInfo,
+                loudness: loudness,
+                noiseFloor: noiseFloor,
+                bandwidth: bandwidth,
+                analogSource: analogSourceMetrics,
+                lossyArtifacts: lossyArtifactMetrics,
+                mp3Stream: mp3Stream ?? nil
+            ),
             verdicts: AnalysisVerdictBuilder.verdicts(
                 fileInfo: fileInfo,
                 loudness: loudness,

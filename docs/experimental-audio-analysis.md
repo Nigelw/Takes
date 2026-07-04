@@ -1,6 +1,62 @@
 # Experimental Audio Analysis
 
-Status: v1 complete (2026-07-04) — 20/20 corpus benchmark, 10/10 unit tests
+Status: v2 in progress (2026-07-04). v1 complete — 20/20 corpus benchmark,
+11/11 unit tests (see Work log).
+
+## v2: source provenance & encode quality (current phase)
+
+Goal shift per Nigel: the headline output is **conclusions with evidence** —
+"this lossless file is actually a reencode", "this m4a appears to be sourced
+from a vinyl rip" — with the metrics serving as the explanation, not the
+star. New `SourceConclusion` model (kind, statement, confidence, evidence
+lines) rendered at the top of the results UI.
+
+### Milestones
+
+| # | Milestone | Owner | State |
+| --- | --- | --- | --- |
+| M0 | Commit v1, plan update | main session | done |
+| M1 | Frozen metric/API contracts + stubs + pbxproj | main session | in progress |
+| M2 | Corpus v2: vinyl/tape sims (gapless), old-encoder MP3s, transient material for pre-echo | subagent (sonnet) | pending |
+| M3a | Analog-source DSP: min-statistics noise floor, noise stereo-coherence, click/crackle detector, rumble, wow (stretch) — `AnalogSourceDSP.swift` | subagent (fable) | pending |
+| M3b | Lossy-artifact DSP: pre-echo, HF flicker ("birdies"), HF stereo coherence — `LossyArtifactDSP.swift`; MP3 bitstream inspector (Xing/Info/LAME tag, encoder fingerprint) — `MP3BitstreamInspector.swift` | subagent (fable) | pending |
+| M4 | Engine integration + `SourceInference.swift` (conclusions from combined metrics, incl. cutoff-vs-bitrate table) | main session | pending |
+| M5 | Benchmark expansion + tuning to all-pass | main session | pending |
+| M6 | UI: conclusions section with evidence disclosure | subagent (opus) | pending |
+| M7 | Docs, final build + launch | main session | pending |
+
+### v2 detector design notes
+
+- **Min-statistics noise floor** (Martin 2001): per-band minimum energy over
+  a sliding multi-second window; stationary hiss leaves a stable floor in
+  10–18 kHz bands even under gapless music. Replaces/augments quiet-gap
+  analysis (fixes the `real_hiss.wav` limitation).
+- **Noise stereo-coherence**: analog noise is decorrelated L/R; digital
+  quiet is often correlated. Strengthens hiss → analog inference.
+- **Clicks/crackle**: impulsive wideband outliers (high-order derivative /
+  median-outlier salience), reported as clicks-per-minute — positive vinyl
+  evidence that works on loud passages.
+- **Rumble**: sub-30 Hz energy in the stereo *difference* channel (vertical
+  stylus motion) — digital masters rarely have it.
+- **Pre-echo**: noise-floor rise in the ~20 ms before strong attacks vs
+  local baseline (bad/early encoders lack short-block switching).
+- **HF flicker ("birdies")**: on/off toggling of 10–16 kHz bands at the
+  codec frame rate (~26 ms), vs slower natural modulation.
+- **HF stereo coherence**: intensity stereo (old encoders) mono-ifies the
+  top octaves → coherence ≈ 1 where modern encodes stay decorrelated.
+- **MP3 bitstream**: still-in-MP3 files carry direct provenance — LAME tag
+  (encoder version, declared lowpass), Xing/Info header, CBR/VBR, and
+  intensity-stereo mode-extension bits per frame.
+- **Cutoff-vs-bitrate**: 192 kbps with a 16 kHz shelf ⇒ early/badly
+  configured encoder; modern LAME 192 keeps ~19 kHz.
+
+### Interruption recovery
+
+If this session dies: contracts are frozen in `AnalysisModels.swift`
+(structs `AnalogSourceMetrics`, `LossyArtifactMetrics`, `MP3StreamInfo`,
+`SourceConclusion`) and stub classes exist in the three new files above.
+Check the milestone table + git log; each milestone commits separately.
+Benchmark with `scripts/analysis-benchmark.sh`.
 
 An experimental single-file analysis window that measures the properties Nigel
 cares about when deciding which of two takes sounds better. Opened from

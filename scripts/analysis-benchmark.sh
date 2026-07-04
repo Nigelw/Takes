@@ -19,6 +19,10 @@ ENGINE_SOURCES=(
     "$REPO_DIR/Sources/Takes/Analysis/AnalysisModels.swift"
     "$REPO_DIR/Sources/Takes/Analysis/AnalysisDSP.swift"
     "$REPO_DIR/Sources/Takes/Analysis/AnalysisVerdicts.swift"
+    "$REPO_DIR/Sources/Takes/Analysis/AnalogSourceDSP.swift"
+    "$REPO_DIR/Sources/Takes/Analysis/LossyArtifactDSP.swift"
+    "$REPO_DIR/Sources/Takes/Analysis/MP3BitstreamInspector.swift"
+    "$REPO_DIR/Sources/Takes/Analysis/SourceInference.swift"
     "$REPO_DIR/Sources/Takes/Analysis/AudioAnalysisEngine.swift"
     "$REPO_DIR/Sources/Takes/Analysis/SpectrogramRenderer.swift"
 )
