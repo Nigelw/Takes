@@ -102,6 +102,20 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
 
+    pre {
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      margin: 14px 0 18px;
+      overflow-x: auto;
+      padding: 14px 16px;
+      white-space: pre;
+    }
+
     .site {
       overflow: hidden;
     }
@@ -614,10 +628,20 @@
 
             <article class="help-card">
               <h3>API</h3>
-              <ul>
-                <li>Open files: <code>takes://open-files?url=&lt;file 1 URL&gt;&amp;url=&lt;file 2 URL&gt;</code></li>
-                <li>Open a URL: <code>open 'takes://open-url?url=&lt;streaming URL&gt;'</code></li>
-              </ul>
+              <p>Takes currently has two public automation surfaces:</p>
+              <ol>
+                <li>Opening the app with files through macOS:</li>
+              </ol>
+              <pre><code>open -a "Takes.app" "$FILE_1" "$FILE_2"</code></pre>
+              <ol start="2">
+                <li>Opening a custom <code>takes://</code> URL:</li>
+              </ol>
+              <pre><code>open 'takes://open-url?url=&lt;streaming%20URL&gt;'
+open 'takes://open-file?url=&lt;file%20URL&gt;'
+open 'takes://open-files?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&gt;'</code></pre>
+              <p>There is also one launch-time appearance option:</p>
+              <pre><code>open -a "Takes.app" --args --appearance-theme dark</code></pre>
+              <p>Use this option to launch Takes with a temporary appearance for e.g. taking screenshots. (The setting doesn't persist across launches).</p>
             </article>
           </div>
         </div>
