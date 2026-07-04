@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -829,6 +830,7 @@ struct ContentView: View {
     @State private var focusedOffsetTrackID: SessionTrack.ID?
     @State private var didConfigureMainWindow = false
     @State private var mainWindow: NSWindow?
+    @State private var mainWindowIsKey = true
     @State private var loopDraft: LoopDraft?
     @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
     @State private var showsAlignmentAttentionPopover = false
@@ -891,6 +893,124 @@ struct ContentView: View {
     }
 
     var body: some View {
+        inactiveAwareContent
+            .frame(
+                minWidth: TakesWindowPolicy.minimumContentWidth,
+                minHeight: TakesWindowPolicy.rootViewMinimumHeight
+            )
+            // The transport bar doubles as the titlebar: lay the root view out
+            // under the hidden titlebar so the bar starts at the window's top edge.
+            .ignoresSafeArea(.container, edges: .top)
+            .environment(\.transportAppearance, settings.transportAppearance)
+            .background(WindowBackground().ignoresSafeArea())
+            .background {
+                MainWindowConfigurationView { window in
+                    mainWindow = window
+                    mainWindowIsKey = window.isKeyWindow
+                    guard !didConfigureMainWindow else { return }
+                    didConfigureMainWindow = true
+                    TakesWindowPolicy.configureMainWindow(window)
+                }
+            }
+            .overlay {
+                if !mainWindowIsKey {
+                    InactiveWindowInteractionShield(window: mainWindow)
+                        .ignoresSafeArea()
+                }
+            }
+            .alert(
+                "Takes Error",
+                isPresented: Binding(
+                    get: { controller.playbackError != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            controller.clearPlaybackError()
+                        }
+                    }
+                )
+            ) {
+                Button("OK") {
+                    controller.clearPlaybackError()
+                }
+            } message: {
+                Text(controller.playbackError?.localizedDescription ?? "")
+            }
+            .onDrop(
+                of: [UTType.fileURL.identifier],
+                delegate: WindowFileImportDropDelegate(
+                    isTargeted: $windowIsDropTargeted,
+                    loadDroppedURLs: { loadDroppedURLs(from: $0) }
+                )
+            )
+            .fileImporter(
+                isPresented: $openFileCommandState.isImportingTracks,
+                allowedContentTypes: [.audio],
+                allowsMultipleSelection: true
+            ) { result in
+                handleImport(result)
+            }
+            .focusedSceneValue(\.openFileCommandState, openFileCommandState)
+            .focusedSceneValue(
+                \.mainWindowCommandState,
+                MainWindowCommandState {
+                    guard let mainWindow else { return }
+                    TakesWindowPolicy.resetMainWindowSize(mainWindow)
+                }
+            )
+            .focusedSceneValue(\.canShowActiveTrackInFinder, controller.session.activeTrack != nil)
+            .focusedSceneValue(\.canRemoveActiveTrack, controller.session.activeTrackID != nil)
+            .focusedSceneValue(\.canUseGlobalMenuShortcuts, focusedOffsetTrackID == nil)
+            .focusedSceneValue(\.canClearTracks, !controller.session.tracks.isEmpty)
+            .onAppear {
+                setupKeyMonitor()
+                waveformStore.sync(tracks: controller.session.tracks)
+                NSApp.appearance = settings.appearanceTheme.nsAppearance
+            }
+            .onChange(of: settings.appearanceTheme) { _, theme in
+                NSApp.appearance = theme.nsAppearance
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
+                guard notification.object as? NSWindow === mainWindow else { return }
+                mainWindowIsKey = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
+                guard notification.object as? NSWindow === mainWindow else { return }
+                mainWindowIsKey = false
+            }
+            .onChange(of: controller.session.tracks) { _, tracks in
+                waveformStore.sync(tracks: tracks)
+            }
+            .onChange(of: controller.session.tracks.count) { previousTrackCount, trackCount in
+                guard let mainWindow else { return }
+                let shouldResize = TakesWindowPolicy.shouldAutoGrowWindow(
+                    previousTrackRowCount: previousTrackCount,
+                    newTrackRowCount: trackCount,
+                    currentWindowHeight: mainWindow.frame.height
+                ) || TakesWindowPolicy.shouldAutoShrinkWindow(
+                    previousTrackRowCount: previousTrackCount,
+                    newTrackRowCount: trackCount,
+                    currentWindowHeight: mainWindow.frame.height
+                )
+                guard shouldResize else { return }
+                TakesWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount)
+            }
+            .onDisappear {
+                keyMonitor?.stop()
+                mouseMonitor?.stop()
+            }
+    }
+
+    private var inactiveAwareContent: some View {
+        contentStack
+            .windowActivityAppearance(isActive: mainWindowIsKey)
+            // Draw the import highlight after the inactive-window treatment so drag
+            // hover stays vivid even while the window is in the background.
+            .overlay {
+                trackDropHighlightOverlay
+            }
+    }
+
+    private var contentStack: some View {
         VStack(alignment: .leading, spacing: 0) {
             transportBar
                 .fixedSize(horizontal: false, vertical: true)
@@ -913,104 +1033,16 @@ struct ContentView: View {
                     .frame(height: 8)
                     .allowsHitTesting(false)
                 }
-                // Import highlight above the transport bar's shadow gradient
-                // (both drawn here at the root, in order) so the highlight's top
-                // border isn't dimmed under the recessed-edge shading. Shown for
-                // the populated list and the empty state alike; the empty state
-                // adds its own badge/prompt treatment on top.
-                .overlay {
-                    trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
-                }
         }
-        .frame(
-            minWidth: TakesWindowPolicy.minimumContentWidth,
-            minHeight: TakesWindowPolicy.rootViewMinimumHeight
-        )
-        // The transport bar doubles as the titlebar: lay the root view out
-        // under the hidden titlebar so the bar starts at the window's top edge.
-        .ignoresSafeArea(.container, edges: .top)
-        .environment(\.transportAppearance, settings.transportAppearance)
-        .background(WindowBackground().ignoresSafeArea())
-        .background {
-            MainWindowConfigurationView { window in
-                mainWindow = window
-                guard !didConfigureMainWindow else { return }
-                didConfigureMainWindow = true
-                TakesWindowPolicy.configureMainWindow(window)
-            }
+    }
+
+    private var trackDropHighlightOverlay: some View {
+        VStack(spacing: 0) {
+            Color.clear
+                .frame(height: TakesWindowPolicy.transportBarReservedHeight + TakesWindowPolicy.rootVerticalSpacing)
+            trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
         }
-        .alert(
-            "Takes Error",
-            isPresented: Binding(
-                get: { controller.playbackError != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        controller.clearPlaybackError()
-                    }
-                }
-            )
-        ) {
-            Button("OK") {
-                controller.clearPlaybackError()
-            }
-        } message: {
-            Text(controller.playbackError?.localizedDescription ?? "")
-        }
-        .onDrop(
-            of: [UTType.fileURL.identifier],
-            delegate: WindowFileImportDropDelegate(
-                isTargeted: $windowIsDropTargeted,
-                loadDroppedURLs: { loadDroppedURLs(from: $0) }
-            )
-        )
-        .fileImporter(
-            isPresented: $openFileCommandState.isImportingTracks,
-            allowedContentTypes: [.audio],
-            allowsMultipleSelection: true
-        ) { result in
-            handleImport(result)
-        }
-        .focusedSceneValue(\.openFileCommandState, openFileCommandState)
-        .focusedSceneValue(
-            \.mainWindowCommandState,
-            MainWindowCommandState {
-                guard let mainWindow else { return }
-                TakesWindowPolicy.resetMainWindowSize(mainWindow)
-            }
-        )
-        .focusedSceneValue(\.canShowActiveTrackInFinder, controller.session.activeTrack != nil)
-        .focusedSceneValue(\.canRemoveActiveTrack, controller.session.activeTrackID != nil)
-        .focusedSceneValue(\.canUseGlobalMenuShortcuts, focusedOffsetTrackID == nil)
-        .focusedSceneValue(\.canClearTracks, !controller.session.tracks.isEmpty)
-        .onAppear {
-            setupKeyMonitor()
-            waveformStore.sync(tracks: controller.session.tracks)
-            NSApp.appearance = settings.appearanceTheme.nsAppearance
-        }
-        .onChange(of: settings.appearanceTheme) { _, theme in
-            NSApp.appearance = theme.nsAppearance
-        }
-        .onChange(of: controller.session.tracks) { _, tracks in
-            waveformStore.sync(tracks: tracks)
-        }
-        .onChange(of: controller.session.tracks.count) { previousTrackCount, trackCount in
-            guard let mainWindow else { return }
-            let shouldResize = TakesWindowPolicy.shouldAutoGrowWindow(
-                previousTrackRowCount: previousTrackCount,
-                newTrackRowCount: trackCount,
-                currentWindowHeight: mainWindow.frame.height
-            ) || TakesWindowPolicy.shouldAutoShrinkWindow(
-                previousTrackRowCount: previousTrackCount,
-                newTrackRowCount: trackCount,
-                currentWindowHeight: mainWindow.frame.height
-            )
-            guard shouldResize else { return }
-            TakesWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount)
-        }
-        .onDisappear {
-            keyMonitor?.stop()
-            mouseMonitor?.stop()
-        }
+        .allowsHitTesting(false)
     }
 
     private var transportBar: some View {
@@ -3088,6 +3120,82 @@ private struct MainWindowConfigurationView: NSViewRepresentable {
             guard let window = view.window else { return }
             configure(window)
         }
+    }
+}
+
+private struct InactiveWindowInteractionShield: NSViewRepresentable {
+    weak var window: NSWindow?
+
+    func makeNSView(context: Context) -> ShieldView {
+        let view = ShieldView()
+        view.targetWindow = window
+        return view
+    }
+
+    func updateNSView(_ view: ShieldView, context: Context) {
+        view.targetWindow = window
+    }
+
+    final class ShieldView: NSView {
+        weak var targetWindow: NSWindow?
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard !Self.shouldPassThrough(event: NSApp.currentEvent) else { return nil }
+            return super.hitTest(point)
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            !Self.shouldPassThrough(event: event)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            activateWindow()
+        }
+
+        override func rightMouseDown(with event: NSEvent) {
+            activateWindow()
+        }
+
+        override func otherMouseDown(with event: NSEvent) {
+            activateWindow()
+        }
+
+        override func scrollWheel(with event: NSEvent) {
+            activateWindow()
+        }
+
+        private func activateWindow() {
+            NSApp.activate(ignoringOtherApps: true)
+            (targetWindow ?? window)?.makeKeyAndOrderFront(nil)
+        }
+
+        private static func shouldPassThrough(event: NSEvent?) -> Bool {
+            event?.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) == true
+        }
+    }
+}
+
+private struct WindowActivityAppearanceModifier: ViewModifier {
+    let isActive: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .saturation(isActive ? 1.0 : 0.6)
+            .opacity(isActive ? 1.0 : 0.58)
+            .overlay {
+                if !isActive {
+                    Color(nsColor: .windowBackgroundColor)
+                        .opacity(0.16)
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.easeOut(duration: 0.12), value: isActive)
+    }
+}
+
+private extension View {
+    func windowActivityAppearance(isActive: Bool) -> some View {
+        modifier(WindowActivityAppearanceModifier(isActive: isActive))
     }
 }
 
