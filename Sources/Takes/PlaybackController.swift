@@ -41,6 +41,7 @@ final class PlaybackController: ObservableObject {
     private let libraryTrackSelector: LibraryTrackSelecting
     private let streamingTrackResolver: StreamingTrackResolving
     private let streamingDownloadCache: StreamingDownloadCache
+    private let ytdlpManager: YTDLPManaging
     private let engine = AVAudioEngine()
     nonisolated private static let maximumSilenceBufferDuration: TimeInterval = 5
 
@@ -101,12 +102,14 @@ final class PlaybackController: ObservableObject {
         streamingTrackResolver: StreamingTrackResolving = StreamingTrackResolver(),
         streamingDownloadCache: StreamingDownloadCache = StreamingDownloadCache(
             rootURL: PlaybackController.defaultStreamingDownloadCacheRoot()
-        )
+        ),
+        ytdlpManager: YTDLPManaging = YTDLPManager()
     ) {
         self.loader = loader
         self.libraryTrackSelector = libraryTrackSelector
         self.streamingTrackResolver = streamingTrackResolver
         self.streamingDownloadCache = streamingDownloadCache
+        self.ytdlpManager = ytdlpManager
         engineConfigurationObserver = NotificationObserverToken(NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine,
@@ -296,14 +299,13 @@ final class PlaybackController: ObservableObject {
             await statusHandler(.failed("Enter a valid streaming URL."))
             return false
         }
-        guard let downloaderURL = YTDLPToolLocator.defaultExecutableURL() else {
-            await statusHandler(.failed(StreamingTrackImportError.downloaderUnavailable.localizedDescription))
-            return false
-        }
 
         let loadID = UUID()
 
         do {
+            await statusHandler(.preparingDownloader)
+            let downloaderURL = try await ytdlpManager.executableURL()
+
             let match = try await streamingTrackResolver.resolveYouTubeMatch(
                 for: sourceURL,
                 using: downloaderURL,
@@ -313,8 +315,6 @@ final class PlaybackController: ObservableObject {
 
             try streamingDownloadCache.prepare()
             let loadDirectory = try streamingDownloadCache.createLoadDirectory(id: loadID)
-
-            await statusHandler(.preparingDownloader)
 
             await statusHandler(.downloading(progress: nil))
             let downloadedURL = try await downloadStreamingAudio(

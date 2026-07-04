@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum StreamingTrackImportError: Error, Equatable, LocalizedError {
@@ -807,6 +808,196 @@ enum YTDLPToolLocator {
         return candidatePaths
             .map(URL.init(fileURLWithPath:))
             .first { fileManager.isExecutableFile(atPath: $0.path) }
+    }
+}
+
+protocol YTDLPManaging: Sendable {
+    func executableURL() async throws -> URL
+}
+
+struct YTDLPDownloadedAsset: Sendable {
+    let data: Data
+    let finalURL: URL
+}
+
+struct YTDLPManagedToolManifest: Codable, Equatable {
+    let version: String
+    let channel: String
+    let installedAt: Date
+    let checksum: String
+    let executablePath: String
+}
+
+struct YTDLPManager: YTDLPManaging {
+    static let assetName = "yt-dlp_macos"
+
+    let rootURL: URL
+
+    private let binaryURL: URL
+    private let checksumsURL: URL
+    private let systemExecutableURL: @Sendable () -> URL?
+    private let isExecutableFile: @Sendable (String) -> Bool
+    private let downloadAsset: @Sendable (URL) async throws -> YTDLPDownloadedAsset
+    private let dateProvider: @Sendable () -> Date
+
+    init(
+        rootURL: URL = Self.defaultRootURL(),
+        binaryURL: URL = URL(string: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos")!,
+        checksumsURL: URL = URL(string: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS")!,
+        systemExecutableURL: @escaping @Sendable () -> URL? = { YTDLPToolLocator.defaultExecutableURL() },
+        isExecutableFile: @escaping @Sendable (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
+        downloadAsset: @escaping @Sendable (URL) async throws -> YTDLPDownloadedAsset = Self.downloadAsset,
+        dateProvider: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.rootURL = rootURL.standardizedFileURL
+        self.binaryURL = binaryURL
+        self.checksumsURL = checksumsURL
+        self.systemExecutableURL = systemExecutableURL
+        self.isExecutableFile = isExecutableFile
+        self.downloadAsset = downloadAsset
+        self.dateProvider = dateProvider
+    }
+
+    func executableURL() async throws -> URL {
+        if let managedExecutableURL = managedExecutableURL() {
+            return managedExecutableURL
+        }
+        if let installedExecutableURL = try? await installLatestManagedExecutable() {
+            return installedExecutableURL
+        }
+        if let systemExecutableURL = systemExecutableURL() {
+            return systemExecutableURL
+        }
+        throw StreamingTrackImportError.downloaderUnavailable
+    }
+
+    static func defaultRootURL(fileManager: FileManager = .default, bundle: Bundle = .main) -> URL {
+        let applicationSupportRoot = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        let bundleID = bundle.bundleIdentifier ?? "com.nigelwarren.Takes"
+        return applicationSupportRoot
+            .appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent("Tools", isDirectory: true)
+            .appendingPathComponent("yt-dlp", isDirectory: true)
+    }
+
+    static func downloadAsset(from url: URL) async throws -> YTDLPDownloadedAsset {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200..<300).contains(httpResponse.statusCode) {
+            throw StreamingTrackImportError.downloaderUnavailable
+        }
+        return YTDLPDownloadedAsset(data: data, finalURL: response.url ?? url)
+    }
+
+    static func sha256Checksum(for url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
+        return SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    static func sha256Checksum(for data: Data) -> String {
+        SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    static func checksum(for assetName: String, in checksumsData: Data) -> String? {
+        guard let text = String(data: checksumsData, encoding: .utf8) else { return nil }
+        return text
+            .split(whereSeparator: \.isNewline)
+            .compactMap { line -> String? in
+                let parts = line.split(whereSeparator: \.isWhitespace)
+                guard parts.count >= 2, parts[1] == assetName else { return nil }
+                let checksum = String(parts[0]).lowercased()
+                guard checksum.count == 64,
+                      checksum.allSatisfy({ $0.isNumber || ("a"..."f").contains($0) })
+                else {
+                    return nil
+                }
+                return checksum
+            }
+            .first
+    }
+
+    static func version(fromDownloadURL url: URL) -> String {
+        let components = url.pathComponents
+        if let downloadIndex = components.firstIndex(of: "download"),
+           components.indices.contains(downloadIndex + 1) {
+            return components[downloadIndex + 1]
+        }
+        return "latest"
+    }
+
+    private func managedExecutableURL() -> URL? {
+        let manifestURL = rootURL.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(YTDLPManagedToolManifest.self, from: data)
+        else {
+            return nil
+        }
+
+        let executableURL = URL(fileURLWithPath: manifest.executablePath).standardizedFileURL
+        guard isManaged(executableURL),
+              isExecutableFile(executableURL.path),
+              (try? Self.sha256Checksum(for: executableURL)) == manifest.checksum
+        else {
+            return nil
+        }
+        return executableURL
+    }
+
+    private func installLatestManagedExecutable() async throws -> URL {
+        async let binary = downloadAsset(binaryURL)
+        async let checksums = downloadAsset(checksumsURL)
+        let (binaryAsset, checksumsAsset) = try await (binary, checksums)
+
+        guard let expectedChecksum = Self.checksum(for: Self.assetName, in: checksumsAsset.data),
+              Self.sha256Checksum(for: binaryAsset.data) == expectedChecksum
+        else {
+            throw StreamingTrackImportError.downloaderUnavailable
+        }
+
+        let version = Self.version(fromDownloadURL: binaryAsset.finalURL)
+        let installDirectory = rootURL
+            .appendingPathComponent(sanitizedVersionDirectoryName(version), isDirectory: true)
+            .standardizedFileURL
+        let executableURL = installDirectory.appendingPathComponent(Self.assetName)
+        try FileManager.default.createDirectory(at: installDirectory, withIntermediateDirectories: true)
+        try binaryAsset.data.write(to: executableURL, options: [.atomic])
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
+
+        guard isExecutableFile(executableURL.path) else {
+            throw StreamingTrackImportError.downloaderUnavailable
+        }
+
+        let manifest = YTDLPManagedToolManifest(
+            version: version,
+            channel: "stable",
+            installedAt: dateProvider(),
+            checksum: expectedChecksum,
+            executablePath: executableURL.path
+        )
+        let manifestData = try JSONEncoder().encode(manifest)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try manifestData.write(to: rootURL.appendingPathComponent("manifest.json"), options: [.atomic])
+        return executableURL
+    }
+
+    private func sanitizedVersionDirectoryName(_ version: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-_"))
+        let sanitized = version.unicodeScalars
+            .map { allowed.contains($0) ? String($0) : "-" }
+            .joined()
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".-_"))
+        return sanitized.isEmpty ? "latest" : sanitized
+    }
+
+    private func isManaged(_ url: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        let rootPath = rootURL.path
+        return path == rootPath || path.hasPrefix(rootPath + "/")
     }
 }
 

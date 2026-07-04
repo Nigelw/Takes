@@ -256,6 +256,132 @@ struct StreamingTrackImportTests {
     }
 
     @Test
+    func ytdlpManagerUsesManifestExecutableBeforeSystemFallback() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executableURL = try Self.writeManagedYTDLPExecutable(
+            root: root,
+            contents: Data("managed yt-dlp".utf8)
+        )
+        try Self.writeYTDLPManifest(root: root, executableURL: executableURL)
+        let systemURL = URL(fileURLWithPath: "/usr/local/bin/yt-dlp")
+        let manager = YTDLPManager(rootURL: root, systemExecutableURL: { systemURL })
+
+        let resolvedURL = try await manager.executableURL()
+
+        #expect(resolvedURL == executableURL.standardizedFileURL)
+    }
+
+    @Test
+    func ytdlpManagerFallsBackWhenManifestChecksumDoesNotMatch() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executableURL = try Self.writeManagedYTDLPExecutable(
+            root: root,
+            contents: Data("managed yt-dlp".utf8)
+        )
+        try Self.writeYTDLPManifest(root: root, executableURL: executableURL, checksum: "not-the-checksum")
+        let systemURL = URL(fileURLWithPath: "/opt/homebrew/bin/yt-dlp")
+        let manager = YTDLPManager(
+            rootURL: root,
+            systemExecutableURL: { systemURL },
+            downloadAsset: { _ in throw StreamingTrackImportError.downloaderUnavailable }
+        )
+
+        let resolvedURL = try await manager.executableURL()
+
+        #expect(resolvedURL == systemURL)
+    }
+
+    @Test
+    func ytdlpManagerInstallsLatestMacOSBinaryWhenManagedToolIsMissing() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let binaryData = Data("downloaded yt-dlp".utf8)
+        let checksum = YTDLPManager.sha256Checksum(for: binaryData)
+        let binaryURL = URL(string: "https://example.com/yt-dlp_macos")!
+        let checksumsURL = URL(string: "https://example.com/SHA2-256SUMS")!
+        let manager = YTDLPManager(
+            rootURL: root,
+            binaryURL: binaryURL,
+            checksumsURL: checksumsURL,
+            systemExecutableURL: { nil },
+            downloadAsset: { url in
+                if url == binaryURL {
+                    return YTDLPDownloadedAsset(
+                        data: binaryData,
+                        finalURL: URL(string: "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_macos")!
+                    )
+                }
+                if url == checksumsURL {
+                    return YTDLPDownloadedAsset(
+                        data: Data("\(checksum)  yt-dlp_macos\n".utf8),
+                        finalURL: url
+                    )
+                }
+                throw StreamingTrackImportError.downloaderUnavailable
+            },
+            dateProvider: { Date(timeIntervalSince1970: 1) }
+        )
+
+        let resolvedURL = try await manager.executableURL()
+        let manifestData = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
+        let manifest = try JSONDecoder().decode(YTDLPManagedToolManifest.self, from: manifestData)
+
+        #expect(resolvedURL.path.hasSuffix("/2026.06.09/yt-dlp_macos"))
+        #expect(FileManager.default.isExecutableFile(atPath: resolvedURL.path))
+        #expect(try Data(contentsOf: resolvedURL) == binaryData)
+        #expect(manifest.version == "2026.06.09")
+        #expect(manifest.checksum == checksum)
+        #expect(manifest.executablePath == resolvedURL.path)
+    }
+
+    @Test
+    func ytdlpManagerFallsBackWhenDownloadedChecksumDoesNotMatch() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let binaryURL = URL(string: "https://example.com/yt-dlp_macos")!
+        let checksumsURL = URL(string: "https://example.com/SHA2-256SUMS")!
+        let systemURL = URL(fileURLWithPath: "/usr/local/bin/yt-dlp")
+        let manager = YTDLPManager(
+            rootURL: root,
+            binaryURL: binaryURL,
+            checksumsURL: checksumsURL,
+            systemExecutableURL: { systemURL },
+            downloadAsset: { url in
+                if url == binaryURL {
+                    return YTDLPDownloadedAsset(data: Data("bad binary".utf8), finalURL: url)
+                }
+                return YTDLPDownloadedAsset(
+                    data: Data("\(String(repeating: "0", count: 64))  yt-dlp_macos\n".utf8),
+                    finalURL: url
+                )
+            }
+        )
+
+        let resolvedURL = try await manager.executableURL()
+
+        #expect(resolvedURL == systemURL)
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("manifest.json").path))
+    }
+
+    @Test
+    func ytdlpManagerParsesMacOSChecksumAndVersion() {
+        let checksums = Data("""
+        e5d57466682cfa9d61e9cf7c8a4f09b00f4a62af37d3bbdc4bcffdf63615feac  yt-dlp
+        b82c3626952e6c14eaf654cc565866775ffd0b9ffb7021628ac59b42c2f4f244  yt-dlp_macos
+        62a3108d7c37090107f0bb9a2369b953b35e43f4bc76ab0ea87e4ab593c23ec7  yt-dlp_macos.zip
+        """.utf8)
+        let downloadURL = URL(string: "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_macos")!
+
+        #expect(
+            YTDLPManager.checksum(for: "yt-dlp_macos", in: checksums)
+                == "b82c3626952e6c14eaf654cc565866775ffd0b9ffb7021628ac59b42c2f4f244"
+        )
+        #expect(YTDLPManager.version(fromDownloadURL: downloadURL) == "2026.06.09")
+    }
+
+    @Test
     func downloaderFailuresUseFriendlyPromptMessage() {
         let error = StreamingTrackImportError.downloaderFailed(
             status: 1,
@@ -292,6 +418,40 @@ struct StreamingTrackImportTests {
             .appendingPathComponent("TakesStreamingTrackImportTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private static func writeManagedYTDLPExecutable(root: URL, contents: Data) throws -> URL {
+        let versionDirectory = root.appendingPathComponent("2026.07.04", isDirectory: true)
+        try FileManager.default.createDirectory(at: versionDirectory, withIntermediateDirectories: true)
+        let executableURL = versionDirectory.appendingPathComponent("yt-dlp_macos")
+        FileManager.default.createFile(atPath: executableURL.path, contents: contents)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executableURL.path
+        )
+        return executableURL
+    }
+
+    private static func writeYTDLPManifest(
+        root: URL,
+        executableURL: URL,
+        checksum: String? = nil
+    ) throws {
+        let resolvedChecksum: String
+        if let checksum {
+            resolvedChecksum = checksum
+        } else {
+            resolvedChecksum = try YTDLPManager.sha256Checksum(for: executableURL)
+        }
+        let manifest = YTDLPManagedToolManifest(
+            version: "2026.07.04",
+            channel: "stable",
+            installedAt: Date(timeIntervalSince1970: 0),
+            checksum: resolvedChecksum,
+            executablePath: executableURL.path
+        )
+        let data = try JSONEncoder().encode(manifest)
+        try data.write(to: root.appendingPathComponent("manifest.json"))
     }
 }
 
