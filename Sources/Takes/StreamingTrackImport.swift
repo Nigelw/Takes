@@ -838,6 +838,10 @@ struct YTDLPDownloadedAsset: Sendable {
     let finalURL: URL
 }
 
+struct YTDLPReleaseInfo: Equatable, Sendable {
+    let checksum: String
+}
+
 struct YTDLPManagedToolStatus: Equatable {
     let version: String
     let channel: String
@@ -1066,20 +1070,40 @@ struct YTDLPManager: YTDLPManaging, YTDLPUpdating {
         dateProvider().timeIntervalSince(manifest.lastCheckedAt) >= Self.updateCheckInterval
     }
 
+    private func latestReleaseInfo() async throws -> YTDLPReleaseInfo {
+        let checksumsAsset = try await downloadAsset(checksumsURL)
+        guard let expectedChecksum = Self.checksum(for: Self.assetName, in: checksumsAsset.data) else {
+            throw StreamingTrackImportError.downloaderUnavailable
+        }
+        return YTDLPReleaseInfo(checksum: expectedChecksum)
+    }
+
     private func installLatestManagedExecutable(previousManifest: YTDLPManagedToolManifest?) async throws -> URL {
         try removeStagingDirectories()
 
-        async let binary = downloadAsset(binaryURL)
-        async let checksums = downloadAsset(checksumsURL)
-        let (binaryAsset, checksumsAsset) = try await (binary, checksums)
+        let releaseInfo = try await latestReleaseInfo()
+        let now = dateProvider()
 
-        guard let expectedChecksum = Self.checksum(for: Self.assetName, in: checksumsAsset.data),
-              Self.sha256Checksum(for: binaryAsset.data) == expectedChecksum
-        else {
+        if let previousManifest,
+           previousManifest.checksum == releaseInfo.checksum,
+           let previousTool = managedTool() {
+            let refreshedManifest = YTDLPManagedToolManifest(
+                version: previousManifest.version,
+                channel: previousManifest.channel,
+                installedAt: previousManifest.installedAt,
+                lastCheckedAt: now,
+                checksum: previousManifest.checksum,
+                executablePath: previousManifest.executablePath
+            )
+            try writeManifest(refreshedManifest)
+            return previousTool.executableURL
+        }
+
+        let binaryAsset = try await downloadAsset(binaryURL)
+        guard Self.sha256Checksum(for: binaryAsset.data) == releaseInfo.checksum else {
             throw StreamingTrackImportError.downloaderUnavailable
         }
 
-        let now = dateProvider()
         try Task.checkCancellation()
         let stagingDirectory = rootURL
             .appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: true)
@@ -1099,22 +1123,6 @@ struct YTDLPManager: YTDLPManaging, YTDLPUpdating {
         let version = try await verifyExecutableVersion(stagedExecutableURL)
         try Task.checkCancellation()
 
-        if let previousManifest,
-           previousManifest.version == version,
-           previousManifest.checksum == expectedChecksum,
-           let previousTool = managedTool() {
-            let refreshedManifest = YTDLPManagedToolManifest(
-                version: previousManifest.version,
-                channel: previousManifest.channel,
-                installedAt: previousManifest.installedAt,
-                lastCheckedAt: now,
-                checksum: previousManifest.checksum,
-                executablePath: previousManifest.executablePath
-            )
-            try writeManifest(refreshedManifest)
-            return previousTool.executableURL
-        }
-
         let installDirectory = rootURL
             .appendingPathComponent(sanitizedVersionDirectoryName(version), isDirectory: true)
             .standardizedFileURL
@@ -1125,7 +1133,7 @@ struct YTDLPManager: YTDLPManaging, YTDLPUpdating {
 
         guard isManaged(executableURL),
               isExecutableFile(executableURL.path),
-              (try? Self.sha256Checksum(for: executableURL)) == expectedChecksum
+              (try? Self.sha256Checksum(for: executableURL)) == releaseInfo.checksum
         else {
             try? FileManager.default.removeItem(at: finalInstallDirectory)
             throw StreamingTrackImportError.downloaderUnavailable
@@ -1136,10 +1144,11 @@ struct YTDLPManager: YTDLPManaging, YTDLPUpdating {
             channel: Self.stableChannel,
             installedAt: previousManifest?.installedAt ?? now,
             lastCheckedAt: now,
-            checksum: expectedChecksum,
+            checksum: releaseInfo.checksum,
             executablePath: executableURL.path
         )
         try writeManifest(manifest)
+        try? removeSupersededInstallDirectories(keeping: finalInstallDirectory)
         return executableURL
     }
 
@@ -1184,6 +1193,37 @@ struct YTDLPManager: YTDLPManaging, YTDLPUpdating {
         for child in children where child.lastPathComponent.hasPrefix(".staging-") {
             let values = try child.resourceValues(forKeys: [.isDirectoryKey])
             guard values.isDirectory == true, isManaged(child) else { continue }
+            try fileManager.removeItem(at: child)
+        }
+    }
+
+    private func removeSupersededInstallDirectories(keeping keptDirectory: URL) throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: rootURL.path) else { return }
+        let keptDirectory = keptDirectory.standardizedFileURL
+
+        let children = try fileManager.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        )
+
+        for child in children {
+            let child = child.standardizedFileURL
+            guard child != keptDirectory,
+                  child.lastPathComponent != "manifest.json",
+                  !child.lastPathComponent.hasPrefix(".staging-"),
+                  isManaged(child)
+            else {
+                continue
+            }
+
+            let values = try child.resourceValues(forKeys: [.isDirectoryKey])
+            guard values.isDirectory == true,
+                  fileManager.fileExists(atPath: child.appendingPathComponent(Self.assetName).path)
+            else {
+                continue
+            }
             try fileManager.removeItem(at: child)
         }
     }

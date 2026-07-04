@@ -577,6 +577,61 @@ struct StreamingTrackImportTests {
     }
 
     @Test
+    func ytdlpManagerRefreshesWeeklyCheckWithoutDownloadingBinaryWhenChecksumMatches() async throws {
+        let root = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executableURL = try Self.writeManagedYTDLPExecutable(
+            root: root,
+            contents: Data("managed yt-dlp".utf8)
+        )
+        let installedAt = Date(timeIntervalSince1970: 100)
+        let lastCheckedAt = Date(timeIntervalSince1970: 200)
+        let checksum = try YTDLPManager.sha256Checksum(for: executableURL)
+        try Self.writeYTDLPManifest(
+            root: root,
+            executableURL: executableURL,
+            installedAt: installedAt,
+            lastCheckedAt: lastCheckedAt
+        )
+        let now = lastCheckedAt.addingTimeInterval(YTDLPManager.updateCheckInterval + 1)
+        let binaryURL = URL(string: "https://example.com/yt-dlp_macos")!
+        let checksumsURL = URL(string: "https://example.com/SHA2-256SUMS")!
+        let recorder = DownloadRequestRecorder()
+        let manager = YTDLPManager(
+            rootURL: root,
+            binaryURL: binaryURL,
+            checksumsURL: checksumsURL,
+            systemExecutableURL: { nil },
+            downloadAsset: { url in
+                await recorder.record(url)
+                guard url == checksumsURL else {
+                    throw StreamingTrackImportError.downloaderUnavailable
+                }
+                return YTDLPDownloadedAsset(
+                    data: Data("\(checksum)  yt-dlp_macos\n".utf8),
+                    finalURL: URL(string: "https://release-assets.githubusercontent.com/github-production-release-asset/SHA2-256SUMS")!
+                )
+            },
+            dateProvider: { now },
+            verifyExecutableVersion: { _ in
+                Issue.record("Matching checksum should not download or verify a replacement binary.")
+                return "2026.07.04"
+            }
+        )
+
+        let resolvedURL = try await manager.executableURL()
+        let manifest = try Self.readYTDLPManifest(root: root)
+
+        #expect(resolvedURL == executableURL.standardizedFileURL)
+        #expect(await recorder.urls() == [checksumsURL])
+        #expect(manifest.version == "2026.07.04")
+        #expect(manifest.installedAt == installedAt)
+        #expect(manifest.lastCheckedAt == now)
+        #expect(manifest.checksum == checksum)
+        #expect(manifest.executablePath == executableURL.path)
+    }
+
+    @Test
     func ytdlpManagerSwitchesManifestAfterVerifiedWeeklyRelease() async throws {
         let root = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -629,6 +684,7 @@ struct StreamingTrackImportTests {
         #expect(manifest.lastCheckedAt == now)
         #expect(manifest.checksum == checksum)
         #expect(manifest.executablePath == resolvedURL.path)
+        #expect(FileManager.default.fileExists(atPath: oldExecutableURL.path) == false)
     }
 
     @Test
