@@ -16,6 +16,7 @@
   <style>
     :root {
       color-scheme: light dark;
+      --page-gutter: clamp(22px, 4vw, 48px);
       --ink: #15151d;
       --muted: #676774;
       --quiet: #8c8d98;
@@ -124,7 +125,7 @@
       justify-content: space-between;
       margin: 0 auto;
       max-width: 1120px;
-      padding: 22px 24px;
+      padding: 22px var(--page-gutter);
     }
 
     .brand {
@@ -211,7 +212,7 @@
     .hero {
       margin: 0 auto;
       max-width: 1120px;
-      padding: 76px 24px 96px;
+      padding: 76px var(--page-gutter) 96px;
       text-align: center;
     }
 
@@ -327,7 +328,7 @@
     .features-band {
       background: var(--band);
       border-top: 1px solid var(--band-line);
-      padding: 92px 24px 108px;
+      padding: 92px var(--page-gutter) 108px;
     }
 
     .features {
@@ -428,7 +429,7 @@
     }
 
     .faq-band {
-      padding: 92px 24px 108px;
+      padding: 92px var(--page-gutter) 108px;
     }
 
     .faq {
@@ -466,17 +467,19 @@
     .help-band {
       background: var(--band);
       border-top: 1px solid var(--band-line);
-      padding: 92px 24px 108px;
+      padding: 92px var(--page-gutter) 108px;
     }
 
     .help {
       margin: 0 auto;
-      max-width: 820px;
+      max-width: 1120px;
     }
 
     .help-stack {
       display: grid;
       gap: 14px;
+      margin: 0 auto;
+      max-width: 620px;
     }
 
     .help-card {
@@ -601,7 +604,7 @@
       justify-content: space-between;
       margin: 0 auto;
       max-width: 1120px;
-      padding: 28px 24px 36px;
+      padding: 28px var(--page-gutter) 36px;
     }
 
     .footer-links {
@@ -611,7 +614,8 @@
 
     @media (max-width: 780px) {
       .nav {
-        padding: 18px 18px;
+        padding-top: 18px;
+        padding-bottom: 18px;
       }
 
       .nav-links {
@@ -623,7 +627,8 @@
       }
 
       .hero {
-        padding: 52px 18px 72px;
+        padding-top: 52px;
+        padding-bottom: 72px;
       }
 
       .hero-icon {
@@ -641,15 +646,18 @@
       }
 
       .features-band {
-        padding: 68px 18px 78px;
+        padding-top: 68px;
+        padding-bottom: 78px;
       }
 
       .faq-band {
-        padding: 0 18px 78px;
+        padding-top: 0;
+        padding-bottom: 78px;
       }
 
       .help-band {
-        padding: 68px 18px 78px;
+        padding-top: 68px;
+        padding-bottom: 78px;
       }
 
       .feature-grid {
@@ -676,8 +684,6 @@
         align-items: flex-start;
         flex-direction: column;
         gap: 12px;
-        padding-left: 18px;
-        padding-right: 18px;
       }
     }
   </style>
