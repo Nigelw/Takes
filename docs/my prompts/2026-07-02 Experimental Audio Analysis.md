@@ -20,4 +20,4 @@ Make commits as you go, keep yourself organized with docs so you don't lose trac
 
 An initial version of the feature can just work on one file at a time. We can worry about comparative analysis later.
 
-Because this is experimental let's put it in a new window and not worry about integrating it into the main UI yet. Add it to the debug menu with the name "Analysis" and keyboard shortcut cmd+opt+a.
+Because this is experimental let's put it in a new window and not worry about integrating it into the main UI yet. Add it to the debug menu with the name "Analysis" and keyboard shortcut cmd+opt+z.
