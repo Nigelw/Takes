@@ -353,11 +353,15 @@ final class QuietFrameCollector {
             return NoiseFloorMetrics(noiseFloorDBFS: -.infinity, quietFrameSpectralFlatness: 0)
         }
 
-        // Use only the quietest tenth of the file (bounded by the reservoir)
-        // so short files or sparse gaps aren't polluted by musical content.
+        // Use only blocks within 10 dB of the very quietest one (bounded by
+        // the reservoir and a tenth of the file) so a short silent gap isn't
+        // averaged together with merely-quiet musical passages.
         let sorted = quietest.sorted { $0.rms < $1.rms }
-        let useCount = max(min(4, sorted.count), min(sorted.count, totalBlockCount / 10))
-        let used = Array(sorted.prefix(useCount))
+        let quietestRMS = sorted[0].rms
+        let rmsCeiling = quietestRMS > 0 ? quietestRMS * pow(10, 10 / 20) : 0
+        let windowed = sorted.prefix { $0.rms <= rmsCeiling }
+        let boundedCount = max(min(4, sorted.count), min(windowed.count, max(totalBlockCount / 10, 4)))
+        let used = Array(sorted.prefix(boundedCount))
 
         let meanSquare = used.map { Double($0.rms) * Double($0.rms) }.reduce(0, +) / Double(used.count)
         let floorDB = meanSquare > 0 ? 10 * log10(meanSquare) : -Double.infinity
@@ -375,9 +379,12 @@ final class QuietFrameCollector {
             return NoiseFloorMetrics(noiseFloorDBFS: floorDB, quietFrameSpectralFlatness: 0)
         }
 
+        // Flatness measured 3–16 kHz: quiet musical residue has little
+        // energy up there, while broadband hiss is strong and flat, so this
+        // band separates the two far better than the full spectrum does.
         let binWidth = sampleRate / Double(blockSize)
-        let low = max(Int(200 / binWidth), 1)
-        let high = min(Int(16000 / binWidth), power.count - 1)
+        let low = max(Int(3_000 / binWidth), 1)
+        let high = min(Int(16_000 / binWidth), power.count - 1)
         var logSum = 0.0
         var linearSum = 0.0
         for bin in low ..< high {

@@ -16,16 +16,21 @@ enum AnalysisVerdictBuilder {
     private static let dynamicCrestDB = 14.0
 
     /// Bass-minus-treble band tilt in dB beyond which balance is notable.
-    private static let bassHeavyTiltDB = 14.0
-    private static let brightTiltDB = -2.0
+    /// Real-world masters sit around +15…+25, so only extremes are called
+    /// out; subtler tilts need the (future) comparative mode to judge.
+    private static let bassHeavyTiltDB = 30.0
+    private static let brightTiltDB = 0.0
 
-    /// Clarity heuristics from the long-term spectrum.
-    private static let muffledRolloffHz = 6_000.0
-    private static let muffledCentroidHz = 900.0
+    /// Clarity heuristics from the long-term spectrum. The Air band
+    /// (10–22 kHz) relative level separates "mellow but fine" (≈ −30 dB on
+    /// real music) from genuinely lowpassed/muffled (−45 dB and below);
+    /// energy rolloff can't, because bass dominates total energy.
+    private static let muffledAirRelativeDB = -38.0
+    private static let muffledCutoffHz = 6_000.0
     private static let brightCentroidHz = 3_500.0
 
     /// Quiet-frame floor and flatness that indicate broadband hiss.
-    private static let hissFlatnessMinimum = 0.25
+    private static let hissFlatnessMinimum = 0.2
     private static let hissFloorRangeDBFS = -78.0 ... -30.0
     private static let audibleFloorDBFS = -60.0
     private static let pristineFloorDBFS = -90.0
@@ -151,15 +156,19 @@ enum AnalysisVerdictBuilder {
             }
         }
 
-        let severelyBandLimited = (bandwidth.detectedCutoffHz ?? .infinity) < muffledRolloffHz
-        if severelyBandLimited || tonalBalance.rolloff95Hz < muffledRolloffHz
-            || tonalBalance.spectralCentroidHz < muffledCentroidHz {
+        // Centroid and rolloff are poor muffledness tests — bass dominates
+        // total energy, so mellow real-world music scores "low" on both.
+        // A collapsed Air band (or an outright lowpass) is what actually
+        // reads as muffled.
+        let airLevel = bandLevel(tonalBalance, names: ["Air"])
+        let severelyBandLimited = (bandwidth.detectedCutoffHz ?? .infinity) < muffledCutoffHz
+        if severelyBandLimited || (airLevel ?? 0) < muffledAirRelativeDB {
             verdicts.append(AnalysisVerdict(
                 category: .clarity,
                 title: "Sounds dull / muffled",
                 detail: String(
-                    format: "Spectral centroid %.0f Hz, 95%% of energy below %.1f kHz.",
-                    tonalBalance.spectralCentroidHz, tonalBalance.rolloff95Hz / 1_000
+                    format: "Almost no energy above 10 kHz (%.0f dB below overall). Spectral centroid %.0f Hz.",
+                    airLevel ?? 0, tonalBalance.spectralCentroidHz
                 ),
                 tone: .caution
             ))

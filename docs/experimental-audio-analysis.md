@@ -1,6 +1,6 @@
 # Experimental Audio Analysis
 
-Status: in progress (2026-07-04)
+Status: v1 complete (2026-07-04) — 20/20 corpus benchmark, 10/10 unit tests
 
 An experimental single-file analysis window that measures the properties Nigel
 cares about when deciding which of two takes sounds better. Opened from
@@ -65,10 +65,62 @@ Cases: loud/quiet masters, bass/bright tilts, muffled lowpass, added hiss,
 MP3 128/320, AAC 96/256, fake-lossless FLACs from MP3-128 and AAC-128,
 true-lossless FLAC, plus real-music derivatives from a library sample.
 
+## Benchmark harness
+
+`scripts/analysis-benchmark.sh` compiles the UI-independent engine sources
+with `swiftc` plus `scripts/analysis-cli/main.swift` and checks every corpus
+file against ground-truth expectations (LUFS ±1 LU vs ffmpeg's ebur128,
+cutoff ranges, required/forbidden verdicts). Also usable ad hoc:
+
+```
+scripts/analysis-benchmark.sh                    # 20-case corpus benchmark
+scripts/analysis-benchmark.sh analyze <files…>   # metrics for any files
+```
+
+## Findings from tuning (thresholds live in AnalysisVerdicts.swift)
+
+- **LUFS agreement**: engine matches ffmpeg `loudnorm` measurements within
+  ~0.2 LU across the corpus.
+- **Fake-lossless detection works**: all four trap cases (MP3-128→FLAC ×2,
+  AAC-128→FLAC, on synthetic and real music) flag as likely transcodes with
+  correct cutoff estimates (~16 kHz for MP3-128, ~18.7 kHz for AAC-128).
+- **Muffledness**: rolloff/centroid are useless on real music (bass dominates
+  total energy; mellow tracks legitimately centroid <400 Hz). The Air band
+  (10–22 kHz) level relative to total is the discriminator: ≈ −30 dB for
+  mellow-but-fine real music vs −69 dB for the same track lowpassed at
+  4.5 kHz. Threshold −38 dB.
+- **Hiss**: quiet-block flatness must be measured 3–16 kHz only, and only on
+  blocks within 10 dB of the file's quietest block, or musical residue
+  swamps it.
+- **Noise floor** reads as "quietest passage level" on gapless material —
+  that's inherent to single-file analysis, not a bug.
+
+## Known limitations (v1, single-file)
+
+- Hiss under gapless music is undetectable: the real-music hiss case has a
+  −50 dBFS hiss bed under music whose quietest passage is −20 dBFS — no gap
+  exists to measure in. (An HF-noise-between-transients approach could help;
+  out of scope.)
+- Absolute bass/treble tilt verdicts only fire at extremes (tilt >30 dB or
+  <0 dB vs the real-music norm of +15…+25), because "bassier than it should
+  be" is inherently a comparison — a +6 dB/120 Hz shelf on bright synthetic
+  material is invisible in absolute terms. Comparative mode is the answer.
+- `real_reference.wav` (a WAV decoded from ~283 kbps AAC) is *not* flagged:
+  its soft ~19–20 kHz rolloff lacks the sharp shelf the detector keys on.
+  Flagging it would be defensible, but soft-slope heuristics false-positive
+  dark masters, so v1 stays conservative.
+- True peak is sample peak (no 4× oversampling), so intersample overs read
+  slightly low (corpus `loud.wav` measures −0.4 dBFS sample peak vs
+  +2.8 dBTP true peak).
+
 ## Work log
 
 - 2026-07-04: Plan written. Corpus generation delegated to a subagent
-  (script + generated files + manifest). Scaffolding module + window wiring.
+  (script + generated files + manifest, 20 files). DSP engine + unit tests
+  implemented and validated against BS.1770 reference points. Analysis
+  window UI built (delegated). CLI benchmark harness built; thresholds tuned
+  from 15/20 to 20/20 (quiet-block windowing, HF-restricted flatness,
+  Air-band muffledness, realistic tilt bounds).
 
 ## Later ideas (out of scope for v1)
 
