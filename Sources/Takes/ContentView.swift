@@ -1403,6 +1403,12 @@ struct ContentView: View {
                                     }
                                 }
                             }
+                            .overlay(alignment: .bottom) {
+                                Rectangle()
+                                    .fill(Theme.hairline)
+                                    .frame(height: trackTimelineDividerHeight)
+                                    .allowsHitTesting(false)
+                            }
 
                             if controller.session.isPlayable {
                                 loopSelectionOverlay(waveformWidth: waveformWidth)
