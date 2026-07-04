@@ -158,17 +158,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum TakesAboutPanel {
     static let creditsText = """
     Lead designer & developer
-    Nigel M. Warren <https://nigelwarren.com>
+    Nigel M. Warren: https://nigelwarren.com
 
     Third-Party Resources
-    Sparkle <https://sparkle-project.org/>
-    yt-dlp <https://github.com/yt-dlp/yt-dlp>
+    Sparkle: https://sparkle-project.org/
+    yt-dlp: https://github.com/yt-dlp/yt-dlp
     """
 
     private static let creditLinks: [(label: String, destination: String)] = [
-        ("Nigel M. Warren <https://nigelwarren.com>", "https://nigelwarren.com"),
-        ("Sparkle <https://sparkle-project.org/>", "https://sparkle-project.org/"),
-        ("yt-dlp <https://github.com/yt-dlp/yt-dlp>", "https://github.com/yt-dlp/yt-dlp")
+        ("https://nigelwarren.com", "https://nigelwarren.com"),
+        ("https://sparkle-project.org/", "https://sparkle-project.org/"),
+        ("https://github.com/yt-dlp/yt-dlp", "https://github.com/yt-dlp/yt-dlp")
     ]
 
     static var options: [NSApplication.AboutPanelOptionKey: Any] {

@@ -34,7 +34,7 @@ private struct GeneralSettingsView: View {
                     Text(AppearanceTheme.dark.title).tag(AppearanceTheme.dark)
                 }
 
-                Picker("Readout Frame", selection: $settings.readoutStyle) {
+                Picker("Readout frame", selection: $settings.readoutStyle) {
                     ForEach(ReadoutStyle.allCases) { style in
                         Text(style.title).tag(style)
                     }
@@ -45,7 +45,7 @@ private struct GeneralSettingsView: View {
 
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Auto-Align Tracks on Open", isOn: $settings.alignTracksOnOpen)
+                    Toggle("Auto-align tracks on open", isOn: $settings.alignTracksOnOpen)
                     OffsetHint("Align audio files when opening in Takes")
                 }
 
@@ -57,7 +57,7 @@ private struct GeneralSettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    LabeledContent("Large Nudge") {
+                    LabeledContent("Large nudge") {
                         OffsetAmountField(value: $settings.offsetLargeStep, stepperIncrement: 50)
                     }
                     OffsetHint("Hold Shift while using steppers or arrow keys to adjust by a larger amount.")
@@ -134,11 +134,6 @@ private struct UpdateSettingsView: View {
                     }
                 }
                 .disabled(!updater.automaticallyChecksForUpdates)
-            } header: {
-                Text("Software Updates")
-            }
-
-            Section {
                 HStack {
                     Text(lastCheckedDescription)
                         .font(.callout)
@@ -151,32 +146,21 @@ private struct UpdateSettingsView: View {
                     }
                     .disabled(!updater.canCheckForUpdates)
                 }
+            } header: {
+                Text("App Updates")
             }
 
             Section {
-                LabeledContent("Auto Update Cadence") {
+                LabeledContent("Check for updates") {
                     Text(ytdlpUpdates.cadenceDescription)
                         .foregroundStyle(.secondary)
                 }
 
-                LabeledContent("Last Checked") {
+                HStack {
                     Text(ytdlpUpdates.lastCheckedDescription)
-                        .foregroundStyle(.secondary)
-                }
-
-                LabeledContent("Last Updated") {
-                    Text(ytdlpUpdates.lastUpdatedDescription)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let statusMessage = ytdlpUpdates.statusMessage {
-                    Text(statusMessage)
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
 
-                HStack {
                     Spacer()
 
                     HStack(spacing: 8) {
@@ -185,14 +169,14 @@ private struct UpdateSettingsView: View {
                                 .controlSize(.small)
                         }
 
-                        Button("Update Now") {
+                        Button("Check Now") {
                             ytdlpUpdates.updateNow()
                         }
                         .disabled(ytdlpUpdates.isUpdating)
                     }
                 }
             } header: {
-                Text("yt-dlp")
+                Text("YouTube Downloader (yt-dlp)")
             }
         }
         .formStyle(.grouped)
@@ -200,6 +184,13 @@ private struct UpdateSettingsView: View {
         .onAppear {
             updater.refreshLastCheckDate()
             ytdlpUpdates.refresh()
+        }
+        .alert(item: $ytdlpUpdates.updateAlert) { updateAlert in
+            Alert(
+                title: Text(updateAlert.title),
+                message: Text(updateAlert.message),
+                dismissButton: .default(Text("OK"))
+            )
         }
     }
 

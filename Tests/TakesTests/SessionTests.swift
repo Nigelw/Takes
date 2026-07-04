@@ -405,17 +405,17 @@ struct SessionTests {
 
         #expect(credits.string == """
         Lead designer & developer
-        Nigel M. Warren <https://nigelwarren.com>
+        Nigel M. Warren: https://nigelwarren.com
 
         Third-Party Resources
-        Sparkle <https://sparkle-project.org/>
-        yt-dlp <https://github.com/yt-dlp/yt-dlp>
+        Sparkle: https://sparkle-project.org/
+        yt-dlp: https://github.com/yt-dlp/yt-dlp
         """)
 
         let expectedLinks: [(label: String, destination: String)] = [
-            ("Nigel M. Warren <https://nigelwarren.com>", "https://nigelwarren.com"),
-            ("Sparkle <https://sparkle-project.org/>", "https://sparkle-project.org/"),
-            ("yt-dlp <https://github.com/yt-dlp/yt-dlp>", "https://github.com/yt-dlp/yt-dlp")
+            ("https://nigelwarren.com", "https://nigelwarren.com"),
+            ("https://sparkle-project.org/", "https://sparkle-project.org/"),
+            ("https://github.com/yt-dlp/yt-dlp", "https://github.com/yt-dlp/yt-dlp")
         ]
 
         for (label, destination) in expectedLinks {
@@ -429,7 +429,7 @@ struct SessionTests {
 
     @Test
     @MainActor
-    func ytdlpUpdateStateFormatsCadenceAndManifestDates() {
+    func ytdlpUpdateStateFormatsCadenceAndLastCheckedDate() {
         let installedAt = Date(timeIntervalSince1970: 100)
         let lastCheckedAt = Date(timeIntervalSince1970: 200)
         let updater = StubYTDLPUpdater(status: YTDLPManagedToolStatus(
@@ -442,17 +442,15 @@ struct SessionTests {
         let state = YTDLPUpdateState(updater: updater)
 
         #expect(state.cadenceDescription == "Weekly")
-        #expect(state.lastCheckedDescription == lastCheckedAt.formatted(date: .abbreviated, time: .shortened))
-        #expect(state.lastUpdatedDescription == installedAt.formatted(date: .abbreviated, time: .shortened))
+        #expect(state.lastCheckedDescription == "Last checked \(lastCheckedAt.formatted(date: .abbreviated, time: .shortened))")
     }
 
     @Test
     @MainActor
-    func ytdlpUpdateStateShowsEmptyManifestDates() {
+    func ytdlpUpdateStateShowsEmptyLastCheckedDate() {
         let state = YTDLPUpdateState(updater: StubYTDLPUpdater(status: nil))
 
         #expect(state.lastCheckedDescription == "Not checked yet")
-        #expect(state.lastUpdatedDescription == "Not updated yet")
     }
 
     @Test
@@ -474,7 +472,9 @@ struct SessionTests {
 
         #expect(updater.updateCallCount == 1)
         #expect(state.toolStatus == updatedStatus)
-        #expect(state.statusMessage == YTDLPUpdateState.updateSucceededMessage)
+        #expect(state.updateAlert == .upToDate(version: "2026.07.11"))
+        #expect(state.updateAlert?.title == "You're up to date!")
+        #expect(state.updateAlert?.message == "yt-dlp 2026.07.11 is currently the newest version available.")
         #expect(!state.isUpdating)
     }
 
@@ -490,7 +490,9 @@ struct SessionTests {
         await state.performUpdateNow()
 
         #expect(updater.updateCallCount == 1)
-        #expect(state.statusMessage == YTDLPUpdateState.updateFailedMessage)
+        #expect(state.updateAlert == .failed)
+        #expect(state.updateAlert?.title == "Could Not Update yt-dlp")
+        #expect(state.updateAlert?.message == "Check your connection and try again.")
         #expect(!state.isUpdating)
     }
 

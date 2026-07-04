@@ -117,14 +117,12 @@ final class SoftwareUpdater: ObservableObject {
 @MainActor
 final class YTDLPUpdateState: ObservableObject {
     static let cadenceDescription = "Weekly"
-    static let updateSucceededMessage = "yt-dlp is up to date."
-    static let updateFailedMessage = "Could not update yt-dlp. Check your connection and try again."
 
     private let updater: YTDLPUpdating
 
     @Published private(set) var toolStatus: YTDLPManagedToolStatus?
     @Published private(set) var isUpdating = false
-    @Published private(set) var statusMessage: String?
+    @Published var updateAlert: YTDLPUpdateAlert?
 
     init(updater: YTDLPUpdating = YTDLPManager()) {
         self.updater = updater
@@ -139,14 +137,7 @@ final class YTDLPUpdateState: ObservableObject {
         guard let date = toolStatus?.lastCheckedAt else {
             return "Not checked yet"
         }
-        return date.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    var lastUpdatedDescription: String {
-        guard let date = toolStatus?.installedAt else {
-            return "Not updated yet"
-        }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        return "Last checked \(date.formatted(date: .abbreviated, time: .shortened))"
     }
 
     func refresh() {
@@ -162,16 +153,61 @@ final class YTDLPUpdateState: ObservableObject {
     func performUpdateNow() async {
         guard !isUpdating else { return }
         isUpdating = true
-        statusMessage = nil
+        updateAlert = nil
         defer { isUpdating = false }
 
         do {
             _ = try await updater.updateManagedExecutableNow()
             refresh()
-            statusMessage = Self.updateSucceededMessage
+            updateAlert = .upToDate(version: toolStatus?.version)
         } catch {
             refresh()
-            statusMessage = Self.updateFailedMessage
+            updateAlert = .failed
         }
     }
+}
+
+struct YTDLPUpdateAlert: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case upToDate(version: String?)
+        case failed
+    }
+
+    let kind: Kind
+
+    var id: String {
+        switch kind {
+        case .upToDate(let version):
+            return "upToDate-\(version ?? "unknown")"
+        case .failed:
+            return "failed"
+        }
+    }
+
+    var title: String {
+        switch kind {
+        case .upToDate:
+            return "You're up to date!"
+        case .failed:
+            return "Could Not Update yt-dlp"
+        }
+    }
+
+    var message: String {
+        switch kind {
+        case .upToDate(let version):
+            if let version {
+                return "yt-dlp \(version) is currently the newest version available."
+            }
+            return "yt-dlp is currently the newest version available."
+        case .failed:
+            return "Check your connection and try again."
+        }
+    }
+
+    static func upToDate(version: String?) -> Self {
+        Self(kind: .upToDate(version: version))
+    }
+
+    static let failed = Self(kind: .failed)
 }
