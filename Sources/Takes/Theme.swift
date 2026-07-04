@@ -50,6 +50,21 @@ enum Theme {
     /// Fill behind an active track row (info + lane).
     static let activeRowFill = primary.opacity(0.12)
 
+    /// Opaque surface of a track row lifted for reordering — a raised card that
+    /// floats above the rows sliding beneath it. White in light mode, a step
+    /// above the well in dark mode.
+    static let reorderCardFill = dynamic(
+        light: (1.0, 1.0, 1.0),
+        dark: (0.16, 0.16, 0.18)
+    )
+
+    /// Drop shadow cast by the lifted reorder card. Much stronger in dark mode,
+    /// where a light shadow would disappear against the dark surface and kill the
+    /// sense of the card floating.
+    static let reorderCardShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.7 : 0.28)
+    })
+
     /// Neutral fill for the index badge on an inactive row (the active row uses
     /// `primary`). Kept subtle so the number reads without competing with the title.
     static let indexBadgeInactiveFill = dynamic(
