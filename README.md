@@ -28,10 +28,11 @@ This README is written for someone working on the repo. It covers project layout
 The app currently supports:
 
 - Loading up to 32 local audio files through the Open control, Finder selection, Music.app selection, drag-and-drop, or files opened from Finder
+- Importing a track from a streaming URL (Apple Music, Spotify, YouTube, or YouTube Music), downloaded via a managed or system-installed yt-dlp
 - Shared transport playback with only one track audible at a time
-- Switching playback through loaded tracks in list order during playback, through the transport, Playback menu, number hotkeys, or media remote commands
+- Switching playback through loaded tracks in list order during playback, through the transport, Playback menu, number hotkeys, Up/Down arrow keys, or media remote commands
 - Dragging files anywhere in the window to append to the track list
-- Reordering loaded tracks by dragging rows
+- Reordering loaded tracks by dragging rows, or dragging a row out of the window to copy its audio file to Finder or another app
 - Progressive waveform extraction and rendering for each loaded track
 - Signed global timeline playback with a playhead over the waveform lanes
 - Automatic track alignment that derives per-track offsets from the audio itself, with an optional deeper tempo analysis for takes recorded at slightly different speeds
@@ -206,8 +207,10 @@ Current transport behavior:
 - Drag track rows to reorder them.
 - Use File > Quick Open from Finder or `Shift+Cmd+F` to import selected audio files from Finder.
 - Use the `+` menu above the track info area and choose `Quick Open from Apple Music` to import the current Music.app selection.
+- Use File > Open Streaming URL or `Shift+Cmd+O` to import a track from an Apple Music, Spotify, YouTube, or YouTube Music URL. This downloads audio through yt-dlp, which Takes manages automatically (falling back to a system-installed copy) and keeps updated in Settings > Updates.
 - Use File > Show in Finder or `Shift+Cmd+R` to reveal the active track.
 - Use File > Remove Track (`Delete`) or File > Remove All Tracks (`Cmd+Delete`) to clear tracks from the session.
+- Drag a track row out of the window to copy its audio file to Finder or another app.
 
 Finder and Music import rules:
 
@@ -219,8 +222,8 @@ Finder and Music import rules:
 ### Playback
 
 - `Space`: play/pause
-- `X`: switch playback to the next loaded track in list order
-- `Shift+X`: switch playback to the previous loaded track in list order
+- `X` / `Down`: switch playback to the next loaded track in list order
+- `Shift+X` / `Up`: switch playback to the previous loaded track in list order
 - `1`...`9`: make the matching row active
 - `0`: make the last loaded row active when there are more than eight tracks
 - `Left` / `Right`: seek by 1 second
@@ -256,7 +259,7 @@ The Playback menu mirrors the main transport actions and includes Auto-Align Tra
 ### Settings And Debug Tools
 
 - Settings > General controls theme, readout frame, Align Tracks on Open, and offset nudge amounts.
-- Settings > Updates controls automatic update checks and downloads.
+- Settings > Updates controls automatic update checks and downloads, and shows yt-dlp's update status with a manual "Check Now" option.
 - Help > Debug > Show Component Names overlays developer labels on major UI regions.
 - Help > Debug > Reset Window Size restores the main window to its default width and launch height.
 - Help > Debug > Appearance Tuner opens a session-only tuning window for transport button and index badge appearance.

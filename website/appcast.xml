@@ -3,6 +3,27 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>2.8</title>
+            <pubDate>Sat, 04 Jul 2026 18:39:48 -0400</pubDate>
+            <sparkle:version>11</sparkle:version>
+            <sparkle:shortVersionString>2.8</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## New
+- Import streaming audio from Apple Music, Spotify, and YouTube
+- Significantly improved drag and drop
+  - Improved visual design and UX of track reordering
+  - Improved visual indicator for external file drops onto Takes window
+  - Support standard Mac conventions: drag track out of the window to copy its file to the Finder or another app, drop on window toolbar or menubar to cancel drag
+
+## Improved
+- Switch tracks with the up/down arrow keys in addition to other keyboard shortcuts
+- Added a link to the Takes website in the Help menu
+
+## Fixed
+- Many UI copy tweaks]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.8/Takes.dmg" length="3397228" type="application/octet-stream" sparkle:edSignature="cXBp9Ovh3Z2CoBQ3oTrBo+JBLObWypYBjjRasY/w3ubgAQOLv5va+DfIxvlDc1iTIJmzRGce1r+5nCqJKbpSCg=="/>
+        </item>
+        <item>
             <title>2.7</title>
             <pubDate>Fri, 03 Jul 2026 13:20:55 -0400</pubDate>
             <sparkle:version>10</sparkle:version>
@@ -38,16 +59,6 @@
 - The mouse cursor now resets correctly after interacting with a text field
 ]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.6.1/Takes.dmg" length="3023113" type="application/octet-stream" sparkle:edSignature="9iNjYxcIEcHbTAA5bc7MdxAVqk71640lpyo1Fps8TsqKn8dgysYWQoson5HuYwLmGbaNlndYBPCKFeYkySTmBg=="/>
-        </item>
-        <item>
-            <title>2.6</title>
-            <pubDate>Thu, 02 Jul 2026 15:58:57 -0400</pubDate>
-            <sparkle:version>8</sparkle:version>
-            <sparkle:shortVersionString>2.6</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[## New Features
-- Blind listening mode: hide track details and shuffle playback order to compare takes without seeing which is which]]></description>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.6/Takes.dmg" length="3008162" type="application/octet-stream" sparkle:edSignature="rvXPeZnJR8ngwkpqsyVGKviIK5EpuiKx8eN6KUnxcVOysa2tjrwr2UKHcWu8CLgXTnuVjRUEXegcWrBJpoqrAA=="/>
         </item>
     </channel>
 </rss>
