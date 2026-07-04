@@ -309,7 +309,7 @@
 
     .shot-wrap {
       margin: 72px auto 0;
-      max-width: 980px;
+      max-width: 1120px;
     }
 
     .hero-shot {
@@ -333,7 +333,7 @@
 
     .features {
       margin: 0 auto;
-      max-width: 1120px;
+      max-width: calc(1120px - (var(--page-gutter) * 2));
     }
 
     .section-heading {
@@ -428,174 +428,6 @@
       margin: 0;
     }
 
-    .faq-band {
-      padding: 92px var(--page-gutter) 108px;
-    }
-
-    .faq {
-      margin: 0 auto;
-      max-width: 1120px;
-    }
-
-    .faq-grid {
-      display: grid;
-      gap: 14px;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .faq-item {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 24px;
-    }
-
-    .faq-item h3 {
-      font-size: 20px;
-      letter-spacing: 0;
-      line-height: 1.2;
-      margin: 0 0 10px;
-    }
-
-    .faq-item p {
-      color: var(--muted);
-      font-size: 15px;
-      line-height: 1.58;
-      margin: 0;
-    }
-
-    .help-band {
-      background: var(--band);
-      border-top: 1px solid var(--band-line);
-      padding: 92px var(--page-gutter) 108px;
-    }
-
-    .help {
-      margin: 0 auto;
-      max-width: 1120px;
-    }
-
-    .help-stack {
-      display: grid;
-      gap: 14px;
-      margin: 0 auto;
-      max-width: 620px;
-    }
-
-    .help-card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 24px;
-    }
-
-    .help-card h3 {
-      font-size: 20px;
-      letter-spacing: 0;
-      line-height: 1.2;
-      margin: 0 0 14px;
-    }
-
-    .help-card p,
-    .help-card li {
-      color: var(--muted);
-      font-size: 15px;
-      line-height: 1.58;
-    }
-
-    .help-card p {
-      margin: 0;
-    }
-
-    .help-card ul {
-      margin: 0;
-      padding-left: 18px;
-    }
-
-    .help-card p + ul {
-      margin-top: 14px;
-    }
-
-    .help-card li + li {
-      margin-top: 4px;
-    }
-
-    .help-card + .help-card {
-      margin-top: 0;
-    }
-
-    .help-card-grid {
-      display: grid;
-      gap: 14px;
-    }
-
-    .shortcut-groups {
-      display: grid;
-      gap: 22px;
-    }
-
-    .shortcut-group h4 {
-      font-size: 14px;
-      letter-spacing: 0.08em;
-      margin: 0 0 12px;
-      text-transform: uppercase;
-      color: var(--brand-dark);
-    }
-
-    .shortcut-list {
-      border-top: 1px solid var(--line-soft);
-    }
-
-    .shortcut-row {
-      align-items: center;
-      border-bottom: 1px solid var(--line-soft);
-      display: grid;
-      gap: 16px;
-      grid-template-columns: minmax(0, 1fr) auto;
-      padding: 12px 0;
-    }
-
-    .shortcut-desc {
-      color: var(--muted);
-      font-size: 15px;
-      line-height: 1.45;
-    }
-
-    .shortcut-keys {
-      align-items: center;
-      display: inline-flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      justify-content: flex-end;
-    }
-
-    kbd {
-      background: var(--key-bg);
-      border: 1px solid var(--key-border);
-      border-bottom-color: var(--key-border-bottom);
-      border-radius: 8px;
-      box-shadow:
-        inset 0 1px 0 var(--key-inset),
-        0 1px 0 var(--key-lift),
-        0 3px 0 var(--key-depth);
-      color: var(--ink);
-      display: inline-block;
-      font-family: inherit;
-      font-size: 0.92em;
-      font-weight: 700;
-      line-height: 1;
-      min-width: 34px;
-      padding: 6px 9px;
-      text-align: center;
-      white-space: nowrap;
-    }
-
-    .key-sep {
-      color: var(--quiet);
-      font-size: 12px;
-      font-weight: 700;
-    }
-
     .footer {
       align-items: center;
       color: var(--quiet);
@@ -650,34 +482,12 @@
         padding-bottom: 78px;
       }
 
-      .faq-band {
-        padding-top: 0;
-        padding-bottom: 78px;
-      }
-
-      .help-band {
-        padding-top: 68px;
-        padding-bottom: 78px;
-      }
-
       .feature-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .faq-grid {
         grid-template-columns: 1fr;
       }
 
       .feature {
         min-height: 0;
-      }
-
-      .shortcut-row {
-        grid-template-columns: 1fr;
-      }
-
-      .shortcut-keys {
-        justify-content: flex-start;
       }
 
       .footer {
@@ -706,6 +516,7 @@
           </svg>
         </button>
         <div class="nav-links">
+          <a href="support.html">Support</a>
           <a href="changelog.html">Changelog</a>
           <a href="https://github.com/Nigelw/Takes">GitHub</a>
         </div>
@@ -730,7 +541,7 @@
             </picture>
           </div>
         </div>
-        
+
       </section>
 
       <section class="features-band" id="features">
@@ -745,9 +556,9 @@
                 <div class="mark">1</div>
                 <h3>Compare up to 32 tracks</h3>
               </div>
-              <p>Songs stay synced during playback while you toggle between them to hear differences.</p>
+              <p>Songs stay synced during playback while you toggle between them to hear differences. Takes supports local files and streaming music from Apple Music/Spotify/YouTube.</p>
             </article>
-            
+
             <article class="feature">
               <div class="feature-header">
                 <div class="mark">2</div>
@@ -755,7 +566,7 @@
               </div>
               <p>Loop the exact section you care about so small differences in arrangement, mix, or mastering are easier to hear.</p>
             </article>
-            
+
             <article class="feature">
               <div class="feature-header">
                 <div class="mark">3</div>
@@ -763,7 +574,7 @@
               </div>
               <p>Randomize order and hide track details to listen without bias. Reveal track names after you pick a take.</p>
             </article>
-            
+
             <article class="feature">
               <div class="feature-header">
                 <div class="mark">4</div>
@@ -771,7 +582,7 @@
               </div>
               <p>Automatically line up different recordings with a single click.</p>
             </article>
-            
+
             <article class="feature">
               <div class="feature-header">
                 <div class="mark">5</div>
@@ -790,241 +601,12 @@
           </div>
         </div>
       </section>
-
-      <section class="faq-band" id="faq">
-        <div class="faq">
-          <div class="section-heading">
-            <h2><a class="anchor-link" href="#faq">Frequently asked questions</a></h2>
-          </div>
-
-          <div class="faq-grid">
-            <article class="faq-item">
-              <h3>Does Takes work with streaming services?</h3>
-              <p>No. Takes is for local file playback only. Bring your own audio files and compare them side by side in the app.</p>
-            </article>
-
-            <article class="faq-item">
-              <h3>How much does Takes cost?</h3>
-              <p>Takes is free and open source. You can download it, use it, and inspect the code on GitHub.</p>
-            </article>
-
-            <article class="faq-item">
-              <h3>Why did you build Takes?</h3>
-              <p>I built Takes to scratch my own itch. I love hearing the differences between original releases and remasters, and I've always wanted an app that lets me listen and toggle between them. I built a small utility, then decided to turn it into a polished app because I love old school native apps that sweat the details. I'm sharing it in case others find it useful too.</p>
-            </article>
-
-            <article class="faq-item">
-              <h3>Do you offer support?</h3>
-              <p>Just the <a class="text-link" href="#help">help section below</a>.</p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="help-band" id="help">
-        <div class="help">
-          <div class="section-heading">
-            <h2><a class="anchor-link" href="#help">Help</a></h2>
-          </div>
-
-          <div class="help-stack">
-            <article class="help-card">
-              <h3>Getting audio into Takes</h3>
-              <ul>
-                <li>Open one or more local files with <kbd>Cmd O</kbd>, or drag files anywhere into the window.</li>
-                <li>Use <kbd>Shift Cmd F</kbd> for Quick Open from Finder.</li>
-                <li>Use the <code>+</code> menu above the track list for Quick Open from Apple Music.</li>
-                <li>Drop a file on a specific row to replace that track, or drag rows to reorder them.</li>
-                <li>Takes supports up to 32 loaded local audio files at once.</li>
-              </ul>
-            </article>
-
-            <div class="help-card-grid">
-              <article class="help-card">
-                <h3>Selection looping</h3>
-                <p>Drag or <kbd>Shift Click</kbd> in the timeline area to constrain playback to the selected range. Use it to focus on a specific passage and loop across tracks.</p>
-                <ul>
-                  <li>Drag selection handles to resize the loop.</li>
-                  <li>Repeat Off stops at the end of the current playable range.</li>
-                  <li>Repeat One restarts the current track from the start of that range.</li>
-                  <li>Switch &amp; Repeat advances to the next track on each wrap so you can compare the same passage across tracks.</li>
-                  <li>Creating a loop automatically switches Takes into Switch &amp; Repeat. Deselecting the loop turns repeat back off.</li>
-                </ul>
-              </article>
-
-              <article class="help-card">
-                <h3>Blind listening mode</h3>
-                <p>Blind Listening Mode is for comparing takes without knowing which source file is which. It hides names and metadata, anonymizes the waveforms, and shuffles the track order.</p>
-                <ul>
-                  <li>Use it when you want your ears to decide without being influenced by knowing which version you're listening to. It even hides the filename from the Now Playig widget in Control Center. No cheating!</li>
-                  <li>Turn it on, switch between tracks, pick your favorite, then reveal the names afterward.</li>
-                </ul>
-              </article>
-
-              <article class="help-card">
-                <h3>Auto-Align</h3>
-                <p>Auto-Align listens to the audio itself and computes per-track offsets so similar sections line up. The quick pass compares audio-change patterns and only accepts confident matches, which helps it avoid false positives when files are unrelated or too ambiguous.</p>
-                <ul>
-                  <li>Auto-Align matches based on the playhead position. Re-run it at any time if tracks drift over time and you need to realign them.</li>
-                  <li>If the quick pass cannot find a clean match, Takes leaves that track unaligned instead of forcing it.</li>
-                  <li>For slightly different speeds or tempo drift, it can offer a deeper analysis that searches tempo deviations, up to about 6 percent, before applying an alignment.</li>
-                </ul>
-              </article>
-            </div>
-
-            <article class="help-card" id="shortcuts">
-              <h3>Keyboard shortcuts</h3>
-              <div class="shortcut-groups">
-                <section class="shortcut-group">
-                  <h4>Playback</h4>
-                  <div class="shortcut-list">
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Play or pause</div>
-                      <div class="shortcut-keys"><kbd>Space</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Switch to the next track</div>
-                      <div class="shortcut-keys"><kbd>X</kbd> or <kbd>↓</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Switch to the previous track</div>
-                      <div class="shortcut-keys"><kbd>Shift X</kbd> or <kbd>↑</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Jump directly to tracks 1 through 9</div>
-                      <div class="shortcut-keys"><kbd>1</kbd><span class="key-sep">…</span><kbd>9</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Jump to the last track</div>
-                      <div class="shortcut-keys"><kbd>0</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Toggle Blind Listening Mode</div>
-                      <div class="shortcut-keys"><kbd>Cmd B</kbd></div>
-                    </div>
-                  </div>
-                </section>
-
-                <section class="shortcut-group">
-                  <h4>Transport and timeline</h4>
-                  <div class="shortcut-list">
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Seek by 1 second</div>
-                      <div class="shortcut-keys"><kbd>←</kbd><span class="key-sep">/</span><kbd>→</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Seek by 10 seconds</div>
-                      <div class="shortcut-keys"><kbd>Shift ←</kbd><span class="key-sep">/</span><kbd>Shift →</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Jump to the start or end of the timeline</div>
-                      <div class="shortcut-keys"><kbd>Cmd ←</kbd><span class="key-sep">/</span><kbd>Cmd →</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Deselect the current loop</div>
-                      <div class="shortcut-keys"><kbd>Cmd D</kbd></div>
-                    </div>
-                  </div>
-                </section>
-
-                <section class="shortcut-group">
-                  <h4>Zoom and alignment</h4>
-                  <div class="shortcut-list">
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Zoom in or out</div>
-                      <div class="shortcut-keys"><kbd>Cmd +</kbd><span class="key-sep">/</span><kbd>Cmd -</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Zoom to the selected loop</div>
-                      <div class="shortcut-keys"><kbd>Option Cmd +</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Zoom to fit the full session</div>
-                      <div class="shortcut-keys"><kbd>Option Cmd -</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Run Auto-Align Tracks</div>
-                      <div class="shortcut-keys"><kbd>Option Cmd A</kbd></div>
-                    </div>
-                  </div>
-                </section>
-
-                <section class="shortcut-group">
-                  <h4>File and track actions</h4>
-                  <div class="shortcut-list">
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Open local audio files</div>
-                      <div class="shortcut-keys"><kbd>Cmd O</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Quick Open from Finder</div>
-                      <div class="shortcut-keys"><kbd>Shift Cmd F</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Quick Open from Apple Music</div>
-                      <div class="shortcut-keys"><kbd>Shift Cmd M</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Show the active track in Finder</div>
-                      <div class="shortcut-keys"><kbd>Shift Cmd R</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Remove the active track</div>
-                      <div class="shortcut-keys"><kbd>Delete</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Remove all tracks</div>
-                      <div class="shortcut-keys"><kbd>Cmd Delete</kbd></div>
-                    </div>
-                  </div>
-                </section>
-
-                <section class="shortcut-group">
-                  <h4>Offset field and hidden UI shortcuts</h4>
-                  <div class="shortcut-list">
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Nudge the offset by the configured amount</div>
-                      <div class="shortcut-keys"><kbd>↑</kbd><span class="key-sep">/</span><kbd>↓</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Nudge the offset by the configured large amount</div>
-                      <div class="shortcut-keys"><kbd>Shift ↑</kbd><span class="key-sep">/</span><kbd>Shift ↓</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Commit the current numeric field value</div>
-                      <div class="shortcut-keys"><kbd>Enter</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Revert a numeric field to its previous value</div>
-                      <div class="shortcut-keys"><kbd>Esc</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Reset an offset to zero by double-clicking its label</div>
-                      <div class="shortcut-keys"><kbd>Double-click ms</kbd></div>
-                    </div>
-                    <div class="shortcut-row">
-                      <div class="shortcut-desc">Switch to the previous track from the UI</div>
-                      <div class="shortcut-keys"><kbd>Shift Click</kbd></div>
-                    </div>
-                  </div>
-                </section>
-              </div>
-            </article>
-
-            <article class="help-card">
-              <h3>Other details</h3>
-              <ul>
-                <li>Keyboard media keys can also control playback.</li>
-              </ul>
-            </article>
-          </div>
-        </div>
-      </section>
     </main>
 
     <footer class="footer">
       <span>&copy; 2026 Nigel M. Warren. Takes for macOS.</span>
       <div class="footer-links">
+        <a href="support.html">Support</a>
         <a href="changelog.html">Changelog</a>
         <a href="https://github.com/Nigelw/Takes">GitHub</a>
       </div>
