@@ -16,8 +16,12 @@ struct TrackDropHighlightTests {
     }
 
     @Test
-    func trackReorderDragUsesDeclaredSystemType() {
-        #expect(TrackReorderDrag.contentType == .plainText)
+    func trackReorderDragUsesPrivateTakesType() {
+        // A private marker type: external drags (Finder file drags carry a
+        // plain-text path flavor) must never match the reorder-only drop target.
+        #expect(TrackReorderDrag.contentType.identifier == "com.nigelwarren.takes.track-reorder")
+        #expect(!UTType.fileURL.conforms(to: TrackReorderDrag.contentType))
+        #expect(!UTType.plainText.conforms(to: TrackReorderDrag.contentType))
     }
 
     @Test
@@ -29,8 +33,10 @@ struct TrackDropHighlightTests {
     }
 
     @Test
-    func trackRowDropKindPrioritizesFileDropsOverPlainTextReorderDrops() {
-        #expect(TrackRowDropKind.kind(hasFileURLs: true, hasReorderItems: true) == .file)
+    func trackRowDropKindPrioritizesReorderDragsOverFileDrops() {
+        // A reorder drag carries the track's file URL too (for dragging out of
+        // the window), so the reorder marker decides the kind when both exist.
+        #expect(TrackRowDropKind.kind(hasFileURLs: true, hasReorderItems: true) == .reorder)
         #expect(TrackRowDropKind.kind(hasFileURLs: true, hasReorderItems: false) == .file)
         #expect(TrackRowDropKind.kind(hasFileURLs: false, hasReorderItems: true) == .reorder)
         #expect(TrackRowDropKind.kind(hasFileURLs: false, hasReorderItems: false) == nil)
