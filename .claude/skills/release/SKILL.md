@@ -97,35 +97,39 @@ Optional safety: run once with **neither** `--publish` nor `--no-commit` first t
 
 ## Step 6 — Capture screenshots (local, transient)
 
-These screenshots feed the archive (Step 7) and the website/README update (Step 8). Capture two versions of the main window — **with** and **without** the background shadow — into `build/` (gitignored, transient). They're deleted at the end of Step 8.
+These screenshots feed the archive (Step 7) and the website/README update (Step 8). Capture the main window in **both light and dark mode**, each **with** and **without** the background shadow — four files total, into `build/` (gitignored, transient). They're deleted at the end of Step 8. The light/dark pair is what lets the website show a theme-matched screenshot in its own light/dark mode.
 
-Launch the build just produced (`build/export/Takes.app` — the notarized release app) with the dedicated screenshot tracks already loaded, then screenshot the window. Use the **computer-use** tools only for the screenshot — loading the files doesn't need them.
+Launch the build just produced (`build/export/Takes.app` — the notarized release app) with the dedicated screenshot tracks loaded and the theme forced non-persistently via `--appearance-theme`, then screenshot the window. Use the **computer-use** tools only for the screenshot — loading the files doesn't need them.
+
+Repeat the launch → capture → quit cycle **once per theme** (`light`, then `dark`). The theme is read from the launch arguments only at startup and isn't persisted, so each theme needs its own fresh launch.
 
 1. Quit any running instance (`pkill -x Takes`).
-2. Open the app directly with the screenshot tracks as arguments — this loads them into the track slots without any UI navigation, so skip the file picker/drag-and-drop dance entirely. **Always use the tracks in `Private/Audio Samples/Screenshot Tracks/`** for visual consistency across releases:
+2. Open the app with the screenshot tracks *and* the theme override. The track files (opened as documents, before `--args`) load into the slots with no UI navigation; everything after `--args` is passed to the app, where `--appearance-theme` accepts `system`, `light`, or `dark`. **Always use the tracks in `Private/Audio Samples/Screenshot Tracks/`** for visual consistency across releases:
    ```bash
    APP="$PWD/build/export/Takes.app"
-   open -a "$APP" "$PWD/Private/Audio Samples/Screenshot Tracks/"*
+   THEME=light   # then repeat the whole cycle with THEME=dark
+   open -a "$APP" "$PWD/Private/Audio Samples/Screenshot Tracks/"* --args --appearance-theme "$THEME"
    ```
    Wait for the app to appear (`pgrep -x Takes`).
-3. `request_access` for `["Takes"]`, then `screenshot` to confirm both tracks show as loaded.
+3. `request_access` for `["Takes"]` (first cycle only), then `screenshot` to confirm both tracks show as loaded and the window is in the expected theme.
 4. Capture **just the Takes window**, twice, into `build/`. Get the window id (and exact bounds) with the helper — no need to eyeball anything:
    ```bash
    read WID X Y W H < <(swift .claude/skills/release/window-info.swift Takes)
    ```
    - **With shadow** (default — includes the window drop shadow):
      ```bash
-     screencapture -l"$WID" build/screenshot_shadow.png
+     screencapture -l"$WID" "build/screenshot_${THEME}_shadow.png"
      ```
    - **Without shadow** (`-o` omits the shadow — tight crop to the window bounds):
      ```bash
-     screencapture -o -l"$WID" build/screenshot_noshadow.png
+     screencapture -o -l"$WID" "build/screenshot_${THEME}_noshadow.png"
      ```
    `screencapture` needs **Screen Recording** permission for the process that runs it (System Settings → Privacy & Security → Screen Recording). Granting it to the terminal you release from is a one-time step that makes this the whole capture.
    - **Fallback if `screencapture` is blocked** (e.g. the agent's shell lacks that permission — it fails with `could not create image from window`): take a computer-use `screenshot` with `save_to_disk` (that path has screen access). Crop to the helper's `$X $Y $W $H` rectangle for the no-shadow version; expand each edge by ~60 px (staying within the display) for the shadow version.
 5. Quit the app (`pkill -x Takes`).
+6. Repeat steps 1–5 with `THEME=dark`.
 
-Confirm both `build/screenshot_shadow.png` and `build/screenshot_noshadow.png` exist.
+Confirm all four files exist: `build/screenshot_light_shadow.png`, `build/screenshot_light_noshadow.png`, `build/screenshot_dark_shadow.png`, `build/screenshot_dark_noshadow.png`.
 
 ## Step 7 — Archive the build (local)
 
@@ -137,35 +141,41 @@ Local archival only — `Private/` is gitignored, so nothing is pushed. Both ite
 cp build/Takes.dmg "Private/Builds/Takes v<MARKETING_VERSION>.dmg"
 ```
 
-**7b — Archive the screenshot.** Copy the **with-shadow** screenshot into `Private/Screenshots/`:
+**7b — Archive the screenshots.** Copy **both with-shadow** screenshots (light and dark) into `Private/Screenshots/`:
 
 ```bash
-cp build/screenshot_shadow.png "Private/Screenshots/Takes v<MARKETING_VERSION>.png"
+cp build/screenshot_light_shadow.png "Private/Screenshots/Takes Light v<MARKETING_VERSION>.png"
+cp build/screenshot_dark_shadow.png  "Private/Screenshots/Takes Dark v<MARKETING_VERSION>.png"
 ```
 
-Confirm both artifacts exist and report their paths.
+Confirm all artifacts exist and report their paths.
 
 ## Step 8 — Update the website and README, then push (single commit)
 
 Refresh the public screenshots, keep the developer-facing README aligned with the current build, and push **everything in one commit** — the appcast + changelog the build script staged in Step 5, plus the screenshots and README. This is the only outward-facing push of the web feed, and it's what makes the new build go live.
 
-1. Copy both screenshots into `website/`, overwriting the previous release's:
+1. Copy all four screenshots into `website/`, overwriting the previous release's:
    ```bash
-   cp build/screenshot_shadow.png   website/screenshot_shadow.png
-   cp build/screenshot_noshadow.png website/screenshot_noshadow.png
+   cp build/screenshot_light_noshadow.png website/screenshot_light_noshadow.png
+   cp build/screenshot_dark_noshadow.png  website/screenshot_dark_noshadow.png
+   cp build/screenshot_light_shadow.png   website/screenshot_light_shadow.png
+   cp build/screenshot_dark_shadow.png    website/screenshot_dark_shadow.png
    ```
-   `website/index.html` embeds `screenshot_noshadow.png` (it applies its own frame); the `README.md` marketing header embeds `screenshot_shadow.png`. Both update automatically once the files are replaced.
+   `website/index.html` embeds the `_noshadow` pair, swapping between the light and dark variant to match the page's own light/dark theme (it applies its own frame); the `README.md` marketing header embeds a `_shadow` variant. All update automatically once the files are replaced.
 2. Review the README section **below the marketing header** — everything after the `---` divider (the developer-facing "Current Scope", requirements, behavior notes, operator guide, etc.). Compare it against what actually shipped in this build (use the release notes from Step 3 and the commits since the last tag) and make any edits needed to keep it accurate: features moved in/out of scope, removed constraints, changed keyboard shortcuts, etc. Leave the marketing header (icon, title, tagline, download links) untouched.
 3. Commit and push in one shot. `appcast.xml` + `changelog.html` are already staged from Step 5; add the screenshots and README to the same commit:
    ```bash
    git add website/appcast.xml website/changelog.html \
-           website/screenshot_shadow.png website/screenshot_noshadow.png README.md
+           website/screenshot_light_noshadow.png website/screenshot_dark_noshadow.png \
+           website/screenshot_light_shadow.png website/screenshot_dark_shadow.png \
+           README.md
    git commit -m "Release <MARKETING_VERSION> (build <BUILD_NUMBER>): appcast, changelog, screenshots, README"
    git push origin main
    ```
 4. Clean up the transient screenshots:
    ```bash
-   rm -f build/screenshot_shadow.png build/screenshot_noshadow.png
+   rm -f build/screenshot_light_noshadow.png build/screenshot_dark_noshadow.png \
+         build/screenshot_light_shadow.png build/screenshot_dark_shadow.png
    ```
 
 ## Step 9 — Verify the live feed

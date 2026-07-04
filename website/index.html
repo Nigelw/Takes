@@ -5,22 +5,84 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Takes for Mac - Compare audio tracks</title>
   <meta name="description" content="Takes is a native macOS app for comparing multiple versions of audio tracks.">
+  <meta name="theme-color" content="#f7f6fb">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <script>
+    (() => {
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = prefersDark ? "dark" : "light";
+    })();
+  </script>
   <style>
     :root {
-      color-scheme: light;
+      color-scheme: light dark;
       --ink: #15151d;
       --muted: #676774;
       --quiet: #8c8d98;
       --line: rgba(26, 26, 34, 0.12);
+      --line-soft: rgba(26, 26, 34, 0.08);
+      --nav-hover: #4f3ec6;
+      --page-gradient-one: rgba(121, 104, 255, 0.18);
+      --page-gradient-two: rgba(246, 189, 98, 0.20);
+      --band: rgba(255, 255, 255, 0.58);
+      --band-line: rgba(255, 255, 255, 0.65);
       --panel: rgba(255, 255, 255, 0.72);
       --panel-strong: #ffffff;
+      --pill: rgba(255, 255, 255, 0.72);
       --brand: #6b55f0;
       --brand-dark: #4f3ec6;
       --brand-soft: #eeeaff;
       --gold: #f6bd62;
       --surface: #f7f6fb;
       --shadow: 0 26px 70px rgba(40, 30, 90, 0.20);
+      --button-shadow: 0 14px 34px rgba(91, 72, 216, 0.24);
+      --hero-shadow-one: rgba(40, 30, 90, 0.24);
+      --hero-shadow-two: rgba(91, 72, 216, 0.15);
+      --key-bg: linear-gradient(180deg, #ffffff 0%, #f0eff8 100%);
+      --key-border: rgba(78, 61, 197, 0.2);
+      --key-border-bottom: rgba(50, 38, 126, 0.35);
+      --key-inset: rgba(255, 255, 255, 0.95);
+      --key-lift: rgba(255, 255, 255, 0.85);
+      --key-depth: rgba(50, 38, 126, 0.08);
+      --theme-toggle-bg: rgba(255, 255, 255, 0.72);
+      --theme-toggle-hover: rgba(238, 234, 255, 0.9);
+      --theme-toggle-icon: #4f3ec6;
+      --theme-toggle-shadow: 0 10px 24px rgba(40, 30, 90, 0.12);
+    }
+
+    html[data-theme="dark"] {
+      --ink: #f5f3ff;
+      --muted: #c9c5d8;
+      --quiet: #9d98b5;
+      --line: rgba(232, 226, 255, 0.16);
+      --line-soft: rgba(232, 226, 255, 0.11);
+      --nav-hover: #d8d0ff;
+      --page-gradient-one: rgba(134, 111, 255, 0.24);
+      --page-gradient-two: rgba(246, 189, 98, 0.12);
+      --band: rgba(21, 18, 34, 0.58);
+      --band-line: rgba(255, 255, 255, 0.08);
+      --panel: rgba(32, 28, 48, 0.78);
+      --panel-strong: rgba(46, 39, 67, 0.9);
+      --pill: rgba(33, 29, 49, 0.82);
+      --brand: #9a88ff;
+      --brand-dark: #c9c0ff;
+      --brand-soft: rgba(154, 136, 255, 0.18);
+      --gold: #ffd083;
+      --surface: #0f0d18;
+      --shadow: 0 26px 70px rgba(0, 0, 0, 0.42);
+      --button-shadow: 0 16px 38px rgba(99, 82, 224, 0.34);
+      --hero-shadow-one: rgba(0, 0, 0, 0.48);
+      --hero-shadow-two: rgba(121, 104, 255, 0.2);
+      --key-bg: linear-gradient(180deg, #312b48 0%, #211d31 100%);
+      --key-border: rgba(201, 192, 255, 0.2);
+      --key-border-bottom: rgba(10, 8, 18, 0.85);
+      --key-inset: rgba(255, 255, 255, 0.11);
+      --key-lift: rgba(255, 255, 255, 0.04);
+      --key-depth: rgba(0, 0, 0, 0.32);
+      --theme-toggle-bg: rgba(32, 28, 48, 0.82);
+      --theme-toggle-hover: rgba(54, 47, 78, 0.95);
+      --theme-toggle-icon: #ffd083;
+      --theme-toggle-shadow: 0 12px 26px rgba(0, 0, 0, 0.34);
     }
 
     * {
@@ -29,8 +91,8 @@
 
     html {
       background:
-        radial-gradient(circle at 18% 0%, rgba(121, 104, 255, 0.18), transparent 34rem),
-        radial-gradient(circle at 82% 10%, rgba(246, 189, 98, 0.20), transparent 31rem),
+        radial-gradient(circle at 18% 0%, var(--page-gradient-one), transparent 34rem),
+        radial-gradient(circle at 82% 10%, var(--page-gradient-two), transparent 31rem),
         var(--surface);
       color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -88,9 +150,62 @@
       font-weight: 600;
     }
 
+    .nav-actions {
+      align-items: center;
+      display: flex;
+      gap: 14px;
+    }
+
     .nav-links a:hover,
     .brand:hover {
-      color: var(--brand-dark);
+      color: var(--nav-hover);
+    }
+
+    .theme-toggle {
+      align-items: center;
+      appearance: none;
+      background: var(--theme-toggle-bg);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      box-shadow: var(--theme-toggle-shadow);
+      color: var(--theme-toggle-icon);
+      cursor: pointer;
+      display: inline-flex;
+      height: 38px;
+      justify-content: center;
+      padding: 0;
+      width: 38px;
+    }
+
+    .theme-toggle:hover {
+      background: var(--theme-toggle-hover);
+      border-color: rgba(107, 85, 240, 0.26);
+    }
+
+    .theme-toggle:focus-visible {
+      outline: 3px solid rgba(107, 85, 240, 0.35);
+      outline-offset: 3px;
+    }
+
+    .theme-toggle svg {
+      height: 18px;
+      width: 18px;
+    }
+
+    .theme-toggle .moon-icon {
+      display: block;
+    }
+
+    .theme-toggle .sun-icon {
+      display: none;
+    }
+
+    html[data-theme="dark"] .theme-toggle .moon-icon {
+      display: none;
+    }
+
+    html[data-theme="dark"] .theme-toggle .sun-icon {
+      display: block;
     }
 
     .hero {
@@ -137,7 +252,7 @@
       align-items: center;
       background: var(--brand);
       border-radius: 12px;
-      box-shadow: 0 14px 34px rgba(91, 72, 216, 0.24);
+      box-shadow: var(--button-shadow);
       color: white;
       display: inline-flex;
       font-size: 16px;
@@ -149,6 +264,10 @@
 
     .button:hover {
       background: var(--brand-dark);
+    }
+
+    html[data-theme="dark"] .button {
+      color: #100d1b;
     }
 
     .apple-logo {
@@ -173,8 +292,8 @@
     }
 
     .section-links a {
-      background: rgba(255, 255, 255, 0.72);
-      border: 1px solid rgba(26, 26, 34, 0.08);
+      background: var(--pill);
+      border: 1px solid var(--line-soft);
       border-radius: 999px;
       color: var(--muted);
       font-size: 13px;
@@ -195,8 +314,8 @@
     .hero-shot {
       border-radius: 12px;
       box-shadow:
-        0 34px 70px rgba(40, 30, 90, 0.24),
-        0 12px 24px rgba(91, 72, 216, 0.15);
+        0 34px 70px var(--hero-shadow-one),
+        0 12px 24px var(--hero-shadow-two);
       overflow: hidden;
       position: relative;
     }
@@ -206,8 +325,8 @@
     }
 
     .features-band {
-      background: rgba(255, 255, 255, 0.58);
-      border-top: 1px solid rgba(255, 255, 255, 0.65);
+      background: var(--band);
+      border-top: 1px solid var(--band-line);
       padding: 92px 24px 108px;
     }
 
@@ -280,12 +399,6 @@
       margin-bottom: 14px;
     }
 
-    .feature:nth-child(2),
-    .feature:nth-child(4),
-    .feature:nth-child(7) {
-      background: var(--panel-strong);
-    }
-
     .mark {
       align-items: center;
       background: var(--brand-soft);
@@ -330,7 +443,7 @@
     }
 
     .faq-item {
-      background: rgba(255, 255, 255, 0.7);
+      background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 24px;
@@ -351,8 +464,8 @@
     }
 
     .help-band {
-      background: rgba(255, 255, 255, 0.58);
-      border-top: 1px solid rgba(255, 255, 255, 0.65);
+      background: var(--band);
+      border-top: 1px solid var(--band-line);
       padding: 92px 24px 108px;
     }
 
@@ -367,7 +480,7 @@
     }
 
     .help-card {
-      background: rgba(255, 255, 255, 0.7);
+      background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 24px;
@@ -423,12 +536,12 @@
     }
 
     .shortcut-list {
-      border-top: 1px solid rgba(26, 26, 34, 0.08);
+      border-top: 1px solid var(--line-soft);
     }
 
     .shortcut-row {
       align-items: center;
-      border-bottom: 1px solid rgba(26, 26, 34, 0.08);
+      border-bottom: 1px solid var(--line-soft);
       display: grid;
       gap: 16px;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -450,14 +563,14 @@
     }
 
     kbd {
-      background: linear-gradient(180deg, #ffffff 0%, #f0eff8 100%);
-      border: 1px solid rgba(78, 61, 197, 0.2);
-      border-bottom-color: rgba(50, 38, 126, 0.35);
+      background: var(--key-bg);
+      border: 1px solid var(--key-border);
+      border-bottom-color: var(--key-border-bottom);
       border-radius: 8px;
       box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.95),
-        0 1px 0 rgba(255, 255, 255, 0.85),
-        0 3px 0 rgba(50, 38, 126, 0.08);
+        inset 0 1px 0 var(--key-inset),
+        0 1px 0 var(--key-lift),
+        0 3px 0 var(--key-depth);
       color: var(--ink);
       display: inline-block;
       font-family: inherit;
@@ -499,6 +612,10 @@
 
       .nav-links {
         gap: 12px;
+      }
+
+      .nav-actions {
+        gap: 10px;
       }
 
       .hero {
@@ -568,9 +685,20 @@
         <img src="icon.png" alt="">
         <span>Takes</span>
       </a>
-      <div class="nav-links">
-        <a href="changelog.html">Changelog</a>
-        <a href="https://github.com/Nigelw/Takes">GitHub</a>
+      <div class="nav-actions">
+        <button class="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false">
+          <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20.4 14.7A8.5 8.5 0 0 1 9.3 3.6 8.5 8.5 0 1 0 20.4 14.7Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          </svg>
+          <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="2"/>
+            <path d="M12 2.5v2.2M12 19.3v2.2M4.7 4.7l1.6 1.6M17.7 17.7l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.7 19.3l1.6-1.6M17.7 6.3l1.6-1.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <div class="nav-links">
+          <a href="changelog.html">Changelog</a>
+          <a href="https://github.com/Nigelw/Takes">GitHub</a>
+        </div>
       </div>
     </nav>
 
@@ -592,7 +720,10 @@
 
         <div class="shot-wrap" aria-label="Takes app screenshot">
           <div class="hero-shot">
-            <img src="screenshot_noshadow.png" alt="Takes showing two aligned audio waveforms in a native Mac window">
+            <picture>
+              <source id="heroScreenshotSource" srcset="screenshot_dark_noshadow.png" media="(prefers-color-scheme: dark)">
+              <img id="heroScreenshot" src="screenshot_light_noshadow.png" alt="Takes showing two aligned audio waveforms in a native Mac window">
+            </picture>
           </div>
         </div>
       </section>
@@ -895,5 +1026,58 @@
       </div>
     </footer>
   </div>
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const themeToggle = document.querySelector(".theme-toggle");
+      const heroScreenshotSource = document.getElementById("heroScreenshotSource");
+      const heroScreenshot = document.getElementById("heroScreenshot");
+      const themeColor = document.querySelector('meta[name="theme-color"]');
+      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      let hasManualTheme = false;
+
+      const themeMetaColors = {
+        light: "#f7f6fb",
+        dark: "#0f0d18"
+      };
+
+      const screenshotSources = {
+        light: "screenshot_light_noshadow.png",
+        dark: "screenshot_dark_noshadow.png"
+      };
+
+      function applyTheme(theme) {
+        const isDark = theme === "dark";
+        root.dataset.theme = theme;
+        if (themeToggle) {
+          themeToggle.setAttribute("aria-pressed", String(isDark));
+          themeToggle.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
+          themeToggle.title = isDark ? "Switch to light mode" : "Switch to dark mode";
+        }
+        if (heroScreenshot) {
+          heroScreenshot.src = screenshotSources[theme];
+        }
+        if (heroScreenshotSource) {
+          heroScreenshotSource.srcset = screenshotSources[theme];
+        }
+        if (themeColor) {
+          themeColor.setAttribute("content", themeMetaColors[theme]);
+        }
+      }
+
+      applyTheme(root.dataset.theme || (mediaQuery.matches ? "dark" : "light"));
+
+      themeToggle?.addEventListener("click", () => {
+        hasManualTheme = true;
+        applyTheme(root.dataset.theme === "dark" ? "light" : "dark");
+      });
+
+      mediaQuery.addEventListener("change", (event) => {
+        if (!hasManualTheme) {
+          applyTheme(event.matches ? "dark" : "light");
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
