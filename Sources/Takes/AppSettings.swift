@@ -70,6 +70,7 @@ final class AppSettings: ObservableObject {
     nonisolated static let alignTracksOnOpenKey = "alignTracksOnOpen"
     nonisolated static let appearanceThemeKey = "appearanceTheme"
     nonisolated static let readoutStyleKey = "readoutStyle"
+    nonisolated static let appearanceThemeOverrideArgument = "--appearance-theme"
 
     private let defaults: UserDefaults
 
@@ -124,12 +125,15 @@ final class AppSettings: ObservableObject {
     /// Tuner. Session-only (not persisted) — a developer aid.
     @Published var indexBadgeAppearance = IndexBadgeAppearance()
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) {
         self.defaults = defaults
         offsetStep = Self.storedOffsetStep(defaults)
         offsetLargeStep = Self.storedOffsetLargeStep(defaults)
         alignTracksOnOpen = Self.storedAlignTracksOnOpen(defaults)
-        appearanceTheme = Self.storedAppearanceTheme(defaults)
+        appearanceTheme = Self.appearanceThemeOverride(arguments: arguments) ?? Self.storedAppearanceTheme(defaults)
         readoutStyle = Self.storedReadoutStyle(defaults)
     }
 
@@ -185,5 +189,25 @@ final class AppSettings: ObservableObject {
 
     nonisolated static func storedReadoutStyle(_ defaults: UserDefaults = .standard) -> ReadoutStyle {
         defaults.string(forKey: readoutStyleKey).flatMap(ReadoutStyle.init(rawValue:)) ?? readoutStyleDefault
+    }
+
+    nonisolated static func appearanceThemeOverride(arguments: [String]) -> AppearanceTheme? {
+        for (index, argument) in arguments.enumerated() {
+            if argument == appearanceThemeOverrideArgument,
+               arguments.indices.contains(index + 1),
+               let theme = AppearanceTheme(rawValue: arguments[index + 1].lowercased()) {
+                return theme
+            }
+
+            let prefix = "\(appearanceThemeOverrideArgument)="
+            if argument.hasPrefix(prefix) {
+                let value = String(argument.dropFirst(prefix.count))
+                if let theme = AppearanceTheme(rawValue: value.lowercased()) {
+                    return theme
+                }
+            }
+        }
+
+        return nil
     }
 }

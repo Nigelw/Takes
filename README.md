@@ -261,6 +261,18 @@ The Playback menu mirrors the main transport actions and includes Auto-Align Tra
 - Help > Debug > Reset Window Size restores the main window to its default width and launch height.
 - Help > Debug > Appearance Tuner opens a session-only tuning window for transport button and index badge appearance.
 
+For automated screenshots, launch with a non-persistent theme override:
+
+```bash
+open .derived-data/Build/Products/Debug/Takes.app --args --appearance-theme dark
+```
+
+The override accepts `system`, `light`, or `dark`. To prepare the next launch through the app's persisted preference instead, use:
+
+```bash
+defaults write com.nigelwarren.Takes appearanceTheme dark
+```
+
 ## Manual Verification Checklist
 
 Useful spot checks after changing playback or UI behavior:

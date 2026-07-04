@@ -346,6 +346,34 @@ struct SessionTests {
     }
 
     @Test
+    func appearanceThemeOverrideReadsLaunchArgument() {
+        #expect(AppSettings.appearanceThemeOverride(arguments: [
+            "Takes",
+            AppSettings.appearanceThemeOverrideArgument,
+            "dark"
+        ]) == .dark)
+        #expect(AppSettings.appearanceThemeOverride(arguments: [
+            "Takes",
+            "\(AppSettings.appearanceThemeOverrideArgument)=light"
+        ]) == .light)
+    }
+
+    @MainActor
+    @Test
+    func appearanceThemeOverrideDoesNotPersistDuringSettingsInitialization() {
+        let defaults = UserDefaults(suiteName: "AppSettingsAppearanceOverrideTests-\(UUID().uuidString)")!
+        defaults.set(AppearanceTheme.light.rawValue, forKey: AppSettings.appearanceThemeKey)
+
+        let settings = AppSettings(
+            defaults: defaults,
+            arguments: ["Takes", AppSettings.appearanceThemeOverrideArgument, "dark"]
+        )
+
+        #expect(settings.appearanceTheme == .dark)
+        #expect(AppSettings.storedAppearanceTheme(defaults) == .light)
+    }
+
+    @Test
     func musicSelectionScriptDoesNotRejectMoreThanTwoTracks() {
         let script = LibraryTrackSelectionLoader.musicSelectionScript
 
