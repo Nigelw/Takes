@@ -39,6 +39,9 @@ final class PlaybackController: ObservableObject {
 
     private let loader: AudioFileLoading
     private let libraryTrackSelector: LibraryTrackSelecting
+    private let streamingTrackResolver: StreamingTrackResolving
+    private let streamingDownloadCache: StreamingDownloadCache
+    private let ytdlpManager: YTDLPManaging
     private let engine = AVAudioEngine()
     nonisolated private static let maximumSilenceBufferDuration: TimeInterval = 5
 
@@ -51,6 +54,7 @@ final class PlaybackController: ObservableObject {
     private var engineConfigurationObserver: NotificationObserverToken?
     private var scrollAnimationTimer: Timer?
     private var scrollAnimation: ScrollAnimation?
+    private var streamingCacheFilesByTrackID: [SessionTrack.ID: URL] = [:]
 
     /// A short tween of `visibleStart`, used to animate the catch-up scroll when
     /// playback starts with the playhead off-screen.
@@ -94,10 +98,18 @@ final class PlaybackController: ObservableObject {
 
     init(
         loader: AudioFileLoading = AudioFileLoader(),
-        libraryTrackSelector: LibraryTrackSelecting = LibraryTrackSelectionLoader()
+        libraryTrackSelector: LibraryTrackSelecting = LibraryTrackSelectionLoader(),
+        streamingTrackResolver: StreamingTrackResolving = StreamingTrackResolver(),
+        streamingDownloadCache: StreamingDownloadCache = StreamingDownloadCache(
+            rootURL: PlaybackController.defaultStreamingDownloadCacheRoot()
+        ),
+        ytdlpManager: YTDLPManaging = YTDLPManager()
     ) {
         self.loader = loader
         self.libraryTrackSelector = libraryTrackSelector
+        self.streamingTrackResolver = streamingTrackResolver
+        self.streamingDownloadCache = streamingDownloadCache
+        self.ytdlpManager = ytdlpManager
         engineConfigurationObserver = NotificationObserverToken(NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine,
@@ -107,6 +119,11 @@ final class PlaybackController: ObservableObject {
                 self?.handleAudioEngineConfigurationChange()
             }
         })
+        prepareStreamingDownloadCache()
+    }
+
+    var displayedTrackRowCount: Int {
+        session.tracks.count
     }
 
     func loadImportedFiles(_ urls: [URL]) async {
@@ -272,6 +289,73 @@ final class PlaybackController: ObservableObject {
         }
     }
 
+    @discardableResult
+    func loadStreamingTrack(
+        from rawURLString: String,
+        statusHandler: @escaping @Sendable (StreamingURLPromptStatus) async -> Void = { _ in }
+    ) async -> Bool {
+        let trimmed = rawURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let sourceURL = URL(string: trimmed), sourceURL.scheme != nil else {
+            await statusHandler(.failed("Enter a valid streaming URL."))
+            return false
+        }
+
+        let loadID = UUID()
+        var loadDirectory: URL?
+
+        do {
+            try Task.checkCancellation()
+            await statusHandler(.preparingDownloader)
+            let downloaderURL = try await ytdlpManager.executableURL()
+            try Task.checkCancellation()
+
+            let match = try await streamingTrackResolver.resolveYouTubeMatch(
+                for: sourceURL,
+                using: downloaderURL,
+                statusHandler: statusHandler
+            )
+            let youtubeURL = match.url
+            try Task.checkCancellation()
+
+            try streamingDownloadCache.prepare()
+            let currentLoadDirectory = try streamingDownloadCache.createLoadDirectory(id: loadID)
+            loadDirectory = currentLoadDirectory
+
+            await statusHandler(.downloading(progress: nil))
+            let downloadedURL = try await downloadStreamingAudio(
+                from: youtubeURL,
+                into: currentLoadDirectory,
+                filenameBase: match.downloadFilenameBase,
+                using: downloaderURL
+            )
+            try Task.checkCancellation()
+
+            await statusHandler(.openingAudio)
+            let existingTrackIDs = Set(session.tracks.map(\.id))
+            await loadImportedFiles([downloadedURL])
+            guard let importedTrack = session.tracks.first(where: {
+                !existingTrackIDs.contains($0.id)
+                    && Self.timelineIdentityURL(for: $0.loadedTrack.url) == Self.timelineIdentityURL(for: downloadedURL)
+            }) else {
+                throw StreamingTrackImportError.openImportFailed
+            }
+            streamingCacheFilesByTrackID[importedTrack.id] = downloadedURL
+            return true
+        } catch is CancellationError {
+            if let loadDirectory {
+                try? streamingDownloadCache.deleteOwnedItem(at: loadDirectory)
+            }
+            return false
+        } catch {
+            if let loadDirectory {
+                try? streamingDownloadCache.deleteOwnedItem(at: loadDirectory)
+            }
+            NSLog("Streaming track import failed: \(error)")
+            await statusHandler(.failed(StreamingTrackImportError.promptMessage(for: error)))
+            return false
+        }
+    }
+
     func setPlaybackError(_ error: PlaybackError) {
         playbackError = error
     }
@@ -284,6 +368,33 @@ final class PlaybackController: ObservableObject {
         let metadata = try await loader.loadTrackMetadata(from: url)
         let file = try loader.makeAudioFile(from: url)
         return PreparedTrackLoad(metadata: metadata, file: file)
+    }
+
+    private static func defaultStreamingDownloadCacheRoot(fileManager: FileManager = .default) -> URL {
+        let cachesRoot = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.nigelwarren.Takes"
+        return cachesRoot
+            .appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent("StreamingDownloads", isDirectory: true)
+    }
+
+    private func prepareStreamingDownloadCache() {
+        do {
+            try streamingDownloadCache.prepare()
+        } catch {
+            playbackError = .librarySelectionFailed("Could not prepare the streaming download cache.")
+        }
+    }
+
+    private func downloadStreamingAudio(
+        from youtubeURL: URL,
+        into directory: URL,
+        filenameBase: String?,
+        using downloaderURL: URL
+    ) async throws -> URL {
+        let downloader = YTDLPDownloader(binaryURL: downloaderURL)
+        return try await downloader.download(youtubeURL, into: directory, filenameBase: filenameBase)
     }
 
     @discardableResult
@@ -469,6 +580,7 @@ final class PlaybackController: ObservableObject {
 
         session.tracks.remove(at: removedIndex)
         detachRuntimeTrack(for: trackID)
+        deleteStreamingCacheFile(for: trackID)
 
         if wasActive {
             if session.tracks.indices.contains(removedIndex) {
@@ -508,6 +620,7 @@ final class PlaybackController: ObservableObject {
         for runtime in runtimeTracksInSessionOrder() {
             runtime.player.stop()
         }
+        deleteAllStreamingCacheFiles()
         runtimeTracksByID.removeAll()
         session.tracks.removeAll()
         session.activeTrackID = nil
@@ -520,6 +633,25 @@ final class PlaybackController: ObservableObject {
         timer?.invalidate()
         recalculateSessionDuration()
         applyAudibility()
+    }
+
+    func cleanupStreamingDownloads() {
+        deleteAllStreamingCacheFiles()
+        try? streamingDownloadCache.deleteLaunchDirectory()
+    }
+
+    private func deleteStreamingCacheFile(for trackID: SessionTrack.ID) {
+        guard let cacheFileURL = streamingCacheFilesByTrackID.removeValue(forKey: trackID) else { return }
+        try? streamingDownloadCache.deleteOwnedItem(at: cacheFileURL)
+        let parentDirectory = cacheFileURL.deletingLastPathComponent()
+        try? streamingDownloadCache.deleteOwnedItem(at: parentDirectory)
+    }
+
+    private func deleteAllStreamingCacheFiles() {
+        let trackIDs = Array(streamingCacheFilesByTrackID.keys)
+        for trackID in trackIDs {
+            deleteStreamingCacheFile(for: trackID)
+        }
     }
 
     func setGain(_ trackID: SessionTrack.ID, db: Float) {

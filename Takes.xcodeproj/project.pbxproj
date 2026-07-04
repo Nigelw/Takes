@@ -29,6 +29,8 @@
 		A1000000000000000000C017 /* TransportControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C007 /* TransportControls.swift */; };
 		A1000000000000000000C018 /* TrackAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C008 /* TrackAligner.swift */; };
 		A1000000000000000000C019 /* TrackAlignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C009 /* TrackAlignerTests.swift */; };
+		A1000000000000000000C01A /* StreamingTrackImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00A /* StreamingTrackImport.swift */; };
+		A1000000000000000000C01B /* StreamingTrackImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00B /* StreamingTrackImportTests.swift */; };
 		A6FE79452FDE592C003F2711 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A6FE79442FDE592C003F2711 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -69,6 +71,8 @@
 		A1000000000000000000C007 /* TransportControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportControls.swift; sourceTree = "<group>"; };
 		A1000000000000000000C008 /* TrackAligner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackAligner.swift; sourceTree = "<group>"; };
 		A1000000000000000000C009 /* TrackAlignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackAlignerTests.swift; sourceTree = "<group>"; };
+		A1000000000000000000C00A /* StreamingTrackImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTrackImport.swift; sourceTree = "<group>"; };
+		A1000000000000000000C00B /* StreamingTrackImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTrackImportTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -152,6 +156,7 @@
 				A10000000000000000000016 /* TakesApp.swift */,
 				A1000000000000000000C003 /* SettingsView.swift */,
 				A1000000000000000000C002 /* SoftwareUpdater.swift */,
+				A1000000000000000000C00A /* StreamingTrackImport.swift */,
 				A10000000000000000000017 /* TransportMapping.swift */,
 				A1000000000000000000C004 /* WaveformStore.swift */,
 			);
@@ -162,6 +167,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000018 /* SessionTests.swift */,
+				A1000000000000000000C00B /* StreamingTrackImportTests.swift */,
 				A1000000000000000000C009 /* TrackAlignerTests.swift */,
 				A1000000000000000000001D /* TrackDropHighlightTests.swift */,
 				A10000000000000000000019 /* TransportMappingTests.swift */,
@@ -285,6 +291,7 @@
 				A10000000000000000000025 /* PlaybackController.swift in Sources */,
 				A1000000000000000000C013 /* SettingsView.swift in Sources */,
 				A1000000000000000000C012 /* SoftwareUpdater.swift in Sources */,
+				A1000000000000000000C01A /* StreamingTrackImport.swift in Sources */,
 				A10000000000000000000026 /* TakesApp.swift in Sources */,
 				A1000000000000000000C018 /* TrackAligner.swift in Sources */,
 				A10000000000000000000027 /* TransportMapping.swift in Sources */,
@@ -297,6 +304,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000031 /* SessionTests.swift in Sources */,
+				A1000000000000000000C01B /* StreamingTrackImportTests.swift in Sources */,
 				A1000000000000000000C019 /* TrackAlignerTests.swift in Sources */,
 				A10000000000000000000033 /* TrackDropHighlightTests.swift in Sources */,
 				A10000000000000000000034 /* WaveformSourceTests.swift in Sources */,

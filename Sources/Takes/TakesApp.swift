@@ -6,7 +6,11 @@ import UniformTypeIdentifiers
 
 enum AppOpenedURLResolver {
     static func audioFileURLs(from urls: [URL], fileManager: FileManager = .default) -> [URL] {
-        urls.flatMap { url in
+        let inputURLs = urls.flatMap { url in
+            automationFileURLs(from: url) ?? [url]
+        }
+
+        return inputURLs.flatMap { url in
             if isDirectory(url, fileManager: fileManager) {
                 return audioFileURLs(in: url, fileManager: fileManager)
             }
@@ -29,6 +33,54 @@ enum AppOpenedURLResolver {
             .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 
+    static func streamingURLStrings(from urls: [URL]) -> [String] {
+        urls.compactMap(streamingURLString)
+    }
+
+    static func streamingURLString(from url: URL) -> String? {
+        guard url.scheme?.lowercased() == "takes",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let command = automationCommand(from: components),
+              ["open-url", "open-streaming-url"].contains(command),
+              let value = components.queryItems?.first(where: { $0.name == "url" })?.value?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              URL(string: value)?.scheme != nil
+        else {
+            return nil
+        }
+        return value
+    }
+
+    static func automationFileURLs(from url: URL) -> [URL]? {
+        guard url.scheme?.lowercased() == "takes",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let command = automationCommand(from: components),
+              ["open-file", "open-files"].contains(command)
+        else {
+            return nil
+        }
+
+        let fileURLs = components.queryItems?
+            .filter { $0.name == "url" }
+            .compactMap(\.value)
+            .compactMap { URL(string: $0) }
+            .filter { $0.isFileURL } ?? []
+
+        return fileURLs.isEmpty ? nil : fileURLs
+    }
+
+    private static func automationCommand(from components: URLComponents) -> String? {
+        if let host = components.host?.lowercased(), !host.isEmpty {
+            return host
+        }
+
+        return components.path
+            .split(separator: "/")
+            .first
+            .map { String($0).lowercased() }
+    }
+
     private static func isDirectory(_ url: URL, fileManager: FileManager) -> Bool {
         var isDirectory: ObjCBool = false
         return fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
@@ -46,29 +98,47 @@ enum AppOpenedURLResolver {
 
 @MainActor
 final class AppFileOpenRouter {
-    typealias Handler = @MainActor ([URL]) -> Void
+    typealias AudioFileHandler = @MainActor ([URL]) -> Void
+    typealias StreamingURLHandler = @MainActor ([String]) -> Void
 
-    private var handler: Handler?
+    private var audioFileHandler: AudioFileHandler?
+    private var streamingURLHandler: StreamingURLHandler?
     private var pendingURLBatches: [[URL]] = []
+    private var pendingStreamingURLBatches: [[String]] = []
 
-    func setHandler(_ handler: @escaping Handler) {
-        self.handler = handler
+    func setHandler(_ handler: @escaping AudioFileHandler) {
+        audioFileHandler = handler
 
         let pendingURLBatches = self.pendingURLBatches
         self.pendingURLBatches.removeAll()
         pendingURLBatches.forEach(handler)
     }
 
+    func setStreamingURLHandler(_ handler: @escaping StreamingURLHandler) {
+        streamingURLHandler = handler
+
+        let pendingStreamingURLBatches = self.pendingStreamingURLBatches
+        self.pendingStreamingURLBatches.removeAll()
+        pendingStreamingURLBatches.forEach(handler)
+    }
+
     func open(_ urls: [URL]) {
         let audioFileURLs = AppOpenedURLResolver.audioFileURLs(from: urls)
-        guard !audioFileURLs.isEmpty else { return }
-
-        guard let handler else {
-            pendingURLBatches.append(audioFileURLs)
-            return
+        if !audioFileURLs.isEmpty {
+            if let audioFileHandler {
+                audioFileHandler(audioFileURLs)
+            } else {
+                pendingURLBatches.append(audioFileURLs)
+            }
         }
 
-        handler(audioFileURLs)
+        let streamingURLStrings = AppOpenedURLResolver.streamingURLStrings(from: urls)
+        guard !streamingURLStrings.isEmpty else { return }
+        if let streamingURLHandler {
+            streamingURLHandler(streamingURLStrings)
+        } else {
+            pendingStreamingURLBatches.append(streamingURLStrings)
+        }
     }
 }
 
@@ -82,6 +152,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         fileOpenRouter.open(urls)
+    }
+}
+
+enum TakesAboutPanel {
+    static let creditsText = """
+    Lead designer & developer
+    Nigel M. Warren: https://nigelwarren.com
+
+    Third-Party Resources
+    Sparkle: https://sparkle-project.org/
+    yt-dlp: https://github.com/yt-dlp/yt-dlp
+    """
+
+    private static let creditLinks: [(label: String, destination: String)] = [
+        ("https://nigelwarren.com", "https://nigelwarren.com"),
+        ("https://sparkle-project.org/", "https://sparkle-project.org/"),
+        ("https://github.com/yt-dlp/yt-dlp", "https://github.com/yt-dlp/yt-dlp")
+    ]
+
+    static var options: [NSApplication.AboutPanelOptionKey: Any] {
+        [.credits: credits]
+    }
+
+    static var credits: NSAttributedString {
+        let credits = NSMutableAttributedString(string: creditsText)
+        let fullRange = NSRange(location: 0, length: credits.length)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+        paragraphStyle.paragraphSpacing = 6
+
+        credits.addAttributes([
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: paragraphStyle
+        ], range: fullRange)
+
+        for (label, destination) in creditLinks {
+            guard let range = credits.string.range(of: label),
+                  let url = URL(string: destination)
+            else { continue }
+
+            credits.addAttributes([
+                .link: url,
+                .foregroundColor: NSColor.linkColor
+            ], range: NSRange(range, in: credits.string))
+        }
+
+        return credits
     }
 }
 
@@ -376,18 +494,16 @@ struct TakesApp: App {
     @StateObject private var remotePlaybackCommands = RemotePlaybackCommandController()
     @StateObject private var settings = AppSettings()
     @StateObject private var updater = SoftwareUpdater()
+    @StateObject private var ytdlpUpdates = YTDLPUpdateState()
 
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
-            ContentView(controller: controller)
+            ContentView(controller: controller, appFileOpenRouter: appDelegate.fileOpenRouter)
                 .environmentObject(settings)
                 .environmentObject(updater)
                 .onAppear {
                     controller.settings = settings
                     remotePlaybackCommands.connect(to: controller)
-                    appDelegate.fileOpenRouter.setHandler { urls in
-                        Task { await controller.loadImportedFiles(urls) }
-                    }
                 }
         }
         .defaultSize(
@@ -400,7 +516,11 @@ struct TakesApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .commands {
-            CommandGroup(after: .appInfo) {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Takes") {
+                    NSApp.orderFrontStandardAboutPanel(options: TakesAboutPanel.options)
+                }
+
                 Button("Check for Updates…") {
                     updater.checkForUpdates()
                 }
@@ -521,6 +641,7 @@ struct TakesApp: App {
             SettingsView()
                 .environmentObject(settings)
                 .environmentObject(updater)
+                .environmentObject(ytdlpUpdates)
         }
         .windowResizability(.contentSize)
     }
@@ -562,6 +683,12 @@ private struct FileCommands: Commands {
                 openFileCommandState?.presentOpenDialog()
             }
             .keyboardShortcut("o")
+            .disabled(openFileCommandState == nil)
+
+            Button(ImportActionMenuItem.streamingURL.title) {
+                openFileCommandState?.presentStreamingURLPrompt()
+            }
+            .keyboardShortcut("o", modifiers: [.shift, .command])
             .disabled(openFileCommandState == nil)
 
             Button(ImportActionMenuItem.finderSelection.title) {

@@ -85,6 +85,7 @@ struct TrackDropHighlightTests {
     @Test
     func importActionMenuOffersFinderSelectionAndMusicSelection() {
         #expect(ImportActionMenuItem.dropdownItems.map(\.title) == [
+            "Open Streaming URL...",
             "Quick Open from Finder",
             "Quick Open from Apple Music"
         ])
@@ -104,6 +105,106 @@ struct TrackDropHighlightTests {
         state.dismissOpenDialog()
 
         #expect(!state.isImportingTracks)
+    }
+
+    @MainActor
+    @Test
+    func openFileCommandStateControlsStreamingURLPromptPresentation() {
+        let state = OpenFileCommandState()
+
+        #expect(!state.isPromptingForStreamingURL)
+
+        state.presentStreamingURLPrompt()
+
+        #expect(state.isPromptingForStreamingURL)
+
+        state.dismissStreamingURLPrompt()
+
+        #expect(!state.isPromptingForStreamingURL)
+    }
+
+    @MainActor
+    @Test
+    func openFileCommandStateSubmitsStreamingURLAction() {
+        var submittedURLString: String?
+        let state = OpenFileCommandState(loadStreamingURL: { urlString, commandState in
+            submittedURLString = urlString
+            commandState.dismissStreamingURLPrompt()
+        })
+
+        state.presentStreamingURLPrompt()
+        state.streamingURLText = "  https://open.spotify.com/track/example  "
+        state.submitStreamingURL()
+
+        #expect(submittedURLString == "https://open.spotify.com/track/example")
+        #expect(!state.isPromptingForStreamingURL)
+        #expect(state.streamingURLText.isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func openFileCommandStateOpensAutomationStreamingURLInPrompt() {
+        var submittedURLString: String?
+        let state = OpenFileCommandState(loadStreamingURL: { urlString, _ in
+            submittedURLString = urlString
+        })
+
+        state.openStreamingURL("https://www.youtube.com/watch?v=XPL_qGqSJxA")
+
+        #expect(submittedURLString == "https://www.youtube.com/watch?v=XPL_qGqSJxA")
+        #expect(state.isPromptingForStreamingURL)
+        #expect(state.streamingURLText == "https://www.youtube.com/watch?v=XPL_qGqSJxA")
+        #expect(state.streamingURLStatus.isWorking)
+    }
+
+    @MainActor
+    @Test
+    func openFileCommandStateKeepsStreamingPromptOpenWhileLoading() {
+        var submittedURLString: String?
+        let state = OpenFileCommandState(loadStreamingURL: { urlString, _ in
+            submittedURLString = urlString
+        })
+
+        state.presentStreamingURLPrompt()
+        state.streamingURLText = "https://open.spotify.com/track/example"
+        state.submitStreamingURL()
+
+        #expect(submittedURLString == "https://open.spotify.com/track/example")
+        #expect(state.isPromptingForStreamingURL)
+        #expect(state.streamingURLStatus.isWorking)
+        #expect(!state.streamingURLText.isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func openFileCommandStateCancelsRegisteredStreamingTaskOnDismiss() async throws {
+        let recorder = StreamingURLCancellationRecorder()
+        let state = OpenFileCommandState(loadStreamingURL: { _, commandState in
+            let taskID = UUID()
+            let task = Task {
+                do {
+                    try await Task.sleep(for: .seconds(10))
+                } catch is CancellationError {
+                    await recorder.recordCancellation()
+                } catch {
+                }
+                await MainActor.run {
+                    commandState.finishStreamingURLTask(id: taskID)
+                }
+            }
+            commandState.registerStreamingURLTask(task, id: taskID)
+        })
+
+        state.presentStreamingURLPrompt()
+        state.streamingURLText = "https://www.youtube.com/watch?v=XPL_qGqSJxA"
+        state.submitStreamingURL()
+        state.dismissStreamingURLPrompt()
+
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(await recorder.didCancel)
+        #expect(!state.isPromptingForStreamingURL)
+        #expect(!state.streamingURLStatus.isWorking)
     }
 
     @MainActor
@@ -212,6 +313,91 @@ struct TrackDropHighlightTests {
         router.open([laterURL])
 
         #expect(handledURLBatches == [[earlyURL], [laterURL]])
+    }
+
+    @MainActor
+    @Test
+    func appFileOpenRouterQueuesAutomationFileURLsUntilHandlerIsConfigured() {
+        let router = AppFileOpenRouter()
+        let earlyURL = URL(string: "takes://open-file?url=file%3A%2F%2F%2Ftmp%2Fearly.wav")!
+        let laterURL = URL(string: "takes://open-files?url=file%3A%2F%2F%2Ftmp%2Flater.mp3&url=file%3A%2F%2F%2Ftmp%2Fthird.m4a")!
+        var handledURLBatches: [[URL]] = []
+
+        router.open([earlyURL])
+
+        #expect(handledURLBatches.isEmpty)
+
+        router.setHandler { urls in
+            handledURLBatches.append(urls)
+        }
+
+        #expect(handledURLBatches == [[URL(fileURLWithPath: "/tmp/early.wav")]])
+
+        router.open([laterURL])
+
+        #expect(handledURLBatches == [
+            [URL(fileURLWithPath: "/tmp/early.wav")],
+            [
+                URL(fileURLWithPath: "/tmp/later.mp3"),
+                URL(fileURLWithPath: "/tmp/third.m4a")
+            ]
+        ])
+    }
+
+    @MainActor
+    @Test
+    func appFileOpenRouterQueuesStreamingURLsUntilHandlerIsConfigured() {
+        let router = AppFileOpenRouter()
+        let earlyURL = URL(string: "takes://open-url?url=https%3A%2F%2Fmusic.apple.com%2Fus%2Falbum%2Fexample%2F123%3Fi%3D456")!
+        let laterURL = URL(string: "takes://open-streaming-url?url=https%3A%2F%2Fopen.spotify.com%2Ftrack%2Fabc")!
+        var handledURLBatches: [[String]] = []
+
+        router.open([earlyURL])
+
+        #expect(handledURLBatches.isEmpty)
+
+        router.setStreamingURLHandler { urlStrings in
+            handledURLBatches.append(urlStrings)
+        }
+
+        #expect(handledURLBatches == [["https://music.apple.com/us/album/example/123?i=456"]])
+
+        router.open([laterURL])
+
+        #expect(handledURLBatches == [
+            ["https://music.apple.com/us/album/example/123?i=456"],
+            ["https://open.spotify.com/track/abc"]
+        ])
+    }
+
+    @Test
+    func appOpenedURLResolverExtractsStreamingURLsFromTakesAutomationScheme() {
+        let url = URL(string: "takes://open-url?url=https%3A%2F%2Fmusic.youtube.com%2Fwatch%3Fv%3Dabc")!
+
+        #expect(AppOpenedURLResolver.streamingURLString(from: url) == "https://music.youtube.com/watch?v=abc")
+        #expect(AppOpenedURLResolver.streamingURLStrings(from: [url]) == ["https://music.youtube.com/watch?v=abc"])
+    }
+
+    @Test
+    func appOpenedURLResolverExtractsUnescapedStreamingURLFromTakesAutomationScheme() {
+        let url = URL(string: "takes://open-url?url=https://www.youtube.com/watch?v=XPL_qGqSJxA")!
+
+        #expect(AppOpenedURLResolver.streamingURLString(from: url) == "https://www.youtube.com/watch?v=XPL_qGqSJxA")
+        #expect(AppOpenedURLResolver.streamingURLStrings(from: [url]) == ["https://www.youtube.com/watch?v=XPL_qGqSJxA"])
+    }
+
+    @Test
+    func appOpenedURLResolverExtractsAudioFilesFromTakesAutomationScheme() {
+        let url = URL(string: "takes://open-files?url=file%3A%2F%2F%2Ftmp%2Ffirst.wav&url=file%3A%2F%2F%2Ftmp%2Fsecond.m4a")!
+
+        #expect(AppOpenedURLResolver.automationFileURLs(from: url) == [
+            URL(fileURLWithPath: "/tmp/first.wav"),
+            URL(fileURLWithPath: "/tmp/second.m4a")
+        ])
+        #expect(AppOpenedURLResolver.audioFileURLs(from: [url]) == [
+            URL(fileURLWithPath: "/tmp/first.wav"),
+            URL(fileURLWithPath: "/tmp/second.m4a")
+        ])
     }
 
     @Test
@@ -329,5 +515,13 @@ struct TrackDropHighlightTests {
         #expect(leftToRightOrigin.y == bounds.maxY)
         #expect(rightToLeftOrigin.x == bounds.minX)
         #expect(rightToLeftOrigin.y == bounds.minY)
+    }
+}
+
+private actor StreamingURLCancellationRecorder {
+    private(set) var didCancel = false
+
+    func recordCancellation() {
+        didCancel = true
     }
 }
