@@ -113,3 +113,65 @@ final class SoftwareUpdater: ObservableObject {
         lastUpdateCheckDate = updater.lastUpdateCheckDate
     }
 }
+
+@MainActor
+final class YTDLPUpdateState: ObservableObject {
+    static let cadenceDescription = "Weekly"
+    static let updateSucceededMessage = "yt-dlp is up to date."
+    static let updateFailedMessage = "Could not update yt-dlp. Check your connection and try again."
+
+    private let updater: YTDLPUpdating
+
+    @Published private(set) var toolStatus: YTDLPManagedToolStatus?
+    @Published private(set) var isUpdating = false
+    @Published private(set) var statusMessage: String?
+
+    init(updater: YTDLPUpdating = YTDLPManager()) {
+        self.updater = updater
+        refresh()
+    }
+
+    var cadenceDescription: String {
+        Self.cadenceDescription
+    }
+
+    var lastCheckedDescription: String {
+        guard let date = toolStatus?.lastCheckedAt else {
+            return "Not checked yet"
+        }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    var lastUpdatedDescription: String {
+        guard let date = toolStatus?.installedAt else {
+            return "Not updated yet"
+        }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    func refresh() {
+        toolStatus = updater.managedToolStatus()
+    }
+
+    func updateNow() {
+        Task {
+            await performUpdateNow()
+        }
+    }
+
+    func performUpdateNow() async {
+        guard !isUpdating else { return }
+        isUpdating = true
+        statusMessage = nil
+        defer { isUpdating = false }
+
+        do {
+            _ = try await updater.updateManagedExecutableNow()
+            refresh()
+            statusMessage = Self.updateSucceededMessage
+        } catch {
+            refresh()
+            statusMessage = Self.updateFailedMessage
+        }
+    }
+}

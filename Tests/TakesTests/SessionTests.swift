@@ -400,6 +400,129 @@ struct SessionTests {
     }
 
     @Test
+    func aboutPanelCreditsExposeExactTextAndLinks() throws {
+        let credits = TakesAboutPanel.credits
+
+        #expect(credits.string == """
+        Lead designer & developer
+        Nigel M. Warren <https://nigelwarren.com>
+
+        Third-Party Resources
+        Sparkle <https://sparkle-project.org/>
+        yt-dlp <https://github.com/yt-dlp/yt-dlp>
+        """)
+
+        let expectedLinks: [(label: String, destination: String)] = [
+            ("Nigel M. Warren <https://nigelwarren.com>", "https://nigelwarren.com"),
+            ("Sparkle <https://sparkle-project.org/>", "https://sparkle-project.org/"),
+            ("yt-dlp <https://github.com/yt-dlp/yt-dlp>", "https://github.com/yt-dlp/yt-dlp")
+        ]
+
+        for (label, destination) in expectedLinks {
+            let range = try #require(credits.string.range(of: label))
+            let linkValue = credits.attribute(.link, at: NSRange(range, in: credits.string).location, effectiveRange: nil)
+            let url = try #require(linkValue as? URL)
+
+            #expect(url.absoluteString == destination)
+        }
+    }
+
+    @Test
+    @MainActor
+    func ytdlpUpdateStateFormatsCadenceAndManifestDates() {
+        let installedAt = Date(timeIntervalSince1970: 100)
+        let lastCheckedAt = Date(timeIntervalSince1970: 200)
+        let updater = StubYTDLPUpdater(status: YTDLPManagedToolStatus(
+            version: "2026.07.04",
+            channel: YTDLPManager.stableChannel,
+            installedAt: installedAt,
+            lastCheckedAt: lastCheckedAt,
+            executableURL: URL(fileURLWithPath: "/tmp/yt-dlp_macos")
+        ))
+        let state = YTDLPUpdateState(updater: updater)
+
+        #expect(state.cadenceDescription == "Weekly")
+        #expect(state.lastCheckedDescription == lastCheckedAt.formatted(date: .abbreviated, time: .shortened))
+        #expect(state.lastUpdatedDescription == installedAt.formatted(date: .abbreviated, time: .shortened))
+    }
+
+    @Test
+    @MainActor
+    func ytdlpUpdateStateShowsEmptyManifestDates() {
+        let state = YTDLPUpdateState(updater: StubYTDLPUpdater(status: nil))
+
+        #expect(state.lastCheckedDescription == "Not checked yet")
+        #expect(state.lastUpdatedDescription == "Not updated yet")
+    }
+
+    @Test
+    @MainActor
+    func ytdlpUpdateStateUpdateNowRefreshesStatusAfterSuccess() async {
+        let installedAt = Date(timeIntervalSince1970: 100)
+        let lastCheckedAt = Date(timeIntervalSince1970: 200)
+        let updatedStatus = YTDLPManagedToolStatus(
+            version: "2026.07.11",
+            channel: YTDLPManager.stableChannel,
+            installedAt: installedAt,
+            lastCheckedAt: lastCheckedAt,
+            executableURL: URL(fileURLWithPath: "/tmp/yt-dlp_macos")
+        )
+        let updater = StubYTDLPUpdater(status: nil, updatedStatus: updatedStatus)
+        let state = YTDLPUpdateState(updater: updater)
+
+        await state.performUpdateNow()
+
+        #expect(updater.updateCallCount == 1)
+        #expect(state.toolStatus == updatedStatus)
+        #expect(state.statusMessage == YTDLPUpdateState.updateSucceededMessage)
+        #expect(!state.isUpdating)
+    }
+
+    @Test
+    @MainActor
+    func ytdlpUpdateStateUpdateNowUsesFriendlyFailureMessage() async {
+        let updater = StubYTDLPUpdater(
+            status: nil,
+            updateError: StreamingTrackImportError.downloaderUnavailable
+        )
+        let state = YTDLPUpdateState(updater: updater)
+
+        await state.performUpdateNow()
+
+        #expect(updater.updateCallCount == 1)
+        #expect(state.statusMessage == YTDLPUpdateState.updateFailedMessage)
+        #expect(!state.isUpdating)
+    }
+
+    @Test
+    @MainActor
+    func cancellingStreamingTrackDuringMetadataAddsNoTrackOrFailureStatus() async throws {
+        let statusRecorder = StreamingStatusRecorder()
+        let controller = PlaybackController(
+            streamingTrackResolver: DelayedStreamingTrackResolver(delay: .seconds(10)),
+            ytdlpManager: StubYTDLPManager(url: URL(fileURLWithPath: "/usr/local/bin/yt-dlp"))
+        )
+
+        let task = Task {
+            await controller.loadStreamingTrack(
+                from: "https://open.spotify.com/track/example",
+                statusHandler: { status in
+                    await statusRecorder.record(status)
+                }
+            )
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+        task.cancel()
+        let didLoad = await task.value
+        let statuses = await statusRecorder.statuses()
+
+        #expect(!didLoad)
+        #expect(controller.displayedTrackRowCount == 0)
+        #expect(!statuses.contains { $0.isFailed })
+    }
+
+    @Test
     func infoPlistDeclaresAudioAndFolderDocumentSupportForAppIconDrops() throws {
         let plistURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -1720,5 +1843,75 @@ private struct FakeLibraryTrackSelector: LibraryTrackSelecting {
 
     func selectedTracks() throws -> LibraryTrackSelection {
         selection
+    }
+}
+
+private final class StubYTDLPUpdater: YTDLPUpdating, @unchecked Sendable {
+    private(set) var updateCallCount = 0
+    private var status: YTDLPManagedToolStatus?
+    private let updatedStatus: YTDLPManagedToolStatus?
+    private let updateError: Error?
+
+    init(
+        status: YTDLPManagedToolStatus?,
+        updatedStatus: YTDLPManagedToolStatus? = nil,
+        updateError: Error? = nil
+    ) {
+        self.status = status
+        self.updatedStatus = updatedStatus
+        self.updateError = updateError
+    }
+
+    func managedToolStatus() -> YTDLPManagedToolStatus? {
+        status
+    }
+
+    func updateManagedExecutableNow() async throws -> URL {
+        updateCallCount += 1
+        if let updateError {
+            throw updateError
+        }
+        if let updatedStatus {
+            status = updatedStatus
+        }
+        return status?.executableURL ?? URL(fileURLWithPath: "/tmp/yt-dlp_macos")
+    }
+}
+
+private struct StubYTDLPManager: YTDLPManaging {
+    let url: URL
+
+    func executableURL() async throws -> URL {
+        url
+    }
+}
+
+private struct DelayedStreamingTrackResolver: StreamingTrackResolving {
+    let delay: Duration
+
+    func resolveYouTubeMatch(
+        for sourceURL: URL,
+        using downloaderURL: URL,
+        statusHandler: @escaping @Sendable (StreamingURLPromptStatus) async -> Void
+    ) async throws -> StreamingYouTubeMatch {
+        try await Task.sleep(for: delay)
+        return StreamingYouTubeMatch(
+            url: URL(string: "https://www.youtube.com/watch?v=XPL_qGqSJxA")!,
+            title: "Example",
+            confidence: 1,
+            downloadFilenameBase: "Example"
+        )
+    }
+}
+
+private actor StreamingStatusRecorder {
+    private var recordedStatuses: [StreamingURLPromptStatus] = []
+
+    func record(_ status: StreamingURLPromptStatus) {
+        recordedStatuses.append(status)
+    }
+
+    func statuses() -> [StreamingURLPromptStatus] {
+        recordedStatuses
     }
 }

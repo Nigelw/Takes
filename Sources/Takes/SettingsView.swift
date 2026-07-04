@@ -118,6 +118,7 @@ private struct OffsetAmountField: View {
 
 private struct UpdateSettingsView: View {
     @EnvironmentObject private var updater: SoftwareUpdater
+    @EnvironmentObject private var ytdlpUpdates: YTDLPUpdateState
 
     var body: some View {
         Form {
@@ -151,11 +152,54 @@ private struct UpdateSettingsView: View {
                     .disabled(!updater.canCheckForUpdates)
                 }
             }
+
+            Section {
+                LabeledContent("Auto Update Cadence") {
+                    Text(ytdlpUpdates.cadenceDescription)
+                        .foregroundStyle(.secondary)
+                }
+
+                LabeledContent("Last Checked") {
+                    Text(ytdlpUpdates.lastCheckedDescription)
+                        .foregroundStyle(.secondary)
+                }
+
+                LabeledContent("Last Updated") {
+                    Text(ytdlpUpdates.lastUpdatedDescription)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let statusMessage = ytdlpUpdates.statusMessage {
+                    Text(statusMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                HStack {
+                    Spacer()
+
+                    HStack(spacing: 8) {
+                        if ytdlpUpdates.isUpdating {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+
+                        Button("Update Now") {
+                            ytdlpUpdates.updateNow()
+                        }
+                        .disabled(ytdlpUpdates.isUpdating)
+                    }
+                }
+            } header: {
+                Text("yt-dlp")
+            }
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
         .onAppear {
             updater.refreshLastCheckDate()
+            ytdlpUpdates.refresh()
         }
     }
 

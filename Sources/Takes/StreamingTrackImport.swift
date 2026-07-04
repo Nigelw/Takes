@@ -11,7 +11,9 @@ enum StreamingTrackImportError: Error, Equatable, LocalizedError {
     case itemOutsideCache(URL)
     case downloaderUnavailable
     case downloaderFailed(status: Int32, message: String)
+    case noCompatibleAudioStream
     case downloadedFileMissing(URL)
+    case openImportFailed
 
     var errorDescription: String? {
         switch self {
@@ -29,9 +31,20 @@ enum StreamingTrackImportError: Error, Equatable, LocalizedError {
             return "Could not find yt-dlp. Install yt-dlp or choose a streaming downloader location before opening streaming tracks."
         case .downloaderFailed:
             return Self.downloaderFailureMessage
-        case .downloadedFileMissing(let url):
-            return "The streaming audio download did not create \(url.lastPathComponent)."
+        case .noCompatibleAudioStream:
+            return "Could not find a compatible M4A audio stream for that track."
+        case .downloadedFileMissing:
+            return "Could not find a compatible M4A audio stream for that track."
+        case .openImportFailed:
+            return "Could not open the downloaded audio in Takes."
         }
+    }
+
+    static func promptMessage(for error: Error) -> String {
+        if let streamingError = error as? StreamingTrackImportError {
+            return streamingError.localizedDescription
+        }
+        return downloaderFailureMessage
     }
 }
 
@@ -815,21 +828,63 @@ protocol YTDLPManaging: Sendable {
     func executableURL() async throws -> URL
 }
 
+protocol YTDLPUpdating: Sendable {
+    func managedToolStatus() -> YTDLPManagedToolStatus?
+    func updateManagedExecutableNow() async throws -> URL
+}
+
 struct YTDLPDownloadedAsset: Sendable {
     let data: Data
     let finalURL: URL
+}
+
+struct YTDLPManagedToolStatus: Equatable {
+    let version: String
+    let channel: String
+    let installedAt: Date
+    let lastCheckedAt: Date
+    let executableURL: URL
 }
 
 struct YTDLPManagedToolManifest: Codable, Equatable {
     let version: String
     let channel: String
     let installedAt: Date
+    let lastCheckedAt: Date
     let checksum: String
     let executablePath: String
+
+    init(
+        version: String,
+        channel: String,
+        installedAt: Date,
+        lastCheckedAt: Date,
+        checksum: String,
+        executablePath: String
+    ) {
+        self.version = version
+        self.channel = channel
+        self.installedAt = installedAt
+        self.lastCheckedAt = lastCheckedAt
+        self.checksum = checksum
+        self.executablePath = executablePath
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(String.self, forKey: .version)
+        channel = try container.decode(String.self, forKey: .channel)
+        installedAt = try container.decode(Date.self, forKey: .installedAt)
+        lastCheckedAt = try container.decodeIfPresent(Date.self, forKey: .lastCheckedAt) ?? installedAt
+        checksum = try container.decode(String.self, forKey: .checksum)
+        executablePath = try container.decode(String.self, forKey: .executablePath)
+    }
 }
 
-struct YTDLPManager: YTDLPManaging {
+struct YTDLPManager: YTDLPManaging, YTDLPUpdating {
     static let assetName = "yt-dlp_macos"
+    static let stableChannel = "stable"
+    static let updateCheckInterval: TimeInterval = 7 * 24 * 60 * 60
 
     let rootURL: URL
 
@@ -839,6 +894,7 @@ struct YTDLPManager: YTDLPManaging {
     private let isExecutableFile: @Sendable (String) -> Bool
     private let downloadAsset: @Sendable (URL) async throws -> YTDLPDownloadedAsset
     private let dateProvider: @Sendable () -> Date
+    private let verifyExecutableVersion: @Sendable (URL) async throws -> String
 
     init(
         rootURL: URL = Self.defaultRootURL(),
@@ -847,7 +903,8 @@ struct YTDLPManager: YTDLPManaging {
         systemExecutableURL: @escaping @Sendable () -> URL? = { YTDLPToolLocator.defaultExecutableURL() },
         isExecutableFile: @escaping @Sendable (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
         downloadAsset: @escaping @Sendable (URL) async throws -> YTDLPDownloadedAsset = Self.downloadAsset,
-        dateProvider: @escaping @Sendable () -> Date = Date.init
+        dateProvider: @escaping @Sendable () -> Date = Date.init,
+        verifyExecutableVersion: @escaping @Sendable (URL) async throws -> String = Self.verifyExecutableVersion
     ) {
         self.rootURL = rootURL.standardizedFileURL
         self.binaryURL = binaryURL
@@ -856,19 +913,51 @@ struct YTDLPManager: YTDLPManaging {
         self.isExecutableFile = isExecutableFile
         self.downloadAsset = downloadAsset
         self.dateProvider = dateProvider
+        self.verifyExecutableVersion = verifyExecutableVersion
     }
 
     func executableURL() async throws -> URL {
-        if let managedExecutableURL = managedExecutableURL() {
-            return managedExecutableURL
+        if let managedTool = managedTool() {
+            guard managedTool.manifest.channel == Self.stableChannel,
+                  shouldCheckForUpdates(manifest: managedTool.manifest)
+            else {
+                return managedTool.executableURL
+            }
+
+            do {
+                return try await installLatestManagedExecutable(previousManifest: managedTool.manifest)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                return managedTool.executableURL
+            }
         }
-        if let installedExecutableURL = try? await installLatestManagedExecutable() {
-            return installedExecutableURL
+
+        do {
+            return try await installLatestManagedExecutable(previousManifest: nil)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if let systemExecutableURL = systemExecutableURL() {
+                return systemExecutableURL
+            }
+            throw StreamingTrackImportError.downloaderUnavailable
         }
-        if let systemExecutableURL = systemExecutableURL() {
-            return systemExecutableURL
-        }
-        throw StreamingTrackImportError.downloaderUnavailable
+    }
+
+    func managedToolStatus() -> YTDLPManagedToolStatus? {
+        guard let managedTool = managedTool() else { return nil }
+        return YTDLPManagedToolStatus(
+            version: managedTool.manifest.version,
+            channel: managedTool.manifest.channel,
+            installedAt: managedTool.manifest.installedAt,
+            lastCheckedAt: managedTool.manifest.lastCheckedAt,
+            executableURL: managedTool.executableURL
+        )
+    }
+
+    func updateManagedExecutableNow() async throws -> URL {
+        try await installLatestManagedExecutable(previousManifest: managedTool()?.manifest)
     }
 
     static func defaultRootURL(fileManager: FileManager = .default, bundle: Bundle = .main) -> URL {
@@ -888,6 +977,31 @@ struct YTDLPManager: YTDLPManaging {
             throw StreamingTrackImportError.downloaderUnavailable
         }
         return YTDLPDownloadedAsset(data: data, finalURL: response.url ?? url)
+    }
+
+    static func verifyExecutableVersion(for executableURL: URL) async throws -> String {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = ["--version"]
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw StreamingTrackImportError.downloaderUnavailable
+        }
+
+        let outputData = output.fileHandleForReading.readDataToEndOfFile()
+        let version = String(data: outputData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !version.isEmpty else {
+            throw StreamingTrackImportError.downloaderUnavailable
+        }
+        return version
     }
 
     static func sha256Checksum(for url: URL) throws -> String {
@@ -930,7 +1044,7 @@ struct YTDLPManager: YTDLPManaging {
         return "latest"
     }
 
-    private func managedExecutableURL() -> URL? {
+    private func managedTool() -> (manifest: YTDLPManagedToolManifest, executableURL: URL)? {
         let manifestURL = rootURL.appendingPathComponent("manifest.json")
         guard let data = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONDecoder().decode(YTDLPManagedToolManifest.self, from: data)
@@ -945,10 +1059,16 @@ struct YTDLPManager: YTDLPManaging {
         else {
             return nil
         }
-        return executableURL
+        return (manifest, executableURL)
     }
 
-    private func installLatestManagedExecutable() async throws -> URL {
+    private func shouldCheckForUpdates(manifest: YTDLPManagedToolManifest) -> Bool {
+        dateProvider().timeIntervalSince(manifest.lastCheckedAt) >= Self.updateCheckInterval
+    }
+
+    private func installLatestManagedExecutable(previousManifest: YTDLPManagedToolManifest?) async throws -> URL {
+        try removeStagingDirectories()
+
         async let binary = downloadAsset(binaryURL)
         async let checksums = downloadAsset(checksumsURL)
         let (binaryAsset, checksumsAsset) = try await (binary, checksums)
@@ -959,30 +1079,78 @@ struct YTDLPManager: YTDLPManaging {
             throw StreamingTrackImportError.downloaderUnavailable
         }
 
-        let version = Self.version(fromDownloadURL: binaryAsset.finalURL)
+        let now = dateProvider()
+        try Task.checkCancellation()
+        let stagingDirectory = rootURL
+            .appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: true)
+            .standardizedFileURL
+        let stagedExecutableURL = stagingDirectory.appendingPathComponent(Self.assetName)
+        try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: stagingDirectory) }
+
+        try binaryAsset.data.write(to: stagedExecutableURL, options: [.atomic])
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stagedExecutableURL.path)
+
+        guard isExecutableFile(stagedExecutableURL.path) else {
+            throw StreamingTrackImportError.downloaderUnavailable
+        }
+
+        try Task.checkCancellation()
+        let version = try await verifyExecutableVersion(stagedExecutableURL)
+        try Task.checkCancellation()
+
+        if let previousManifest,
+           previousManifest.version == version,
+           previousManifest.checksum == expectedChecksum,
+           let previousTool = managedTool() {
+            let refreshedManifest = YTDLPManagedToolManifest(
+                version: previousManifest.version,
+                channel: previousManifest.channel,
+                installedAt: previousManifest.installedAt,
+                lastCheckedAt: now,
+                checksum: previousManifest.checksum,
+                executablePath: previousManifest.executablePath
+            )
+            try writeManifest(refreshedManifest)
+            return previousTool.executableURL
+        }
+
         let installDirectory = rootURL
             .appendingPathComponent(sanitizedVersionDirectoryName(version), isDirectory: true)
             .standardizedFileURL
-        let executableURL = installDirectory.appendingPathComponent(Self.assetName)
-        try FileManager.default.createDirectory(at: installDirectory, withIntermediateDirectories: true)
-        try binaryAsset.data.write(to: executableURL, options: [.atomic])
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
+        let finalInstallDirectory = availableInstallDirectory(startingAt: installDirectory)
+        let executableURL = finalInstallDirectory.appendingPathComponent(Self.assetName)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: stagingDirectory, to: finalInstallDirectory)
 
-        guard isExecutableFile(executableURL.path) else {
+        guard isManaged(executableURL),
+              isExecutableFile(executableURL.path),
+              (try? Self.sha256Checksum(for: executableURL)) == expectedChecksum
+        else {
+            try? FileManager.default.removeItem(at: finalInstallDirectory)
             throw StreamingTrackImportError.downloaderUnavailable
         }
 
         let manifest = YTDLPManagedToolManifest(
             version: version,
-            channel: "stable",
-            installedAt: dateProvider(),
+            channel: Self.stableChannel,
+            installedAt: previousManifest?.installedAt ?? now,
+            lastCheckedAt: now,
             checksum: expectedChecksum,
             executablePath: executableURL.path
         )
+        try writeManifest(manifest)
+        return executableURL
+    }
+
+    private func writeManifest(_ manifest: YTDLPManagedToolManifest) throws {
+        let executableURL = URL(fileURLWithPath: manifest.executablePath).standardizedFileURL
+        guard isManaged(executableURL) else {
+            throw StreamingTrackImportError.downloaderUnavailable
+        }
         let manifestData = try JSONEncoder().encode(manifest)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         try manifestData.write(to: rootURL.appendingPathComponent("manifest.json"), options: [.atomic])
-        return executableURL
     }
 
     private func sanitizedVersionDirectoryName(_ version: String) -> String {
@@ -992,6 +1160,32 @@ struct YTDLPManager: YTDLPManaging {
             .joined()
             .trimmingCharacters(in: CharacterSet(charactersIn: ".-_"))
         return sanitized.isEmpty ? "latest" : sanitized
+    }
+
+    private func availableInstallDirectory(startingAt installDirectory: URL) -> URL {
+        guard FileManager.default.fileExists(atPath: installDirectory.path) else {
+            return installDirectory
+        }
+        return rootURL
+            .appendingPathComponent("\(installDirectory.lastPathComponent)-\(UUID().uuidString)", isDirectory: true)
+            .standardizedFileURL
+    }
+
+    private func removeStagingDirectories() throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: rootURL.path) else { return }
+
+        let children = try fileManager.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        )
+
+        for child in children where child.lastPathComponent.hasPrefix(".staging-") {
+            let values = try child.resourceValues(forKeys: [.isDirectoryKey])
+            guard values.isDirectory == true, isManaged(child) else { continue }
+            try fileManager.removeItem(at: child)
+        }
     }
 
     private func isManaged(_ url: URL) -> Bool {
@@ -1005,12 +1199,65 @@ protocol StreamingAudioDownloading: Sendable {
     func download(_ sourceURL: URL, into directory: URL, filenameBase: String?) throws -> URL
 }
 
+private final class YTDLPCancellableProcess: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var cancelled = false
+
+    func setProcess(_ process: Process) {
+        lock.lock()
+        self.process = process
+        let shouldTerminate = cancelled
+        lock.unlock()
+
+        if shouldTerminate {
+            process.terminate()
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let process = process
+        lock.unlock()
+
+        process?.terminate()
+    }
+
+    var isCancelled: Bool {
+        lock.lock()
+        let value = cancelled
+        lock.unlock()
+        return value
+    }
+}
+
 struct YTDLPDownloader: StreamingAudioDownloading {
     static let audioFormatSelector = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]"
 
     let binaryURL: URL
 
     func download(_ sourceURL: URL, into directory: URL, filenameBase: String?) throws -> URL {
+        try download(sourceURL, into: directory, filenameBase: filenameBase, cancellation: nil)
+    }
+
+    func download(_ sourceURL: URL, into directory: URL, filenameBase: String?) async throws -> URL {
+        let cancellation = YTDLPCancellableProcess()
+        return try await withTaskCancellationHandler {
+            try await Task.detached(priority: .userInitiated) {
+                try download(sourceURL, into: directory, filenameBase: filenameBase, cancellation: cancellation)
+            }.value
+        } onCancel: {
+            cancellation.cancel()
+        }
+    }
+
+    private func download(
+        _ sourceURL: URL,
+        into directory: URL,
+        filenameBase: String?,
+        cancellation: YTDLPCancellableProcess?
+    ) throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let outputLogURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("TakesYTDLP-\(UUID().uuidString)-stdout.log")
@@ -1040,11 +1287,20 @@ struct YTDLPDownloader: StreamingAudioDownloading {
         process.standardOutput = output
         process.standardError = error
 
+        try Task.checkCancellation()
         try process.run()
+        cancellation?.setProcess(process)
         process.waitUntilExit()
+
+        if cancellation?.isCancelled == true {
+            throw CancellationError()
+        }
 
         if process.terminationStatus != 0 {
             let message = Self.message(stdoutURL: outputLogURL, stderrURL: errorLogURL)
+            if Self.messageIndicatesMissingCompatibleAudio(message) {
+                throw StreamingTrackImportError.noCompatibleAudioStream
+            }
             throw StreamingTrackImportError.downloaderFailed(
                 status: process.terminationStatus,
                 message: message
@@ -1056,6 +1312,13 @@ struct YTDLPDownloader: StreamingAudioDownloading {
             throw StreamingTrackImportError.downloadedFileMissing(downloadedURL)
         }
         return downloadedURL
+    }
+
+    static func messageIndicatesMissingCompatibleAudio(_ message: String) -> Bool {
+        let lowercased = message.lowercased()
+        return lowercased.contains("requested format is not available")
+            || lowercased.contains("no video formats found")
+            || lowercased.contains("no audio formats found")
     }
 
     func arguments(

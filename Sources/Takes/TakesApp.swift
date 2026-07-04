@@ -155,6 +155,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+enum TakesAboutPanel {
+    static let creditsText = """
+    Lead designer & developer
+    Nigel M. Warren <https://nigelwarren.com>
+
+    Third-Party Resources
+    Sparkle <https://sparkle-project.org/>
+    yt-dlp <https://github.com/yt-dlp/yt-dlp>
+    """
+
+    private static let creditLinks: [(label: String, destination: String)] = [
+        ("Nigel M. Warren <https://nigelwarren.com>", "https://nigelwarren.com"),
+        ("Sparkle <https://sparkle-project.org/>", "https://sparkle-project.org/"),
+        ("yt-dlp <https://github.com/yt-dlp/yt-dlp>", "https://github.com/yt-dlp/yt-dlp")
+    ]
+
+    static var options: [NSApplication.AboutPanelOptionKey: Any] {
+        [.credits: credits]
+    }
+
+    static var credits: NSAttributedString {
+        let credits = NSMutableAttributedString(string: creditsText)
+        let fullRange = NSRange(location: 0, length: credits.length)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+        paragraphStyle.paragraphSpacing = 6
+
+        credits.addAttributes([
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: paragraphStyle
+        ], range: fullRange)
+
+        for (label, destination) in creditLinks {
+            guard let range = credits.string.range(of: label),
+                  let url = URL(string: destination)
+            else { continue }
+
+            credits.addAttributes([
+                .link: url,
+                .foregroundColor: NSColor.linkColor
+            ], range: NSRange(range, in: credits.string))
+        }
+
+        return credits
+    }
+}
+
 @MainActor
 final class RemotePlaybackCommandController: ObservableObject {
     private struct CommandTarget {
@@ -446,6 +494,7 @@ struct TakesApp: App {
     @StateObject private var remotePlaybackCommands = RemotePlaybackCommandController()
     @StateObject private var settings = AppSettings()
     @StateObject private var updater = SoftwareUpdater()
+    @StateObject private var ytdlpUpdates = YTDLPUpdateState()
 
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
@@ -467,7 +516,11 @@ struct TakesApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .commands {
-            CommandGroup(after: .appInfo) {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Takes") {
+                    NSApp.orderFrontStandardAboutPanel(options: TakesAboutPanel.options)
+                }
+
                 Button("Check for Updates…") {
                     updater.checkForUpdates()
                 }
@@ -588,6 +641,7 @@ struct TakesApp: App {
             SettingsView()
                 .environmentObject(settings)
                 .environmentObject(updater)
+                .environmentObject(ytdlpUpdates)
         }
         .windowResizability(.contentSize)
     }

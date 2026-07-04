@@ -80,8 +80,10 @@ The manager should:
 - Download the official macOS standalone `yt-dlp_macos` release asset.
 - Verify the release checksum/signature before marking it usable.
 - Store a small manifest with version, channel, install date, checksum, and path.
-- Check for updates at most once per day, and before each streaming download if
+- Check for updates at most once per week, and before each streaming download if
   the installed copy is missing or older than a chosen age.
+- Expose a `yt-dlp` section in `Settings > Updates` showing the automatic update
+  cadence, last update/check timestamp, and an `Update Now` button.
 - Replace binaries atomically by installing into a new version directory and then
   switching the manifest.
 - Keep the previous known-good binary until the replacement has passed
@@ -92,10 +94,8 @@ self-update for release binaries, but Takes should own verification, atomic
 replacement, and rollback. `-U` can still be exposed as a manual repair action if
 we decide to trust yt-dlp's updater behavior for official channels.
 
-Use the `nightly` channel only if we are comfortable with occasional regressions.
-The yt-dlp README currently says nightly is recommended for regular users because
-stable can lag behind site changes. For Takes, the default should probably be
-stable plus a user-visible `Use yt-dlp nightly` troubleshooting option.
+Use the stable channel only. Do not add nightly channel support for this feature
+slice.
 
 ### Legal Recommendation
 
@@ -112,9 +112,18 @@ engineering plan.
   bundle, invoking it as a separate process, and displaying its license notices is
   a cleaner separation. It still deserves legal review, but it avoids shipping the
   GPL binary as part of the signed Takes bundle.
-- The app should show a first-run disclosure: Takes uses yt-dlp to download audio
-  from YouTube for user-provided links; users are responsible for using it only
-  where they have rights or permission.
+- Credit yt-dlp in the About window alongside Sparkle.
+
+About window credits should include:
+
+```text
+Lead designer & developer
+Nigel M. Warren <https://nigelwarren.com>
+
+Third-Party Resources
+Sparkle <https://sparkle-project.org/>
+yt-dlp <https://github.com/yt-dlp/yt-dlp>
+```
 
 ## Audio Format Strategy
 
@@ -239,10 +248,9 @@ Use `Process` rather than embedding yt-dlp as a Python module. It keeps Swift
 isolated from Python packaging details and preserves the ability to replace the
 binary without relinking Takes.
 
-Progress parsing should use yt-dlp progress templates instead of scraping the
-default console output. Capture stdout/stderr asynchronously and translate lines
-into structured prompt states. Add cancellation before enabling prompt dismissal
-during an active lookup or download.
+The current spinner-based progress UI is acceptable for this feature slice. Add
+cancellation before enabling prompt dismissal during an active lookup or
+download.
 
 ## First Implementation Slice
 
@@ -256,19 +264,17 @@ during an active lookup or download.
 5. Add `YTDLPManager` behind a protocol with a fake implementation in tests.
 6. Add real yt-dlp download path with M4A-only format selection.
 7. Import the downloaded file through the existing `loadImportedFiles(_:)` path.
-8. Add cancellation and retry.
+8. Add cancellation. Pressing `Open` again after an error remains the retry path.
 
 The first code slice should not attempt ffmpeg, playlists, albums, private links,
 cookies, OAuth-gated service APIs, or a candidate picker.
 
 ## Open Decisions
 
-- Whether to default yt-dlp to stable or nightly.
-- Whether first-run installation should be automatic or require a one-time
-  confirmation.
+- Whether later releases should add a more detailed yt-dlp update history.
 - Whether a streaming-loaded row should display original service artwork/title
   instead of the downloaded file name.
 - Whether drag-to-Finder should expose the downloaded cache file, a `.webloc` for
   the original stream, or be disabled for streaming rows.
-- Whether Sparkle release notes should include the yt-dlp disclosure once this
+- Whether Sparkle release notes should mention the yt-dlp integration once this
   ships.

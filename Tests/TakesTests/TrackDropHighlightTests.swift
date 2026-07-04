@@ -177,6 +177,38 @@ struct TrackDropHighlightTests {
 
     @MainActor
     @Test
+    func openFileCommandStateCancelsRegisteredStreamingTaskOnDismiss() async throws {
+        let recorder = StreamingURLCancellationRecorder()
+        let state = OpenFileCommandState(loadStreamingURL: { _, commandState in
+            let taskID = UUID()
+            let task = Task {
+                do {
+                    try await Task.sleep(for: .seconds(10))
+                } catch is CancellationError {
+                    await recorder.recordCancellation()
+                } catch {
+                }
+                await MainActor.run {
+                    commandState.finishStreamingURLTask(id: taskID)
+                }
+            }
+            commandState.registerStreamingURLTask(task, id: taskID)
+        })
+
+        state.presentStreamingURLPrompt()
+        state.streamingURLText = "https://www.youtube.com/watch?v=XPL_qGqSJxA"
+        state.submitStreamingURL()
+        state.dismissStreamingURLPrompt()
+
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(await recorder.didCancel)
+        #expect(!state.isPromptingForStreamingURL)
+        #expect(!state.streamingURLStatus.isWorking)
+    }
+
+    @MainActor
+    @Test
     func openFileCommandStatePerformsAppleMusicSelectionAction() {
         var loadCount = 0
         let state = OpenFileCommandState(loadAppleMusicSelection: {
@@ -483,5 +515,13 @@ struct TrackDropHighlightTests {
         #expect(leftToRightOrigin.y == bounds.maxY)
         #expect(rightToLeftOrigin.x == bounds.minX)
         #expect(rightToLeftOrigin.y == bounds.minY)
+    }
+}
+
+private actor StreamingURLCancellationRecorder {
+    private(set) var didCancel = false
+
+    func recordCancellation() {
+        didCancel = true
     }
 }

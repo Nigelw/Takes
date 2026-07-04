@@ -301,10 +301,13 @@ final class PlaybackController: ObservableObject {
         }
 
         let loadID = UUID()
+        var loadDirectory: URL?
 
         do {
+            try Task.checkCancellation()
             await statusHandler(.preparingDownloader)
             let downloaderURL = try await ytdlpManager.executableURL()
+            try Task.checkCancellation()
 
             let match = try await streamingTrackResolver.resolveYouTubeMatch(
                 for: sourceURL,
@@ -312,17 +315,20 @@ final class PlaybackController: ObservableObject {
                 statusHandler: statusHandler
             )
             let youtubeURL = match.url
+            try Task.checkCancellation()
 
             try streamingDownloadCache.prepare()
-            let loadDirectory = try streamingDownloadCache.createLoadDirectory(id: loadID)
+            let currentLoadDirectory = try streamingDownloadCache.createLoadDirectory(id: loadID)
+            loadDirectory = currentLoadDirectory
 
             await statusHandler(.downloading(progress: nil))
             let downloadedURL = try await downloadStreamingAudio(
                 from: youtubeURL,
-                into: loadDirectory,
+                into: currentLoadDirectory,
                 filenameBase: match.downloadFilenameBase,
                 using: downloaderURL
             )
+            try Task.checkCancellation()
 
             await statusHandler(.openingAudio)
             let existingTrackIDs = Set(session.tracks.map(\.id))
@@ -331,12 +337,21 @@ final class PlaybackController: ObservableObject {
                 !existingTrackIDs.contains($0.id)
                     && Self.timelineIdentityURL(for: $0.loadedTrack.url) == Self.timelineIdentityURL(for: downloadedURL)
             }) else {
-                throw playbackError ?? PlaybackError.failedToOpenFile(downloadedURL)
+                throw StreamingTrackImportError.openImportFailed
             }
             streamingCacheFilesByTrackID[importedTrack.id] = downloadedURL
             return true
+        } catch is CancellationError {
+            if let loadDirectory {
+                try? streamingDownloadCache.deleteOwnedItem(at: loadDirectory)
+            }
+            return false
         } catch {
-            await statusHandler(.failed(error.localizedDescription))
+            if let loadDirectory {
+                try? streamingDownloadCache.deleteOwnedItem(at: loadDirectory)
+            }
+            NSLog("Streaming track import failed: \(error)")
+            await statusHandler(.failed(StreamingTrackImportError.promptMessage(for: error)))
             return false
         }
     }
@@ -378,10 +393,8 @@ final class PlaybackController: ObservableObject {
         filenameBase: String?,
         using downloaderURL: URL
     ) async throws -> URL {
-        try await Task.detached(priority: .userInitiated) {
-            let downloader = YTDLPDownloader(binaryURL: downloaderURL)
-            return try downloader.download(youtubeURL, into: directory, filenameBase: filenameBase)
-        }.value
+        let downloader = YTDLPDownloader(binaryURL: downloaderURL)
+        return try await downloader.download(youtubeURL, into: directory, filenameBase: filenameBase)
     }
 
     @discardableResult

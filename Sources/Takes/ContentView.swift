@@ -692,6 +692,9 @@ final class OpenFileCommandState: ObservableObject {
     @Published var streamingURLText = ""
     @Published var streamingURLStatus: StreamingURLPromptStatus = .idle
 
+    private var streamingURLTask: Task<Void, Never>?
+    private var streamingURLTaskID: UUID?
+
     private let loadStreamingURLAction: @MainActor (String, OpenFileCommandState) -> Void
     private let loadAppleMusicSelection: @MainActor () -> Void
     private let loadFinderSelection: @MainActor () -> Void
@@ -724,6 +727,7 @@ final class OpenFileCommandState: ObservableObject {
     }
 
     func presentStreamingURLPrompt() {
+        cancelStreamingURLTask()
         streamingURLText = ""
         streamingURLStatus = .idle
         isPromptingForStreamingURL = true
@@ -738,9 +742,27 @@ final class OpenFileCommandState: ObservableObject {
     }
 
     func dismissStreamingURLPrompt() {
+        cancelStreamingURLTask()
         isPromptingForStreamingURL = false
         streamingURLText = ""
         streamingURLStatus = .idle
+    }
+
+    func registerStreamingURLTask(_ task: Task<Void, Never>, id: UUID) {
+        streamingURLTask = task
+        streamingURLTaskID = id
+    }
+
+    func finishStreamingURLTask(id: UUID) {
+        guard streamingURLTaskID == id else { return }
+        streamingURLTask = nil
+        streamingURLTaskID = nil
+    }
+
+    private func cancelStreamingURLTask() {
+        streamingURLTask?.cancel()
+        streamingURLTask = nil
+        streamingURLTaskID = nil
     }
 
     func submitStreamingURL() {
@@ -904,7 +926,8 @@ struct ContentView: View {
         _openFileCommandState = StateObject(
             wrappedValue: OpenFileCommandState(
                 loadStreamingURL: { urlString, commandState in
-                    Task {
+                    let taskID = UUID()
+                    let task = Task {
                         let didLoad = await controller.loadStreamingTrack(
                             from: urlString,
                             statusHandler: { status in
@@ -913,12 +936,16 @@ struct ContentView: View {
                                 }
                             }
                         )
+                        await MainActor.run {
+                            commandState.finishStreamingURLTask(id: taskID)
+                        }
                         if didLoad {
                             await MainActor.run {
                                 commandState.dismissStreamingURLPrompt()
                             }
                         }
                     }
+                    commandState.registerStreamingURLTask(task, id: taskID)
                 },
                 loadAppleMusicSelection: {
                     Task { await controller.loadSelectedLibraryTracks() }
@@ -2092,7 +2119,6 @@ struct ContentView: View {
                 Button("Cancel") {
                     openFileCommandState.dismissStreamingURLPrompt()
                 }
-                .disabled(openFileCommandState.streamingURLStatus.isWorking)
                 Button("Open") {
                     openFileCommandState.submitStreamingURL()
                 }
