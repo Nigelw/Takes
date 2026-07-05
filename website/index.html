@@ -254,22 +254,32 @@
     }
 
     .hero {
+      --hero-title-size: clamp(52px, 8vw, 104px);
+      --hero-icon-size: calc(var(--hero-title-size) * 1.14);
+      --hero-icon-radius: calc(var(--hero-icon-size) * 0.24);
       margin: 0 auto;
       max-width: 1120px;
       padding: 76px var(--page-gutter) 96px;
       text-align: center;
     }
 
+    .hero-lockup {
+      align-items: center;
+      display: inline-flex;
+      gap: clamp(18px, 3vw, 30px);
+      justify-content: center;
+    }
+
     .hero-icon {
-      border-radius: 28px;
+      border-radius: var(--hero-icon-radius);
       box-shadow: 0 16px 42px rgba(78, 61, 197, 0.24);
-      height: 118px;
-      margin: 0 auto 28px;
-      width: 118px;
+      height: var(--hero-icon-size);
+      flex: 0 0 auto;
+      width: var(--hero-icon-size);
     }
 
     h1 {
-      font-size: clamp(52px, 8vw, 104px);
+      font-size: var(--hero-title-size);
       letter-spacing: 0;
       line-height: 0.95;
       margin: 0;
@@ -424,9 +434,9 @@
     }
 
     .feature-grid {
-      display: grid;
+      display: flex;
+      flex-wrap: wrap;
       gap: 16px;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .feature {
@@ -441,10 +451,9 @@
       box-shadow:
         0 18px 44px rgba(40, 30, 90, 0.09),
         inset 0 1px 0 rgba(255, 255, 255, 0.74);
-      display: flex;
-      flex-direction: column;
+      flex: 1 1 calc((100% - 32px) / 3);
       min-height: 190px;
-      overflow: hidden;
+      min-width: 0;
       padding: 24px;
       position: relative;
     }
@@ -546,6 +555,12 @@
       gap: 16px;
     }
 
+    @media (max-width: 800px) {
+      .feature {
+        flex-basis: calc((100% - 16px) / 2);
+      }
+    }
+
     @media (max-width: 560px) {
       .nav {
         padding-top: 18px;
@@ -612,12 +627,6 @@
         padding-bottom: 72px;
       }
 
-      .hero-icon {
-        border-radius: 22px;
-        height: 92px;
-        width: 92px;
-      }
-
       .shot-wrap {
         margin-top: 54px;
       }
@@ -632,10 +641,11 @@
       }
 
       .feature-grid {
-        grid-template-columns: 1fr;
+        gap: 14px;
       }
 
       .feature {
+        flex-basis: 100%;
         min-height: 0;
       }
 
@@ -675,8 +685,10 @@
 
     <main>
       <section class="hero">
-        <img class="hero-icon" src="icon.png" alt="Takes app icon">
-        <h1>Takes</h1>
+        <div class="hero-lockup">
+          <img class="hero-icon" src="icon.png" alt="Takes app icon">
+          <h1>Takes</h1>
+        </div>
         <p class="summary">Compare multiple mixes of a song to find your favorite take.</p>
         <div class="actions">
           <a class="button" href="https://github.com/Nigelw/Takes/releases/latest/download/Takes.dmg"><span class="apple-logo" aria-hidden="true">&#63743;</span>Download for macOS</a>
