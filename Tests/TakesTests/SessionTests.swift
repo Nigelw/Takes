@@ -362,13 +362,13 @@ struct SessionTests {
 
     @Test
     func windowPolicyDetectsSavedMainWindowFrame() {
-        let defaults = UserDefaults(suiteName: "TakesWindowPolicyTests-\(UUID().uuidString)")!
+        var defaults: [String: Any] = [:]
 
-        #expect(!TakesWindowPolicy.hasSavedMainWindowFrame(defaults: defaults))
+        #expect(!TakesWindowPolicy.hasSavedMainWindowFrame { defaults[$0] })
 
-        defaults.set("10 20 900 568 0 0 1512 944", forKey: TakesWindowPolicy.mainWindowFrameAutosaveName)
+        defaults[TakesWindowPolicy.mainWindowFrameAutosaveName] = "10 20 900 568 0 0 1512 944"
 
-        #expect(TakesWindowPolicy.hasSavedMainWindowFrame(defaults: defaults))
+        #expect(TakesWindowPolicy.hasSavedMainWindowFrame { defaults[$0] })
     }
 
     @Test
@@ -387,7 +387,7 @@ struct SessionTests {
     @MainActor
     @Test
     func appearanceThemeOverrideDoesNotPersistDuringSettingsInitialization() {
-        let defaults = UserDefaults(suiteName: "AppSettingsAppearanceOverrideTests-\(UUID().uuidString)")!
+        let defaults = InMemoryAppSettingsDefaults()
         defaults.set(AppearanceTheme.light.rawValue, forKey: AppSettings.appearanceThemeKey)
 
         let settings = AppSettings(
@@ -1872,6 +1872,22 @@ private struct FakeLibraryTrackSelector: LibraryTrackSelecting {
 
     func selectedTracks() throws -> LibraryTrackSelection {
         selection
+    }
+}
+
+private final class InMemoryAppSettingsDefaults: AppSettingsDefaults {
+    private var values: [String: Any] = [:]
+
+    func object(forKey defaultName: String) -> Any? {
+        values[defaultName]
+    }
+
+    func string(forKey defaultName: String) -> String? {
+        values[defaultName] as? String
+    }
+
+    func set(_ value: Any?, forKey defaultName: String) {
+        values[defaultName] = value
     }
 }
 

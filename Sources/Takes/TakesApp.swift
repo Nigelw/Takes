@@ -440,7 +440,11 @@ enum TakesWindowPolicy {
     }
 
     static func hasSavedMainWindowFrame(defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: mainWindowFrameAutosaveName) != nil
+        hasSavedMainWindowFrame(objectForKey: defaults.object(forKey:))
+    }
+
+    static func hasSavedMainWindowFrame(objectForKey: (String) -> Any?) -> Bool {
+        objectForKey(mainWindowFrameAutosaveName) != nil
     }
 
     @MainActor
