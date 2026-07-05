@@ -80,6 +80,12 @@
       box-sizing: border-box;
     }
 
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation-duration: 500ms;
+      animation-timing-function: ease;
+    }
+
     html {
       background:
         radial-gradient(circle at 18% 0%, var(--page-gradient-one), transparent 34rem),
@@ -782,6 +788,12 @@ open 'takes://open-files?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&g
         dark: "#0f0d18"
       };
 
+      function runThemeTransition(nextTheme) {
+        document.startViewTransition(() => {
+          applyTheme(nextTheme);
+        });
+      }
+
       function applyTheme(theme) {
         const isDark = theme === "dark";
         root.dataset.theme = theme;
@@ -797,7 +809,7 @@ open 'takes://open-files?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&g
 
       themeToggle?.addEventListener("click", () => {
         hasManualTheme = true;
-        applyTheme(root.dataset.theme === "dark" ? "light" : "dark");
+        runThemeTransition(root.dataset.theme === "dark" ? "light" : "dark");
       });
 
       menuButton?.addEventListener("click", () => {

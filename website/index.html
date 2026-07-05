@@ -92,6 +92,12 @@
       box-sizing: border-box;
     }
 
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation-duration: 500ms;
+      animation-timing-function: ease;
+    }
+
     html {
       background:
         radial-gradient(circle at 18% 0%, var(--page-gradient-one), transparent 34rem),
@@ -718,6 +724,12 @@
         dark: "screenshot_dark_noshadow.png"
       };
 
+      function runThemeTransition(nextTheme) {
+        document.startViewTransition(() => {
+          applyTheme(nextTheme);
+        });
+      }
+
       function applyTheme(theme) {
         const isDark = theme === "dark";
         root.dataset.theme = theme;
@@ -741,7 +753,7 @@
 
       themeToggle?.addEventListener("click", () => {
         hasManualTheme = true;
-        applyTheme(root.dataset.theme === "dark" ? "light" : "dark");
+        runThemeTransition(root.dataset.theme === "dark" ? "light" : "dark");
       });
 
       menuButton?.addEventListener("click", () => {
