@@ -635,12 +635,12 @@
 
             <article class="faq-item">
               <h3>Why did you build Takes?</h3>
-              <p>I built Takes to scratch my own itch. I've always wanted a tool like <a class="text-link" href="https://kaleidoscope.app">Kaleidoscope</a> but for audio files. I love hearing the differences between original releases and remasters, and I wanted an app that lets me listen and toggle between them. I built a quick utility, then decided to turn it into a polished app because I love old school native apps that sweat the details. I'm sharing it in case others find it useful too.</p>
+              <p>I built Takes to scratch my own itch. I've always wanted a tool like <a class="text-link" href="https://kaleidoscope.app">Kaleidoscope</a> but for audio files. I love hearing the differences between original releases and remasters, and I wanted an app to let me listen and toggle between them. I built a quick throwaway prototype for myself, then decided to turn it into a polished app because I love native apps that sweat the details. I'm sharing it in case others find it useful too.</p>
             </article>
 
             <article class="faq-item">
               <h3>Do you offer support?</h3>
-              <p>Just the <a class="text-link" href="#help">help section</a> below.</p>
+              <p>You better believe I don't! But check the <a class="text-link" href="#help">help section</a> below. It's a pretty decent.</p>
             </article>
           </div>
         </div>
@@ -658,18 +658,17 @@
               <ul>
                 <li>Drag files and folders onto the app, use Quick Open to grab your current selection from Finder or Apple Music, or use the Open dialog box like a normie.</li>
                 <li>You can also open streaming music. Give it a URL from Spotify, Apple Music, or YouTube and you're good to go.</li>
-                <li>Takes supports up to 32 loaded audio files at once.</li>
-                <li>Takes plays a wide range of audio formats.</li>
+                <li>Takes supports up to 32 loaded audio files at once and plays a wide range of audio formats.</li>
               </ul>
             </article>
 
             <div class="help-card-grid">
               <article class="help-card">
                 <h3>Selection looping</h3>
-                <p>Use selection looping to focus on a specific passage. Drag or <kbd>Shift</kbd><span class="key-sep">+</span><kbd>Click</kbd> in the timeline area to create a loop. "Switch &amp; Repeat" mode is automatically enabled when looping. This changes tracks eachtime playback loops so you can compare the same passage across tracks.</p>
+                <p>Use selection looping to focus on a specific passage. <kbd>Drag</kbd> or <kbd>Shift</kbd><span class="key-sep">+</span><kbd>Click</kbd> in the timeline area to create a loop. "Switch &amp; Repeat" mode is automatically enabled when looping. This changes tracks each time playback loops so you can compare the same passage across tracks.</p>
                 <ul>
                   <li>You can also repeat one, to keep looping the same track.</li>
-                  <li>Clearing a loop automatically switches repeat back off.</li>
+                  <li>Clearing a loop automatically switches off repeat mode.</li>
                 </ul>
               </article>
 
@@ -677,20 +676,20 @@
                 <h3>Blind listening mode</h3>
                 <p>Decide which take sounds best without bias. Blind listening mode hides names and metadata, anonymizes the waveforms, and shuffles the track order. It even hides the track name from the Now Playing widget in Control Center. No cheating! 😜</p>
                 <ul>
-                  <li>Turn off blind listening mode to reveal your the name of your favorite. The track order stays in place when turning it off.</li>
+                  <li>Turn off blind listening mode to reveal the name of your favorite track. (The track order remains unchanged when turning it off.)</li>
                 </ul>
               </article>
 
               <article class="help-card">
                 <h3>Auto-align</h3>
-                <p>Different copies of a track don't always line up perfectly. An extra bit of silence at the start of one can make toggling back and forth jarring, as each switch between tracks jumps the music backward and forward.</p>
+                <p>Different copies of a track don't always line up perfectly. An extra bit of silence at the start of one can make toggling back and forth jarring, as each switch jumps the music backward and forward.</p>
                 <p>Auto-align analyzes the audio to find matching sections, and adjusts offsets so tracks line up perfectly.</p>
                 <ul>
-                  <li>If tracks fall out of sync over time due to a difference in recordings, you can re-run auto-align at any time. It sync offsets based on the current playhead position.</li>
-                  <li>Auto-align only accepts confident matches and avoids false positives, so it won't set crazy offsets if file matching is ambiguous.</li>
-                  <li>For tracks with larger tempo differences, auto-align offers a deeper analysis mode that searches tempo deviations, up to about 6 percent, before applying an alignment.</li>
-                  <li>If auto-align can't sync up your tracks, Takes is designed to make manual alignment as fast as possible. A great workflow is to start playback, nudge alignment, toggle back and forth between tracks, and repeat if necessary.</li>
-                  <li>The Takes UI is specifically designed for quick keyboard navigation to make this easy: <kbd>tab</kbd> into the offset field, nudge the offset with <kbd>Shift</kbd><span class="key-sep">+</span><kbd>↑/↓</kbd>, hit <kbd>tab</kbd> or <kbd>enter</kbd>, hit <kbd>X</kbd> to toggle tracks.</li>
+                  <li>If tracks fall out of sync over time due to a difference in recordings, you can auto-align again at any time. It syncs offsets based on the current playhead position.</li>
+                  <li>Auto-align only accepts confident matches and is tuned to avoid false positives, so it won't set crazy offsets if file matching is ambiguous.</li>
+                  <li>For tracks with larger tempo differences, auto-align offers a deeper analysis option that searches tempo deviations, up to about 6 percent, to find alignment.</li>
+                  <li>If auto-align can't sync up your tracks, Takes is designed to make manual alignment as fast as possible. My own workflow is to start playback, nudge alignment, then toggle back and forth between tracks while playing and continuing to adjust if necessary.</li>
+                  <li>The Takes UI is specifically designed for quick keyboard navigation to make this easy: <kbd>Tab</kbd> into the offset field, nudge with <kbd>↑/↓</kbd>, hit <kbd>Enter</kbd>, hit <kbd>X</kbd> to toggle tracks.</li>
                 </ul>
               </article>
             </div>
@@ -737,20 +736,20 @@
 
             <article class="help-card">
               <h3>API</h3>
-              <p>Takes currently has two public automation surfaces:</p>
+              <p>Takes has two automation interfaces:</p>
               <ol>
-                <li>Opening the app with files through macOS:</li>
+                <li>Open the app with files through macOS:</li>
               </ol>
               <pre><code>open -a "Takes.app" "$FILE_1" "$FILE_2"</code></pre>
               <ol start="2">
-                <li>Opening a custom <code>takes://</code> URL:</li>
+                <li>Open a custom <code>takes://</code> URL:</li>
               </ol>
               <pre><code>open 'takes://open-url?url=&lt;streaming%20URL&gt;'
 open 'takes://open-file?url=&lt;file%20URL&gt;'
 open 'takes://open-files?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&gt;'</code></pre>
               <p>There is also one launch-time appearance option:</p>
               <pre><code>open -a "Takes.app" --args --appearance-theme dark</code></pre>
-              <p>Use this option to launch Takes with a temporary appearance for e.g. taking screenshots. (The setting doesn't persist across launches).</p>
+              <p>Use this option to launch Takes with a temporary appearance for e.g. taking screenshots. (The setting doesn't persist across launches.)</p>
             </article>
           </div>
         </div>
