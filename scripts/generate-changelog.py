@@ -335,8 +335,24 @@ def render(items):
     .notes h3, .notes h4 {{ font-size: .95rem; margin: 1rem 0 .35rem; }}
     .notes > :first-child {{ margin-top: 0; }}
     .empty {{ color: #8e8e93; font-style: italic; }}
-    footer {{ margin-top: 3rem; font-size: .85rem; color: var(--muted); }}
-    footer a {{ color: inherit; }}
+    .footer {{
+      align-items: center;
+      color: var(--muted);
+      display: flex;
+      font-size: .85rem;
+      flex-direction: column;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 3rem;
+      text-align: center;
+    }}
+    .footer a {{
+      color: var(--accent);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }}
+    .footer a:hover {{ color: var(--ink); }}
     html[data-theme="dark"] .release {{ border-color: var(--line); }}
     html[data-theme="dark"] .badge {{ color: #ffb066; background: #3a2410; }}
     @media (max-width: 560px) {{
@@ -415,6 +431,9 @@ def render(items):
       <p>Everything shipped in Takes for Mac, newest first.</p>
     </header>
 {body}
+    <footer class="footer">
+      <span>Made with 🥱 sleep deprivation by <a href="https://nigelwarren.com">Nigel M. Warren</a>. &copy; 2026.</span>
+    </footer>
   </main>
   <script>
     (() => {{

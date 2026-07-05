@@ -484,10 +484,24 @@
       color: var(--quiet);
       display: flex;
       font-size: 13px;
-      justify-content: space-between;
+      flex-direction: column;
+      gap: 12px;
+      justify-content: center;
       margin: 0 auto;
       max-width: 1120px;
       padding: 28px var(--page-gutter) 36px;
+      text-align: center;
+    }
+
+    .footer a {
+      color: var(--brand-dark);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    .footer a:hover {
+      color: var(--brand);
     }
 
     .footer-links {
@@ -588,11 +602,6 @@
         justify-content: flex-start;
       }
 
-      .footer {
-        align-items: flex-start;
-        flex-direction: column;
-        gap: 12px;
-      }
     }
   </style>
 </head>
@@ -765,12 +774,7 @@ open 'takes://open-files?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&g
     </main>
 
     <footer class="footer">
-      <span>&copy; 2026 Nigel M. Warren. Takes for macOS.</span>
-      <div class="footer-links">
-        <a href="support.html">Support</a>
-        <a href="changelog.html">Release Notes</a>
-        <a href="https://github.com/Nigelw/Takes">GitHub</a>
-      </div>
+      <span>Made with 🥱 sleep deprivation by <a href="https://nigelwarren.com">Nigel M. Warren</a>. &copy; 2026.</span>
     </footer>
   </div>
   <script>
