@@ -16,11 +16,11 @@ lines) rendered at the top of the results UI.
 | # | Milestone | Owner | State |
 | --- | --- | --- | --- |
 | M0 | Commit v1, plan update | main session | done |
-| M1 | Frozen metric/API contracts + stubs + pbxproj | main session | in progress |
-| M2 | Corpus v2: vinyl/tape sims (gapless), old-encoder MP3s, transient material for pre-echo | subagent (sonnet) | pending |
-| M3a | Analog-source DSP: min-statistics noise floor, noise stereo-coherence, click/crackle detector, rumble, wow (stretch) — `AnalogSourceDSP.swift` | subagent (fable) | pending |
-| M3b | Lossy-artifact DSP: pre-echo, HF flicker ("birdies"), HF stereo coherence — `LossyArtifactDSP.swift`; MP3 bitstream inspector (Xing/Info/LAME tag, encoder fingerprint) — `MP3BitstreamInspector.swift` | subagent (fable) | pending |
-| M4 | Engine integration + `SourceInference.swift` (conclusions from combined metrics, incl. cutoff-vs-bitrate table) | main session | pending |
+| M1 | Frozen metric/API contracts + stubs + pbxproj | main session | done |
+| M2 | Corpus v2: vinyl/tape sims (gapless), old-encoder MP3s, transient material for pre-echo | subagent (sonnet) | running |
+| M3a | Analog-source DSP: min-statistics noise floor, noise stereo-coherence, click/crackle detector, rumble, wow (stretch) — `AnalogSourceDSP.swift` | subagent (fable) | running |
+| M3b | Lossy-artifact DSP: pre-echo, HF flicker ("birdies"), HF stereo coherence — `LossyArtifactDSP.swift`; MP3 bitstream inspector (Xing/Info/LAME tag, encoder fingerprint) — `MP3BitstreamInspector.swift` | subagent (fable) | running |
+| M4 | Engine integration + `SourceInference.swift` (conclusions from combined metrics, incl. cutoff-vs-bitrate table) | main session | rules written; engine wired; tuning blocked on M2/M3 |
 | M5 | Benchmark expansion + tuning to all-pass | main session | pending |
 | M6 | UI: conclusions section with evidence disclosure | subagent (opus) | pending |
 | M7 | Docs, final build + launch | main session | pending |

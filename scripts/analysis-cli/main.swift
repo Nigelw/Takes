@@ -53,7 +53,30 @@ func describe(_ report: AudioAnalysisReport) -> String {
     line += "\n    bands: " + report.tonalBalance.bands
         .map { "\($0.name) \(format($0.relativeDB))" }
         .joined(separator: "  ")
+    line += "\n    analog: floor \(format(report.analogSource.stationaryNoiseFloorDBFS, 0))"
+        + "  flat \(format(report.analogSource.noiseFloorFlatness, 2))"
+        + "  cohere \(format(report.analogSource.highBandNoiseCoherence, 2))"
+        + "  clicks/min \(format(report.analogSource.clickRatePerMinute, 1))"
+        + "  rumble \(format(report.analogSource.rumbleSideLevelDB, 0))"
+        + "  wow \(report.analogSource.wowPeakCents.map { format($0, 0) } ?? "—")"
+    line += "\n    lossy: pre-echo \(format(report.lossyArtifacts.preEchoScore, 1)) dB"
+        + " (\(report.lossyArtifacts.attackCount) attacks)"
+        + "  flicker \(format(report.lossyArtifacts.highBandFlickerScore, 1))"
+        + "  hf-cohere \(format(report.lossyArtifacts.hfStereoCoherence, 2))"
+    if let stream = report.mp3Stream {
+        line += "\n    mp3: \(stream.encoderInfo ?? "unknown encoder")"
+            + "  \(stream.bitrateMode == .cbr ? "CBR" : "VBR") \(format(stream.meanBitrateKbps, 0)) kbps"
+            + "  xing \(stream.hasXingOrInfoHeader)  lame \(stream.hasLameTag)"
+            + "  lowpass \(stream.declaredLowpassHz.map { format($0, 0) } ?? "—")"
+            + "  IS \(stream.usesIntensityStereo)  js \(format(stream.jointStereoFrameFraction, 2))"
+    }
     line += "\n    verdicts: " + report.verdicts.map { "[\($0.category.rawValue)] \($0.title)" }.joined(separator: " | ")
+    for conclusion in report.conclusions {
+        line += "\n    ⇒ \(conclusion.statement) [\(conclusion.confidence)]"
+        for item in conclusion.evidence {
+            line += "\n       • \(item)"
+        }
+    }
     return line
 }
 
@@ -65,6 +88,10 @@ struct Expectation {
     var requiredVerdicts: [String] = []
     /// Substrings that must NOT appear among verdict titles.
     var forbiddenVerdicts: [String] = []
+    /// Substrings that must appear among conclusion statements.
+    var requiredConclusions: [String] = []
+    /// Substrings that must NOT appear among conclusion statements.
+    var forbiddenConclusions: [String] = []
     var cutoffRange: ClosedRange<Double>?
     /// When true, a nil cutoff (full bandwidth) also satisfies `cutoffRange`.
     var cutoffMayBeFull = false
@@ -185,6 +212,15 @@ func check(_ report: AudioAnalysisReport, against expectation: Expectation) -> [
     for forbidden in expectation.forbiddenVerdicts
     where titles.contains(where: { $0.localizedCaseInsensitiveContains(forbidden) }) {
         failures.append("unexpected verdict containing “\(forbidden)”")
+    }
+    let statements = report.conclusions.map(\.statement)
+    for required in expectation.requiredConclusions
+    where !statements.contains(where: { $0.localizedCaseInsensitiveContains(required) }) {
+        failures.append("missing conclusion containing “\(required)”")
+    }
+    for forbidden in expectation.forbiddenConclusions
+    where statements.contains(where: { $0.localizedCaseInsensitiveContains(forbidden) }) {
+        failures.append("unexpected conclusion containing “\(forbidden)”")
     }
     if let range = expectation.cutoffRange {
         if let cutoff = report.bandwidth.detectedCutoffHz {
