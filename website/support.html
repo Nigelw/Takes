@@ -43,6 +43,7 @@
       --theme-toggle-hover: rgba(238, 234, 255, 0.9);
       --theme-toggle-icon: #4f3ec6;
       --theme-toggle-shadow: 0 10px 24px rgba(40, 30, 90, 0.12);
+      --menu-bg: rgba(255, 255, 255, 0.96);
     }
 
     html[data-theme="dark"] {
@@ -72,6 +73,7 @@
       --theme-toggle-hover: rgba(54, 47, 78, 0.95);
       --theme-toggle-icon: #ffd083;
       --theme-toggle-shadow: 0 12px 26px rgba(0, 0, 0, 0.34);
+      --menu-bg: rgba(32, 28, 48, 0.97);
     }
 
     * {
@@ -160,11 +162,45 @@
       align-items: center;
       display: flex;
       gap: 14px;
+      position: relative;
     }
 
     .nav-links a:hover,
     .brand:hover {
       color: var(--nav-hover);
+    }
+
+    .nav-menu-button {
+      display: none;
+    }
+
+    .nav-menu-icon,
+    .nav-menu-icon::before,
+    .nav-menu-icon::after {
+      background: currentColor;
+      border-radius: 999px;
+      display: block;
+      height: 2px;
+      width: 16px;
+    }
+
+    .nav-menu-icon {
+      position: relative;
+    }
+
+    .nav-menu-icon::before,
+    .nav-menu-icon::after {
+      content: "";
+      left: 0;
+      position: absolute;
+    }
+
+    .nav-menu-icon::before {
+      top: -5px;
+    }
+
+    .nav-menu-icon::after {
+      top: 5px;
     }
 
     .theme-toggle {
@@ -331,10 +367,29 @@
       gap: 14px;
       margin: 0 auto;
       max-width: 620px;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .help-card,
+    .help-card-grid,
+    .shortcut-groups,
+    .shortcut-list,
+    .shortcut-row,
+    .shortcut-desc,
+    .shortcut-keys {
+      min-width: 0;
     }
 
     .help-card p + p {
       margin-top: 8px;
+    }
+
+    .help-card p,
+    .help-card li,
+    .shortcut-desc,
+    .shortcut-keys {
+      overflow-wrap: anywhere;
     }
 
     .help-card ul {
@@ -387,6 +442,7 @@
       flex-wrap: wrap;
       gap: 6px;
       justify-content: flex-end;
+      max-width: 100%;
     }
 
     kbd {
@@ -432,7 +488,7 @@
       gap: 16px;
     }
 
-    @media (max-width: 780px) {
+    @media (max-width: 560px) {
       .nav {
         padding-top: 18px;
         padding-bottom: 18px;
@@ -444,6 +500,53 @@
 
       .nav-actions {
         gap: 10px;
+      }
+
+      .nav-menu-button {
+        align-items: center;
+        appearance: none;
+        background: var(--menu-bg);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        cursor: pointer;
+        display: inline-flex;
+        font-family: inherit;
+        font-weight: 700;
+        height: 38px;
+        justify-content: center;
+        min-height: 38px;
+        padding: 0;
+        width: 38px;
+      }
+
+      .nav-actions.menu-open .nav-menu-button {
+        color: var(--brand-dark);
+      }
+
+      .nav-actions .nav-links {
+        background: var(--menu-bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--theme-toggle-shadow);
+        display: none;
+        min-width: 156px;
+        padding: 8px;
+        position: absolute;
+        right: 0;
+        top: calc(100% + 8px);
+        z-index: 10;
+      }
+
+      .nav-actions.menu-open .nav-links {
+        align-items: stretch;
+        display: grid;
+        gap: 2px;
+      }
+
+      .nav-actions .nav-links a {
+        border-radius: 6px;
+        padding: 9px 10px;
       }
 
       .hero {
@@ -459,6 +562,11 @@
       .help-band {
         padding-top: 68px;
         padding-bottom: 78px;
+      }
+
+      .faq-item,
+      .help-card {
+        padding: 20px;
       }
 
       .faq-grid {
@@ -498,9 +606,10 @@
             <path d="M12 2.5v2.2M12 19.3v2.2M4.7 4.7l1.6 1.6M17.7 17.7l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.7 19.3l1.6-1.6M17.7 6.3l1.6-1.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </button>
-        <div class="nav-links">
+        <button class="nav-menu-button" type="button" aria-label="Open navigation menu" aria-expanded="false" aria-controls="site-menu"><span class="nav-menu-icon" aria-hidden="true"></span></button>
+        <div class="nav-links" id="site-menu">
           <a href="support.html" aria-current="page">Support</a>
-          <a href="changelog.html">Changelog</a>
+          <a href="changelog.html">Release Notes</a>
           <a href="https://github.com/Nigelw/Takes">GitHub</a>
         </div>
       </div>
@@ -526,12 +635,12 @@
 
             <article class="faq-item">
               <h3>Why did you build Takes?</h3>
-              <p>I built Takes to scratch my own itch. I've always wanted a tool like <a class="text-link" href="kaleidoscope">Kaleidoscope</a> but for audio files. I love hearing the differences between original releases and remasters, and I wanted an app that lets me listen and toggle between them. I built a quick utility, then decided to turn it into a polished app because I love old school native apps that sweat the details. I'm sharing it in case others find it useful too.</p>
+              <p>I built Takes to scratch my own itch. I've always wanted a tool like <a class="text-link" href="https://kaleidoscope.app">Kaleidoscope</a> but for audio files. I love hearing the differences between original releases and remasters, and I wanted an app that lets me listen and toggle between them. I built a quick utility, then decided to turn it into a polished app because I love old school native apps that sweat the details. I'm sharing it in case others find it useful too.</p>
             </article>
 
             <article class="faq-item">
               <h3>Do you offer support?</h3>
-              <p>Everything I currently provide is on this page.</p>
+              <p>Just the <a class="text-link" href="#help">help section</a> below.</p>
             </article>
           </div>
         </div>
@@ -566,7 +675,7 @@
 
               <article class="help-card">
                 <h3>Blind listening mode</h3>
-                <p>Decide which take sounds best without the bias of knowing which version you're listening to. Blind listening mode hides names and metadata, anonymizes the waveforms, and shuffles the track order. It even hides the track name from the Now Playing widget in Control Center.</p>
+                <p>Decide which take sounds best without bias. Blind listening mode hides names and metadata, anonymizes the waveforms, and shuffles the track order. It even hides the track name from the Now Playing widget in Control Center. No cheating! 😜</p>
                 <ul>
                   <li>Turn off blind listening mode to reveal your the name of your favorite. The track order stays in place when turning it off.</li>
                 </ul>
@@ -652,7 +761,7 @@ open 'takes://open-files?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&g
       <span>&copy; 2026 Nigel M. Warren. Takes for macOS.</span>
       <div class="footer-links">
         <a href="support.html">Support</a>
-        <a href="changelog.html">Changelog</a>
+        <a href="changelog.html">Release Notes</a>
         <a href="https://github.com/Nigelw/Takes">GitHub</a>
       </div>
     </footer>
@@ -661,6 +770,8 @@ open 'takes://open-files?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&g
     (() => {
       const root = document.documentElement;
       const themeToggle = document.querySelector(".theme-toggle");
+      const navActions = document.querySelector(".nav-actions");
+      const menuButton = document.querySelector(".nav-menu-button");
       const themeColor = document.querySelector('meta[name="theme-color"]');
       const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
       let hasManualTheme = false;
@@ -686,6 +797,20 @@ open 'takes://open-files?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&g
       themeToggle?.addEventListener("click", () => {
         hasManualTheme = true;
         applyTheme(root.dataset.theme === "dark" ? "light" : "dark");
+      });
+
+      menuButton?.addEventListener("click", () => {
+        const isOpen = navActions?.classList.toggle("menu-open") ?? false;
+        menuButton.setAttribute("aria-expanded", String(isOpen));
+        menuButton.setAttribute("aria-label", isOpen ? "Close navigation menu" : "Open navigation menu");
+      });
+
+      navActions?.querySelectorAll(".nav-links a").forEach((link) => {
+        link.addEventListener("click", () => {
+          navActions.classList.remove("menu-open");
+          menuButton?.setAttribute("aria-expanded", "false");
+          menuButton?.setAttribute("aria-label", "Open navigation menu");
+        });
       });
 
       mediaQuery.addEventListener("change", (event) => {

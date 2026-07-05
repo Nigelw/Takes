@@ -49,6 +49,7 @@
       --theme-toggle-hover: rgba(238, 234, 255, 0.9);
       --theme-toggle-icon: #4f3ec6;
       --theme-toggle-shadow: 0 10px 24px rgba(40, 30, 90, 0.12);
+      --menu-bg: rgba(255, 255, 255, 0.96);
     }
 
     html[data-theme="dark"] {
@@ -84,6 +85,7 @@
       --theme-toggle-hover: rgba(54, 47, 78, 0.95);
       --theme-toggle-icon: #ffd083;
       --theme-toggle-shadow: 0 12px 26px rgba(0, 0, 0, 0.34);
+      --menu-bg: rgba(32, 28, 48, 0.97);
     }
 
     * {
@@ -155,11 +157,45 @@
       align-items: center;
       display: flex;
       gap: 14px;
+      position: relative;
     }
 
     .nav-links a:hover,
     .brand:hover {
       color: var(--nav-hover);
+    }
+
+    .nav-menu-button {
+      display: none;
+    }
+
+    .nav-menu-icon,
+    .nav-menu-icon::before,
+    .nav-menu-icon::after {
+      background: currentColor;
+      border-radius: 999px;
+      display: block;
+      height: 2px;
+      width: 16px;
+    }
+
+    .nav-menu-icon {
+      position: relative;
+    }
+
+    .nav-menu-icon::before,
+    .nav-menu-icon::after {
+      content: "";
+      left: 0;
+      position: absolute;
+    }
+
+    .nav-menu-icon::before {
+      top: -5px;
+    }
+
+    .nav-menu-icon::after {
+      top: 5px;
     }
 
     .theme-toggle {
@@ -444,7 +480,7 @@
       gap: 16px;
     }
 
-    @media (max-width: 780px) {
+    @media (max-width: 560px) {
       .nav {
         padding-top: 18px;
         padding-bottom: 18px;
@@ -456,6 +492,53 @@
 
       .nav-actions {
         gap: 10px;
+      }
+
+      .nav-menu-button {
+        align-items: center;
+        appearance: none;
+        background: var(--menu-bg);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        cursor: pointer;
+        display: inline-flex;
+        font-family: inherit;
+        font-weight: 700;
+        height: 38px;
+        justify-content: center;
+        min-height: 38px;
+        padding: 0;
+        width: 38px;
+      }
+
+      .nav-actions.menu-open .nav-menu-button {
+        color: var(--brand-dark);
+      }
+
+      .nav-actions .nav-links {
+        background: var(--menu-bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--theme-toggle-shadow);
+        display: none;
+        min-width: 156px;
+        padding: 8px;
+        position: absolute;
+        right: 0;
+        top: calc(100% + 8px);
+        z-index: 10;
+      }
+
+      .nav-actions.menu-open .nav-links {
+        align-items: stretch;
+        display: grid;
+        gap: 2px;
+      }
+
+      .nav-actions .nav-links a {
+        border-radius: 6px;
+        padding: 9px 10px;
       }
 
       .hero {
@@ -515,9 +598,10 @@
             <path d="M12 2.5v2.2M12 19.3v2.2M4.7 4.7l1.6 1.6M17.7 17.7l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.7 19.3l1.6-1.6M17.7 6.3l1.6-1.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </button>
-        <div class="nav-links">
+        <button class="nav-menu-button" type="button" aria-label="Open navigation menu" aria-expanded="false" aria-controls="site-menu"><span class="nav-menu-icon" aria-hidden="true"></span></button>
+        <div class="nav-links" id="site-menu">
           <a href="support.html">Support</a>
-          <a href="changelog.html">Changelog</a>
+          <a href="changelog.html">Release Notes</a>
           <a href="https://github.com/Nigelw/Takes">GitHub</a>
         </div>
       </div>
@@ -530,7 +614,7 @@
         <p class="summary">Compare multiple mixes of a song to find your favorite take.</p>
         <div class="actions">
           <a class="button" href="https://github.com/Nigelw/Takes/releases/latest/download/Takes.dmg"><span class="apple-logo" aria-hidden="true">&#63743;</span>Download for macOS</a>
-          <a class="secondary" href="https://takes.nigelwarren.com/changelog.html">See latest changes</a>
+          <a class="secondary" href="https://takes.nigelwarren.com/changelog.html">See release notes</a>
         </div>
 
         <div class="shot-wrap" aria-label="Takes app screenshot">
@@ -607,7 +691,7 @@
       <span>&copy; 2026 Nigel M. Warren. Takes for macOS.</span>
       <div class="footer-links">
         <a href="support.html">Support</a>
-        <a href="changelog.html">Changelog</a>
+        <a href="changelog.html">Release Notes</a>
         <a href="https://github.com/Nigelw/Takes">GitHub</a>
       </div>
     </footer>
@@ -616,6 +700,8 @@
     (() => {
       const root = document.documentElement;
       const themeToggle = document.querySelector(".theme-toggle");
+      const navActions = document.querySelector(".nav-actions");
+      const menuButton = document.querySelector(".nav-menu-button");
       const heroScreenshotSource = document.getElementById("heroScreenshotSource");
       const heroScreenshot = document.getElementById("heroScreenshot");
       const themeColor = document.querySelector('meta[name="theme-color"]');
@@ -656,6 +742,20 @@
       themeToggle?.addEventListener("click", () => {
         hasManualTheme = true;
         applyTheme(root.dataset.theme === "dark" ? "light" : "dark");
+      });
+
+      menuButton?.addEventListener("click", () => {
+        const isOpen = navActions?.classList.toggle("menu-open") ?? false;
+        menuButton.setAttribute("aria-expanded", String(isOpen));
+        menuButton.setAttribute("aria-label", isOpen ? "Close navigation menu" : "Open navigation menu");
+      });
+
+      navActions?.querySelectorAll(".nav-links a").forEach((link) => {
+        link.addEventListener("click", () => {
+          navActions.classList.remove("menu-open");
+          menuButton?.setAttribute("aria-expanded", "false");
+          menuButton?.setAttribute("aria-label", "Open navigation menu");
+        });
       });
 
       mediaQuery.addEventListener("change", (event) => {
