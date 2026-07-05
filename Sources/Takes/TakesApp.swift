@@ -315,6 +315,10 @@ enum TakesWindowPolicy {
     static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
     static let minimumContentWidth: CGFloat = 640
     static let defaultWindowWidth: CGFloat = 700
+    static let trackInfoColumnWidthKey = "trackInfoColumnWidth"
+    static let defaultTrackInfoColumnWidth: CGFloat = 240
+    static let minimumTrackInfoColumnWidth: CGFloat = defaultTrackInfoColumnWidth - 10
+    static let minimumWaveformColumnWidth: CGFloat = 240
     static let trackRowHeight: CGFloat = 96
     static let trackTimelineDividerHeight: CGFloat = 1
     static let trackTimelineHeaderHeight: CGFloat = 34
@@ -351,6 +355,11 @@ enum TakesWindowPolicy {
         let rowCount = max(rowCount, 1)
         let dividerCount = max(rowCount - 1, 0)
         return trackRowHeight * CGFloat(rowCount) + trackTimelineDividerHeight * CGFloat(dividerCount)
+    }
+
+    static func clampedTrackInfoColumnWidth(_ width: CGFloat, sectionWidth: CGFloat) -> CGFloat {
+        let maximumWidth = max(minimumTrackInfoColumnWidth, sectionWidth - minimumWaveformColumnWidth)
+        return min(max(width, minimumTrackInfoColumnWidth), maximumWidth)
     }
 
     static func contentHeight(displayingTrackRows rowCount: Int) -> CGFloat {
@@ -664,7 +673,7 @@ private struct ResetMainWindowSizeButton: View {
 
     var body: some View {
         Button("Reset Window Size") {
-            mainWindowCommandState?.resetWindowSize()
+            mainWindowCommandState?.resetWindowSizing()
         }
         .disabled(mainWindowCommandState == nil)
     }

@@ -795,7 +795,7 @@ final class OpenFileCommandState: ObservableObject {
 }
 
 struct MainWindowCommandState {
-    let resetWindowSize: @MainActor () -> Void
+    let resetWindowSizing: @MainActor () -> Void
 }
 
 private struct OpenFileCommandStateKey: FocusedValueKey {
@@ -827,6 +827,66 @@ private struct TransportReadoutWidthKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+private struct TrackInfoColumnResizeHandleView: NSViewRepresentable {
+    let sectionWidth: CGFloat
+    @Binding var columnWidth: Double
+
+    func makeNSView(context: Context) -> ResizeHandleNSView {
+        let view = ResizeHandleNSView()
+        view.sectionWidth = sectionWidth
+        view.columnWidth = CGFloat(columnWidth)
+        view.onColumnWidthChanged = { columnWidth = Double($0) }
+        return view
+    }
+
+    func updateNSView(_ nsView: ResizeHandleNSView, context: Context) {
+        nsView.sectionWidth = sectionWidth
+        nsView.columnWidth = CGFloat(columnWidth)
+        nsView.onColumnWidthChanged = { columnWidth = Double($0) }
+    }
+
+    final class ResizeHandleNSView: NSView {
+        var sectionWidth: CGFloat = 0
+        var columnWidth: CGFloat = TakesWindowPolicy.defaultTrackInfoColumnWidth
+        var onColumnWidthChanged: ((CGFloat) -> Void)?
+        private var dragStartWidth: CGFloat?
+        private var dragStartX: CGFloat?
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .resizeLeftRight)
+        }
+
+        override func cursorUpdate(with event: NSEvent) {
+            NSCursor.resizeLeftRight.set()
+        }
+
+        override func mouseMoved(with event: NSEvent) {
+            NSCursor.resizeLeftRight.set()
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            dragStartWidth = columnWidth
+            dragStartX = event.locationInWindow.x
+            NSCursor.resizeLeftRight.set()
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let dragStartWidth, let dragStartX else { return }
+            let nextWidth = TakesWindowPolicy.clampedTrackInfoColumnWidth(
+                dragStartWidth + event.locationInWindow.x - dragStartX,
+                sectionWidth: sectionWidth
+            )
+            onColumnWidthChanged?(nextWidth)
+            NSCursor.resizeLeftRight.set()
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            dragStartWidth = nil
+            dragStartX = nil
+        }
     }
 }
 
@@ -895,6 +955,7 @@ struct ContentView: View {
     @State private var mainWindowIsKey = true
     @State private var loopDraft: LoopDraft?
     @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
+    @AppStorage(TakesWindowPolicy.trackInfoColumnWidthKey) private var trackInfoColumnWidth = TakesWindowPolicy.defaultTrackInfoColumnWidth
     @State private var showsAlignmentAttentionPopover = false
     @State private var alignmentOutcomePulse = false
 
@@ -1041,6 +1102,7 @@ struct ContentView: View {
             .focusedSceneValue(
                 \.mainWindowCommandState,
                 MainWindowCommandState {
+                    trackInfoColumnWidth = TakesWindowPolicy.defaultTrackInfoColumnWidth
                     guard let mainWindow else { return }
                     TakesWindowPolicy.resetMainWindowSize(mainWindow)
                 }
@@ -1450,8 +1512,8 @@ struct ContentView: View {
         TakesWindowPolicy.trackRowHeight
     }
 
-    private var trackInfoWidth: CGFloat {
-        240
+    private func trackInfoWidth(sectionWidth: CGFloat) -> CGFloat {
+        TakesWindowPolicy.clampedTrackInfoColumnWidth(CGFloat(trackInfoColumnWidth), sectionWidth: sectionWidth)
     }
 
     private var trackHeaderHeight: CGFloat {
@@ -1493,7 +1555,8 @@ struct ContentView: View {
 
     private var trackTimelineSection: some View {
         GeometryReader { proxy in
-            let waveformWidth = max(proxy.size.width - trackInfoWidth, 1)
+            let infoWidth = trackInfoWidth(sectionWidth: proxy.size.width)
+            let waveformWidth = max(proxy.size.width - infoWidth, 1)
             let displayedTrackRowCount = controller.displayedTrackRowCount
             VStack(alignment: .leading, spacing: 0) {
                 if displayedTrackRowCount == 0 {
@@ -1502,7 +1565,7 @@ struct ContentView: View {
                     trackAreaEmptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    trackTimelineHeader(waveformWidth: waveformWidth)
+                    trackTimelineHeader(infoWidth: infoWidth, waveformWidth: waveformWidth)
                         .frame(width: proxy.size.width, height: trackHeaderHeight)
                     Divider()
 
@@ -1512,7 +1575,7 @@ struct ContentView: View {
                                 ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
                                     let isLifted = reorderDraggingID == sessionTrack.id
                                         || reorderRevealingID == sessionTrack.id
-                                    trackRow(index: index, sessionTrack: sessionTrack, infoWidth: trackInfoWidth)
+                                    trackRow(index: index, sessionTrack: sessionTrack, infoWidth: infoWidth)
                                         // The dragged row's floating preview stands in
                                         // for it; its slot stays reserved as the gap the
                                         // other rows slide around. It stays hidden one
@@ -1539,7 +1602,7 @@ struct ContentView: View {
                             }
 
                             if controller.session.isPlayable {
-                                loopSelectionOverlay(waveformWidth: waveformWidth)
+                                loopSelectionOverlay(infoWidth: infoWidth, waveformWidth: waveformWidth)
                             }
                         }
                         .frame(width: proxy.size.width)
@@ -1577,7 +1640,7 @@ struct ContentView: View {
                         onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
                     )
                     .frame(width: waveformWidth, height: proxy.size.height)
-                    .offset(x: trackInfoWidth)
+                    .offset(x: infoWidth)
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -1590,14 +1653,24 @@ struct ContentView: View {
                     Rectangle()
                         .fill(Theme.frozenColumnEdge)
                         .frame(width: 1, height: proxy.size.height)
-                        .offset(x: trackInfoWidth)
+                        .offset(x: infoWidth)
                         .allowsHitTesting(false)
                 }
             }
-            // Playhead drawn last so the grabber and line sit ON TOP of the
-            // frozen-column and header/row dividers rather than under them.
+            // Playhead drawn above the visible frozen-column and header/row
+            // dividers; the transparent resize handle is installed after it so
+            // its cursor and drag region still win at the column boundary.
             .overlay(alignment: .topLeading) {
-                timelinePlayheadOverlay(sectionHeight: proxy.size.height, waveformWidth: waveformWidth)
+                timelinePlayheadOverlay(sectionHeight: proxy.size.height, infoWidth: infoWidth, waveformWidth: waveformWidth)
+            }
+            .overlay(alignment: .topLeading) {
+                if displayedTrackRowCount > 0 {
+                    trackInfoColumnResizeHandle(
+                        sectionWidth: proxy.size.width,
+                        sectionHeight: proxy.size.height,
+                        infoWidth: infoWidth
+                    )
+                }
             }
             .coordinateSpace(name: Self.playheadSpace)
         }
@@ -1641,7 +1714,19 @@ struct ContentView: View {
         )
     }
 
-    private func trackTimelineHeader(waveformWidth: CGFloat) -> some View {
+    private func trackInfoColumnResizeHandle(sectionWidth: CGFloat, sectionHeight: CGFloat, infoWidth: CGFloat) -> some View {
+        let hitWidth: CGFloat = 12
+        return TrackInfoColumnResizeHandleView(
+            sectionWidth: sectionWidth,
+            columnWidth: $trackInfoColumnWidth
+        )
+            .frame(width: hitWidth, height: sectionHeight)
+            .contentShape(Rectangle())
+            .offset(x: infoWidth - hitWidth / 2)
+            .accessibilityLabel("Resize track info column")
+    }
+
+    private func trackTimelineHeader(infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 8) {
                 ImportActionSplitButton(
@@ -1653,7 +1738,7 @@ struct ContentView: View {
             }
             .padding(.leading, 8)
             // Center the button cluster in the taller header rather than pinning it up top.
-            .frame(width: trackInfoWidth, height: trackHeaderHeight, alignment: .leading)
+            .frame(width: infoWidth, height: trackHeaderHeight, alignment: .leading)
             .overlay(alignment: .trailing) {
                 Button("Remove All") {
                     controller.clearTracks()
@@ -1734,7 +1819,7 @@ struct ContentView: View {
     /// grabber is draggable to scrub; the line is inert. Mirrors the same
     /// `isPlayable` + in-range guard used elsewhere.
     @ViewBuilder
-    private func timelinePlayheadOverlay(sectionHeight: CGFloat, waveformWidth: CGFloat) -> some View {
+    private func timelinePlayheadOverlay(sectionHeight: CGFloat, infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
         let playheadX = xPosition(for: controller.session.transportPosition, width: waveformWidth)
         if controller.session.isPlayable, playheadX >= -1, playheadX <= waveformWidth + 1 {
             let handleWidth: CGFloat = 14
@@ -1742,7 +1827,7 @@ struct ContentView: View {
             // Comfortable grab target a bit wider than the visible grabber.
             let hitWidth: CGFloat = 22
             // Whole-pixel center so the 2pt tip and 2pt line overlap exactly.
-            let centerX = trackInfoWidth + playheadX.rounded()
+            let centerX = infoWidth + playheadX.rounded()
             // The grabber's flat tip seats just below the header/rows divider, where the line begins.
             let seatBottom = trackHeaderHeight + trackTimelineDividerHeight
             let lineHeight = max(min(trackTimelineHeight, sectionHeight - seatBottom), 0)
@@ -1768,7 +1853,7 @@ struct ContentView: View {
                     .gesture(
                         DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.playheadSpace))
                             .onChanged { value in
-                                controller.seek(to: globalTime(atX: value.location.x - trackInfoWidth, width: waveformWidth))
+                                controller.seek(to: globalTime(atX: value.location.x - infoWidth, width: waveformWidth))
                             }
                     )
             }
@@ -2286,6 +2371,8 @@ struct ContentView: View {
             Text("ms")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) {
                     binding.wrappedValue = 0
@@ -2304,6 +2391,7 @@ struct ContentView: View {
         .padding(.leading, 6)
         .padding(.trailing, 3)
         .padding(.vertical, 2)
+        .fixedSize(horizontal: true, vertical: false)
         // Recessed field: a filled surface with a soft top inner shadow, ringed by
         // an inset bevel (dark top edge fading to a light bottom edge).
         .background {
@@ -2395,7 +2483,7 @@ struct ContentView: View {
     /// The interaction layer, selection rectangle, and resize handles for the
     /// loop, spanning all lanes across the waveform column. Clipped to the column
     /// so an off-screen loop never spills into the track-info column.
-    private func loopSelectionOverlay(waveformWidth: CGFloat) -> some View {
+    private func loopSelectionOverlay(infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             // Drag to select a loop; click to seek (and deselect if outside the loop).
             Color.clear
@@ -2425,7 +2513,7 @@ struct ContentView: View {
         .frame(width: waveformWidth, height: trackTimelineHeight, alignment: .topLeading)
         .clipped()
         .coordinateSpace(name: Self.loopColumnSpace)
-        .offset(x: trackInfoWidth)
+        .offset(x: infoWidth)
     }
 
     /// Grab handle drawn at each loop edge: a slim accent rod inside a soft
