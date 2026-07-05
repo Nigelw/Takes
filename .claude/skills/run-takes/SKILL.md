@@ -74,13 +74,6 @@ open -a "$APP" "/abs/path/track-a.m4a" "/abs/path/track-b.m4a"
 
 After loading, use computer-use only for what genuinely needs eyes — confirming the waveform rendered, checking playback, reading the UI.
 
-### What the UI looks like at launch
-
-- Transport bar at top: **Play** (disabled), **Switch Track** (disabled), time counter `00:00 / 00:00`
-- Track toolbar: **+** button (opens "Open Finder Selection" / "Open Apple Music Selection" dropdown), **Clear All**, offset timestamp
-- Track 1 row left panel: label "Track 1", "No file loaded"
-- Track 1 row right panel: "Drop audio file here" drop zone
-
 ### Quit the app
 
 ```bash
@@ -125,9 +118,8 @@ Use this to verify PRs that touch `TransportMapping.swift`, `Models.swift`, or o
 - **`open` returns immediately** — the process takes ~1 second to appear. `smoke.sh` polls `pgrep -x Takes` to wait. Don't screenshot immediately after calling `open`; wait for the script to confirm the PID.
 - **`Switch Track` is always disabled with fewer than 2 loaded tracks.** Don't interpret a grayed-out Switch Track as a bug when there's only one track.
 - **Music import requires Automation permission.** The first time a user clicks "Open Apple Music Selection", macOS shows a permission dialog. The app will hang on that dialog until approved.
-- **Dropping files from Finder into the Takes window works**; the drop zone is the right panel of each track row, but any part of the window accepts the drop.
-- **The `+` button itself** (not the chevron) opens a native file picker; the chevron opens the "Open Finder Selection / Open Apple Music Selection" menu.
-- **Escape does not close the `+` dropdown menu** — click elsewhere in the window to dismiss it.
+- **Dropping files from Finder into the Takes window works**; the drop zone is the track area, but the entire window accepts the drop.
+- **The `+` button itself** (not the chevron) opens a native file picker; the chevron opens a dropdown with additional options.
 
 ## Troubleshooting
 
