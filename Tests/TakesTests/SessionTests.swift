@@ -335,6 +335,32 @@ struct SessionTests {
     }
 
     @Test
+    func trackInfoColumnPolicyDefaultsNearExistingFixedWidth() {
+        #expect(TakesWindowPolicy.defaultTrackInfoColumnWidth == 240)
+        #expect(TakesWindowPolicy.minimumTrackInfoColumnWidth == TakesWindowPolicy.defaultTrackInfoColumnWidth - 10)
+    }
+
+    @Test
+    func trackInfoColumnPolicyClampsToMinimumWidth() {
+        let width = TakesWindowPolicy.clampedTrackInfoColumnWidth(
+            120,
+            sectionWidth: TakesWindowPolicy.defaultWindowWidth
+        )
+
+        #expect(width == TakesWindowPolicy.minimumTrackInfoColumnWidth)
+    }
+
+    @Test
+    func trackInfoColumnPolicyPreservesWaveformMinimumWidth() {
+        let width = TakesWindowPolicy.clampedTrackInfoColumnWidth(
+            640,
+            sectionWidth: TakesWindowPolicy.defaultWindowWidth
+        )
+
+        #expect(width == TakesWindowPolicy.defaultWindowWidth - TakesWindowPolicy.minimumWaveformColumnWidth)
+    }
+
+    @Test
     func windowPolicyDetectsSavedMainWindowFrame() {
         let defaults = UserDefaults(suiteName: "TakesWindowPolicyTests-\(UUID().uuidString)")!
 
@@ -1736,6 +1762,7 @@ struct SessionTests {
         #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.iBeam, hitView: textField) == false)
         #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.iBeam, hitView: nil) == true)
         #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.arrow, hitView: button) == false)
+        #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.resizeLeftRight, hitView: button) == false)
     }
 
     @Test
