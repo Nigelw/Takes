@@ -231,6 +231,7 @@ def render(items):
   <style>
     :root {{
       color-scheme: light dark;
+      --page-gutter: clamp(22px, 4vw, 48px);
       --ink: #1d1d1f;
       --muted: #6e6e73;
       --line: #e5e5e7;
@@ -255,15 +256,20 @@ def render(items):
       --theme-toggle-shadow: 0 12px 26px rgba(0, 0, 0, 0.34);
     }}
     * {{ box-sizing: border-box; }}
+    ::view-transition-old(root),
+    ::view-transition-new(root) {{
+      animation-duration: 500ms;
+      animation-timing-function: ease;
+    }}
     body {{ font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
            margin: 0; color: var(--ink); background: var(--surface); }}
     a {{ color: inherit; text-decoration: none; }}
     .nav {{ align-items: center; display: flex; justify-content: space-between;
-            margin: 0 auto; max-width: 48rem; padding: 1.25rem; }}
-    .brand {{ align-items: center; display: inline-flex; gap: .65rem; font-size: .95rem; font-weight: 700; }}
-    .brand img {{ width: 34px; height: 34px; border-radius: 9px; }}
-    .nav-actions {{ align-items: center; display: flex; gap: .8rem; position: relative; }}
-    .nav-links {{ align-items: center; color: var(--muted); display: flex; gap: 1rem; font-size: .88rem; font-weight: 600; }}
+            margin: 0 auto; max-width: 1120px; padding: 22px var(--page-gutter); }}
+    .brand {{ align-items: center; display: inline-flex; gap: 10px; font-size: 15px; font-weight: 700; }}
+    .brand img {{ width: 34px; height: 34px; border-radius: 10px; }}
+    .nav-actions {{ align-items: center; display: flex; gap: 14px; position: relative; }}
+    .nav-links {{ align-items: center; color: var(--muted); display: flex; gap: 18px; font-size: 14px; font-weight: 600; }}
     .nav-links a[aria-current="page"] {{ color: var(--accent); }}
     .brand:hover, .nav-links a:hover {{ color: var(--accent); }}
     .nav-menu-button {{ display: none; }}
@@ -323,6 +329,7 @@ def render(items):
     .badge {{ font-size: .65rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
              color: #b25000; background: #ffefe0; padding: .15rem .45rem; border-radius: 5px; }}
     .notes ul {{ margin: 0; padding-left: 1.25rem; }}
+    .notes {{ max-width: 40rem; }}
     .notes li {{ margin: .2rem 0; }}
     .notes li ul {{ margin-top: .2rem; }}
     .notes h3, .notes h4 {{ font-size: .95rem; margin: 1rem 0 .35rem; }}
@@ -357,8 +364,8 @@ def render(items):
         border-radius: 8px;
         box-shadow: 0 12px 28px rgba(0, 0, 0, .12);
         display: none;
-        min-width: 150px;
-        padding: .45rem;
+        min-width: 156px;
+        padding: 8px;
         position: absolute;
         right: 0;
         top: calc(100% + 8px);
@@ -367,11 +374,11 @@ def render(items):
       .nav.menu-open .nav-actions .nav-links {{
         align-items: stretch;
         display: grid;
-        gap: .1rem;
+        gap: 2px;
       }}
       .nav-actions .nav-links a {{
         border-radius: 6px;
-        padding: .55rem .6rem;
+        padding: 9px 10px;
       }}
       .release-heading {{ align-items: flex-start; flex-direction: column; gap: .15rem; }}
       .meta {{ text-align: left; }}
@@ -424,6 +431,12 @@ def render(items):
         dark: "#111114"
       }};
 
+      function runThemeTransition(nextTheme) {{
+        document.startViewTransition(() => {{
+          applyTheme(nextTheme);
+        }});
+      }}
+
       function applyTheme(theme) {{
         const isDark = theme === "dark";
         root.dataset.theme = theme;
@@ -439,7 +452,7 @@ def render(items):
 
       themeToggle?.addEventListener("click", () => {{
         hasManualTheme = true;
-        applyTheme(root.dataset.theme === "dark" ? "light" : "dark");
+        runThemeTransition(root.dataset.theme === "dark" ? "light" : "dark");
       }});
 
       menuButton?.addEventListener("click", () => {{
