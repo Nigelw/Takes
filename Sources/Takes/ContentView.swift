@@ -954,6 +954,7 @@ struct ContentView: View {
     @State private var mainWindow: NSWindow?
     @State private var mainWindowIsKey = true
     @State private var loopDraft: LoopDraft?
+    @State private var loopResizeDraft: LoopRegion?
     @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
     @AppStorage(TakesWindowPolicy.trackInfoColumnWidthKey) private var trackInfoColumnWidth = TakesWindowPolicy.defaultTrackInfoColumnWidth
     @State private var showsAlignmentAttentionPopover = false
@@ -2500,13 +2501,17 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
 
-            // Resize handles for a committed loop (not while drafting a new one).
-            if loopDraft == nil, let loop = controller.session.loopRegion {
+            // During resize, preview locally so playback is rebound only once on mouse-up.
+            if loopDraft == nil, let loop = displayedLoopRegion {
                 loopResizeHandle(atTime: loop.start, waveformWidth: waveformWidth) { time in
-                    controller.resizeLoop(start: time)
+                    updateLoopResizeDraft(start: time)
+                } onEnded: { time in
+                    commitLoopResize(start: time)
                 }
                 loopResizeHandle(atTime: loop.end, waveformWidth: waveformWidth) { time in
-                    controller.resizeLoop(end: time)
+                    updateLoopResizeDraft(end: time)
+                } onEnded: { time in
+                    commitLoopResize(end: time)
                 }
             }
         }
@@ -2527,15 +2532,15 @@ struct ContentView: View {
             .frame(width: 2)
     }
 
-    /// x-span (points, within the waveform column) of the draft loop while
-    /// dragging, else the committed loop; `nil` when there is nothing to draw.
+    /// x-span (points, within the waveform column) of the loop being drawn:
+    /// a new-selection draft, a resize preview, or the committed loop.
     private func activeLoopXRange(waveformWidth: CGFloat) -> ClosedRange<CGFloat>? {
         let start: TimeInterval
         let end: TimeInterval
         if let draft = loopDraft {
             start = min(draft.start, draft.current)
             end = max(draft.start, draft.current)
-        } else if let loop = controller.session.loopRegion {
+        } else if let loop = displayedLoopRegion {
             start = loop.start
             end = loop.end
         } else {
@@ -2549,7 +2554,8 @@ struct ContentView: View {
     private func loopResizeHandle(
         atTime time: TimeInterval,
         waveformWidth: CGFloat,
-        onDrag: @escaping (TimeInterval) -> Void
+        onChanged: @escaping (TimeInterval) -> Void,
+        onEnded: @escaping (TimeInterval) -> Void
     ) -> some View {
         let x = xPosition(for: time, width: waveformWidth)
         let hitWidth: CGFloat = 12
@@ -2564,9 +2570,40 @@ struct ContentView: View {
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.loopColumnSpace))
                     .onChanged { value in
-                        onDrag(globalTime(atX: value.location.x, width: waveformWidth))
+                        onChanged(globalTime(atX: value.location.x, width: waveformWidth))
+                    }
+                    .onEnded { value in
+                        onEnded(globalTime(atX: value.location.x, width: waveformWidth))
                     }
             )
+    }
+
+    private var displayedLoopRegion: LoopRegion? {
+        loopResizeDraft ?? controller.session.loopRegion
+    }
+
+    private func resizedLoopRegion(start: TimeInterval? = nil, end: TimeInterval? = nil) -> LoopRegion? {
+        guard let current = displayedLoopRegion else { return nil }
+        return LoopRegion.normalized(
+            start: start ?? current.start,
+            end: end ?? current.end,
+            timelineStart: controller.session.timelineStart,
+            timelineEnd: controller.session.timelineEnd
+        )
+    }
+
+    private func updateLoopResizeDraft(start: TimeInterval? = nil, end: TimeInterval? = nil) {
+        guard let region = resizedLoopRegion(start: start, end: end) else { return }
+        loopResizeDraft = region
+    }
+
+    private func commitLoopResize(start: TimeInterval? = nil, end: TimeInterval? = nil) {
+        guard let region = resizedLoopRegion(start: start, end: end) else {
+            loopResizeDraft = nil
+            return
+        }
+        loopResizeDraft = nil
+        controller.resizeLoop(start: region.start, end: region.end)
     }
 
     /// Click-to-seek / drag-to-select-loop behaviour, shared by the waveform column and the

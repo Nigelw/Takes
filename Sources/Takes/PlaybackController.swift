@@ -970,10 +970,26 @@ final class PlaybackController: ObservableObject {
             timelineEnd: session.timelineEnd
         ) else { return }
 
+        guard region != current else { return }
+
+        let transport = session.isPlaying ? currentTransportPosition() : session.transportPosition
         session.loopRegion = region
-        // Keep the playhead inside the loop and, if playing, rebind the audio to
-        // the new bounds (mirrors the existing scrub-reschedule behaviour).
-        seek(to: session.transportPosition)
+        guard session.isPlaying else {
+            seek(to: transport)
+            return
+        }
+
+        if Self.canResizeLoopWithoutRescheduling(from: current, to: region, transport: transport) {
+            session.transportPosition = transport
+            if region.end > current.end {
+                appendLoopExtension(from: current, currentPosition: transport)
+            }
+            return
+        }
+
+        // Destructive edits, such as shrinking the end under already-scheduled
+        // audio or moving the start past the playhead, still need a precise rebind.
+        seek(to: transport)
     }
 
     /// Clear the loop and turn repeat off.
@@ -1370,6 +1386,36 @@ final class PlaybackController: ObservableObject {
             playbackError = .schedulingFailed
             stopAtEnd()
         }
+    }
+
+    private func appendLoopExtension(from previousLoop: LoopRegion, currentPosition: TimeInterval) {
+        guard session.isPlayable else { return }
+        let extensionStart = max(previousLoop.end, currentPosition)
+        guard extensionStart < session.playbackEnd else { return }
+
+        do {
+            try scheduleTracks(
+                session.tracks.map(\.id),
+                startingAt: extensionStart,
+                stoppingExistingSchedule: false
+            )
+        } catch let error as PlaybackError {
+            playbackError = error
+            stopAtEnd()
+        } catch {
+            playbackError = .schedulingFailed
+            stopAtEnd()
+        }
+    }
+
+    nonisolated static func canResizeLoopWithoutRescheduling(
+        from previousLoop: LoopRegion,
+        to resizedLoop: LoopRegion,
+        transport: TimeInterval
+    ) -> Bool {
+        resizedLoop.end >= previousLoop.end
+            && transport >= resizedLoop.start
+            && transport < resizedLoop.end
     }
 
     private func trackHadPlaybackScheduledThroughLoopEnd(
