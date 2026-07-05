@@ -10,12 +10,12 @@
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <description sparkle:format="markdown"><![CDATA[## New
 - Import streaming audio from Apple Music, Spotify, and YouTube
+
+## Improved
 - Significantly improved drag and drop
   - Improved visual design and UX of track reordering
   - Improved visual indicator for external file drops onto Takes window
   - Support standard Mac conventions: drag track out of the window to copy its file to the Finder or another app, drop on window toolbar or menubar to cancel drag
-
-## Improved
 - Switch tracks with the up/down arrow keys in addition to other keyboard shortcuts
 - Added a link to the Takes website in the Help menu
 
