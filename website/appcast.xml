@@ -3,6 +3,19 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>2.8.1</title>
+            <pubDate>Sun, 05 Jul 2026 10:49:49 -0400</pubDate>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>2.8.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## New
+- Resizable track info column. Grab the divider and drag it left/right
+
+## Improved
+- Changing the loop range during playback no longer causes audio to stutter]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.8.1/Takes.dmg" length="3406125" type="application/octet-stream" sparkle:edSignature="3k/NtGr54K36MWajZKrLzejQqO5yn5kZgYvqgIdqXBMijI75/xwqXxw2hrF8jNX1d+CMtPcXz5Td73VIs7LDBQ=="/>
+        </item>
+        <item>
             <title>2.8</title>
             <pubDate>Sat, 04 Jul 2026 18:39:48 -0400</pubDate>
             <sparkle:version>11</sparkle:version>
@@ -44,21 +57,6 @@
 ## Fixed
 - App window can be moved by dragging anywhere in the control area]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.7/Takes.dmg" length="3123238" type="application/octet-stream" sparkle:edSignature="QnKKTcK1qg9Jift6VStt+6rEyFomagJRtcOKm0zsuDt1CIi51EcCSfSPo9L+OS0mgTxsD5GmXXQFp/xvlW7IBw=="/>
-        </item>
-        <item>
-            <title>2.6.1</title>
-            <pubDate>Thu, 02 Jul 2026 17:15:06 -0400</pubDate>
-            <sparkle:version>9</sparkle:version>
-            <sparkle:shortVersionString>2.6.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[## Improved
-- Double-click the "ms" label in the offset text field to reset it to zero
-
-## Fixed
-- Playback now continues when the system audio device changes, such as when putting in AirPods
-- The mouse cursor now resets correctly after interacting with a text field
-]]></description>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.6.1/Takes.dmg" length="3023113" type="application/octet-stream" sparkle:edSignature="9iNjYxcIEcHbTAA5bc7MdxAVqk71640lpyo1Fps8TsqKn8dgysYWQoson5HuYwLmGbaNlndYBPCKFeYkySTmBg=="/>
         </item>
     </channel>
 </rss>

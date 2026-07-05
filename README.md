@@ -33,6 +33,7 @@ The app currently supports:
 - Switching playback through loaded tracks in list order during playback, through the transport, Playback menu, number hotkeys, Up/Down arrow keys, or media remote commands
 - Dragging files anywhere in the window to append to the track list
 - Reordering loaded tracks by dragging rows, or dragging a row out of the window to copy its audio file to Finder or another app
+- Resizable track info column for balancing metadata and waveform space
 - Progressive waveform extraction and rendering for each loaded track
 - Signed global timeline playback with a playhead over the waveform lanes
 - Automatic track alignment that derives per-track offsets from the audio itself, with an optional deeper tempo analysis for takes recorded at slightly different speeds
@@ -205,6 +206,7 @@ Current transport behavior:
 - Drag files anywhere in the window to append them to the track list.
 - Drop a file on a specific row to replace that track.
 - Drag track rows to reorder them.
+- Drag the divider between the track info column and waveform area to resize the track info column.
 - Use File > Quick Open from Finder or `Shift+Cmd+F` to import selected audio files from Finder.
 - Use the `+` menu above the track info area and choose `Quick Open from Apple Music` to import the current Music.app selection.
 - Use File > Open Streaming URL or `Shift+Cmd+O` to import a track from an Apple Music, Spotify, YouTube, or YouTube Music URL. This downloads audio through yt-dlp, which Takes manages automatically (falling back to a system-installed copy) and keeps updated in Settings > Updates.
