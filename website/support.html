@@ -675,15 +675,16 @@
               <ul>
                 <li>Drag files and folders onto the app, use Quick Open to grab your current selection from Finder or Apple Music, or use the Open dialog box like a normie.</li>
                 <li>You can also open streaming music. Give it a URL from Spotify, Apple Music, or YouTube and you're good to go.</li>
-                <li>Takes supports up to 32 loaded audio files at once and plays a wide range of audio formats.</li>
+                <li>Takes supports loading up to 32 audio files at once and plays a wide range of audio formats.</li>
               </ul>
             </article>
 
             <div class="help-card-grid">
               <article class="help-card">
                 <h3>Selection looping</h3>
-                <p>Use selection looping to focus on a specific passage. <kbd>Drag</kbd> or <kbd>Shift</kbd><span class="key-sep">+</span><kbd>Click</kbd> in the timeline area to create a loop. "Switch &amp; Repeat" mode is automatically enabled when looping. This changes tracks each time playback loops so you can compare the same passage across tracks.</p>
+                <p>Use selection looping to focus on a specific passage. <kbd>Drag</kbd> or <kbd>Shift</kbd><span class="key-sep">+</span><kbd>Click</kbd> in the timeline area to create a loop.</p>
                 <ul>
+                  <li>"Switch &amp; Repeat" mode is automatically enabled when looping. This changes tracks each time playback loops so you can compare the same passage across tracks.</li>
                   <li>You can also repeat one, to keep looping the same track.</li>
                   <li>Clearing a loop automatically switches off repeat mode.</li>
                 </ul>
@@ -693,20 +694,20 @@
                 <h3>Blind listening mode</h3>
                 <p>Decide which take sounds best without bias. Blind listening mode hides names and metadata, anonymizes the waveforms, and shuffles the track order. It even hides the track name from the Now Playing widget in Control Center. No cheating! 😜</p>
                 <ul>
-                  <li>Turn off blind listening mode to reveal the name of your favorite track. (The track order remains unchanged when turning it off.)</li>
+                  <li>Turn off blind listening mode to reveal the name of your favorite version. (Track order only shuffles when turning it on; it remains unchanged when turning it off.)</li>
                 </ul>
               </article>
 
               <article class="help-card">
                 <h3>Auto-align</h3>
-                <p>Different copies of a track don't always line up perfectly. An extra bit of silence at the start of one can make toggling back and forth jarring, as each switch jumps the music backward and forward.</p>
+                <p>Different copies of a track don't always line up perfectly. An extra bit of silence at the start of one can make toggling back and forth jarring, as each switch jumps the music backwards and forwards.</p>
                 <p>Auto-align analyzes the audio to find matching sections, and adjusts offsets so tracks line up perfectly.</p>
                 <ul>
                   <li>If tracks fall out of sync over time due to a difference in recordings, you can auto-align again at any time. It syncs offsets based on the current playhead position.</li>
                   <li>Auto-align only accepts confident matches and is tuned to avoid false positives, so it won't set crazy offsets if file matching is ambiguous.</li>
                   <li>For tracks with larger tempo differences, auto-align offers a deeper analysis option that searches tempo deviations, up to about 6 percent, to find alignment.</li>
-                  <li>If auto-align can't sync up your tracks, Takes is designed to make manual alignment as fast as possible. My own workflow is to start playback, nudge alignment, then toggle back and forth between tracks while playing and continuing to adjust if necessary.</li>
-                  <li>The Takes UI is specifically designed for quick keyboard navigation to make this easy: <kbd>Tab</kbd> into the offset field, nudge with <kbd>↑/↓</kbd>, hit <kbd>Enter</kbd>, hit <kbd>X</kbd> to toggle tracks.</li>
+                  <li>If auto-align can't sync up your tracks, Takes is designed to make manual alignment as fast as possible. My own workflow is to start playback, nudge alignment, then toggle back and forth between tracks while playing and continuing to adjust as necessary.</li>
+                  <li>The Takes UI is specifically designed for quick keyboard navigation to make this easy: <kbd>Tab</kbd> into the offset field, nudge with <kbd>↑/↓</kbd> and hit <kbd>Enter</kbd>, hit <kbd>X</kbd> to toggle tracks.</li>
                 </ul>
               </article>
             </div>
@@ -746,7 +747,7 @@
 
                 <section class="shortcut-group">
                   <h4>Other details</h4>
-                  <p>Drag a track out of Takes to copy it elsewhere.</p>
+                  <p>Takes has full drag & drop support. Drag to rearrange the order of tracks, or drag one out of its window to copy it elsewhere.</p>
                 </section>
               </div>
             </article>
@@ -755,18 +756,18 @@
               <h3>API</h3>
               <p>Takes has two automation interfaces:</p>
               <ol>
-                <li>Open the app with files through macOS:</li>
-              </ol>
-              <pre><code>open -a "Takes.app" "$FILE_1" "$FILE_2"</code></pre>
-              <ol start="2">
-                <li>Open a custom <code>takes://</code> URL:</li>
+                <li>Open a file or streaming URL with a <code>takes://</code> URL:</li>
               </ol>
               <pre><code>open 'takes://open-url?url=&lt;streaming%20URL&gt;'
 open 'takes://open-file?url=&lt;file%20URL&gt;'
 open 'takes://open-files?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&gt;'</code></pre>
-              <p>There is also one launch-time appearance option:</p>
+              <ol start="2">
+                <li>Open the app with files through the CLI:</li>
+              </ol>
+              <pre><code>open -a "Takes.app" "$FILE_1" "$FILE_2"</code></pre>
+              <p>There is also a launch-time appearance option:</p>
               <pre><code>open -a "Takes.app" --args --appearance-theme dark</code></pre>
-              <p>Use this option to launch Takes with a temporary appearance for e.g. taking screenshots. (The setting doesn't persist across launches.)</p>
+              <p>Use this option to launch Takes with a temporary light or dark theme for e.g. taking screenshots. (The setting doesn't persist across launches.)</p>
             </article>
           </div>
         </div>
