@@ -553,7 +553,7 @@ private struct OpenAnalysisWindowButton: View {
         Button("Analysis") {
             openWindow(id: TakesWindowPolicy.analysisWindowID)
         }
-        .keyboardShortcut("z", modifiers: [.command, .option])
+        .keyboardShortcut("l", modifiers: [.command])
     }
 }
 
