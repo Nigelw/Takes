@@ -335,14 +335,49 @@ struct SessionTests {
     }
 
     @Test
+    func trackInfoColumnPolicyDefaultsNearExistingFixedWidth() {
+        #expect(TakesWindowPolicy.defaultTrackInfoColumnWidth == 240)
+        #expect(TakesWindowPolicy.minimumTrackInfoColumnWidth == TakesWindowPolicy.defaultTrackInfoColumnWidth - 10)
+    }
+
+    @Test
+    func trackInfoColumnPolicyClampsToMinimumWidth() {
+        let width = TakesWindowPolicy.clampedTrackInfoColumnWidth(
+            120,
+            sectionWidth: TakesWindowPolicy.defaultWindowWidth
+        )
+
+        #expect(width == TakesWindowPolicy.minimumTrackInfoColumnWidth)
+    }
+
+    @Test
+    func trackInfoColumnPolicyPreservesWaveformMinimumWidth() {
+        let width = TakesWindowPolicy.clampedTrackInfoColumnWidth(
+            640,
+            sectionWidth: TakesWindowPolicy.defaultWindowWidth
+        )
+
+        #expect(width == TakesWindowPolicy.defaultWindowWidth - TakesWindowPolicy.minimumWaveformColumnWidth)
+    }
+
+    @Test
     func windowPolicyDetectsSavedMainWindowFrame() {
-        let defaults = UserDefaults(suiteName: "TakesWindowPolicyTests-\(UUID().uuidString)")!
+        var defaults: [String: Any] = [:]
 
-        #expect(!TakesWindowPolicy.hasSavedMainWindowFrame(defaults: defaults))
+        #expect(!TakesWindowPolicy.hasSavedMainWindowFrame { defaults[$0] })
 
-        defaults.set("10 20 900 568 0 0 1512 944", forKey: TakesWindowPolicy.mainWindowFrameAutosaveName)
+        defaults[TakesWindowPolicy.mainWindowFrameAutosaveName] = "10 20 900 568 0 0 1512 944"
 
-        #expect(TakesWindowPolicy.hasSavedMainWindowFrame(defaults: defaults))
+        #expect(TakesWindowPolicy.hasSavedMainWindowFrame { defaults[$0] })
+    }
+
+    @Test
+    func launchOptionsReadTemporaryDefaultWindowLayoutArgument() {
+        #expect(TakesLaunchOptions(arguments: [
+            "Takes",
+            TakesLaunchOptions.defaultWindowLayoutArgument
+        ]).usesDefaultWindowLayout)
+        #expect(!TakesLaunchOptions(arguments: ["Takes"]).usesDefaultWindowLayout)
     }
 
     @Test
@@ -361,7 +396,7 @@ struct SessionTests {
     @MainActor
     @Test
     func appearanceThemeOverrideDoesNotPersistDuringSettingsInitialization() {
-        let defaults = UserDefaults(suiteName: "AppSettingsAppearanceOverrideTests-\(UUID().uuidString)")!
+        let defaults = InMemoryAppSettingsDefaults()
         defaults.set(AppearanceTheme.light.rawValue, forKey: AppSettings.appearanceThemeKey)
 
         let settings = AppSettings(
@@ -400,6 +435,131 @@ struct SessionTests {
     }
 
     @Test
+    func aboutPanelCreditsExposeExactTextAndLinks() throws {
+        let credits = TakesAboutPanel.credits
+
+        #expect(credits.string == """
+        Lead designer & developer
+        Nigel M. Warren: https://nigelwarren.com
+
+        Third-Party Resources
+        Sparkle: https://sparkle-project.org/
+        yt-dlp: https://github.com/yt-dlp/yt-dlp
+        """)
+
+        let expectedLinks: [(label: String, destination: String)] = [
+            ("https://nigelwarren.com", "https://nigelwarren.com"),
+            ("https://sparkle-project.org/", "https://sparkle-project.org/"),
+            ("https://github.com/yt-dlp/yt-dlp", "https://github.com/yt-dlp/yt-dlp")
+        ]
+
+        for (label, destination) in expectedLinks {
+            let range = try #require(credits.string.range(of: label))
+            let linkValue = credits.attribute(.link, at: NSRange(range, in: credits.string).location, effectiveRange: nil)
+            let url = try #require(linkValue as? URL)
+
+            #expect(url.absoluteString == destination)
+        }
+    }
+
+    @Test
+    @MainActor
+    func ytdlpUpdateStateFormatsCadenceAndLastCheckedDate() {
+        let installedAt = Date(timeIntervalSince1970: 100)
+        let lastCheckedAt = Date(timeIntervalSince1970: 200)
+        let updater = StubYTDLPUpdater(status: YTDLPManagedToolStatus(
+            version: "2026.07.04",
+            channel: YTDLPManager.stableChannel,
+            installedAt: installedAt,
+            lastCheckedAt: lastCheckedAt,
+            executableURL: URL(fileURLWithPath: "/tmp/yt-dlp_macos")
+        ))
+        let state = YTDLPUpdateState(updater: updater)
+
+        #expect(state.cadenceDescription == "Weekly")
+        #expect(state.lastCheckedDescription == "Last checked \(lastCheckedAt.formatted(date: .abbreviated, time: .shortened))")
+    }
+
+    @Test
+    @MainActor
+    func ytdlpUpdateStateShowsEmptyLastCheckedDate() {
+        let state = YTDLPUpdateState(updater: StubYTDLPUpdater(status: nil))
+
+        #expect(state.lastCheckedDescription == "Not checked yet")
+    }
+
+    @Test
+    @MainActor
+    func ytdlpUpdateStateUpdateNowRefreshesStatusAfterSuccess() async {
+        let installedAt = Date(timeIntervalSince1970: 100)
+        let lastCheckedAt = Date(timeIntervalSince1970: 200)
+        let updatedStatus = YTDLPManagedToolStatus(
+            version: "2026.07.11",
+            channel: YTDLPManager.stableChannel,
+            installedAt: installedAt,
+            lastCheckedAt: lastCheckedAt,
+            executableURL: URL(fileURLWithPath: "/tmp/yt-dlp_macos")
+        )
+        let updater = StubYTDLPUpdater(status: nil, updatedStatus: updatedStatus)
+        let state = YTDLPUpdateState(updater: updater)
+
+        await state.performUpdateNow()
+
+        #expect(updater.updateCallCount == 1)
+        #expect(state.toolStatus == updatedStatus)
+        #expect(state.updateAlert == .upToDate(version: "2026.07.11"))
+        #expect(state.updateAlert?.title == "You're up to date!")
+        #expect(state.updateAlert?.message == "yt-dlp 2026.07.11 is currently the newest version available.")
+        #expect(!state.isUpdating)
+    }
+
+    @Test
+    @MainActor
+    func ytdlpUpdateStateUpdateNowUsesFriendlyFailureMessage() async {
+        let updater = StubYTDLPUpdater(
+            status: nil,
+            updateError: StreamingTrackImportError.downloaderUnavailable
+        )
+        let state = YTDLPUpdateState(updater: updater)
+
+        await state.performUpdateNow()
+
+        #expect(updater.updateCallCount == 1)
+        #expect(state.updateAlert == .failed)
+        #expect(state.updateAlert?.title == "Could Not Update yt-dlp")
+        #expect(state.updateAlert?.message == "Check your connection and try again.")
+        #expect(!state.isUpdating)
+    }
+
+    @Test
+    @MainActor
+    func cancellingStreamingTrackDuringMetadataAddsNoTrackOrFailureStatus() async throws {
+        let statusRecorder = StreamingStatusRecorder()
+        let controller = PlaybackController(
+            streamingTrackResolver: DelayedStreamingTrackResolver(delay: .seconds(10)),
+            ytdlpManager: StubYTDLPManager(url: URL(fileURLWithPath: "/usr/local/bin/yt-dlp"))
+        )
+
+        let task = Task {
+            await controller.loadStreamingTrack(
+                from: "https://open.spotify.com/track/example",
+                statusHandler: { status in
+                    await statusRecorder.record(status)
+                }
+            )
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+        task.cancel()
+        let didLoad = await task.value
+        let statuses = await statusRecorder.statuses()
+
+        #expect(!didLoad)
+        #expect(controller.displayedTrackRowCount == 0)
+        #expect(!statuses.contains { $0.isFailed })
+    }
+
+    @Test
     func infoPlistDeclaresAudioAndFolderDocumentSupportForAppIconDrops() throws {
         let plistURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -419,6 +579,27 @@ struct SessionTests {
 
         #expect(supportedTypes.contains("public.audio"))
         #expect(supportedTypes.contains("public.folder"))
+    }
+
+    @Test
+    func infoPlistDeclaresTakesAutomationURLScheme() throws {
+        let plistURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Config")
+            .appending(path: "Takes-Info.plist")
+
+        let data = try Data(contentsOf: plistURL)
+        let plist = try #require(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        let urlTypes = try #require(plist["CFBundleURLTypes"] as? [[String: Any]])
+        let schemes = urlTypes.flatMap { urlType in
+            urlType["CFBundleURLSchemes"] as? [String] ?? []
+        }
+
+        #expect(schemes.contains("takes"))
     }
 
     @Test
@@ -1199,6 +1380,45 @@ struct SessionTests {
 
     @MainActor
     @Test
+    func creatingLoopAroundPausedPlayheadKeepsPlaybackPosition() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop-paused-playhead.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.seek(to: 0.4)
+
+        controller.beginLoop(LoopRegion(start: 0.3, end: 0.8))
+
+        #expect(!controller.session.isPlaying)
+        #expect(controller.session.loopRegion == LoopRegion(start: 0.3, end: 0.8))
+        #expect(controller.session.repeatMode == .switchAndRepeat)
+        #expect(abs(controller.session.transportPosition - 0.4) < 0.0001)
+    }
+
+    @MainActor
+    @Test
+    func replacingActiveLoopAroundPlayingPlayheadKeepsPlaybackPosition() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop-replace-playhead.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.beginLoop(LoopRegion(start: 0.1, end: 0.5))
+        controller.seek(to: 0.4)
+        controller.play()
+
+        controller.beginLoop(LoopRegion(start: 0.3, end: 0.8))
+
+        #expect(controller.session.isPlaying)
+        #expect(controller.session.loopRegion == LoopRegion(start: 0.3, end: 0.8))
+        #expect(controller.session.repeatMode == .switchAndRepeat)
+        #expect(controller.session.transportPosition >= 0.4)
+        #expect(controller.session.transportPosition < 0.8)
+    }
+
+    @MainActor
+    @Test
     func deselectLoopTurnsRepeatOff() async throws {
         let url = try makeTemporaryAudioFile(name: "loop.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
@@ -1590,6 +1810,7 @@ struct SessionTests {
         #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.iBeam, hitView: textField) == false)
         #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.iBeam, hitView: nil) == true)
         #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.arrow, hitView: button) == false)
+        #expect(CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.resizeLeftRight, hitView: button) == false)
     }
 
     @Test
@@ -1699,5 +1920,91 @@ private struct FakeLibraryTrackSelector: LibraryTrackSelecting {
 
     func selectedTracks() throws -> LibraryTrackSelection {
         selection
+    }
+}
+
+private final class InMemoryAppSettingsDefaults: AppSettingsDefaults {
+    private var values: [String: Any] = [:]
+
+    func object(forKey defaultName: String) -> Any? {
+        values[defaultName]
+    }
+
+    func string(forKey defaultName: String) -> String? {
+        values[defaultName] as? String
+    }
+
+    func set(_ value: Any?, forKey defaultName: String) {
+        values[defaultName] = value
+    }
+}
+
+private final class StubYTDLPUpdater: YTDLPUpdating, @unchecked Sendable {
+    private(set) var updateCallCount = 0
+    private var status: YTDLPManagedToolStatus?
+    private let updatedStatus: YTDLPManagedToolStatus?
+    private let updateError: Error?
+
+    init(
+        status: YTDLPManagedToolStatus?,
+        updatedStatus: YTDLPManagedToolStatus? = nil,
+        updateError: Error? = nil
+    ) {
+        self.status = status
+        self.updatedStatus = updatedStatus
+        self.updateError = updateError
+    }
+
+    func managedToolStatus() -> YTDLPManagedToolStatus? {
+        status
+    }
+
+    func updateManagedExecutableNow() async throws -> URL {
+        updateCallCount += 1
+        if let updateError {
+            throw updateError
+        }
+        if let updatedStatus {
+            status = updatedStatus
+        }
+        return status?.executableURL ?? URL(fileURLWithPath: "/tmp/yt-dlp_macos")
+    }
+}
+
+private struct StubYTDLPManager: YTDLPManaging {
+    let url: URL
+
+    func executableURL() async throws -> URL {
+        url
+    }
+}
+
+private struct DelayedStreamingTrackResolver: StreamingTrackResolving {
+    let delay: Duration
+
+    func resolveYouTubeMatch(
+        for sourceURL: URL,
+        using downloaderURL: URL,
+        statusHandler: @escaping @Sendable (StreamingURLPromptStatus) async -> Void
+    ) async throws -> StreamingYouTubeMatch {
+        try await Task.sleep(for: delay)
+        return StreamingYouTubeMatch(
+            url: URL(string: "https://www.youtube.com/watch?v=XPL_qGqSJxA")!,
+            title: "Example",
+            confidence: 1,
+            downloadFilenameBase: "Example"
+        )
+    }
+}
+
+private actor StreamingStatusRecorder {
+    private var recordedStatuses: [StreamingURLPromptStatus] = []
+
+    func record(_ status: StreamingURLPromptStatus) {
+        recordedStatuses.append(status)
+    }
+
+    func statuses() -> [StreamingURLPromptStatus] {
+        recordedStatuses
     }
 }

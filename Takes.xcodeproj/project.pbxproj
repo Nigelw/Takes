@@ -44,6 +44,8 @@
 		A1000000000000000000D01C /* SourceInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00C /* SourceInference.swift */; };
 		A1000000000000000000D01D /* AnalogSourceDSPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00D /* AnalogSourceDSPTests.swift */; };
 		A1000000000000000000D01E /* LossyArtifactDSPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00E /* LossyArtifactDSPTests.swift */; };
+		A1000000000000000000C01A /* StreamingTrackImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00A /* StreamingTrackImport.swift */; };
+		A1000000000000000000C01B /* StreamingTrackImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00B /* StreamingTrackImportTests.swift */; };
 		A6FE79452FDE592C003F2711 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A6FE79442FDE592C003F2711 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -99,6 +101,8 @@
 		A1000000000000000000D00C /* SourceInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceInference.swift; sourceTree = "<group>"; };
 		A1000000000000000000D00D /* AnalogSourceDSPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalogSourceDSPTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000D00E /* LossyArtifactDSPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LossyArtifactDSPTests.swift; sourceTree = "<group>"; };
+		A1000000000000000000C00A /* StreamingTrackImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTrackImport.swift; sourceTree = "<group>"; };
+		A1000000000000000000C00B /* StreamingTrackImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTrackImportTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -202,6 +206,7 @@
 				A10000000000000000000016 /* TakesApp.swift */,
 				A1000000000000000000C003 /* SettingsView.swift */,
 				A1000000000000000000C002 /* SoftwareUpdater.swift */,
+				A1000000000000000000C00A /* StreamingTrackImport.swift */,
 				A10000000000000000000017 /* TransportMapping.swift */,
 				A1000000000000000000C004 /* WaveformStore.swift */,
 			);
@@ -215,6 +220,7 @@
 				A1000000000000000000D008 /* AnalysisEngineTests.swift */,
 				A1000000000000000000D00E /* LossyArtifactDSPTests.swift */,
 				A10000000000000000000018 /* SessionTests.swift */,
+				A1000000000000000000C00B /* StreamingTrackImportTests.swift */,
 				A1000000000000000000C009 /* TrackAlignerTests.swift */,
 				A1000000000000000000001D /* TrackDropHighlightTests.swift */,
 				A10000000000000000000019 /* TransportMappingTests.swift */,
@@ -350,6 +356,7 @@
 				A10000000000000000000025 /* PlaybackController.swift in Sources */,
 				A1000000000000000000C013 /* SettingsView.swift in Sources */,
 				A1000000000000000000C012 /* SoftwareUpdater.swift in Sources */,
+				A1000000000000000000C01A /* StreamingTrackImport.swift in Sources */,
 				A10000000000000000000026 /* TakesApp.swift in Sources */,
 				A1000000000000000000C018 /* TrackAligner.swift in Sources */,
 				A10000000000000000000027 /* TransportMapping.swift in Sources */,
@@ -365,6 +372,7 @@
 				A1000000000000000000D018 /* AnalysisEngineTests.swift in Sources */,
 				A1000000000000000000D01E /* LossyArtifactDSPTests.swift in Sources */,
 				A10000000000000000000031 /* SessionTests.swift in Sources */,
+				A1000000000000000000C01B /* StreamingTrackImportTests.swift in Sources */,
 				A1000000000000000000C019 /* TrackAlignerTests.swift in Sources */,
 				A10000000000000000000033 /* TrackDropHighlightTests.swift in Sources */,
 				A10000000000000000000034 /* WaveformSourceTests.swift in Sources */,
@@ -489,7 +497,7 @@
 				CODE_SIGN_ENTITLEMENTS = Config/Takes.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 13;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = KMA5YWAK8T;
 				ENABLE_APP_SANDBOX = NO;
@@ -503,7 +511,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.7;
+				MARKETING_VERSION = 2.8.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nigelwarren.Takes;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -519,7 +527,7 @@
 				CODE_SIGN_ENTITLEMENTS = Config/Takes.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 13;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = KMA5YWAK8T;
 				ENABLE_APP_SANDBOX = NO;
@@ -532,7 +540,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.7;
+				MARKETING_VERSION = 2.8.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nigelwarren.Takes;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -617,7 +625,7 @@
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 2.9.3;
+				minimumVersion = 2.9.4;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

@@ -3,28 +3,103 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Takes — Changelog</title>
+  <title>Takes — Release Notes</title>
+  <meta name="theme-color" content="#fbfbfd">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <script>
+    (() => {
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = prefersDark ? "dark" : "light";
+    })();
+  </script>
   <style>
     :root {
       color-scheme: light dark;
+      --page-gutter: clamp(22px, 4vw, 48px);
       --ink: #1d1d1f;
       --muted: #6e6e73;
       --line: #e5e5e7;
       --accent: #4f3ec6;
       --surface: #fbfbfd;
+      --menu-bg: rgba(255, 255, 255, 0.96);
+      --theme-toggle-bg: rgba(255, 255, 255, 0.72);
+      --theme-toggle-hover: rgba(238, 234, 255, 0.9);
+      --theme-toggle-icon: #4f3ec6;
+      --theme-toggle-shadow: 0 10px 24px rgba(40, 30, 90, 0.12);
+    }
+    html[data-theme="dark"] {
+      --ink: #f5f5f7;
+      --muted: #98989d;
+      --line: #2c2c2e;
+      --accent: #a79dff;
+      --surface: #111114;
+      --menu-bg: rgba(24, 24, 28, 0.97);
+      --theme-toggle-bg: rgba(32, 28, 48, 0.82);
+      --theme-toggle-hover: rgba(54, 47, 78, 0.95);
+      --theme-toggle-icon: #ffd083;
+      --theme-toggle-shadow: 0 12px 26px rgba(0, 0, 0, 0.34);
     }
     * { box-sizing: border-box; }
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation-duration: 500ms;
+      animation-timing-function: ease;
+    }
     body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
            margin: 0; color: var(--ink); background: var(--surface); }
     a { color: inherit; text-decoration: none; }
     .nav { align-items: center; display: flex; justify-content: space-between;
-            margin: 0 auto; max-width: 48rem; padding: 1.25rem; }
-    .brand { align-items: center; display: inline-flex; gap: .65rem; font-size: .95rem; font-weight: 700; }
-    .brand img { width: 34px; height: 34px; border-radius: 9px; }
-    .nav-links { align-items: center; color: var(--muted); display: flex; gap: 1rem; font-size: .88rem; font-weight: 600; }
+            margin: 0 auto; max-width: 1120px; padding: 22px var(--page-gutter); }
+    .brand { align-items: center; display: inline-flex; gap: 10px; font-size: 15px; font-weight: 700; }
+    .brand img { width: 34px; height: 34px; border-radius: 10px; }
+    .nav-actions { align-items: center; display: flex; gap: 14px; position: relative; }
+    .nav-links { align-items: center; color: var(--muted); display: flex; gap: 18px; font-size: 14px; font-weight: 600; }
     .nav-links a[aria-current="page"] { color: var(--accent); }
     .brand:hover, .nav-links a:hover { color: var(--accent); }
+    .nav-menu-button { display: none; }
+    .nav-menu-icon,
+    .nav-menu-icon::before,
+    .nav-menu-icon::after {
+      background: currentColor;
+      border-radius: 999px;
+      display: block;
+      height: 2px;
+      width: 16px;
+    }
+    .nav-menu-icon { position: relative; }
+    .nav-menu-icon::before,
+    .nav-menu-icon::after {
+      content: "";
+      left: 0;
+      position: absolute;
+    }
+    .nav-menu-icon::before { top: -5px; }
+    .nav-menu-icon::after { top: 5px; }
+    .theme-toggle {
+      align-items: center;
+      appearance: none;
+      background: var(--theme-toggle-bg);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      box-shadow: var(--theme-toggle-shadow);
+      color: var(--theme-toggle-icon);
+      cursor: pointer;
+      display: inline-flex;
+      height: 38px;
+      justify-content: center;
+      padding: 0;
+      width: 38px;
+    }
+    .theme-toggle:hover { background: var(--theme-toggle-hover); }
+    .theme-toggle:focus-visible {
+      outline: 3px solid rgba(107, 85, 240, 0.35);
+      outline-offset: 3px;
+    }
+    .theme-toggle svg { height: 18px; width: 18px; }
+    .theme-toggle .moon-icon { display: block; }
+    .theme-toggle .sun-icon { display: none; }
+    html[data-theme="dark"] .theme-toggle .moon-icon { display: none; }
+    html[data-theme="dark"] .theme-toggle .sun-icon { display: block; }
     .page { max-width: 48rem; margin: 0 auto; padding: 0 1.25rem 5rem; }
     .hero { padding: 3.2rem 0 2.4rem; }
     .hero h1 { font-size: clamp(2.4rem, 8vw, 3.9rem); letter-spacing: 0; line-height: .98; margin: 0; }
@@ -38,24 +113,73 @@
     .badge { font-size: .65rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
              color: #b25000; background: #ffefe0; padding: .15rem .45rem; border-radius: 5px; }
     .notes ul { margin: 0; padding-left: 1.25rem; }
+    .notes { max-width: 40rem; }
     .notes li { margin: .2rem 0; }
+    .notes li ul { margin-top: .2rem; }
     .notes h3, .notes h4 { font-size: .95rem; margin: 1rem 0 .35rem; }
     .notes > :first-child { margin-top: 0; }
     .empty { color: #8e8e93; font-style: italic; }
-    footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
-    footer a { color: inherit; }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --ink: #f5f5f7;
-        --muted: #98989d;
-        --line: #2c2c2e;
-        --accent: #a79dff;
-        --surface: #111114;
-      }
-      .release { border-color: var(--line); }
-      .badge { color: #ffb066; background: #3a2410; }
+    .footer {
+      align-items: center;
+      color: var(--muted);
+      display: flex;
+      font-size: .85rem;
+      flex-direction: column;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 3rem;
+      text-align: center;
     }
-    @media (max-width: 440px) {
+    .footer a {
+      color: var(--accent);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+    .footer a:hover { color: var(--ink); }
+    html[data-theme="dark"] .release { border-color: var(--line); }
+    html[data-theme="dark"] .badge { color: #ffb066; background: #3a2410; }
+    @media (max-width: 560px) {
+      .nav-menu-button {
+        align-items: center;
+        appearance: none;
+        background: var(--menu-bg);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        cursor: pointer;
+        display: inline-flex;
+        font-family: inherit;
+        font-weight: 700;
+        height: 38px;
+        justify-content: center;
+        min-height: 38px;
+        padding: 0;
+        width: 38px;
+      }
+      .nav.menu-open .nav-menu-button { color: var(--accent); }
+      .nav-actions .nav-links {
+        background: var(--menu-bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, .12);
+        display: none;
+        min-width: 156px;
+        padding: 8px;
+        position: absolute;
+        right: 0;
+        top: calc(100% + 8px);
+        z-index: 10;
+      }
+      .nav.menu-open .nav-actions .nav-links {
+        align-items: stretch;
+        display: grid;
+        gap: 2px;
+      }
+      .nav-actions .nav-links a {
+        border-radius: 6px;
+        padding: 9px 10px;
+      }
       .release-heading { align-items: flex-start; flex-direction: column; gap: .15rem; }
       .meta { text-align: left; }
     }
@@ -67,178 +191,218 @@
       <img src="icon.png" alt="">
       <span>Takes</span>
     </a>
-    <div class="nav-links">
-      <a href="changelog.html" aria-current="page">Changelog</a>
-      <a href="https://github.com/Nigelw/Takes">GitHub</a>
+    <div class="nav-actions">
+      <button class="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false">
+        <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20.4 14.7A8.5 8.5 0 0 1 9.3 3.6 8.5 8.5 0 1 0 20.4 14.7Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        </svg>
+        <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M12 2.5v2.2M12 19.3v2.2M4.7 4.7l1.6 1.6M17.7 17.7l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.7 19.3l1.6-1.6M17.7 6.3l1.6-1.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button class="nav-menu-button" type="button" aria-label="Open navigation menu" aria-expanded="false" aria-controls="site-menu"><span class="nav-menu-icon" aria-hidden="true"></span></button>
+      <div class="nav-links" id="site-menu">
+        <a href="support.html">Support</a>
+        <a href="changelog.html" aria-current="page">Release Notes</a>
+        <a href="https://github.com/Nigelw/Takes">GitHub</a>
+      </div>
     </div>
   </nav>
   <main class="page">
     <header class="hero">
-      <h1>Changelog</h1>
+      <h1>Release Notes</h1>
       <p>Everything shipped in Takes for Mac, newest first.</p>
     </header>
+    <section class="release">
+      <div class="release-heading">
+        <h2>2.8.2</h2>
+        <p class="meta">6 July, 2026</p>
+      </div>
+      <div class="notes"><h3>Fixed</h3>
+<ul><li>Creating a loop no longer moves the playhead if it&#x27;s already within the loop range</li></ul></div>
+    </section>
+    <section class="release">
+      <div class="release-heading">
+        <h2>2.8.1</h2>
+        <p class="meta">5 July, 2026</p>
+      </div>
+      <div class="notes"><h3>New</h3>
+<ul><li>Resizable track info column. Grab the divider and drag it left/right</li></ul>
+<h3>Improved</h3>
+<ul><li>Changing the loop range during playback no longer causes audio to stutter</li></ul></div>
+    </section>
+    <section class="release">
+      <div class="release-heading">
+        <h2>2.8</h2>
+        <p class="meta">4 July, 2026</p>
+      </div>
+      <div class="notes"><h3>New</h3>
+<ul><li>Import streaming audio from Apple Music, Spotify, and YouTube</li></ul>
+<h3>Improved</h3>
+<ul><li>Significantly improved drag and drop<ul><li>Improved visual design and UX of track reordering</li><li>Improved visual indicator for external file drops onto Takes window</li><li>Support standard Mac conventions: drag track out of the window to copy its file to the Finder or another app, drop on window toolbar or menubar to cancel drag</li></ul></li><li>Switch tracks with the up/down arrow keys in addition to other keyboard shortcuts</li><li>Added a link to the Takes website in the Help menu</li></ul>
+<h3>Fixed</h3>
+<ul><li>Many UI copy tweaks</li></ul></div>
+    </section>
     <section class="release">
       <div class="release-heading">
         <h2>2.7</h2>
         <p class="meta">3 July, 2026</p>
       </div>
-      <div class="notes"><h3>New Features</h3>
-<ul>
-<li>Auto-Align tracks! A single button lines your tracks up automatically by listening to the audio itself</li>
-<li>Auto-Align can also handle tracks recorded at slightly different speeds, offering a deeper tempo analysis when the quick pass can&#x27;t find a match</li>
-<li>If tracks have tempo drift, you can auto-align anytime at the current playhead</li>
-<li>Added setting to auto-align by default when opening files</li>
-</ul>
-<h3>Improvements</h3>
-<ul>
-<li>Takes remembers its window position between launches</li>
-<li>Folders can be dropped on the app window</li>
-<li>Clearer error messages when files can&#x27;t be loaded</li>
-<li>Small wording polish on the empty state</li>
-</ul>
-<h3>Fixes</h3>
-<ul>
-<li>App window can be moved by dragging anywhere in the control area</li>
-</ul></div>
+      <div class="notes"><h3>New</h3>
+<ul><li>Auto-Align tracks: a single button lines your tracks up automatically by listening to the audio itself</li><li>Auto-Align can also handle tracks recorded at slightly different speeds, offering a deeper tempo analysis when the quick pass can&#x27;t find a match</li><li>If tracks have tempo drift, you can auto-align anytime at the current playhead</li><li>Added setting to auto-align by default when opening files</li></ul>
+<h3>Improved</h3>
+<ul><li>Takes remembers its window position between launches</li><li>Folders can be dropped on the app window</li><li>Clearer error messages when files can&#x27;t be loaded</li><li>Small wording polish on the empty state</li></ul>
+<h3>Fixed</h3>
+<ul><li>App window can be moved by dragging anywhere in the control area</li></ul></div>
     </section>
     <section class="release">
       <div class="release-heading">
         <h2>2.6.1</h2>
         <p class="meta">2 July, 2026</p>
       </div>
-      <div class="notes"><h3>Improvements</h3>
-<ul>
-<li>Double-click the &quot;ms&quot; label in the offset text field to reset it to zero</li>
-</ul>
-<h3>Fixes</h3>
-<ul>
-<li>Playback now continues when the system audio device changes, such as when putting in AirPods</li>
-<li>The mouse cursor now resets correctly after interacting with a text field</li>
-</ul></div>
+      <div class="notes"><h3>Improved</h3>
+<ul><li>Double-click the &quot;ms&quot; label in the offset text field to reset it to zero</li></ul>
+<h3>Fixed</h3>
+<ul><li>Playback now continues when the system audio device changes, such as when putting in AirPods</li><li>The mouse cursor now resets correctly after interacting with a text field</li></ul></div>
     </section>
     <section class="release">
       <div class="release-heading">
         <h2>2.6</h2>
         <p class="meta">2 July, 2026</p>
       </div>
-      <div class="notes"><h3>New Features</h3>
-<ul>
-<li>Blind listening mode: compare takes without seeing which is which, so your ears decide</li>
-</ul></div>
+      <div class="notes"><h3>New</h3>
+<ul><li>Blind listening mode: hide track details and shuffle playback order to compare takes without seeing which is which</li></ul></div>
     </section>
     <section class="release">
       <div class="release-heading">
         <h2>2.5</h2>
         <p class="meta">2 July, 2026</p>
       </div>
-      <div class="notes"><h3>New Features</h3>
-<ul>
-<li>Major redesign with a brand new look and feel, every pixel reworked</li>
-<li>New appearance settings: choose light or dark theme, and pick your preferred time readout display style</li>
-<li>Redesigned track rows with clearer info at a glance</li>
-<li>Redesigned timeline ruler and playhead, with an interactive grabber you can drag to scrub</li>
-<li>Polished buttons and controls with satisfying pressed states and better dark mode contrast</li>
-<li>Control playback with your keyboard&#x27;s media keys</li>
-</ul>
+      <div class="notes"><h3>New</h3>
+<ul><li>Major redesign with a brand new look and feel, every pixel reworked<ul><li>New appearance settings: choose light or dark theme, and pick your preferred time readout display style</li><li>Redesigned track rows with clearer info at a glance</li><li>Redesigned timeline ruler and playhead, with an interactive grabber you can drag to scrub</li><li>Polished buttons and controls with satisfying pressed states and better dark mode contrast</li></ul></li><li>Control playback with your keyboard&#x27;s media keys</li></ul>
 <h3>Improved</h3>
-<ul>
-<li>A cleaner empty state — just drop your files onto the target to get started</li>
-<li>Shift-click the Switch Track button to switch to previous</li>
-<li>New menu commands for timeline zoom and track removal</li>
-</ul>
+<ul><li>A cleaner empty state — just drop your files onto the target to get started</li><li>Shift-click the Switch Track button to switch to previous</li><li>New menu commands for timeline zoom and track removal</li></ul>
 <h3>Fixed</h3>
-<ul>
-<li>Fixed timeline overscroll getting stuck if an input field is active</li>
-<li>Various layout, contrast, and window-sizing refinements</li>
-</ul></div>
+<ul><li>Fixed timeline overscroll getting stuck if an input field is active</li><li>Various layout, contrast, and window-sizing refinements</li></ul></div>
     </section>
     <section class="release">
       <div class="release-heading">
         <h2>2.1</h2>
         <p class="meta">2 July, 2026</p>
       </div>
-      <div class="notes"><h3>New Features</h3>
-<ul>
-<li>Loop audio by dragging or shift+clicking to select a range</li>
-<li>Resize selection by dragging the selection handles</li>
-<li>Repeat modes: Off, Repeat One, and Switch &amp; Repeat (to compare tracks back-to-back by toggling to the next track on each loop)</li>
-</ul>
-<h3>Fixes</h3>
-<ul>
-<li>Starting playback at the end of a track now restarts playback from the beginning</li>
-</ul></div>
+      <div class="notes"><h3>New</h3>
+<ul><li>Loop audio by dragging or shift+clicking to select a range<ul><li>Resize selection by dragging the selection handles</li></ul></li><li>Repeat modes: Off, Repeat One, and Switch &amp; Repeat (to compare tracks back-to-back by toggling to the next on each loop)</li></ul>
+<h3>Fixed</h3>
+<ul><li>Starting playback at the end of a track now restarts playback from the beginning</li></ul></div>
     </section>
     <section class="release">
       <div class="release-heading">
         <h2>2.0</h2>
         <p class="meta">1 July, 2026</p>
       </div>
-      <div class="notes"><h3>Improvements</h3>
-<ul>
-<li>Timeline zooming</li>
-<li>Pinch to zoom or use the zoom control</li>
-<li>Waveform area uses native scroll inertia and bounce behavior</li>
-<li>View smoothly slides to keep playhead in view while zoomed in</li>
-<li>Improved timeline ruler tick marks and labeling, including dynamic scale when zoomed</li>
-<li>Added link to release notes in Help menu</li>
-</ul>
-<h3>Fixes</h3>
-<ul>
-<li>The playhead position is preserved when opening a new track while paused</li>
-<li>Adjusted default window position</li>
-</ul></div>
+      <div class="notes"><h3>Improved</h3>
+<ul><li>Timeline zooming<ul><li>Pinch to zoom or use the zoom control</li><li>Waveform area uses native scroll inertia and bounce behavior</li><li>View smoothly slides to keep playhead in view while zoomed in</li></ul></li><li>Improved timeline ruler tick marks and labeling, including dynamic scale when zoomed</li><li>Added link to release notes in Help menu</li></ul>
+<h3>Fixed</h3>
+<ul><li>The playhead position is preserved when opening a new track while paused</li><li>Adjusted default window position</li></ul></div>
     </section>
     <section class="release">
       <div class="release-heading">
         <h2>2.0a3<span class="badge">Pre-release</span></h2>
         <p class="meta">19 June, 2026</p>
       </div>
-      <div class="notes"><ul>
-<li>Each track now shows real waveforms instead of a placeholder mockup</li>
-<li>Rendering doesn&#x27;t block the UI</li>
-</ul></div>
+      <div class="notes"><h3>New</h3>
+<ul><li>Waveform display: each track now renders real waveforms instead of a placeholder mockup<ul><li>Rendering doesn&#x27;t block the UI</li></ul></li></ul></div>
     </section>
     <section class="release">
       <div class="release-heading">
         <h2>2.0a2<span class="badge">Pre-release</span></h2>
         <p class="meta">18 June, 2026</p>
       </div>
-      <div class="notes"><h4>Major Improvements</h4>
-<ul>
-<li>Renamed to Takes</li>
-<li>New UI</li>
-<li>New icon</li>
-<li>Compare up to 32 tracks</li>
-<li>Auto-updates via Sparkle</li>
-</ul>
-<h4>Smaller Changes</h4>
-<ul>
-<li>Drag to reorder tracks</li>
-<li>Quick Open from Finder and Apple Music selection</li>
-<li>Hidden shortcuts: use number keys 1–9 to quickly switch to the correspondingly numbered track. Hitting 0 switches to the last track.</li>
-<li>Input field behavior improvements (Esc key reverts to previous value, up/down arrow keys increment value, arrow key insertion point navigation takes precedence over playback keyboard shortcuts when input field is active)</li>
-<li>Added settings for offset nudging intervals &amp; auto-update behavior</li>
-<li>Added proper menubar</li>
-<li>Added full set of keyboard shortcuts</li>
-<li>Improved drag and drop support (drop files and folders on app icon to open, simplified behavior when dropping on app window)</li>
-<li>Improved window sizing behavior (more compact, smart resizing, single window)</li>
-<li>Signed &amp; notarized for public distribution</li>
-</ul></div>
+      <div class="notes"><h3>New</h3>
+<ul><li>Renamed to Takes</li><li>New UI</li><li>New icon</li><li>Compare up to 32 tracks</li><li>Drag to reorder tracks</li><li>Signed &amp; notarized by Apple for public distribution, no longer requires bypassing Gatekeeper or building yourself</li><li>Auto-updating via Sparkle</li></ul>
+<h3>Improved</h3>
+<ul><li>Customized menubar with commands and a full set of keyboard shortcuts like a proper Mac app</li><li>Hidden keyboard shortcuts: use number keys 1–8 to quickly switch to correspondingly numbered track. Hitting 9 switches to the last track.</li><li>Quick Open files from Finder or Apple Music selection</li><li>Improved offset input field behavior<ul><li>Arrow keys nudge value up/down</li><li>Shift+arrow keys nudge by larger amount</li><li>Esc key reverts to previous value</li><li>Left/right arrow keys navigate cursor instead of controlling playback</li></ul></li><li>Added settings for offset nudging intervals &amp; auto-update behavior</li><li>Improved drag and drop support<ul><li>Drop files and folders on app icon to open</li><li>Simplified window drop target behavior for quicker interaction (removed ability to drop on individual rows to replace)</li></ul></li><li>Improved window behavior<ul><li>Smart resizing when adding and removing tracks</li><li>More compact</li><li>Single window only</li></ul></li></ul></div>
     </section>
     <section class="release">
       <div class="release-heading">
         <h2>1.0.2</h2>
         <p class="meta">18 June, 2026</p>
       </div>
-      <div class="notes"><p>Signed and packaged for public distribution.</p></div>
+      <div class="notes"><h3>Improved</h3>
+<ul><li>This is v1.0.0 compiled, signed and notarized initial release for public distribution. Bumped version in order to release properly.</li><li>No other changes between v1.0.0 and this. (v1.0.1 tag was a project documentation update.)</li></ul></div>
     </section>
     <section class="release">
       <div class="release-heading">
         <h2>1.0.0</h2>
         <p class="meta">26 April, 2026</p>
       </div>
-      <div class="notes"><p>Initial release of TrackSwitch. Load two audio tracks and toggle between them.</p></div>
+      <div class="notes"><h3>New</h3>
+<ul><li>Initial release of TrackSwitch: load two audio tracks and toggle playback between them</li><li>A couple niceties to make loading tracks quicker than navigating the Open dialog box<ul><li>Drop files onto Track A/B wells to open</li><li>Support for loading 2 of the currently selected tracks in Apple Music</li></ul></li><li>Adjust gain</li><li>Adjust offset</li></ul></div>
     </section>
+    <footer class="footer">
+      <span>Made with 🥱 sleep deprivation by <a href="https://nigelwarren.com">Nigel M. Warren</a>. &copy; 2026.</span>
+    </footer>
   </main>
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const nav = document.querySelector(".nav");
+      const themeToggle = document.querySelector(".theme-toggle");
+      const menuButton = document.querySelector(".nav-menu-button");
+      const themeColor = document.querySelector('meta[name="theme-color"]');
+      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      let hasManualTheme = false;
+
+      const themeMetaColors = {
+        light: "#fbfbfd",
+        dark: "#111114"
+      };
+
+      function runThemeTransition(nextTheme) {
+        document.startViewTransition(() => {
+          applyTheme(nextTheme);
+        });
+      }
+
+      function applyTheme(theme) {
+        const isDark = theme === "dark";
+        root.dataset.theme = theme;
+        themeToggle?.setAttribute("aria-pressed", String(isDark));
+        themeToggle?.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
+        if (themeToggle) {
+          themeToggle.title = isDark ? "Switch to light mode" : "Switch to dark mode";
+        }
+        themeColor?.setAttribute("content", themeMetaColors[theme]);
+      }
+
+      applyTheme(root.dataset.theme || (mediaQuery.matches ? "dark" : "light"));
+
+      themeToggle?.addEventListener("click", () => {
+        hasManualTheme = true;
+        runThemeTransition(root.dataset.theme === "dark" ? "light" : "dark");
+      });
+
+      menuButton?.addEventListener("click", () => {
+        const isOpen = nav?.classList.toggle("menu-open") ?? false;
+        menuButton.setAttribute("aria-expanded", String(isOpen));
+        menuButton.setAttribute("aria-label", isOpen ? "Close navigation menu" : "Open navigation menu");
+      });
+
+      nav?.querySelectorAll(".nav-links a").forEach((link) => {
+        link.addEventListener("click", () => {
+          nav.classList.remove("menu-open");
+          menuButton?.setAttribute("aria-expanded", "false");
+          menuButton?.setAttribute("aria-label", "Open navigation menu");
+        });
+      });
+
+      mediaQuery.addEventListener("change", (event) => {
+        if (!hasManualTheme) {
+          applyTheme(event.matches ? "dark" : "light");
+        }
+      });
+    })();
+  </script>
 </body>
 </html>

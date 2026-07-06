@@ -54,6 +54,14 @@ enum ReadoutStyle: String, CaseIterable, Identifiable {
 /// The offset nudge amounts are stored here so they can be adjusted from the
 /// Settings window. The defaults mirror `NumericControlConfiguration.offset`,
 /// keeping a single source of truth for the shipped values.
+protocol AppSettingsDefaults {
+    func object(forKey defaultName: String) -> Any?
+    func string(forKey defaultName: String) -> String?
+    func set(_ value: Any?, forKey defaultName: String)
+}
+
+extension UserDefaults: AppSettingsDefaults {}
+
 @MainActor
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
@@ -72,7 +80,7 @@ final class AppSettings: ObservableObject {
     nonisolated static let readoutStyleKey = "readoutStyle"
     nonisolated static let appearanceThemeOverrideArgument = "--appearance-theme"
 
-    private let defaults: UserDefaults
+    private let defaults: AppSettingsDefaults
 
     @Published var offsetStep: Int {
         didSet {
@@ -126,7 +134,7 @@ final class AppSettings: ObservableObject {
     @Published var indexBadgeAppearance = IndexBadgeAppearance()
 
     init(
-        defaults: UserDefaults = .standard,
+        defaults: AppSettingsDefaults = UserDefaults.standard,
         arguments: [String] = ProcessInfo.processInfo.arguments
     ) {
         self.defaults = defaults
@@ -171,23 +179,23 @@ final class AppSettings: ObservableObject {
         min(max(value, offsetStepRange.lowerBound), offsetStepRange.upperBound)
     }
 
-    nonisolated static func storedOffsetStep(_ defaults: UserDefaults = .standard) -> Int {
+    nonisolated static func storedOffsetStep(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> Int {
         clamp(defaults.object(forKey: offsetStepKey) as? Int ?? offsetStepDefault)
     }
 
-    nonisolated static func storedOffsetLargeStep(_ defaults: UserDefaults = .standard) -> Int {
+    nonisolated static func storedOffsetLargeStep(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> Int {
         clamp(defaults.object(forKey: offsetLargeStepKey) as? Int ?? offsetLargeStepDefault)
     }
 
-    nonisolated static func storedAlignTracksOnOpen(_ defaults: UserDefaults = .standard) -> Bool {
+    nonisolated static func storedAlignTracksOnOpen(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> Bool {
         defaults.object(forKey: alignTracksOnOpenKey) as? Bool ?? alignTracksOnOpenDefault
     }
 
-    nonisolated static func storedAppearanceTheme(_ defaults: UserDefaults = .standard) -> AppearanceTheme {
+    nonisolated static func storedAppearanceTheme(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> AppearanceTheme {
         defaults.string(forKey: appearanceThemeKey).flatMap(AppearanceTheme.init(rawValue:)) ?? appearanceThemeDefault
     }
 
-    nonisolated static func storedReadoutStyle(_ defaults: UserDefaults = .standard) -> ReadoutStyle {
+    nonisolated static func storedReadoutStyle(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> ReadoutStyle {
         defaults.string(forKey: readoutStyleKey).flatMap(ReadoutStyle.init(rawValue:)) ?? readoutStyleDefault
     }
 

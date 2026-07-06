@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deploy_1.outputs.page_url || steps.deploy_2.outputs.page_url || steps.deploy_3.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -36,7 +36,30 @@ jobs:
       - name: Upload website/ as the Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: './website'
       - name: Deploy to GitHub Pages
-        id: deployment
+        id: deploy_1
         uses: actions/deploy-pages@v5
+        continue-on-error: true
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Wait before retrying Pages deploy
+        if: steps.deploy_1.outcome == 'failure'
+        run: sleep 30
+      - name: Deploy to GitHub Pages retry 2
+        id: deploy_2
+        if: steps.deploy_1.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Wait before final Pages deploy retry
+        if: steps.deploy_2.outcome == 'failure'
+        run: sleep 60
+      - name: Deploy to GitHub Pages retry 3
+        id: deploy_3
+        if: steps.deploy_2.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}

@@ -87,4 +87,59 @@ struct LoopingTests {
         #expect(session.playbackStart == 5)
         #expect(session.playbackEnd == 12)
     }
+
+    // MARK: - Loop resize scheduling policy
+
+    @Test
+    func loopResizeCanAvoidRescheduleWhenMovingStartAroundCurrentPlayhead() {
+        let previous = LoopRegion(start: 2, end: 10)
+
+        #expect(PlaybackController.canResizeLoopWithoutRescheduling(
+            from: previous,
+            to: LoopRegion(start: 1, end: 10),
+            transport: 5
+        ))
+        #expect(PlaybackController.canResizeLoopWithoutRescheduling(
+            from: previous,
+            to: LoopRegion(start: 4, end: 10),
+            transport: 5
+        ))
+    }
+
+    @Test
+    func loopResizeCanAvoidRescheduleWhenExtendingEnd() {
+        let previous = LoopRegion(start: 2, end: 10)
+
+        #expect(PlaybackController.canResizeLoopWithoutRescheduling(
+            from: previous,
+            to: LoopRegion(start: 2, end: 12),
+            transport: 5
+        ))
+        #expect(PlaybackController.canResizeLoopWithoutRescheduling(
+            from: previous,
+            to: LoopRegion(start: 2, end: 12),
+            transport: 10
+        ))
+    }
+
+    @Test
+    func loopResizeReschedulesWhenEditWouldInvalidateCurrentPlayback() {
+        let previous = LoopRegion(start: 2, end: 10)
+
+        #expect(!PlaybackController.canResizeLoopWithoutRescheduling(
+            from: previous,
+            to: LoopRegion(start: 2, end: 8),
+            transport: 5
+        ))
+        #expect(!PlaybackController.canResizeLoopWithoutRescheduling(
+            from: previous,
+            to: LoopRegion(start: 6, end: 10),
+            transport: 5
+        ))
+        #expect(!PlaybackController.canResizeLoopWithoutRescheduling(
+            from: previous,
+            to: LoopRegion(start: 2, end: 12),
+            transport: 12
+        ))
+    }
 }
