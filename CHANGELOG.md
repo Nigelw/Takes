@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-07-06
+
+### Fixed
+
+- Creating a loop no longer moves the playhead if it's already within the loop range
+
 ## [2.8.1] - 2026-07-05
 
 ### New
