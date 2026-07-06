@@ -43,18 +43,31 @@ enum AnalysisVerdictBuilder {
     private static let lowBitrateAACKbps = 128.0
 
     static func verdicts(
+        modules: AnalysisSelection = .all,
         fileInfo: AnalyzedFileInfo,
         loudness: LoudnessMetrics,
         tonalBalance: TonalBalanceMetrics,
         noiseFloor: NoiseFloorMetrics,
         bandwidth: BandwidthMetrics
     ) -> [AnalysisVerdict] {
+        // Each verdict group is gated on the module that measured it, so a
+        // skipped analysis never asserts a (neutral-placeholder) negative.
+        // The encoding/authenticity verdicts read bandwidth, which the
+        // tonal-balance module produces.
         var verdicts: [AnalysisVerdict] = []
-        verdicts.append(contentsOf: loudnessVerdicts(loudness))
-        verdicts.append(contentsOf: tonalBalanceVerdicts(tonalBalance, bandwidth: bandwidth))
-        verdicts.append(contentsOf: noiseVerdicts(noiseFloor))
-        verdicts.append(contentsOf: encodingVerdicts(fileInfo: fileInfo, bandwidth: bandwidth))
-        verdicts.append(contentsOf: authenticityVerdicts(fileInfo: fileInfo, bandwidth: bandwidth))
+        if modules.contains(.loudness) {
+            verdicts.append(contentsOf: loudnessVerdicts(loudness))
+        }
+        if modules.contains(.tonalBalance) {
+            verdicts.append(contentsOf: tonalBalanceVerdicts(tonalBalance, bandwidth: bandwidth))
+        }
+        if modules.contains(.noiseFloor) {
+            verdicts.append(contentsOf: noiseVerdicts(noiseFloor))
+        }
+        if modules.contains(.tonalBalance) {
+            verdicts.append(contentsOf: encodingVerdicts(fileInfo: fileInfo, bandwidth: bandwidth))
+            verdicts.append(contentsOf: authenticityVerdicts(fileInfo: fileInfo, bandwidth: bandwidth))
+        }
         return verdicts
     }
 

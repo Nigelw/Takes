@@ -38,6 +38,7 @@
 		A1000000000000000000D017 /* SpectrogramRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D007 /* SpectrogramRenderer.swift */; };
 		A1000000000000000000D018 /* AnalysisEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D008 /* AnalysisEngineTests.swift */; };
 		A1000000000000000000D019 /* AnalogSourceDSP.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D009 /* AnalogSourceDSP.swift */; };
+		A1000000000000000000D020 /* AnalysisModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D010 /* AnalysisModule.swift */; };
 		A1000000000000000000D01A /* LossyArtifactDSP.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00A /* LossyArtifactDSP.swift */; };
 		A1000000000000000000D01B /* MP3BitstreamInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00B /* MP3BitstreamInspector.swift */; };
 		A1000000000000000000D01C /* SourceInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00C /* SourceInference.swift */; };
@@ -92,6 +93,7 @@
 		A1000000000000000000D007 /* SpectrogramRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectrogramRenderer.swift; sourceTree = "<group>"; };
 		A1000000000000000000D008 /* AnalysisEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisEngineTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000D009 /* AnalogSourceDSP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalogSourceDSP.swift; sourceTree = "<group>"; };
+		A1000000000000000000D010 /* AnalysisModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisModule.swift; sourceTree = "<group>"; };
 		A1000000000000000000D00A /* LossyArtifactDSP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LossyArtifactDSP.swift; sourceTree = "<group>"; };
 		A1000000000000000000D00B /* MP3BitstreamInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MP3BitstreamInspector.swift; sourceTree = "<group>"; };
 		A1000000000000000000D00C /* SourceInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceInference.swift; sourceTree = "<group>"; };
@@ -169,6 +171,7 @@
 				A1000000000000000000D009 /* AnalogSourceDSP.swift */,
 				A1000000000000000000D005 /* AnalysisController.swift */,
 				A1000000000000000000D002 /* AnalysisDSP.swift */,
+				A1000000000000000000D010 /* AnalysisModule.swift */,
 				A1000000000000000000D00A /* LossyArtifactDSP.swift */,
 				A1000000000000000000D00B /* MP3BitstreamInspector.swift */,
 				A1000000000000000000D00C /* SourceInference.swift */,
@@ -324,6 +327,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000000000000000000D019 /* AnalogSourceDSP.swift in Sources */,
+				A1000000000000000000D020 /* AnalysisModule.swift in Sources */,
 				A1000000000000000000D015 /* AnalysisController.swift in Sources */,
 				A1000000000000000000D012 /* AnalysisDSP.swift in Sources */,
 				A1000000000000000000D01A /* LossyArtifactDSP.swift in Sources */,

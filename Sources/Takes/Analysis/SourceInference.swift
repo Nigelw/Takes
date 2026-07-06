@@ -60,6 +60,7 @@ enum SourceInference {
     ]
 
     static func conclusions(
+        modules: AnalysisSelection = .all,
         fileInfo: AnalyzedFileInfo,
         loudness: LoudnessMetrics,
         noiseFloor: NoiseFloorMetrics,
@@ -70,20 +71,28 @@ enum SourceInference {
     ) -> [SourceConclusion] {
         var conclusions: [SourceConclusion] = []
 
-        if let authenticity = authenticityConclusion(
-            fileInfo: fileInfo, bandwidth: bandwidth, lossyArtifacts: lossyArtifacts
-        ) {
+        // Authenticity and encode-quality both hinge on the bandwidth shelf,
+        // which the tonal-balance module measures; only draw them when it ran
+        // so a skipped analysis never asserts "looks genuinely lossless".
+        if modules.contains(.tonalBalance),
+           let authenticity = authenticityConclusion(
+               fileInfo: fileInfo, bandwidth: bandwidth, lossyArtifacts: lossyArtifacts
+           ) {
             conclusions.append(authenticity)
         }
-        if let analog = analogSourceConclusion(
-            fileInfo: fileInfo, noiseFloor: noiseFloor, analogSource: analogSource
-        ) {
+        // Analog attribution needs the dedicated stationary-floor / coherence
+        // / click detectors; the quiet-gap noise floor alone stays a verdict.
+        if modules.contains(.analogSource),
+           let analog = analogSourceConclusion(
+               fileInfo: fileInfo, noiseFloor: noiseFloor, analogSource: analogSource
+           ) {
             conclusions.append(analog)
         }
-        if let encodeQuality = encodeQualityConclusion(
-            fileInfo: fileInfo, bandwidth: bandwidth,
-            lossyArtifacts: lossyArtifacts, mp3Stream: mp3Stream
-        ) {
+        if modules.contains(.tonalBalance),
+           let encodeQuality = encodeQualityConclusion(
+               fileInfo: fileInfo, bandwidth: bandwidth,
+               lossyArtifacts: lossyArtifacts, mp3Stream: mp3Stream
+           ) {
             conclusions.append(encodeQuality)
         }
 

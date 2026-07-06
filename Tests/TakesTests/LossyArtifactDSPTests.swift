@@ -203,4 +203,16 @@ final class LossyArtifactDSPTests: XCTestCase {
         let junk = Data((0 ..< 100_000).map { UInt8(($0 * 37) % 251) })
         XCTAssertNil(MP3BitstreamInspector.parse(data: junk))
     }
+
+    // MARK: Module selection
+
+    func testAnalysisModuleMetadataIsComplete() {
+        // Every toggle needs the copy the configuration screen renders.
+        for module in AnalysisModule.allCases {
+            XCTAssertFalse(module.name.isEmpty)
+            XCTAssertFalse(module.determines.isEmpty)
+            XCTAssertFalse(module.howItWorks.isEmpty)
+        }
+        XCTAssertEqual(AnalysisSelection.all.count, AnalysisModule.allCases.count)
+    }
 }

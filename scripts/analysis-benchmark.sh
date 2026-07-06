@@ -17,6 +17,7 @@ mkdir -p "$BUILD_DIR"
 
 ENGINE_SOURCES=(
     "$REPO_DIR/Sources/Takes/Analysis/AnalysisModels.swift"
+    "$REPO_DIR/Sources/Takes/Analysis/AnalysisModule.swift"
     "$REPO_DIR/Sources/Takes/Analysis/AnalysisDSP.swift"
     "$REPO_DIR/Sources/Takes/Analysis/AnalysisVerdicts.swift"
     "$REPO_DIR/Sources/Takes/Analysis/AnalogSourceDSP.swift"

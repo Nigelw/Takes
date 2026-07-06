@@ -296,7 +296,7 @@ case "analyze":
         do {
             // Spectrogram included so ad-hoc runs exercise the full app path
             // (benchmark mode skips it purely for speed).
-            let report = try AudioAnalysisEngine.analyze(fileAt: url, includeSpectrogram: true)
+            let report = try AudioAnalysisEngine.analyze(fileAt: url, modules: .all)
             print(describe(report))
         } catch {
             print("\(url.lastPathComponent): FAILED — \(error.localizedDescription)")
@@ -320,7 +320,10 @@ case "benchmark":
             continue
         }
         do {
-            let report = try AudioAnalysisEngine.analyze(fileAt: url, includeSpectrogram: false)
+            // Everything except the display-only spectrogram, for speed.
+            let report = try AudioAnalysisEngine.analyze(
+                fileAt: url, modules: AnalysisSelection.all.subtracting([.spectrogram])
+            )
             let failures = check(report, against: expectation)
             if failures.isEmpty {
                 passCount += 1

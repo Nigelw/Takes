@@ -35,10 +35,25 @@ struct AnalysisWindowView: View {
         switch controller.state {
         case .idle:
             IdleView(onOpen: presentOpenPanel)
+        case .configuring(let url):
+            ConfigurationView(
+                fileURL: url,
+                selection: Binding(
+                    get: { controller.selection },
+                    set: { controller.selection = $0 }
+                ),
+                onAnalyze: { controller.runConfiguredAnalysis() },
+                onChooseAnotherFile: presentOpenPanel
+            )
         case .analyzing(let fileName):
             AnalyzingView(fileName: fileName)
         case .finished(let report):
-            ResultsView(report: report, onReset: { controller.reset() }, onOpen: presentOpenPanel)
+            ResultsView(
+                report: report,
+                onReset: { controller.reset() },
+                onAdjust: { controller.reconfigure() },
+                onOpen: presentOpenPanel
+            )
         case .failed(let fileName, let message):
             FailureView(fileName: fileName, message: message, onReset: { controller.reset() })
         }
@@ -61,7 +76,9 @@ struct AnalysisWindowView: View {
         panel.allowedContentTypes = [.audio]
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            controller.analyze(fileAt: url)
+            // Land on the configuration step, not straight into analysis, so
+            // the slow modules can be switched off before the run.
+            controller.prepare(fileAt: url)
         }
     }
 
@@ -72,7 +89,7 @@ struct AnalysisWindowView: View {
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
             guard let url, AnalysisController.isSupportedAudioFile(url) else { return }
             Task { @MainActor in
-                controller.analyze(fileAt: url)
+                controller.prepare(fileAt: url)
             }
         }
         return true
@@ -117,6 +134,164 @@ private struct IdleView: View {
                 .keyboardShortcut("o", modifiers: .command)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Configuration
+
+/// The interim step between choosing a file and running: a checklist of the
+/// analyses, each with a speed badge, the conclusion it feeds, and a sketch of
+/// how it works. Analysis is CPU-heavy, so this is where the slow modules get
+/// switched off before the (potentially long) run. All start enabled.
+private struct ConfigurationView: View {
+    let fileURL: URL
+    @Binding var selection: AnalysisSelection
+    let onAnalyze: () -> Void
+    let onChooseAnotherFile: () -> Void
+
+    private var modules: [AnalysisModule] { AnalysisModule.allCases }
+    private var allSelected: Bool { selection.count == modules.count }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    header
+                    ForEach(modules) { module in
+                        ModuleRow(
+                            module: module,
+                            isOn: Binding(
+                                get: { selection.contains(module) },
+                                set: { isOn in
+                                    if isOn { selection.insert(module) } else { selection.remove(module) }
+                                }
+                            )
+                        )
+                    }
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            footer
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Choose Analyses")
+                .font(.title2.bold())
+            HStack(spacing: 8) {
+                Image(systemName: "waveform")
+                    .foregroundStyle(Theme.primary)
+                Text(fileURL.lastPathComponent)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Text("Each analysis runs independently. Switch off the slow ones you don't need to speed up the run.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+
+            HStack(spacing: 12) {
+                Button(allSelected ? "Deselect All" : "Select All") {
+                    selection = allSelected ? [] : .all
+                }
+                .buttonStyle(.link)
+                .font(.callout)
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            Button("Choose Different File…", action: onChooseAnotherFile)
+            Spacer()
+            Text(selectionSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Analyze", action: onAnalyze)
+                .keyboardShortcut(.return, modifiers: [])
+                .buttonStyle(.borderedProminent)
+                .disabled(selection.isEmpty)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 14)
+        .background(.bar)
+    }
+
+    private var selectionSummary: String {
+        let slowCount = selection.filter { $0.cost == .slow }.count
+        if selection.isEmpty { return "Select at least one analysis" }
+        let base = "\(selection.count) of \(modules.count) selected"
+        return slowCount > 0 ? "\(base) · \(slowCount) slow" : base
+    }
+}
+
+/// One toggle row: the switch, the analysis name with a speed badge, and two
+/// lines of explanation — what conclusion it determines and how it works.
+private struct ModuleRow: View {
+    let module: AnalysisModule
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(module.name)
+                        .font(.headline)
+                    CostBadge(cost: module.cost)
+                }
+                Text(module.determines)
+                    .font(.callout)
+                    .foregroundStyle(.primary.opacity(0.75))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(module.howItWorks)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.leading, 4)
+        }
+        .toggleStyle(.switch)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Theme.timelineWellShade)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(isOn ? Theme.primary.opacity(0.35) : Theme.hairline, lineWidth: 1)
+        )
+        .opacity(isOn ? 1 : 0.6)
+    }
+}
+
+/// Fast / Average / Slow pill, color-coded green → orange → red so the costly
+/// analyses stand out at a glance.
+private struct CostBadge: View {
+    let cost: AnalysisModule.Cost
+
+    private var tint: Color {
+        switch cost {
+        case .fast: return .green
+        case .average: return .orange
+        case .slow: return .red
+        }
+    }
+
+    var body: some View {
+        Text(cost.label.uppercased())
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(tint.opacity(0.15)))
     }
 }
 
@@ -178,7 +353,15 @@ private struct FailureView: View {
 private struct ResultsView: View {
     let report: AudioAnalysisReport
     let onReset: () -> Void
+    let onAdjust: () -> Void
     let onOpen: () -> Void
+
+    /// Whether any headline-number cell has real data to show.
+    private var hasKeyNumbers: Bool {
+        report.analyzedModules.contains(.loudness)
+            || report.analyzedModules.contains(.noiseFloor)
+            || report.analyzedModules.contains(.tonalBalance)
+    }
 
     var body: some View {
         ScrollView {
@@ -191,8 +374,12 @@ private struct ResultsView: View {
                 if !report.conclusions.isEmpty {
                     ConclusionsList(conclusions: report.conclusions)
                 }
-                VerdictList(verdicts: report.verdicts)
-                KeyNumbersStrip(report: report)
+                if !report.verdicts.isEmpty {
+                    VerdictList(verdicts: report.verdicts)
+                }
+                if hasKeyNumbers {
+                    KeyNumbersStrip(report: report)
+                }
 
                 if let spectrogram = report.spectrogram {
                     SectionCard(title: "Spectrogram") {
@@ -200,12 +387,14 @@ private struct ResultsView: View {
                     }
                 }
 
-                SectionCard(title: "Average Spectrum") {
-                    AverageSpectrumPlot(
-                        spectrum: report.averageSpectrum,
-                        nyquistHz: report.bandwidth.nyquistHz,
-                        cutoffHz: report.bandwidth.detectedCutoffHz
-                    )
+                if report.analyzedModules.contains(.tonalBalance) {
+                    SectionCard(title: "Average Spectrum") {
+                        AverageSpectrumPlot(
+                            spectrum: report.averageSpectrum,
+                            nyquistHz: report.bandwidth.nyquistHz,
+                            cutoffHz: report.bandwidth.detectedCutoffHz
+                        )
+                    }
                 }
             }
             .padding(24)
@@ -221,6 +410,9 @@ private struct ResultsView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 16)
+                // Re-run the same file with different toggles without reopening.
+                Button("Adjust Analyses", action: onAdjust)
+                    .controlSize(.regular)
                 Button("Analyze Another File…", action: onReset)
                     .controlSize(.regular)
             }
@@ -489,41 +681,48 @@ private struct ConclusionStyle {
 private struct KeyNumbersStrip: View {
     let report: AudioAnalysisReport
 
+    /// Only the cells whose module actually ran, so a skipped analysis never
+    /// shows a placeholder −∞ or "nil" reading.
     private var cells: [StatCell] {
-        var cells: [StatCell] = [
-            StatCell(
+        var cells: [StatCell] = []
+        if report.analyzedModules.contains(.loudness) {
+            cells.append(StatCell(
                 label: "Integrated",
                 value: AnalysisFormat.lufs(report.loudness.integratedLUFS),
                 unit: "LUFS"
-            ),
-            StatCell(
+            ))
+            cells.append(StatCell(
                 label: "Sample Peak",
                 value: AnalysisFormat.decibels(report.loudness.samplePeakDBFS),
                 unit: "dBFS"
-            ),
-            StatCell(
+            ))
+            cells.append(StatCell(
                 label: "Crest Factor",
                 value: AnalysisFormat.decibels(report.loudness.crestFactorDB),
                 unit: "dB"
-            ),
-            StatCell(
+            ))
+        }
+        if report.analyzedModules.contains(.noiseFloor) {
+            cells.append(StatCell(
                 label: "Noise Floor",
                 value: AnalysisFormat.decibels(report.noiseFloor.noiseFloorDBFS),
                 unit: "dBFS"
-            )
-        ]
-        if let cutoff = report.bandwidth.detectedCutoffHz {
-            cells.append(StatCell(
-                label: "Bandwidth",
-                value: AnalysisFormat.kilohertz(cutoff),
-                unit: "kHz"
             ))
-        } else {
-            cells.append(StatCell(
-                label: "Bandwidth",
-                value: "Full",
-                unit: AnalysisFormat.kilohertz(report.bandwidth.nyquistHz) + " kHz"
-            ))
+        }
+        if report.analyzedModules.contains(.tonalBalance) {
+            if let cutoff = report.bandwidth.detectedCutoffHz {
+                cells.append(StatCell(
+                    label: "Bandwidth",
+                    value: AnalysisFormat.kilohertz(cutoff),
+                    unit: "kHz"
+                ))
+            } else {
+                cells.append(StatCell(
+                    label: "Bandwidth",
+                    value: "Full",
+                    unit: AnalysisFormat.kilohertz(report.bandwidth.nyquistHz) + " kHz"
+                ))
+            }
         }
         return cells
     }

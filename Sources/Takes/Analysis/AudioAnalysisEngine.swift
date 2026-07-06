@@ -20,7 +20,10 @@ enum AudioAnalysisEngine {
     /// Frames decoded per read; keeps memory flat regardless of file length.
     private static let chunkFrameCount: AVAudioFrameCount = 1 << 16
 
-    static func analyze(fileAt url: URL, includeSpectrogram: Bool = true) throws -> AudioAnalysisReport {
+    static func analyze(
+        fileAt url: URL,
+        modules: AnalysisSelection = .all
+    ) throws -> AudioAnalysisReport {
         let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
         let format = file.processingFormat
         let sampleRate = format.sampleRate
@@ -31,92 +34,119 @@ enum AudioAnalysisEngine {
         let durationSeconds = Double(totalFrames) / sampleRate
         let fileInfo = fileInfo(for: url, file: file, durationSeconds: durationSeconds)
 
-        let loudnessMeter = LoudnessMeter(sampleRate: sampleRate, channelCount: channelCount)
-        let welch = WelchSpectrumAccumulator(sampleRate: sampleRate)
-        let quietFrames = QuietFrameCollector(sampleRate: sampleRate)
+        // Only build the accumulators the caller asked for; the expensive
+        // ones (analog, lossy, spectrogram) are exactly what the window's
+        // toggles switch off to save time.
+        let loudnessMeter = modules.contains(.loudness)
+            ? LoudnessMeter(sampleRate: sampleRate, channelCount: channelCount) : nil
+        let welch = modules.contains(.tonalBalance)
+            ? WelchSpectrumAccumulator(sampleRate: sampleRate) : nil
+        let quietFrames = modules.contains(.noiseFloor)
+            ? QuietFrameCollector(sampleRate: sampleRate) : nil
         // Stereo analyzers see at most two channels; surround content is
         // rare in Takes and the front pair carries the evidence they need.
         let analyzedChannelCount = min(channelCount, 2)
-        let analogSource = AnalogSourceAnalyzer(sampleRate: sampleRate, channelCount: analyzedChannelCount)
-        let lossyArtifacts = LossyArtifactAnalyzer(sampleRate: sampleRate, channelCount: analyzedChannelCount)
-        let spectrogram = includeSpectrogram
-            ? SpectrogramAccumulator(sampleRate: sampleRate, expectedFrameCount: totalFrames)
-            : nil
+        let analogSource = modules.contains(.analogSource)
+            ? AnalogSourceAnalyzer(sampleRate: sampleRate, channelCount: analyzedChannelCount) : nil
+        let lossyArtifacts = modules.contains(.lossyArtifacts)
+            ? LossyArtifactAnalyzer(sampleRate: sampleRate, channelCount: analyzedChannelCount) : nil
+        let spectrogram = modules.contains(.spectrogram)
+            ? SpectrogramAccumulator(sampleRate: sampleRate, expectedFrameCount: totalFrames) : nil
 
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrameCount) else {
-            throw AnalysisError.emptyFile
-        }
+        // The mono mix and per-channel copies are only worth computing if
+        // something downstream consumes them.
+        let needsMonoMix = welch != nil || quietFrames != nil || spectrogram != nil
+        let needsChannelArrays = analogSource != nil || lossyArtifacts != nil
+        let needsAudioPass = loudnessMeter != nil || needsMonoMix || needsChannelArrays
 
-        var monoMix = [Float]()
-        while file.framePosition < file.length {
-            try file.read(into: buffer, frameCount: chunkFrameCount)
-            let frameCount = Int(buffer.frameLength)
-            guard frameCount > 0, let channelData = buffer.floatChannelData else { break }
-
-            let channels = (0 ..< channelCount).map {
-                UnsafeBufferPointer(start: channelData[$0], count: frameCount)
+        if needsAudioPass {
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrameCount) else {
+                throw AnalysisError.emptyFile
             }
-            loudnessMeter.process(channels: channels)
 
-            // Mono mix (average of channels) feeds the spectral accumulators.
-            monoMix.removeAll(keepingCapacity: true)
-            monoMix.append(contentsOf: channels[0])
-            if channelCount > 1 {
-                for channel in channels.dropFirst() {
-                    for index in 0 ..< frameCount { monoMix[index] += channel[index] }
+            var monoMix = [Float]()
+            while file.framePosition < file.length {
+                try file.read(into: buffer, frameCount: chunkFrameCount)
+                let frameCount = Int(buffer.frameLength)
+                guard frameCount > 0, let channelData = buffer.floatChannelData else { break }
+
+                let channels = (0 ..< channelCount).map {
+                    UnsafeBufferPointer(start: channelData[$0], count: frameCount)
                 }
-                let scale = 1 / Float(channelCount)
-                for index in 0 ..< frameCount { monoMix[index] *= scale }
+                loudnessMeter?.process(channels: channels)
+
+                if needsMonoMix {
+                    // Mono mix (average of channels) feeds the spectral accumulators.
+                    monoMix.removeAll(keepingCapacity: true)
+                    monoMix.append(contentsOf: channels[0])
+                    if channelCount > 1 {
+                        for channel in channels.dropFirst() {
+                            for index in 0 ..< frameCount { monoMix[index] += channel[index] }
+                        }
+                        let scale = 1 / Float(channelCount)
+                        for index in 0 ..< frameCount { monoMix[index] *= scale }
+                    }
+                    welch?.process(monoSamples: monoMix)
+                    quietFrames?.process(monoSamples: monoMix)
+                    spectrogram?.process(monoSamples: monoMix)
+                }
+
+                if needsChannelArrays {
+                    let channelArrays = channels.prefix(analyzedChannelCount).map(Array.init)
+                    analogSource?.process(channels: channelArrays)
+                    lossyArtifacts?.process(channels: channelArrays)
+                }
             }
-
-            welch.process(monoSamples: monoMix)
-            quietFrames.process(monoSamples: monoMix)
-            spectrogram?.process(monoSamples: monoMix)
-
-            let channelArrays = channels.prefix(analyzedChannelCount).map(Array.init)
-            analogSource.process(channels: channelArrays)
-            lossyArtifacts.process(channels: channelArrays)
         }
 
-        let loudnessResult = loudnessMeter.finalize()
-        let spectrum = welch.finalize()
-        let noiseFloor = quietFrames.finalize()
-        let tonalBalance = SpectrumMetrics.tonalBalance(from: spectrum)
-        let bandwidth = SpectrumMetrics.bandwidth(from: spectrum, sampleRate: sampleRate)
-        let analogSourceMetrics = analogSource.finalize()
-        let lossyArtifactMetrics = lossyArtifacts.finalize()
+        let loudness: LoudnessMetrics
+        if let loudnessResult = loudnessMeter?.finalize() {
+            loudness = LoudnessMetrics(
+                integratedLUFS: loudnessResult.integratedLUFS,
+                samplePeakDBFS: loudnessResult.samplePeakDBFS,
+                crestFactorDB: loudnessResult.samplePeakDBFS - loudnessResult.overallRMSDBFS,
+                clippedSampleRunCount: loudnessResult.clippedRunCount
+            )
+        } else {
+            loudness = .unavailable
+        }
+
+        let spectrum = welch?.finalize() ?? .unavailable(sampleRate: sampleRate)
+        let tonalBalance = welch != nil ? SpectrumMetrics.tonalBalance(from: spectrum) : .unavailable
+        let bandwidth = welch != nil
+            ? SpectrumMetrics.bandwidth(from: spectrum, sampleRate: sampleRate)
+            : .unavailable(sampleRate: sampleRate)
+        let noiseFloor = quietFrames?.finalize() ?? .unavailable
+        let analogSourceMetrics = analogSource?.finalize() ?? .unavailable
+        let lossyArtifactMetrics = lossyArtifacts?.finalize() ?? .unavailable
         // Bitstream inspection failing (I/O aside) just means "not an MP3";
         // provenance evidence is additive, never required.
-        let mp3Stream = try? MP3BitstreamInspector.inspect(fileAt: url)
-
-        let loudness = LoudnessMetrics(
-            integratedLUFS: loudnessResult.integratedLUFS,
-            samplePeakDBFS: loudnessResult.samplePeakDBFS,
-            crestFactorDB: loudnessResult.samplePeakDBFS - loudnessResult.overallRMSDBFS,
-            clippedSampleRunCount: loudnessResult.clippedRunCount
-        )
+        let mp3Stream = modules.contains(.bitstream) ? (try? MP3BitstreamInspector.inspect(fileAt: url)) ?? nil : nil
 
         return AudioAnalysisReport(
             fileInfo: fileInfo,
+            analyzedModules: modules,
             loudness: loudness,
             tonalBalance: tonalBalance,
             noiseFloor: noiseFloor,
             bandwidth: bandwidth,
             analogSource: analogSourceMetrics,
             lossyArtifacts: lossyArtifactMetrics,
-            mp3Stream: mp3Stream ?? nil,
+            mp3Stream: mp3Stream,
             averageSpectrum: spectrum,
             spectrogram: spectrogram?.finalize(durationSeconds: durationSeconds),
             conclusions: SourceInference.conclusions(
+                modules: modules,
                 fileInfo: fileInfo,
                 loudness: loudness,
                 noiseFloor: noiseFloor,
                 bandwidth: bandwidth,
                 analogSource: analogSourceMetrics,
                 lossyArtifacts: lossyArtifactMetrics,
-                mp3Stream: mp3Stream ?? nil
+                mp3Stream: mp3Stream
             ),
             verdicts: AnalysisVerdictBuilder.verdicts(
+                modules: modules,
                 fileInfo: fileInfo,
                 loudness: loudness,
                 tonalBalance: tonalBalance,

@@ -9,6 +9,10 @@ import Foundation
 /// tuned without touching the measurement code.
 struct AudioAnalysisReport {
     let fileInfo: AnalyzedFileInfo
+    /// Which analyses actually ran. Skipped modules leave neutral placeholder
+    /// metrics behind, so the UI consults this to hide sections it didn't
+    /// measure rather than rendering empty/false readings.
+    let analyzedModules: AnalysisSelection
     let loudness: LoudnessMetrics
     let tonalBalance: TonalBalanceMetrics
     let noiseFloor: NoiseFloorMetrics
@@ -52,6 +56,14 @@ struct AnalogSourceMetrics {
     /// measurable from sustained tonal content. Stretch metric; nil when
     /// the material offers no stable pitch track.
     let wowPeakCents: Double?
+
+    /// Placeholder for when the analog-source module is switched off — reads
+    /// as pristine (no floor, correlated, no clicks/rumble) so no analog
+    /// conclusion is drawn.
+    static let unavailable = AnalogSourceMetrics(
+        stationaryNoiseFloorDBFS: -.infinity, noiseFloorFlatness: 0, highBandNoiseCoherence: 1,
+        clickRatePerMinute: 0, meanClickSalienceDB: 0, rumbleSideLevelDB: -.infinity, wowPeakCents: nil
+    )
 }
 
 /// Artifact measurements that grade lossy-encode quality beyond bandwidth.
@@ -72,6 +84,11 @@ struct LossyArtifactMetrics {
     /// detected cutoff. ≈1 on a stereo file suggests intensity stereo or
     /// other HF mono-ification (early-encoder tell). 1.0 for mono files.
     let hfStereoCoherence: Double
+
+    /// Placeholder for when the lossy-artifact module is switched off.
+    static let unavailable = LossyArtifactMetrics(
+        preEchoScore: 0, attackCount: 0, highBandFlickerScore: 0, hfStereoCoherence: 1
+    )
 }
 
 /// Facts read directly from an MPEG audio bitstream (no decoding) — the
@@ -164,6 +181,11 @@ struct LoudnessMetrics {
     /// Runs of ≥3 consecutive near-full-scale samples; >0 suggests the
     /// master is clipped, many suggest it is slammed.
     let clippedSampleRunCount: Int
+
+    /// Placeholder for when the loudness module is switched off.
+    static let unavailable = LoudnessMetrics(
+        integratedLUFS: nil, samplePeakDBFS: -.infinity, crestFactorDB: 0, clippedSampleRunCount: 0
+    )
 }
 
 /// Long-term energy split into perceptually meaningful bands.
@@ -180,6 +202,9 @@ struct TonalBalanceMetrics {
     let spectralCentroidHz: Double
     /// Frequency below which 95% of the energy lives.
     let rolloff95Hz: Double
+
+    /// Placeholder for when the tonal-balance module is switched off.
+    static let unavailable = TonalBalanceMetrics(bands: [], spectralCentroidHz: 0, rolloff95Hz: 0)
 }
 
 /// Noise floor measured from the quietest stretches of the file.
@@ -190,6 +215,9 @@ struct NoiseFloorMetrics {
     /// Spectral flatness (0…1) of the quiet frames. Broadband hiss is flat;
     /// tonal residue (hum, bleed) is not.
     let quietFrameSpectralFlatness: Double
+
+    /// Placeholder for when the noise-floor module is switched off.
+    static let unavailable = NoiseFloorMetrics(noiseFloorDBFS: -.infinity, quietFrameSpectralFlatness: 0)
 }
 
 /// High-frequency bandwidth measurement, the core of transcode detection.
@@ -205,6 +233,13 @@ struct BandwidthMetrics {
     /// How far the spectrum falls above the cutoff relative to mid-band, dB.
     let shelfDepthDB: Double?
     let confidence: Confidence
+
+    /// Placeholder for when the tonal-balance module (which measures
+    /// bandwidth) is switched off. Carries the Nyquist so the UI can still
+    /// label an axis, but reports no cutoff and low confidence.
+    static func unavailable(sampleRate: Double) -> BandwidthMetrics {
+        BandwidthMetrics(nyquistHz: sampleRate / 2, detectedCutoffHz: nil, shelfDepthDB: nil, confidence: .low)
+    }
 }
 
 /// Welch-averaged power spectrum for the UI line plot and cutoff marker.
@@ -212,6 +247,11 @@ struct AverageSpectrum {
     /// Center frequency of bin `i` is `Double(i) * binWidthHz`.
     let binWidthHz: Double
     let magnitudesDB: [Float]
+
+    /// Placeholder (empty) for when the tonal-balance module is switched off.
+    static func unavailable(sampleRate: Double) -> AverageSpectrum {
+        AverageSpectrum(binWidthHz: sampleRate / 8_192, magnitudesDB: [])
+    }
 }
 
 /// Rendered spectrogram (linear frequency axis so codec shelves read as a
