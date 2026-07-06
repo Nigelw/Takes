@@ -1371,6 +1371,45 @@ struct SessionTests {
 
     @MainActor
     @Test
+    func creatingLoopAroundPausedPlayheadKeepsPlaybackPosition() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop-paused-playhead.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.seek(to: 0.4)
+
+        controller.beginLoop(LoopRegion(start: 0.3, end: 0.8))
+
+        #expect(!controller.session.isPlaying)
+        #expect(controller.session.loopRegion == LoopRegion(start: 0.3, end: 0.8))
+        #expect(controller.session.repeatMode == .switchAndRepeat)
+        #expect(abs(controller.session.transportPosition - 0.4) < 0.0001)
+    }
+
+    @MainActor
+    @Test
+    func replacingActiveLoopAroundPlayingPlayheadKeepsPlaybackPosition() async throws {
+        let url = try makeTemporaryAudioFile(name: "loop-replace-playhead.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.beginLoop(LoopRegion(start: 0.1, end: 0.5))
+        controller.seek(to: 0.4)
+        controller.play()
+
+        controller.beginLoop(LoopRegion(start: 0.3, end: 0.8))
+
+        #expect(controller.session.isPlaying)
+        #expect(controller.session.loopRegion == LoopRegion(start: 0.3, end: 0.8))
+        #expect(controller.session.repeatMode == .switchAndRepeat)
+        #expect(controller.session.transportPosition >= 0.4)
+        #expect(controller.session.transportPosition < 0.8)
+    }
+
+    @MainActor
+    @Test
     func deselectLoopTurnsRepeatOff() async throws {
         let url = try makeTemporaryAudioFile(name: "loop.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

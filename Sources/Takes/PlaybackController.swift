@@ -952,12 +952,42 @@ final class PlaybackController: ObservableObject {
         setRepeatMode(session.repeatMode.next)
     }
 
-    /// Activate a loop: force Switch & Repeat so the loop is heard across tracks,
-    /// and move the playhead to the loop start.
+    /// Activate a loop: force Switch & Repeat so the loop is heard across tracks.
+    /// A loop starts from its beginning unless the current playhead already sits
+    /// inside it. Replacing an active loop while playing preserves playback when
+    /// the new loop still contains the live transport.
     func beginLoop(_ region: LoopRegion) {
+        let previousLoop = session.loopRegion
+        let transport = session.isPlaying ? currentTransportPosition() : session.transportPosition
         session.loopRegion = region
         session.repeatMode = .switchAndRepeat
-        seek(to: region.start)
+
+        guard transport >= region.start, transport < region.end else {
+            seek(to: region.start)
+            return
+        }
+
+        guard session.isPlaying else {
+            session.transportPosition = transport
+            return
+        }
+
+        guard let previousLoop else {
+            seek(to: transport)
+            return
+        }
+
+        if Self.canResizeLoopWithoutRescheduling(from: previousLoop, to: region, transport: transport) {
+            session.transportPosition = transport
+            if region.end > previousLoop.end {
+                appendLoopExtension(from: previousLoop, currentPosition: transport)
+            }
+            return
+        }
+
+        // The new loop still contains the playhead, but queued audio needs to be
+        // rebound to the new loop boundary.
+        seek(to: transport)
     }
 
     /// Update one edge of the active loop while dragging a resize handle.
