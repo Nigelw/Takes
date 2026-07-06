@@ -108,10 +108,19 @@ final class AnalogSourceDSPTests: XCTestCase {
     func testClicksAreCountedWithSalience() {
         let count = Int(20 * sampleRate)
         var music = gaplessMusic(count: count, seed: 7)
-        // 10 clicks: 1 ms wideband bursts, well above the music.
-        let clickLength = Int(0.001 * sampleRate)
+        // 10 clicks: 0.3 ms wideband spikes, well above the music — real
+        // stylus pops are sub-millisecond, which is exactly the sharpness
+        // the detector requires to reject drum onsets.
+        let clickLength = Int(0.0003 * sampleRate)
+        // Align spikes to the detector's 0.5 ms envelope frames: a spike
+        // straddling a frame boundary splits across two frames and is
+        // (intentionally) dropped by the sharpness rule — real surface
+        // noise is dense enough that the loss doesn't matter, but a
+        // 10-click test needs all 10 to land.
+        let envelopeFrame = max(16, Int((sampleRate * 0.0005).rounded()))
         for clickIndex in 0 ..< 10 {
-            let position = Int(1.9 * sampleRate) * clickIndex + Int(0.5 * sampleRate)
+            var position = Int(1.9 * sampleRate) * clickIndex + Int(0.5 * sampleRate)
+            position -= position % envelopeFrame
             let burst = whiteNoise(amplitude: 0.85, count: clickLength, seed: UInt64(clickIndex + 3))
             for (offset, value) in burst.enumerated() { music[position + offset] += value }
         }

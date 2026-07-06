@@ -201,7 +201,13 @@ final class LossyArtifactAnalyzer {
         let zoneStart = zoneEnd - preZoneFrames + 1
         let zoneDB = decibels(mean(energies[zoneStart ... zoneEnd]))
 
-        preEchoSum += max(0, zoneDB - baselineDB)
+        // Audibility floor: noise more than ~45 dB below the attack peak is
+        // masked in practice, so measure the rise only above
+        // max(baseline, peak − 45 dB). Against a near-digital-silence bed,
+        // a plain baseline-relative rise would grade even transparent
+        // encoders' faint granule noise as huge pre-echo.
+        let audibilityFloorDB = max(baselineDB, level - 45)
+        preEchoSum += max(0, zoneDB - audibilityFloorDB)
         qualifyingAttackCount += 1
         lastMeasuredAttackFrame = candidateAbsoluteIndex
     }

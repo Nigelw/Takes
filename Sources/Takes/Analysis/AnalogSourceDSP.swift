@@ -64,7 +64,7 @@ final class AnalogSourceAnalyzer {
     private let clickFrameLength: Int
     /// Sliding envelope ring: ±30 ms around the evaluated frame.
     private let clickRingLength: Int
-    private let clickThresholdDB: Float = 12
+    private let clickThresholdDB: Float = 18
     /// Frames above 2× median within ±3 ms must stay under this count
     /// (clicks are narrow; drum hits are not).
     private let clickMaxWidthFrames: Int
@@ -355,7 +355,7 @@ final class AnalogSourceAnalyzer {
         let candidate = envelopeRing[center]
         guard framesSinceClick >= clickRefractoryFrames, candidate > 0 else { return }
 
-        // Local max within ±2 ms, well above the ±30 ms median, and narrow.
+        // Local max within ±3 ms, well above the ±30 ms median, and narrow.
         let localRange = max(0, center - clickMaxWidthFrames) ... min(envelopeRing.count - 1, center + clickMaxWidthFrames)
         guard candidate >= envelopeRing[localRange].max() ?? candidate else { return }
 
@@ -364,8 +364,15 @@ final class AnalogSourceAnalyzer {
         let salience = Double(20 * log10(candidate / floorLevel))
         guard salience >= Double(clickThresholdDB) else { return }
 
-        let wideCount = envelopeRing[localRange].filter { $0 > floorLevel * 2 }.count
-        guard wideCount <= clickMaxWidthFrames else { return }
+        // Sharpness: a stylus click is a single sub-millisecond spike — the
+        // envelope collapses within one 0.5 ms frame of the peak. Musical
+        // onsets (drums, castanets) rise over 1–3 ms and hold several
+        // comparable frames, which is what made a naive detector count
+        // drum hits at 100+ "clicks"/minute on real music.
+        guard envelopeRing[center - 1] < candidate * 0.5,
+              envelopeRing[center + 1] < candidate * 0.5 else { return }
+        let strongCount = envelopeRing[localRange].filter { $0 > floorLevel * 4 }.count
+        guard strongCount <= 2 else { return }
 
         clickCount += 1
         clickSalienceSumDB += min(salience, 60)

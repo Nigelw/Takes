@@ -1,7 +1,7 @@
 # Experimental Audio Analysis
 
-Status: v2 in progress (2026-07-04). v1 complete — 20/20 corpus benchmark,
-11/11 unit tests (see Work log).
+Status: v2 complete (2026-07-04) — 29/29 corpus benchmark, full unit suite
+green. v1 complete earlier the same day (20/20).
 
 ## v2: source provenance & encode quality (current phase)
 
@@ -17,13 +17,50 @@ lines) rendered at the top of the results UI.
 | --- | --- | --- | --- |
 | M0 | Commit v1, plan update | main session | done |
 | M1 | Frozen metric/API contracts + stubs + pbxproj | main session | done |
-| M2 | Corpus v2: vinyl/tape sims (gapless), old-encoder MP3s, transient material for pre-echo | subagent (sonnet) | running |
-| M3a | Analog-source DSP: min-statistics noise floor, noise stereo-coherence, click/crackle detector, rumble, wow (stretch) — `AnalogSourceDSP.swift` | subagent (fable) | running |
-| M3b | Lossy-artifact DSP: pre-echo, HF flicker ("birdies"), HF stereo coherence — `LossyArtifactDSP.swift`; MP3 bitstream inspector (Xing/Info/LAME tag, encoder fingerprint) — `MP3BitstreamInspector.swift` | subagent (fable) | running |
-| M4 | Engine integration + `SourceInference.swift` (conclusions from combined metrics, incl. cutoff-vs-bitrate table) | main session | rules written; engine wired; tuning blocked on M2/M3 |
-| M5 | Benchmark expansion + tuning to all-pass | main session | pending |
-| M6 | UI: conclusions section with evidence disclosure | subagent (opus) | pending |
-| M7 | Docs, final build + launch | main session | pending |
+| M2 | Corpus v2: vinyl/tape sims (gapless), old-encoder MP3s, transient material for pre-echo | subagent (sonnet) | done |
+| M3a | Analog-source DSP: min-statistics noise floor, noise stereo-coherence, click/crackle detector, rumble, wow (stretch) — `AnalogSourceDSP.swift` | main session (subagent hit usage limit) | done (wow deferred) |
+| M3b | Lossy-artifact DSP: pre-echo, HF flicker ("birdies"), HF stereo coherence — `LossyArtifactDSP.swift`; MP3 bitstream inspector (Xing/Info/LAME tag, encoder fingerprint) — `MP3BitstreamInspector.swift` | subagent (fable) + main session (inspector) | done |
+| M4 | Engine integration + `SourceInference.swift` (conclusions from combined metrics, incl. cutoff-vs-bitrate table) | main session | done |
+| M5 | Benchmark expansion + tuning to all-pass | main session | done — 29/29 |
+| M6 | UI: conclusions section with evidence disclosure | subagent (opus) | done |
+| M7 | Docs, final build + launch | main session | done |
+
+### v2 tuning findings (thresholds in SourceInference.swift)
+
+- **Stationary hiss under gapless music works**: the min-statistics floor
+  reads the -50 dBFS hiss beds at -44/-38 on the real-music sims (music
+  never below -20 dBFS) — the case v1 documented as impossible. Floor
+  flatness separates hiss (0.31–0.42) from clean digital music (0.17);
+  threshold 0.28.
+- **Pre-echo needs an audibility floor**: measured against a near-silent
+  bed, even LAME 320's faint granule noise read as a "42 dB rise". Gating
+  the measurement at attack-peak -45 dB gives: clean 0.0 / LAME 320 -> 1.4
+  / LAME 128 -> 6.6 dB. Threshold 4.
+- **Clicks need a sub-millisecond sharpness rule**: a naive
+  salience-over-median detector counts drum onsets — 104 "clicks"/min on
+  clean real music. Requiring the envelope to collapse within ±0.5 ms of
+  the peak: clean music ~20/min, vinyl sim 436/min. Threshold 60/min.
+- **Sub-30 Hz side-channel rumble is mostly masked by real music**:
+  ordinary stereo bass measures -32 dB; threshold -25 so only rumble that
+  punches above musical LF counts (the vinyl sim reads -21).
+- **M/S is not intensity stereo**: LAME 192's legitimate mid/side coding
+  with a starved side channel reads HF coherence 0.93; true HF
+  mono-ification reads 1.00. Threshold 0.97.
+- **Early-encoder 192 detection works via cutoff-vs-bitrate**: 16.1 kHz at
+  192 kbps flags (modern LAME 192 keeps 18.8 kHz), corroborated by the
+  missing Xing/LAME header read straight from the bitstream.
+
+### v2 limitations
+
+- **Wow not implemented** (`wowPeakCents` always nil): needs a partial
+  tracker that won't confuse vibrato with transport speed error.
+- Clicks wider than ~1 ms are intentionally dropped by the sharpness rule;
+  dense surface noise still measures hundreds/min so attribution is
+  unaffected.
+- Vinyl attribution requires clicks + corroborating hiss/rumble; a
+  surgically de-noised vinyl rip will read clean — arguably correct.
+- Intensity-stereo detection fires only on effectively full HF mono
+  (coherence >= 0.97); partial intensity coding blends in with M/S.
 
 ### v2 detector design notes
 

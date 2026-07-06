@@ -104,6 +104,8 @@ let expectations: [String: Expectation] = [
         lufs: -14.6 ... -12.6,
         requiredVerdicts: ["Looks genuinely lossless"],
         forbiddenVerdicts: ["transcode", "hiss", "muffled"],
+        requiredConclusions: ["no signs of lossy ancestry"],
+        forbiddenConclusions: ["vinyl rip", "tape"],
         cutoffRange: 20_000 ... 22_050, cutoffMayBeFull: true
     ),
     "true_lossless.flac": Expectation(
@@ -134,7 +136,10 @@ let expectations: [String: Expectation] = [
         requiredVerdicts: ["muffled"]
     ),
     "hiss.wav": Expectation(
-        requiredVerdicts: ["Background hiss"]
+        requiredVerdicts: ["Background hiss"],
+        requiredConclusions: ["hiss"],
+        forbiddenConclusions: ["vinyl rip"],
+        notes: "correlated (mono) noise bed — hiss but no analog attribution"
     ),
     "mp3_128.mp3": Expectation(
         lufs: -15.4 ... -13.4,
@@ -155,6 +160,7 @@ let expectations: [String: Expectation] = [
     ),
     "fake_lossless_mp3128.flac": Expectation(
         requiredVerdicts: ["transcode"],
+        requiredConclusions: ["re-encode"],
         cutoffRange: 15_000 ... 17_500,
         notes: "core trap case: MP3-128 wearing FLAC"
     ),
@@ -175,11 +181,52 @@ let expectations: [String: Expectation] = [
         requiredVerdicts: ["muffled"]
     ),
     "real_hiss.wav": Expectation(
-        // The 30 s real-music window never drops below ≈ −20 dBFS, so a
-        // −50 dBFS hiss bed stays 30 dB under the quietest music — no gap
-        // exists to measure it in. Documented limitation.
+        // v1's quiet-gap analysis can't see this (music never drops below
+        // ≈ −20 dBFS); the v2 minimum-statistics floor is exactly the fix.
         forbiddenVerdicts: ["muffled", "transcode"],
-        notes: "hiss under gapless music is undetectable via quiet-frame analysis"
+        requiredConclusions: ["hiss"],
+        forbiddenConclusions: ["vinyl rip"],
+        notes: "v2 milestone: stationary hiss under gapless music"
+    ),
+    "real_tape_sim.wav": Expectation(
+        requiredConclusions: ["tape"],
+        forbiddenConclusions: ["vinyl rip"],
+        notes: "decorrelated hiss, gapless — tape attribution"
+    ),
+    "real_vinyl_sim.wav": Expectation(
+        requiredConclusions: ["vinyl rip"],
+        notes: "clicks + decorrelated hiss + side rumble, gapless"
+    ),
+    "mp3_192_modern.mp3": Expectation(
+        requiredConclusions: ["looks clean"],
+        forbiddenConclusions: ["quality problems"],
+        cutoffRange: 18_000 ... 22_050, cutoffMayBeFull: true
+    ),
+    "mp3_192_early.mp3": Expectation(
+        requiredConclusions: ["quality problems"],
+        cutoffRange: 15_000 ... 17_500,
+        notes: "early-encoder sim: 16 kHz lowpass at 192 kbps, no LAME tag"
+    ),
+    "mp3_192_intensity.mp3": Expectation(
+        requiredConclusions: ["quality problems"],
+        notes: "HF mono-ified before encoding — intensity-stereo tell"
+    ),
+    "transient_reference.wav": Expectation(
+        forbiddenConclusions: ["quality problems", "re-encode"],
+        notes: "clean transient probe material"
+    ),
+    "transient_mp3_128.mp3": Expectation(
+        requiredConclusions: ["quality problems"],
+        notes: "pre-echo on castanet-style transients at 128 kbps"
+    ),
+    "transient_mp3_320.mp3": Expectation(
+        forbiddenConclusions: ["quality problems"],
+        notes: "320 kbps keeps transients clean — pre-echo contrast case"
+    ),
+    "transient_fake_lossless_mp3128.flac": Expectation(
+        requiredConclusions: ["re-encode"],
+        cutoffRange: 15_000 ... 17_500,
+        notes: "pre-echo + shelf survive the FLAC wrapper"
     ),
     "real_mp3_128.mp3": Expectation(
         requiredVerdicts: ["Lossy encode"],

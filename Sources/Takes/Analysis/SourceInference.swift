@@ -17,24 +17,36 @@ enum SourceInference {
 
     /// Analog noise-floor window: audible-but-plausible hiss levels.
     private static let hissFloorRangeDBFS = -80.0 ... -28.0
-    private static let hissFlatnessMinimum = 0.35
+    /// Clean digital music measures ≈ 0.17 on the corpus; hiss beds under
+    /// gapless real music measure 0.31+ (correlated) / 0.42 (decorrelated).
+    private static let hissFlatnessMinimum = 0.28
     /// Below this inter-channel coherence, floor noise reads as
     /// decorrelated — an analog-chain signature.
     private static let decorrelatedNoiseCoherenceMaximum = 0.5
 
-    private static let vinylClickRateMinimum = 8.0
+    /// Clean real music still yields ~20 sharp-spike detections/minute
+    /// (residual percussive edges); genuine surface noise measures in the
+    /// hundreds. Sit well above the false-positive floor.
+    private static let vinylClickRateMinimum = 60.0
     private static let clickSalienceMinimumDB = 8.0
-    /// Side-channel rumble above this (relative dB) supports vinyl.
-    private static let rumbleSideLevelMinimumDB = -55.0
+    /// Side-channel rumble above this (relative dB) supports vinyl. Real
+    /// music with ordinary stereo bass measures ≈ −32 on the corpus, so
+    /// only rumble that punches well above musical LF side content counts.
+    private static let rumbleSideLevelMinimumDB = -25.0
     private static let wowCentsMinimum = 12.0
 
     /// Pre-echo: mean rise before attacks (dB) that marks a bad encode, and
     /// the attack count needed to trust the score at all.
-    private static let preEchoScoreMinimumDB = 6.0
+    /// With the audibility floor in the DSP, corpus measurements: clean
+    /// transients 0.0, LAME 320 → 1.4, LAME 128 → 6.6. Split the gap.
+    private static let preEchoScoreMinimumDB = 4.0
     private static let preEchoAttackCountMinimum = 5
     private static let flickerScoreMinimum = 4.0
-    /// HF coherence above this on a stereo file suggests intensity stereo.
-    private static let intensityStereoCoherenceMinimum = 0.9
+    /// HF coherence above this on a stereo file suggests intensity stereo /
+    /// fully mono-ified highs. Ordinary M/S joint stereo with a starved
+    /// side channel measures ≈ 0.93 at 192 kbps on the corpus — legitimate
+    /// coding, not an early-encoder tell — while true HF mono reads 1.00.
+    private static let intensityStereoCoherenceMinimum = 0.97
 
     /// Expected minimum bandwidth a competent modern encoder delivers at a
     /// given bitrate (kbps → Hz), used for the "early encoder" mismatch
