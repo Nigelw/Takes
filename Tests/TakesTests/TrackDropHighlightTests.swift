@@ -320,7 +320,7 @@ struct TrackDropHighlightTests {
     func appFileOpenRouterQueuesAutomationFileURLsUntilHandlerIsConfigured() {
         let router = AppFileOpenRouter()
         let earlyURL = URL(string: "takes://open-file?url=file%3A%2F%2F%2Ftmp%2Fearly.wav")!
-        let laterURL = URL(string: "takes://open-files?url=file%3A%2F%2F%2Ftmp%2Flater.mp3&url=file%3A%2F%2F%2Ftmp%2Fthird.m4a")!
+        let laterURL = URL(string: "takes://open-file?url=file%3A%2F%2F%2Ftmp%2Flater.mp3&url=file%3A%2F%2F%2Ftmp%2Fthird.m4a")!
         var handledURLBatches: [[URL]] = []
 
         router.open([earlyURL])
@@ -349,7 +349,7 @@ struct TrackDropHighlightTests {
     func appFileOpenRouterQueuesStreamingURLsUntilHandlerIsConfigured() {
         let router = AppFileOpenRouter()
         let earlyURL = URL(string: "takes://open-url?url=https%3A%2F%2Fmusic.apple.com%2Fus%2Falbum%2Fexample%2F123%3Fi%3D456")!
-        let laterURL = URL(string: "takes://open-streaming-url?url=https%3A%2F%2Fopen.spotify.com%2Ftrack%2Fabc")!
+        let laterURL = URL(string: "takes://open-url?url=https%3A%2F%2Fopen.spotify.com%2Ftrack%2Fabc")!
         var handledURLBatches: [[String]] = []
 
         router.open([earlyURL])
@@ -388,7 +388,7 @@ struct TrackDropHighlightTests {
 
     @Test
     func appOpenedURLResolverExtractsAudioFilesFromTakesAutomationScheme() {
-        let url = URL(string: "takes://open-files?url=file%3A%2F%2F%2Ftmp%2Ffirst.wav&url=file%3A%2F%2F%2Ftmp%2Fsecond.m4a")!
+        let url = URL(string: "takes://open-file?url=file%3A%2F%2F%2Ftmp%2Ffirst.wav&url=file%3A%2F%2F%2Ftmp%2Fsecond.m4a")!
 
         #expect(AppOpenedURLResolver.automationFileURLs(from: url) == [
             URL(fileURLWithPath: "/tmp/first.wav"),

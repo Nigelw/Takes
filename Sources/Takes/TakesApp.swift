@@ -41,7 +41,7 @@ enum AppOpenedURLResolver {
         guard url.scheme?.lowercased() == "takes",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let command = automationCommand(from: components),
-              ["open-url", "open-streaming-url"].contains(command),
+              command == "open-url",
               let value = components.queryItems?.first(where: { $0.name == "url" })?.value?
                   .trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty,
@@ -56,7 +56,7 @@ enum AppOpenedURLResolver {
         guard url.scheme?.lowercased() == "takes",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let command = automationCommand(from: components),
-              ["open-file", "open-files"].contains(command)
+              command == "open-file"
         else {
             return nil
         }

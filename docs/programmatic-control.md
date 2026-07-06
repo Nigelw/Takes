@@ -19,7 +19,7 @@ Takes currently has two public automation surfaces:
    ```sh
    open 'takes://open-url?url=<streaming URL>'
    open 'takes://open-file?url=<file URL>'
-   open 'takes://open-files?url=<file 1 URL>&url=<file 2 URL>'
+   open 'takes://open-file?url=<file 1 URL>&url=<file 2 URL>'
    ```
 
 There are also launch-time options:
@@ -82,7 +82,7 @@ scheme  command   query parameter
 - `open-file` is the command.
 - `url=...` is the value being passed to that command.
 
-### Open One Local File
+### Open Local Files
 
 Use `open-file` for one local file:
 
@@ -104,13 +104,11 @@ This is a file URL:
 file:///Users/me/Music/take-a.wav
 ```
 
-### Open Multiple Local Files
-
-Use `open-files` for more than one local file. Repeat the `url` parameter once
-for each file:
+Use the same `open-file` command for more than one local file. Repeat the
+`url` parameter once for each file:
 
 ```sh
-open 'takes://open-files?url=file:///Users/me/Music/take-a.wav&url=file:///Users/me/Music/take-b.wav'
+open 'takes://open-file?url=file:///Users/me/Music/take-a.wav&url=file:///Users/me/Music/take-b.wav'
 ```
 
 Takes reads all of the `url` parameters and opens the valid file URLs.
@@ -122,12 +120,6 @@ URL:
 
 ```sh
 open 'takes://open-url?url=https://www.youtube.com/watch?v=abc123'
-```
-
-Takes also accepts `open-streaming-url` as another name for the same command:
-
-```sh
-open 'takes://open-streaming-url?url=https://www.youtube.com/watch?v=abc123'
 ```
 
 Internally, this follows the same path as the "Open Streaming URL" command in
@@ -242,12 +234,11 @@ Use `takes://open-url` for streaming URLs:
 open 'takes://open-url?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabc123'
 ```
 
-Use `takes://open-file` or `takes://open-files` when another app, shortcut, or
-web-style automation system needs to send Takes a URL instead of shell file
-arguments:
+Use `takes://open-file` when another app, shortcut, or web-style automation
+system needs to send Takes file URLs instead of shell file arguments:
 
 ```sh
-open 'takes://open-files?url=file:///Users/me/Music/take-a.wav&url=file:///Users/me/Music/take-b.wav'
+open 'takes://open-file?url=file:///Users/me/Music/take-a.wav&url=file:///Users/me/Music/take-b.wav'
 ```
 
 Use `--appearance-theme` only when launching Takes with a temporary appearance,
@@ -263,10 +254,8 @@ open -a "Takes.app" --args --default-window-layout
 | Command | Example | Purpose |
 | --- | --- | --- |
 | `open -a "Takes.app" "$FILE"` | `open -a "Takes.app" take.wav` | Open one or more local files through macOS. |
-| `takes://open-file?url=<file URL>` | `open 'takes://open-file?url=file:///tmp/take.wav'` | Open one local file through the Takes URL scheme. |
-| `takes://open-files?url=<file URL>&url=<file URL>` | `open 'takes://open-files?url=file:///tmp/a.wav&url=file:///tmp/b.wav'` | Open multiple local files through the Takes URL scheme. |
+| `takes://open-file?url=<file URL>` | `open 'takes://open-file?url=file:///tmp/a.wav&url=file:///tmp/b.wav'` | Open one or more local files through the Takes URL scheme. |
 | `takes://open-url?url=<streaming URL>` | `open 'takes://open-url?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabc123'` | Open a streaming URL. |
-| `takes://open-streaming-url?url=<streaming URL>` | `open 'takes://open-streaming-url?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabc123'` | Alternate name for opening a streaming URL. |
 | `--appearance-theme <theme>` | `open -a "Takes.app" --args --appearance-theme dark` | Override the appearance theme for this launch. |
 | `--default-window-layout` | `open -a "Takes.app" --args --default-window-layout` | Start this launch with the default window size and track info column width. |
 
@@ -277,5 +266,4 @@ open -a "Takes.app" --args --default-window-layout
   controls such as play, pause, seek, or switch track.
 - The `takes://` scheme does not currently set launch options.
 - Launch options are not runtime commands.
-- The `takes://open-file` and `takes://open-files` commands accept file URLs,
-  not plain shell paths.
+- The `takes://open-file` command accepts file URLs, not plain shell paths.
