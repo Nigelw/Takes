@@ -77,6 +77,66 @@ final class RealFFT {
     }
 }
 
+// MARK: - Complex-output real FFT
+
+/// Like `RealFFT` but exposes the complex half-spectrum instead of
+/// accumulating power — the coherence detectors (`LossyArtifactAnalyzer`,
+/// `AnalogSourceAnalyzer`) need phases. Same Hann window and normalization:
+/// a full-scale sine's bin power reads ~0 dB.
+final class ComplexSpectrumFFT {
+    let size: Int
+    private let log2n: vDSP_Length
+    private let setup: FFTSetup
+    private let window: [Float]
+    private let amplitudeScale: Float
+    private var windowed: [Float]
+
+    init(size: Int) {
+        precondition(size > 0 && (size & (size - 1)) == 0, "FFT size must be a power of two")
+        self.size = size
+        log2n = vDSP_Length(log2(Double(size)).rounded())
+        setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2))!
+        windowed = [Float](repeating: 0, count: size)
+        var hann = [Float](repeating: 0, count: size)
+        vDSP_hann_window(&hann, vDSP_Length(size), Int32(vDSP_HANN_DENORM))
+        window = hann
+        // fft_zrip returns 2× the DFT; a real sine's line is
+        // amplitude/2 · windowSum · 2, so 1/windowSum recovers amplitude.
+        amplitudeScale = 1 / vDSP.sum(hann)
+    }
+
+    deinit {
+        vDSP_destroy_fftsetup(setup)
+    }
+
+    /// Windows `input` (exactly `size` samples) and writes the scaled
+    /// half-spectrum into `real`/`imaginary` (`size/2` bins, Nyquist dropped).
+    func transform(
+        _ input: UnsafeBufferPointer<Float>, intoReal real: inout [Float], imaginary: inout [Float]
+    ) {
+        precondition(input.count == size && real.count == size / 2 && imaginary.count == size / 2)
+        vDSP.multiply(input, window, result: &windowed)
+
+        real.withUnsafeMutableBufferPointer { realPtr in
+            imaginary.withUnsafeMutableBufferPointer { imagPtr in
+                var split = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
+                windowed.withUnsafeBufferPointer { source in
+                    source.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: size / 2) {
+                        vDSP_ctoz($0, 2, &split, 1, vDSP_Length(size / 2))
+                    }
+                }
+                vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(kFFTDirection_Forward))
+                // Packed format stores Nyquist in imagp[0]; drop it so bin 0
+                // is pure DC.
+                imagPtr[0] = 0
+                var scale = amplitudeScale
+                vDSP_vsmul(realPtr.baseAddress!, 1, &scale, realPtr.baseAddress!, 1, vDSP_Length(size / 2))
+                vDSP_vsmul(imagPtr.baseAddress!, 1, &scale, imagPtr.baseAddress!, 1, vDSP_Length(size / 2))
+            }
+        }
+    }
+}
+
 // MARK: - Loudness (ITU-R BS.1770-4)
 
 /// Integrated loudness with K-weighting and two-stage gating, plus sample

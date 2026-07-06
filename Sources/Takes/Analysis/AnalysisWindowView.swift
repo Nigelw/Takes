@@ -184,6 +184,13 @@ private struct ResultsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
+                // Headline conclusions sit directly under the metadata header —
+                // above the per-category verdicts — because they are the whole
+                // feature's payoff ("this FLAC is a re-encode"). Rendered only
+                // when the engine reached one; no empty-state placeholder.
+                if !report.conclusions.isEmpty {
+                    ConclusionsList(conclusions: report.conclusions)
+                }
                 VerdictList(verdicts: report.verdicts)
                 KeyNumbersStrip(report: report)
 
@@ -339,6 +346,139 @@ private struct VerdictRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
+    }
+}
+
+// MARK: - Conclusions
+
+/// The stack of headline `SourceConclusion` cards. One prominent card per
+/// finding, in the order the engine ranked them (most convincing first).
+private struct ConclusionsList: View {
+    let conclusions: [SourceConclusion]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(conclusions) { conclusion in
+                ConclusionCard(conclusion: conclusion)
+            }
+        }
+    }
+}
+
+/// One headline finding, styled to carry the eye first: a large tinted icon,
+/// the plain-language `statement` set big and bold, a confidence chip, and the
+/// supporting evidence as an always-visible indented list. The tint is derived
+/// from the conclusion's kind — the evidence IS the explanation, so nothing is
+/// collapsed behind a disclosure.
+private struct ConclusionCard: View {
+    let conclusion: SourceConclusion
+
+    private var style: ConclusionStyle { ConclusionStyle.style(for: conclusion.kind) }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: style.symbol)
+                .font(.system(size: 26, weight: .medium))
+                .foregroundStyle(style.tint)
+                .frame(width: 30)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(conclusion.statement)
+                        .font(.title3.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    ConfidenceChip(confidence: conclusion.confidence, tint: style.tint)
+                        .padding(.top, 1)
+                }
+
+                if !conclusion.evidence.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(conclusion.evidence.enumerated()), id: \.offset) { _, line in
+                            HStack(alignment: .top, spacing: 7) {
+                                // A neutral bullet, tinted just enough to tie
+                                // the list to the card's accent without shouting.
+                                Text("•")
+                                    .foregroundStyle(style.tint.opacity(0.7))
+                                Text(line)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .font(.callout)
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(
+            // A faint wash of the accent over the shared well shade, so the card
+            // reads as tinted without introducing a new opaque surface color.
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Theme.timelineWellShade)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(style.tint.opacity(0.07))
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(style.tint.opacity(0.35), lineWidth: 1)
+        )
+    }
+}
+
+/// A small pill reading "Low/Medium/High confidence", tinted to match its card
+/// so it reinforces the finding's flavor rather than reading as a separate tag.
+private struct ConfidenceChip: View {
+    let confidence: SourceConclusion.Confidence
+    let tint: Color
+
+    private var label: String {
+        switch confidence {
+        case .low: return "Low confidence"
+        case .medium: return "Medium confidence"
+        case .high: return "High confidence"
+        }
+    }
+
+    var body: some View {
+        Text(label.uppercased())
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(tint.opacity(0.15)))
+            .fixedSize()
+    }
+}
+
+/// Icon + tint for each conclusion kind. Warning-flavored provenance (fake
+/// lossless, poor encodes) uses traffic-light red/orange; positive findings use
+/// green; neutral analog-source provenance borrows the Theme secondary accent so
+/// it reads as informative rather than alarming. All three appearances resolve
+/// through system semantic colors + Theme tokens, so light and dark both hold up.
+private struct ConclusionStyle {
+    let symbol: String
+    let tint: Color
+
+    static func style(for kind: SourceConclusion.Kind) -> ConclusionStyle {
+        switch kind {
+        case .fakeLossless:
+            return ConclusionStyle(symbol: "exclamationmark.triangle.fill", tint: .red)
+        case .poorLossyEncode:
+            return ConclusionStyle(symbol: "waveform.badge.exclamationmark", tint: .orange)
+        case .vinylSourced:
+            return ConclusionStyle(symbol: "recordingtape", tint: Theme.secondary)
+        case .analogTapeSourced:
+            return ConclusionStyle(symbol: "recordingtape", tint: Theme.secondary)
+        case .cleanLossyEncode:
+            return ConclusionStyle(symbol: "checkmark.seal.fill", tint: .green)
+        case .cleanLossless:
+            return ConclusionStyle(symbol: "checkmark.seal.fill", tint: .green)
+        }
     }
 }
 
