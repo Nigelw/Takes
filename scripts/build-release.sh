@@ -21,11 +21,9 @@
 # Usage:
 #   scripts/build-release.sh                          # build + notarize, no publish
 #   scripts/build-release.sh --publish                # also create release + push appcast
-#   scripts/build-release.sh --notes-file NOTES.md    # use Markdown notes for appcast + release
-#   scripts/build-release.sh --publish --notes-file release-notes.md
 #
-# --notes-file <path>  Markdown release notes. Embedded in the Sparkle appcast
-#                      (rendered to HTML) and used as the GitHub release body.
+# Release notes are extracted from CHANGELOG.md for the current MARKETING_VERSION
+# and used for both the Sparkle appcast and GitHub release body.
 # --no-commit          With --publish, create the release and stage
 #                      appcast.xml + changelog.html but do NOT commit/push them.
 #                      Lets the caller fold them into a single combined commit
@@ -45,6 +43,7 @@ GITHUB_DOWNLOAD_BASE="https://github.com/${REPO}/releases/download"
 WEBSITE_DIR="website"
 BUILD_DIR="build"
 DEFAULT_BRANCH="main"
+CHANGELOG="CHANGELOG.md"
 
 # ---- Locate project root --------------------------------------------------
 cd "$(dirname "$0")/.."
@@ -52,12 +51,10 @@ ROOT="$(pwd)"
 
 PUBLISH=0
 NO_COMMIT=0
-NOTES_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --publish) PUBLISH=1; shift ;;
     --no-commit) NO_COMMIT=1; shift ;;
-    --notes-file) NOTES_FILE="${2:-}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -67,7 +64,7 @@ die()  { printf '\033[1;31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 
 # ---- Preflight ------------------------------------------------------------
 step "Preflight"
-[[ -z "$NOTES_FILE" || -f "$NOTES_FILE" ]] || die "notes file not found: $NOTES_FILE"
+[[ -f "$CHANGELOG" ]] || die "changelog not found: $CHANGELOG"
 command -v create-dmg >/dev/null || die "create-dmg not found (brew install create-dmg)"
 grep -q "$TEAM_ID" <<<"$(security find-identity -v -p codesigning)" || die "Developer ID identity not in keychain"
 xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
@@ -93,6 +90,11 @@ TAG="v${MARKETING_VERSION}"
 echo "  marketing version : $MARKETING_VERSION"
 echo "  build number      : $BUILD_NUMBER  (Sparkle comparison key)"
 echo "  release tag       : $TAG"
+
+mkdir -p "$BUILD_DIR"
+RELEASE_NOTES="$BUILD_DIR/release-notes.md"
+step "Reading release notes from changelog"
+python3 scripts/generate-changelog.py --release-notes "$MARKETING_VERSION" "$RELEASE_NOTES"
 
 if [[ $PUBLISH -eq 1 ]] && gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   die "release $TAG already exists — bump CURRENT_PROJECT_VERSION / MARKETING_VERSION first"
@@ -169,16 +171,12 @@ cp "$DMG" "$APPCAST_SRC/$APP_NAME.dmg"
 # --embed-release-notes is REQUIRED: without it, a .md notes file is emitted as
 # an external <sparkle:releaseNotesLink> to a URL we never host (404 in the
 # updater + blank changelog). Embedding inlines the notes as <description>, so
-# Sparkle and the changelog page both read them straight from the appcast.
-if [[ -n "$NOTES_FILE" ]]; then
-  cp "$NOTES_FILE" "$APPCAST_SRC/$APP_NAME.md"
-  echo "  using release notes from $NOTES_FILE"
-fi
-# Prior entries are preserved because generate_appcast reads and updates the
-# existing feed at its -o path. That committed file ($WEBSITE_DIR/appcast.xml)
-# IS the release history — it is not reconstructable from anything else, so it
-# must stay in git. (generate_appcast ignores any appcast inside the input dir,
-# so there's no point seeding $APPCAST_SRC with a copy.)
+# Sparkle can show the notes without depending on a separately hosted notes URL.
+cp "$RELEASE_NOTES" "$APPCAST_SRC/$APP_NAME.md"
+echo "  using release notes from $CHANGELOG"
+# Prior feed items are preserved because generate_appcast reads and updates the
+# existing feed at its -o path. The canonical release history now lives in
+# CHANGELOG.md; the appcast is the signed update feed served to Sparkle.
 "$GENERATE_APPCAST" \
   --embed-release-notes \
   --download-url-prefix "${GITHUB_DOWNLOAD_BASE}/${TAG}/" \
@@ -187,7 +185,7 @@ fi
 echo "  wrote $WEBSITE_DIR/appcast.xml"
 
 step "Generating changelog page"
-python3 scripts/generate-changelog.py "$WEBSITE_DIR/appcast.xml" "$WEBSITE_DIR/changelog.html"
+python3 scripts/generate-changelog.py "$CHANGELOG" "$WEBSITE_DIR/changelog.html"
 
 # ---- Publish (outward-facing) --------------------------------------------
 if [[ $PUBLISH -eq 0 ]]; then
@@ -207,11 +205,7 @@ fi
 step "Creating GitHub release $TAG"
 RELEASE_ARGS=(--repo "$REPO" --title "$APP_NAME $MARKETING_VERSION")
 [[ "$MARKETING_VERSION" =~ [a-zA-Z] ]] && RELEASE_ARGS+=(--prerelease)  # alpha/beta strings
-if [[ -n "$NOTES_FILE" ]]; then
-  RELEASE_ARGS+=(--notes-file "$NOTES_FILE")
-else
-  RELEASE_ARGS+=(--notes "Direct-distribution build $MARKETING_VERSION (build $BUILD_NUMBER). Notarized & stapled; delivered via Sparkle.")
-fi
+RELEASE_ARGS+=(--notes-file "$RELEASE_NOTES")
 gh release create "$TAG" "$DMG" "${RELEASE_ARGS[@]}"
 
 step "Verifying release asset"

@@ -1,8 +1,8 @@
 // Prints the frontmost normal window of an app as: <id>\t<x>\t<y>\t<w>\t<h>
 // Usage: swift window-info.swift "Takes"
-// Window id feeds `screencapture -l<id>`; bounds feed a `screencapture -R` /
-// `sips` crop fallback. Uses owner name only, so no Screen Recording
-// permission is needed to look up the id/bounds (capturing content still is).
+// The release skill uses the window id for `screencapture -l<id>`. Uses owner
+// name only, so no Screen Recording permission is needed to look up the id
+// (capturing content still is).
 import CoreGraphics
 import Foundation
 

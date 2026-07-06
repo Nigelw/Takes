@@ -3,7 +3,7 @@ name: release
 description: Cut and publish a new direct-distribution release of Takes — bump the version, draft user-facing release notes, build/notarize/staple, and publish the Sparkle appcast + GitHub release. Use when asked to release, ship a new build, cut a release, or publish an update of Takes.
 ---
 
-Releases Takes as a notarized, Developer ID–signed DMG with a signed Sparkle appcast served from GitHub Pages, and a matching GitHub release. The heavy lifting (archive → export → notarize → staple → DMG → appcast → release) is done by `scripts/build-release.sh`; this skill drives the human-judgment parts around it (versioning, release notes) and the git ordering.
+Releases Takes as a notarized, Developer ID–signed DMG with a signed Sparkle appcast served from GitHub Pages, and a matching GitHub release. The heavy lifting (archive → export → notarize → staple → DMG → appcast → release) is done by `scripts/build-release.sh`; this skill drives the human-judgment parts around it (versioning, `CHANGELOG.md` release notes) and the git ordering.
 
 Background: see [docs/direct-distribution-plan.md](../../../docs/direct-distribution-plan.md). All paths are relative to the repo root (`Takes/`).
 
@@ -47,7 +47,7 @@ grep -m1 'CURRENT_PROJECT_VERSION'  Takes.xcodeproj/project.pbxproj
    - Reject any choice whose tag `v<version>` already exists (`git tag | grep`).
    Edit `project.pbxproj`, replacing both Takes-target `MARKETING_VERSION` occurrences.
 
-Do not commit yet — notes come first so the bump + notes land together.
+Do not commit yet — the changelog entry comes first so the bump + notes land together.
 
 ## Step 3 — Draft user-facing release notes
 
@@ -57,28 +57,44 @@ Gather the changes:
 git log --no-merges <last-tag>..HEAD --pretty='%s%n%b'
 ```
 
-Write `build/release-notes.md` (build/ is gitignored — the notes are captured in the appcast and the GitHub release, so this file is transient and not committed). Author it as a short Markdown bullet list, applying these rules:
+Move the `CHANGELOG.md` `Unreleased` notes into a new release section for the chosen marketing version:
 
-- **Rewrite every entry from the user's perspective.** Never echo commit messages. Describe what changed for someone *using* the app.
+```markdown
+## [<MARKETING_VERSION>] - YYYY-MM-DD
+
+### New
+
+- ...
+```
+
+If `Unreleased` is empty, draft the section from the commits. Author it as short user-facing Markdown, applying these rules:
+
+- Draft release notes entries under three Markdown ## headings in this order: **New** (major, headline features), **Improved** (quality-of-life updates, polish), **Fixed** (bug fixes). Omit a bucket if it has no entries.
+- **Rewrite every entry from the user's perspective.** Describe what changed for someone *using* the app.
 - **Drop anything with no user-visible impact** — internal refactors, test/CI changes, dependency bumps, doc edits.
 - **One succinct line per entry, no jargon.** No file names, symbols, or implementation detail.
 
 Example shape:
 
 ```markdown
-- Tracks now keep their order after you reload a session
-- Fixed a crash when dropping a folder of audio files
-- The transport scrubber is smoother on long takes
+### Improved
+
+- Folders can be dropped on the app window
+- Resizing the loop range no longer causes audio to stutter
+
+### Fixed
+
+- Fixed a crash when opening a folder of audio files
 ```
 
-Then let the user review/edit: show the draft, offer to open it (`${EDITOR:-${VISUAL:-open}} build/release-notes.md`) or take edits in conversation. **Get explicit confirmation** before continuing. The same Markdown is used verbatim for both the Sparkle appcast (rendered to HTML) and the GitHub release body.
+Then let the user review/edit: show the new `CHANGELOG.md` section, offer to open the file (`${EDITOR:-${VISUAL:-open}} CHANGELOG.md`) or take edits in conversation. **Get explicit confirmation** before continuing. The release script extracts this section and uses it for the Sparkle appcast (rendered to HTML), GitHub release body, and generated website changelog.
 
 ## Step 4 — Commit the version bump and push
 
 The tag is created by the script via `gh release create`, which tags the **remote** `main` HEAD — so the bump must be pushed *before* the script runs, or the tag won't include it.
 
 ```bash
-git add Takes.xcodeproj/project.pbxproj
+git add Takes.xcodeproj/project.pbxproj CHANGELOG.md
 git commit -m "Bump version to <MARKETING_VERSION> (build <BUILD_NUMBER>)"
 git push origin main
 ```
@@ -86,10 +102,10 @@ git push origin main
 ## Step 5 — Build and publish (defer the push)
 
 ```bash
-scripts/build-release.sh --publish --no-commit --notes-file build/release-notes.md
+scripts/build-release.sh --publish --no-commit
 ```
 
-This archives, exports (Developer ID), notarizes + staples the app, builds the styled signed DMG, notarizes + staples it, generates the signed appcast (with the notes embedded), regenerates `website/changelog.html` from the appcast, and creates the `v<MARKETING_VERSION>` GitHub release (auto-flagged prerelease for alpha/beta strings) with the DMG attached. Takes several minutes (two notarization round-trips). All failure-prone work happens **before** anything is published, so a notarization failure aborts cleanly with no release/tag created.
+This archives, exports (Developer ID), notarizes + staples the app, builds the styled signed DMG, notarizes + staples it, generates the signed appcast (with notes extracted from `CHANGELOG.md`), regenerates `website/changelog.html` from `CHANGELOG.md`, and creates the `v<MARKETING_VERSION>` GitHub release (auto-flagged prerelease for alpha/beta strings) with the DMG attached. Takes several minutes (two notarization round-trips). All failure-prone work happens **before** anything is published, so a notarization failure aborts cleanly with no release/tag created.
 
 `--no-commit` is the key to a **single push**: the script stages `website/appcast.xml` + `website/changelog.html` but leaves them uncommitted, so they get folded into one commit with the fresh screenshots and README in Step 8 (instead of a separate appcast push here and another for the website). The GitHub release is live at this point, but the Sparkle feed isn't served until that combined push lands.
 
@@ -97,43 +113,38 @@ Optional safety: run once with **neither** `--publish` nor `--no-commit` first t
 
 ## Step 6 — Capture screenshots (local, transient)
 
-These screenshots feed the archive (Step 7) and the website/README update (Step 8). Capture the main window in **both light and dark mode**, each **with** and **without** the background shadow — four files total, into `build/` (gitignored, transient). They're deleted at the end of Step 8. The light/dark pair is what lets the website show a theme-matched screenshot in its own light/dark mode.
+Capture four screenshots from the notarized release app in `build/export/Takes.app`:
 
-Launch the build just produced (`build/export/Takes.app` — the notarized release app) with the dedicated screenshot tracks loaded and the theme forced non-persistently via `--appearance-theme`, then screenshot the window. Use the **computer-use** tools only for the screenshot — loading the files doesn't need them.
+- Light mode with shadow: `build/screenshot_light_shadow.png`
+- Light mode without shadow: `build/screenshot_light_noshadow.png`
+- Dark mode with shadow: `build/screenshot_dark_shadow.png`
+- Dark mode without shadow: `build/screenshot_dark_noshadow.png`
 
-Repeat the launch → capture → quit cycle **once per theme** (`light`, then `dark`). The theme is read from the launch arguments only at startup and isn't persisted, so each theme needs its own fresh launch.
+Use the dedicated tracks in `Private/Audio Samples/Screenshot Tracks/` for visual consistency. Launch the app once per theme because `--appearance-theme` is read only at startup:
 
-1. Quit any running instance (`pkill -x Takes`).
-2. Open the app with the screenshot tracks *and* the theme override. The track files (opened as documents, before `--args`) load into the slots with no UI navigation; everything after `--args` is passed to the app, where `--appearance-theme` accepts `system`, `light`, or `dark`. **Always use the tracks in `Private/Audio Samples/Screenshot Tracks/`** for visual consistency across releases:
-   ```bash
-   APP="$PWD/build/export/Takes.app"
-   THEME=light   # then repeat the whole cycle with THEME=dark
-   open -a "$APP" "$PWD/Private/Audio Samples/Screenshot Tracks/"* --args --appearance-theme "$THEME"
-   ```
-   Wait for the app to appear (`pgrep -x Takes`).
-3. `request_access` for `["Takes"]` (first cycle only), then `screenshot` to confirm both tracks show as loaded and the window is in the expected theme.
-4. Capture **just the Takes window**, twice, into `build/`. Get the window id (and exact bounds) with the helper — no need to eyeball anything:
-   ```bash
-   read WID X Y W H < <(swift .claude/skills/release/window-info.swift Takes)
-   ```
-   - **With shadow** (default — includes the window drop shadow):
-     ```bash
-     screencapture -l"$WID" "build/screenshot_${THEME}_shadow.png"
-     ```
-   - **Without shadow** (`-o` omits the shadow — tight crop to the window bounds):
-     ```bash
-     screencapture -o -l"$WID" "build/screenshot_${THEME}_noshadow.png"
-     ```
-   `screencapture` needs **Screen Recording** permission for the process that runs it (System Settings → Privacy & Security → Screen Recording). Granting it to the terminal you release from is a one-time step that makes this the whole capture.
-   - **Fallback if `screencapture` is blocked** (e.g. the agent's shell lacks that permission — it fails with `could not create image from window`): take a computer-use `screenshot` with `save_to_disk` (that path has screen access). Crop to the helper's `$X $Y $W $H` rectangle for the no-shadow version; expand each edge by ~60 px (staying within the display) for the shadow version.
-5. Quit the app (`pkill -x Takes`).
-6. Repeat steps 1–5 with `THEME=dark`.
+```bash
+APP="$PWD/build/export/Takes.app"
+TRACKS=( "$PWD/Private/Audio Samples/Screenshot Tracks/"* )
 
-Confirm all four files exist: `build/screenshot_light_shadow.png`, `build/screenshot_light_noshadow.png`, `build/screenshot_dark_shadow.png`, `build/screenshot_dark_noshadow.png`.
+for THEME in light dark; do
+  pkill -x Takes || true
+  open -a "$APP" "${TRACKS[@]}" --args --appearance-theme "$THEME" --default-window-layout
+  sleep 3
+
+  read WID _REST < <(swift .claude/skills/release/window-info.swift Takes)
+  screencapture -l"$WID" "build/screenshot_${THEME}_shadow.png"
+  screencapture -o -l"$WID" "build/screenshot_${THEME}_noshadow.png"
+done
+
+pkill -x Takes || true
+ls -lh build/screenshot_*_shadow.png build/screenshot_*_noshadow.png
+```
+
+Before trusting the files, visually check at least one light and one dark screenshot. If `screencapture` fails because the shell lacks Screen Recording permission, grant it to the terminal and rerun this step.
 
 ## Step 7 — Archive the build (local)
 
-Local archival only — `Private/` is gitignored, so nothing is pushed. Both items use the `<MARKETING_VERSION>` filename convention (note the space, matching existing files like `Private/Builds/TrackSwitch v1.0.dmg`).
+Local archival only — `Private/` is gitignored, so nothing is pushed.
 
 **7a — Archive the disk image.** Copy the notarized release DMG into `Private/Builds/`:
 
@@ -144,8 +155,8 @@ cp build/Takes.dmg "Private/Builds/Takes v<MARKETING_VERSION>.dmg"
 **7b — Archive the screenshots.** Copy **both with-shadow** screenshots (light and dark) into `Private/Screenshots/`:
 
 ```bash
-cp build/screenshot_light_shadow.png "Private/Screenshots/Takes Light v<MARKETING_VERSION>.png"
-cp build/screenshot_dark_shadow.png  "Private/Screenshots/Takes Dark v<MARKETING_VERSION>.png"
+cp build/screenshot_light_shadow.png "Private/Screenshots/Takes v<MARKETING_VERSION> Light.png"
+cp build/screenshot_dark_shadow.png  "Private/Screenshots/Takes v<MARKETING_VERSION> Dark.png"
 ```
 
 Confirm all artifacts exist and report their paths.
@@ -162,7 +173,7 @@ Refresh the public screenshots, keep the developer-facing README aligned with th
    cp build/screenshot_dark_shadow.png    website/screenshot_dark_shadow.png
    ```
    `website/index.html` embeds the `_noshadow` pair, swapping between the light and dark variant to match the page's own light/dark theme (it applies its own frame); the `README.md` marketing header embeds a `_shadow` variant. All update automatically once the files are replaced.
-2. Review the README section **below the marketing header** — everything after the `---` divider (the developer-facing "Current Scope", requirements, behavior notes, operator guide, etc.). Compare it against what actually shipped in this build (use the release notes from Step 3 and the commits since the last tag) and make any edits needed to keep it accurate: features moved in/out of scope, removed constraints, changed keyboard shortcuts, etc. Leave the marketing header (icon, title, tagline, download links) untouched.
+2. Review the README section **below the marketing header** — everything after the `---` divider (the developer-facing "Current Scope", requirements, behavior notes, operator guide, etc.). Compare it against what actually shipped in this build (use the `CHANGELOG.md` release section from Step 3 and the commits since the last tag) and make any edits needed to keep it accurate: features moved in/out of scope, removed constraints, changed keyboard shortcuts, etc. Leave the marketing header (icon, title, tagline, download links) untouched.
 3. Commit and push in one shot. `appcast.xml` + `changelog.html` are already staged from Step 5; add the screenshots and README to the same commit:
    ```bash
    git add website/appcast.xml website/changelog.html \
@@ -181,8 +192,6 @@ Refresh the public screenshots, keep the developer-facing README aligned with th
 ## Step 9 — Verify the live feed
 
 The Step 8 push is what publishes the appcast; Pages redeploys on it (~1 min, CDN cache may lag). Confirm the new build is actually being served:
-
-> **If the Pages deploy fails, never `gh run rerun --failed`.** The `pages.yml` workflow uses `upload-pages-artifact@v5` / `deploy-pages@v5`, whose v4+ artifact backend makes artifacts **immutable** — a re-run uploads a *second* `github-pages` artifact instead of overwriting, and `deploy-pages` then aborts with `Multiple artifacts named "github-pages"... count is 2`. GitHub Pages also fails transiently on its own (`Deployment failed, try again later.`), so a failed deploy is common and expected. The correct recovery in both cases is a **fresh** run — `gh workflow run pages.yml --ref main` — which builds one clean artifact. Watch it with `gh run list --workflow pages.yml --limit 1` / `gh run view <id>`. (Seen live during the v2.6 release, 2026-07-02.)
 
 ```bash
 curl -sL https://nigelw.github.io/Takes/appcast.xml | grep -E 'sparkle:version|enclosure url'

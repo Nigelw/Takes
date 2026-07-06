@@ -756,19 +756,19 @@
               <h3>API</h3>
               <p>Takes has two automation interfaces:</p>
               <ol>
-                <li>Open a file or streaming URL with a <code>takes://</code> URL:</li>
+                <li>Open a file or URL with a <code>takes://</code> URL:</li>
               </ol>
-              <pre><code>open 'takes://open-url?url=&lt;streaming%20URL&gt;'
-open 'takes://open-file?url=&lt;file%20URL&gt;'
-open 'takes://open-file?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&gt;'</code></pre>
+              <pre><code>open 'takes://open-url?url=&lt;streaming-URL&gt;'
+open 'takes://open-file?url=&lt;file1.mp4&gt;&amp;url=&lt;file2.mp4&gt;'</code></pre>
+              <p>File paths must be URL encoded.</p>
               <ol start="2">
                 <li>Open the app with files through the CLI:</li>
               </ol>
               <pre><code>open -a "Takes.app" "$FILE_1" "$FILE_2"</code></pre>
               <p>There are also launch-time options for temporary startup state:</p>
-              <pre><code>open -a "Takes.app" --args --appearance-theme dark
+              <pre><code>open -a "Takes.app" --args --default-window-layout --appearance-theme [light/dark/system]
 open -a "Takes.app" --args --default-window-layout</code></pre>
-              <p>Use these options to launch Takes with a temporary light or dark theme, or with the default window size and track info column width. They do not overwrite the saved normal-launch settings.</p>
+              <p>Use these options to temporarily launch Takes with its default window size and/or a specific theme.</p>
             </article>
           </div>
         </div>

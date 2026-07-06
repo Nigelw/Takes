@@ -1,36 +1,42 @@
 #!/usr/bin/env python3
-"""Generate website/changelog.html from the Sparkle appcast.
+"""Generate website/changelog.html from CHANGELOG.md.
 
-The appcast is the source of truth for release history: each <item> carries the
-version, date, and release notes (the <description>, authored in Markdown). This
-renders them as a single self-contained, human-readable page.
+CHANGELOG.md is the source of truth for release history. This script renders it
+as a self-contained, human-readable website page and can extract one release's
+notes for Sparkle and GitHub Releases.
 
 Usage:
-    scripts/generate-changelog.py [APPCAST] [OUTPUT]
-        APPCAST  default: website/appcast.xml
+    scripts/generate-changelog.py [CHANGELOG] [OUTPUT]
+        CHANGELOG  default: CHANGELOG.md
         OUTPUT   default: website/changelog.html
+    scripts/generate-changelog.py --release-notes VERSION OUTPUT
 """
+import argparse
 import html
-import json
 import re
-import subprocess
 import sys
-import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
-SPARKLE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
-REPO = "Nigelw/Takes"
-
 ROOT = Path(__file__).resolve().parent.parent
-appcast_path = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "website" / "appcast.xml"
-output_path = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "website" / "changelog.html"
+RELEASE_HEADING = re.compile(r"^## \[(?P<version>[^\]]+)\](?: - (?P<date>\d{4}-\d{2}-\d{2}))?\s*$")
 
 
-def text(item, tag, ns=None):
-    el = item.find(f"{{{ns}}}{tag}" if ns else tag)
-    return el.text.strip() if el is not None and el.text else ""
+@dataclass
+class Release:
+    version: str
+    date: str
+    notes_md: str
+
+    @property
+    def date_value(self):
+        if not self.date:
+            return None
+        try:
+            return datetime.fromisoformat(self.date)
+        except ValueError:
+            return None
 
 
 def inline_md(s):
@@ -84,7 +90,7 @@ def md_to_html(md):
             i += 1
             continue
         if heading:
-            tag = "h3" if len(heading.group(1)) == 2 else "h4"
+            tag = "h3" if len(heading.group(1)) <= 3 else "h4"
             out.append(f"<{tag}>{inline_md(heading.group(2))}</{tag}>")
         else:
             out.append(f"<p>{inline_md(line.strip())}</p>")
@@ -92,105 +98,42 @@ def md_to_html(md):
     return "\n".join(out)
 
 
-def notes_html(item):
-    # Release notes are authored in Markdown and embedded in the appcast as
-    # <description sparkle:format="markdown">; render that to HTML.
-    desc = item.find("description")
-    if desc is None or not desc.text:
-        return ""
-    return md_to_html(desc.text.strip())
+def strip_blank_edges(lines):
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return lines
 
 
-def parse_date(value):
-    if not value:
-        return None
-    try:
-        if value.endswith("Z"):
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return datetime.fromisoformat(value)
-    except ValueError:
-        try:
-            return parsedate_to_datetime(value)
-        except (TypeError, ValueError):
-            return None
+def parse_changelog(path):
+    lines = path.read_text(encoding="utf-8").splitlines()
+    headings = [(i, RELEASE_HEADING.match(line)) for i, line in enumerate(lines)]
+    headings = [(i, match) for i, match in headings if match]
+    releases = []
 
-
-def parse_items(appcast):
-    tree = ET.parse(appcast)
-    items = []
-    for item in tree.findall(".//item"):
-        build = text(item, "version", SPARKLE)
-        date = text(item, "pubDate")
-        short = text(item, "shortVersionString", SPARKLE) or text(item, "title")
-        items.append({
-            "build": int(build) if build.isdigit() else 0,
-            "short": short,
-            "min_os": text(item, "minimumSystemVersion", SPARKLE),
-            "date": date,
-            "date_value": parse_date(date),
-            "notes": notes_html(item),  # HTML, rendered from Markdown when needed
-            "tag": f"v{short}" if short else "",
-        })
-    # Newest first by publication date.
-    items.sort(key=sort_key, reverse=True)
-    return items
-
-
-def github_release_items():
-    try:
-        result = subprocess.run(
-            ["gh", "api", f"repos/{REPO}/releases", "--paginate"],
-            capture_output=True,
-            check=True,
-            text=True,
-        )
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return []
-
-    try:
-        releases = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return []
-
-    items = []
-    for release in releases:
-        if release.get("draft"):
+    for idx, (start, match) in enumerate(headings):
+        end = headings[idx + 1][0] if idx + 1 < len(headings) else len(lines)
+        version = match.group("version").strip()
+        if version.lower() == "unreleased":
             continue
-        tag = release.get("tag_name", "")
-        short = tag.removeprefix("v") or release.get("name", "")
-        published = release.get("published_at") or release.get("created_at") or ""
-        body = (release.get("body") or "").strip()
-        items.append({
-            "build": 0,
-            "short": short,
-            "min_os": "",
-            "date": published,
-            "date_value": parse_date(published),
-            "notes": md_to_html(body) if body else "",
-            "tag": tag,
-        })
-    return items
+        section = strip_blank_edges(lines[start + 1:end])
+        releases.append(Release(
+            version=version,
+            date=match.group("date") or "",
+            notes_md="\n".join(section).strip(),
+        ))
 
-
-def combined_items(appcast):
-    items = parse_items(appcast)
-    seen = {item["tag"] or item["short"] for item in items}
-    for item in github_release_items():
-        key = item["tag"] or item["short"]
-        if key in seen:
-            continue
-        items.append(item)
-        seen.add(key)
-    items.sort(key=sort_key, reverse=True)
-    return items
-
-
-def sort_key(item):
-    return item.get("date_value") or datetime.min.replace(tzinfo=timezone.utc)
+    return releases
 
 
 def fmt_date(value):
-    dt = value if isinstance(value, datetime) else parse_date(value)
+    dt = value if isinstance(value, datetime) else None
+    if dt is None and isinstance(value, str) and value:
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            dt = None
     if not dt:
         return ""
     return dt.strftime("%-d %B, %Y")
@@ -203,12 +146,12 @@ def is_prerelease(short):
 def render(items):
     rows = []
     for it in items:
-        badge = '<span class="badge">Pre-release</span>' if is_prerelease(it["short"]) else ""
-        meta = fmt_date(it.get("date_value") or it["date"])
-        notes = it["notes"] or '<p class="empty">No release notes.</p>'
+        badge = '<span class="badge">Pre-release</span>' if is_prerelease(it.version) else ""
+        meta = fmt_date(it.date_value or it.date)
+        notes = md_to_html(it.notes_md) if it.notes_md else '<p class="empty">No release notes.</p>'
         rows.append(f"""    <section class="release">
       <div class="release-heading">
-        <h2>{html.escape(it['short'])}{badge}</h2>
+        <h2>{html.escape(it.version)}{badge}</h2>
         <p class="meta">{html.escape(meta)}</p>
       </div>
       <div class="notes">{notes}</div>
@@ -500,10 +443,45 @@ def render(items):
 """
 
 
+def release_notes_markdown(changelog_path, version):
+    for release in parse_changelog(changelog_path):
+        if release.version == version:
+            notes = release.notes_md.strip()
+            if not notes:
+                sys.exit(f"release {version} has no notes in {changelog_path}")
+            # GitHub releases and Sparkle notes are not nested inside the
+            # CHANGELOG release heading, so promote category headings by one.
+            return re.sub(r"^### ", "## ", notes, flags=re.MULTILINE)
+    sys.exit(f"release {version} not found in {changelog_path}")
+
+
 def main():
-    if not appcast_path.exists():
-        sys.exit(f"appcast not found: {appcast_path}")
-    output_path.write_text(render(combined_items(appcast_path)))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("paths", nargs="*")
+    parser.add_argument("--release-notes", metavar="VERSION")
+    args = parser.parse_args()
+
+    if args.release_notes:
+        if len(args.paths) > 1:
+            parser.error("--release-notes accepts at most one output path")
+        changelog_path = ROOT / "CHANGELOG.md"
+        output_path = Path(args.paths[0]) if args.paths else None
+        notes = release_notes_markdown(changelog_path, args.release_notes)
+        if output_path:
+            output_path.write_text(notes + "\n", encoding="utf-8")
+            print(f"wrote {output_path}")
+        else:
+            print(notes)
+        return
+
+    if len(args.paths) > 2:
+        parser.error("expected [CHANGELOG] [OUTPUT]")
+
+    changelog_path = Path(args.paths[0]) if args.paths else ROOT / "CHANGELOG.md"
+    output_path = Path(args.paths[1]) if len(args.paths) > 1 else ROOT / "website" / "changelog.html"
+    if not changelog_path.exists():
+        sys.exit(f"changelog not found: {changelog_path}")
+    output_path.write_text(render(parse_changelog(changelog_path)), encoding="utf-8")
     print(f"wrote {output_path}")
 
 
