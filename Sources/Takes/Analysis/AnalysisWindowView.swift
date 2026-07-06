@@ -239,28 +239,41 @@ private struct ModuleRow: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        Toggle(isOn: $isOn) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
-                    Text(module.name)
-                        .font(.headline)
-                    CostBadge(cost: module.cost)
+        // A plain Button makes the entire row a hit target; the switch is
+        // along for the ride visually (hit-testing disabled on it) so a
+        // click anywhere doesn't fire both the row's action and the
+        // switch's own tap and toggle twice.
+        Button {
+            isOn.toggle()
+        } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text(module.name)
+                            .font(.headline)
+                        CostBadge(cost: module.cost)
+                    }
+                    Text(module.determines)
+                        .font(.callout)
+                        .foregroundStyle(.primary.opacity(0.75))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(module.howItWorks)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(module.determines)
-                    .font(.callout)
-                    .foregroundStyle(.primary.opacity(0.75))
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(module.howItWorks)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Toggle("", isOn: $isOn)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .allowsHitTesting(false)
             }
-            .padding(.leading, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .toggleStyle(.switch)
+        .buttonStyle(.plain)
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Theme.timelineWellShade)
