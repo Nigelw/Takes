@@ -448,9 +448,12 @@ enum TakesWindowPolicy {
     }
 
     @MainActor
-    static func configureMainWindow(_ window: NSWindow, defaults: UserDefaults = .standard) {
+    static func configureMainWindow(
+        _ window: NSWindow,
+        defaults: UserDefaults = .standard,
+        resetsLayoutForLaunch: Bool = false
+    ) {
         let hasSavedFrame = hasSavedMainWindowFrame(defaults: defaults)
-        window.setFrameAutosaveName(mainWindowID)
         window.minSize = minimumWindowSize
 
         // Unify the titlebar with the transport bar: let content draw up
@@ -462,6 +465,12 @@ enum TakesWindowPolicy {
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = false
 
+        guard !resetsLayoutForLaunch else {
+            resetMainWindowSize(window, animate: false)
+            return
+        }
+
+        window.setFrameAutosaveName(mainWindowID)
         if !hasSavedFrame {
             let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
             window.setFrame(defaultFrame(visibleFrame: visibleFrame), display: true)
@@ -500,6 +509,16 @@ enum TakesWindowPolicy {
     }
 }
 
+struct TakesLaunchOptions {
+    static let defaultWindowLayoutArgument = "--default-window-layout"
+
+    var usesDefaultWindowLayout = false
+
+    init(arguments: [String] = ProcessInfo.processInfo.arguments) {
+        usesDefaultWindowLayout = arguments.contains(Self.defaultWindowLayoutArgument)
+    }
+}
+
 @main
 struct TakesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -508,10 +527,15 @@ struct TakesApp: App {
     @StateObject private var settings = AppSettings()
     @StateObject private var updater = SoftwareUpdater()
     @StateObject private var ytdlpUpdates = YTDLPUpdateState()
+    private let launchOptions = TakesLaunchOptions()
 
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
-            ContentView(controller: controller, appFileOpenRouter: appDelegate.fileOpenRouter)
+            ContentView(
+                controller: controller,
+                appFileOpenRouter: appDelegate.fileOpenRouter,
+                usesTemporaryDefaultWindowLayout: launchOptions.usesDefaultWindowLayout
+            )
                 .environmentObject(settings)
                 .environmentObject(updater)
                 .onAppear {

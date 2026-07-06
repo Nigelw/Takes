@@ -765,9 +765,10 @@ open 'takes://open-files?url=&lt;file%201%20URL&gt;&amp;url=&lt;file%202%20URL&g
                 <li>Open the app with files through the CLI:</li>
               </ol>
               <pre><code>open -a "Takes.app" "$FILE_1" "$FILE_2"</code></pre>
-              <p>There is also a launch-time appearance option:</p>
-              <pre><code>open -a "Takes.app" --args --appearance-theme dark</code></pre>
-              <p>Use this option to launch Takes with a temporary light or dark theme for e.g. taking screenshots. (The setting doesn't persist across launches.)</p>
+              <p>There are also launch-time options for temporary startup state:</p>
+              <pre><code>open -a "Takes.app" --args --appearance-theme dark
+open -a "Takes.app" --args --default-window-layout</code></pre>
+              <p>Use these options to launch Takes with a temporary light or dark theme, or with the default window size and track info column width. They do not overwrite the saved normal-launch settings.</p>
             </article>
           </div>
         </div>

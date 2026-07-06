@@ -372,6 +372,15 @@ struct SessionTests {
     }
 
     @Test
+    func launchOptionsReadTemporaryDefaultWindowLayoutArgument() {
+        #expect(TakesLaunchOptions(arguments: [
+            "Takes",
+            TakesLaunchOptions.defaultWindowLayoutArgument
+        ]).usesDefaultWindowLayout)
+        #expect(!TakesLaunchOptions(arguments: ["Takes"]).usesDefaultWindowLayout)
+    }
+
+    @Test
     func appearanceThemeOverrideReadsLaunchArgument() {
         #expect(AppSettings.appearanceThemeOverride(arguments: [
             "Takes",

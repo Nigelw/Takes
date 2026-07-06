@@ -22,14 +22,16 @@ Takes currently has two public automation surfaces:
    open 'takes://open-files?url=<file 1 URL>&url=<file 2 URL>'
    ```
 
-There is also one launch-time appearance option:
+There are also launch-time options:
 
 ```sh
 open -a "Takes.app" --args --appearance-theme dark
+open -a "Takes.app" --args --default-window-layout
 ```
 
-That option is different from the media-opening commands. It controls the app's
-appearance for that launch. It is not a general command channel.
+Those options are different from the media-opening commands. They control the
+app's startup appearance or layout for that launch. They are not a general
+command channel.
 
 ## Route 1: Open Files with macOS
 
@@ -159,9 +161,9 @@ one value.
 Takes currently accepts some unencoded streaming URLs, but scripts should prefer
 encoded values.
 
-## Appearance Theme Launch Option
+## Launch Options
 
-Takes has one command-line option for overriding the appearance theme at launch:
+Takes has command-line options for temporary launch-time setup. To override the appearance theme at launch:
 
 ```sh
 open -a "Takes.app" --args --appearance-theme dark
@@ -175,12 +177,18 @@ The same option can also be written with an equals sign:
 open -a "Takes.app" --args --appearance-theme=dark
 ```
 
+To start with the default main window size and default track info column width:
+
+```sh
+open -a "Takes.app" --args --default-window-layout
+```
+
 Important details:
 
-- This is read only when Takes starts.
-- It does not permanently change the stored theme setting.
-- It is not part of the `takes://` URL scheme.
-- It should be treated as a launch option, not as a runtime automation command.
+- These are read only when Takes starts.
+- They do not permanently change the stored theme or normal-launch window layout.
+- They are not part of the `takes://` URL scheme.
+- They should be treated as launch options, not as runtime automation commands.
 
 For example, this opens Takes with the dark theme for that launch:
 
@@ -242,10 +250,12 @@ arguments:
 open 'takes://open-files?url=file:///Users/me/Music/take-a.wav&url=file:///Users/me/Music/take-b.wav'
 ```
 
-Use `--appearance-theme` only when launching Takes with a temporary appearance:
+Use `--appearance-theme` only when launching Takes with a temporary appearance,
+or `--default-window-layout` only when starting with the default window layout:
 
 ```sh
 open -a "Takes.app" --args --appearance-theme dark
+open -a "Takes.app" --args --default-window-layout
 ```
 
 ## Current Commands
@@ -258,14 +268,14 @@ open -a "Takes.app" --args --appearance-theme dark
 | `takes://open-url?url=<streaming URL>` | `open 'takes://open-url?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabc123'` | Open a streaming URL. |
 | `takes://open-streaming-url?url=<streaming URL>` | `open 'takes://open-streaming-url?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabc123'` | Alternate name for opening a streaming URL. |
 | `--appearance-theme <theme>` | `open -a "Takes.app" --args --appearance-theme dark` | Override the appearance theme for this launch. |
+| `--default-window-layout` | `open -a "Takes.app" --args --default-window-layout` | Start this launch with the default window size and track info column width. |
 
 ## Current Limitations
 
 - There is no single command that opens files and streaming URLs together.
 - The `takes://` scheme currently opens media; it does not expose playback
   controls such as play, pause, seek, or switch track.
-- The `takes://` scheme does not currently set the appearance theme.
-- The appearance theme launch option is not a runtime command.
+- The `takes://` scheme does not currently set launch options.
+- Launch options are not runtime commands.
 - The `takes://open-file` and `takes://open-files` commands accept file URLs,
   not plain shell paths.
-

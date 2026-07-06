@@ -272,7 +272,13 @@ For automated screenshots, launch with a non-persistent theme override:
 open .derived-data/Build/Products/Debug/Takes.app --args --appearance-theme dark
 ```
 
-The override accepts `system`, `light`, or `dark`. To prepare the next launch through the app's persisted preference instead, use:
+The override accepts `system`, `light`, or `dark`. To temporarily start with the default window size and track info column width without overwriting the saved normal-launch layout, use:
+
+```bash
+open .derived-data/Build/Products/Debug/Takes.app --args --default-window-layout
+```
+
+To prepare the next launch through the app's persisted preference instead, use:
 
 ```bash
 defaults write com.nigelwarren.Takes appearanceTheme dark

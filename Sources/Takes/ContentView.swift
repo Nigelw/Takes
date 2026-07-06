@@ -927,6 +927,7 @@ struct ContentView: View {
     @ObservedObject var controller: PlaybackController
     @EnvironmentObject private var settings: AppSettings
     private let appFileOpenRouter: AppFileOpenRouter?
+    private let usesTemporaryDefaultWindowLayout: Bool
 
     @StateObject private var openFileCommandState = OpenFileCommandState()
     @StateObject private var waveformStore = WaveformStore()
@@ -956,7 +957,7 @@ struct ContentView: View {
     @State private var loopDraft: LoopDraft?
     @State private var loopResizeDraft: LoopRegion?
     @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
-    @AppStorage(TakesWindowPolicy.trackInfoColumnWidthKey) private var trackInfoColumnWidth = TakesWindowPolicy.defaultTrackInfoColumnWidth
+    @State private var trackInfoColumnWidth: Double
     @State private var showsAlignmentAttentionPopover = false
     @State private var alignmentOutcomePulse = false
 
@@ -982,9 +983,19 @@ struct ContentView: View {
     /// Horizontal travel (points) that turns a click into a loop drag.
     private static let loopDragThreshold: CGFloat = 4
 
-    init(controller: PlaybackController, appFileOpenRouter: AppFileOpenRouter? = nil) {
+    init(
+        controller: PlaybackController,
+        appFileOpenRouter: AppFileOpenRouter? = nil,
+        usesTemporaryDefaultWindowLayout: Bool = false
+    ) {
         self.controller = controller
         self.appFileOpenRouter = appFileOpenRouter
+        self.usesTemporaryDefaultWindowLayout = usesTemporaryDefaultWindowLayout
+        _trackInfoColumnWidth = State(
+            initialValue: Self.initialTrackInfoColumnWidth(
+                usesTemporaryDefaultWindowLayout: usesTemporaryDefaultWindowLayout
+            )
+        )
         _openFileCommandState = StateObject(
             wrappedValue: OpenFileCommandState(
                 loadStreamingURL: { urlString, commandState in
@@ -1039,6 +1050,30 @@ struct ContentView: View {
         )
     }
 
+    private static func initialTrackInfoColumnWidth(
+        usesTemporaryDefaultWindowLayout: Bool,
+        defaults: UserDefaults = .standard
+    ) -> Double {
+        guard !usesTemporaryDefaultWindowLayout,
+              let storedWidth = defaults.object(forKey: TakesWindowPolicy.trackInfoColumnWidthKey) as? NSNumber
+        else {
+            return TakesWindowPolicy.defaultTrackInfoColumnWidth
+        }
+
+        return storedWidth.doubleValue
+    }
+
+    private var trackInfoColumnWidthBinding: Binding<Double> {
+        Binding(
+            get: { trackInfoColumnWidth },
+            set: { width in
+                trackInfoColumnWidth = width
+                guard !usesTemporaryDefaultWindowLayout else { return }
+                UserDefaults.standard.set(width, forKey: TakesWindowPolicy.trackInfoColumnWidthKey)
+            }
+        )
+    }
+
     var body: some View {
         inactiveAwareContent
             .frame(
@@ -1056,7 +1091,10 @@ struct ContentView: View {
                     mainWindowIsKey = window.isKeyWindow
                     guard !didConfigureMainWindow else { return }
                     didConfigureMainWindow = true
-                    TakesWindowPolicy.configureMainWindow(window)
+                    TakesWindowPolicy.configureMainWindow(
+                        window,
+                        resetsLayoutForLaunch: usesTemporaryDefaultWindowLayout
+                    )
                 }
             }
             .overlay {
@@ -1103,7 +1141,7 @@ struct ContentView: View {
             .focusedSceneValue(
                 \.mainWindowCommandState,
                 MainWindowCommandState {
-                    trackInfoColumnWidth = TakesWindowPolicy.defaultTrackInfoColumnWidth
+                    trackInfoColumnWidthBinding.wrappedValue = TakesWindowPolicy.defaultTrackInfoColumnWidth
                     guard let mainWindow else { return }
                     TakesWindowPolicy.resetMainWindowSize(mainWindow)
                 }
@@ -1719,7 +1757,7 @@ struct ContentView: View {
         let hitWidth: CGFloat = 12
         return TrackInfoColumnResizeHandleView(
             sectionWidth: sectionWidth,
-            columnWidth: $trackInfoColumnWidth
+            columnWidth: trackInfoColumnWidthBinding
         )
             .frame(width: hitWidth, height: sectionHeight)
             .contentShape(Rectangle())
