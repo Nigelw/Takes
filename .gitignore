@@ -12,3 +12,6 @@ DerivedData/
 xcuserdata/
 
 Private/
+.derived-data-ui/
+.derived-data-a/
+.derived-data-b/

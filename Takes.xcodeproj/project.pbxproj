@@ -29,6 +29,21 @@
 		A1000000000000000000C017 /* TransportControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C007 /* TransportControls.swift */; };
 		A1000000000000000000C018 /* TrackAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C008 /* TrackAligner.swift */; };
 		A1000000000000000000C019 /* TrackAlignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C009 /* TrackAlignerTests.swift */; };
+		A1000000000000000000D011 /* AnalysisModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D001 /* AnalysisModels.swift */; };
+		A1000000000000000000D012 /* AnalysisDSP.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D002 /* AnalysisDSP.swift */; };
+		A1000000000000000000D013 /* AudioAnalysisEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D003 /* AudioAnalysisEngine.swift */; };
+		A1000000000000000000D014 /* AnalysisVerdicts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D004 /* AnalysisVerdicts.swift */; };
+		A1000000000000000000D015 /* AnalysisController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D005 /* AnalysisController.swift */; };
+		A1000000000000000000D016 /* AnalysisWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D006 /* AnalysisWindowView.swift */; };
+		A1000000000000000000D017 /* SpectrogramRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D007 /* SpectrogramRenderer.swift */; };
+		A1000000000000000000D018 /* AnalysisEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D008 /* AnalysisEngineTests.swift */; };
+		A1000000000000000000D019 /* AnalogSourceDSP.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D009 /* AnalogSourceDSP.swift */; };
+		A1000000000000000000D020 /* AnalysisModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D010 /* AnalysisModule.swift */; };
+		A1000000000000000000D01A /* LossyArtifactDSP.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00A /* LossyArtifactDSP.swift */; };
+		A1000000000000000000D01B /* MP3BitstreamInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00B /* MP3BitstreamInspector.swift */; };
+		A1000000000000000000D01C /* SourceInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00C /* SourceInference.swift */; };
+		A1000000000000000000D01D /* AnalogSourceDSPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00D /* AnalogSourceDSPTests.swift */; };
+		A1000000000000000000D01E /* LossyArtifactDSPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D00E /* LossyArtifactDSPTests.swift */; };
 		A1000000000000000000C01A /* StreamingTrackImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00A /* StreamingTrackImport.swift */; };
 		A1000000000000000000C01B /* StreamingTrackImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00B /* StreamingTrackImportTests.swift */; };
 		A6FE79452FDE592C003F2711 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A6FE79442FDE592C003F2711 /* Sparkle */; };
@@ -71,6 +86,21 @@
 		A1000000000000000000C007 /* TransportControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportControls.swift; sourceTree = "<group>"; };
 		A1000000000000000000C008 /* TrackAligner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackAligner.swift; sourceTree = "<group>"; };
 		A1000000000000000000C009 /* TrackAlignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackAlignerTests.swift; sourceTree = "<group>"; };
+		A1000000000000000000D001 /* AnalysisModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisModels.swift; sourceTree = "<group>"; };
+		A1000000000000000000D002 /* AnalysisDSP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisDSP.swift; sourceTree = "<group>"; };
+		A1000000000000000000D003 /* AudioAnalysisEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAnalysisEngine.swift; sourceTree = "<group>"; };
+		A1000000000000000000D004 /* AnalysisVerdicts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisVerdicts.swift; sourceTree = "<group>"; };
+		A1000000000000000000D005 /* AnalysisController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisController.swift; sourceTree = "<group>"; };
+		A1000000000000000000D006 /* AnalysisWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisWindowView.swift; sourceTree = "<group>"; };
+		A1000000000000000000D007 /* SpectrogramRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectrogramRenderer.swift; sourceTree = "<group>"; };
+		A1000000000000000000D008 /* AnalysisEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisEngineTests.swift; sourceTree = "<group>"; };
+		A1000000000000000000D009 /* AnalogSourceDSP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalogSourceDSP.swift; sourceTree = "<group>"; };
+		A1000000000000000000D010 /* AnalysisModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisModule.swift; sourceTree = "<group>"; };
+		A1000000000000000000D00A /* LossyArtifactDSP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LossyArtifactDSP.swift; sourceTree = "<group>"; };
+		A1000000000000000000D00B /* MP3BitstreamInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MP3BitstreamInspector.swift; sourceTree = "<group>"; };
+		A1000000000000000000D00C /* SourceInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceInference.swift; sourceTree = "<group>"; };
+		A1000000000000000000D00D /* AnalogSourceDSPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalogSourceDSPTests.swift; sourceTree = "<group>"; };
+		A1000000000000000000D00E /* LossyArtifactDSPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LossyArtifactDSPTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000C00A /* StreamingTrackImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTrackImport.swift; sourceTree = "<group>"; };
 		A1000000000000000000C00B /* StreamingTrackImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTrackImportTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -139,9 +169,29 @@
 			path = Config;
 			sourceTree = "<group>";
 		};
+		A1000000000000000000D0F0 /* Analysis */ = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000D009 /* AnalogSourceDSP.swift */,
+				A1000000000000000000D005 /* AnalysisController.swift */,
+				A1000000000000000000D002 /* AnalysisDSP.swift */,
+				A1000000000000000000D010 /* AnalysisModule.swift */,
+				A1000000000000000000D00A /* LossyArtifactDSP.swift */,
+				A1000000000000000000D00B /* MP3BitstreamInspector.swift */,
+				A1000000000000000000D00C /* SourceInference.swift */,
+				A1000000000000000000D001 /* AnalysisModels.swift */,
+				A1000000000000000000D004 /* AnalysisVerdicts.swift */,
+				A1000000000000000000D006 /* AnalysisWindowView.swift */,
+				A1000000000000000000D003 /* AudioAnalysisEngine.swift */,
+				A1000000000000000000D007 /* SpectrogramRenderer.swift */,
+			);
+			path = Analysis;
+			sourceTree = "<group>";
+		};
 		A10000000000000000000074 /* Takes */ = {
 			isa = PBXGroup;
 			children = (
+				A1000000000000000000D0F0 /* Analysis */,
 				A1000000000000000000C001 /* AppSettings.swift */,
 				A10000000000000000000011 /* AudioFileLoader.swift */,
 				A1000000000000000000C005 /* ComponentDebugLabel.swift */,
@@ -166,6 +216,9 @@
 		A10000000000000000000075 /* TakesTests */ = {
 			isa = PBXGroup;
 			children = (
+				A1000000000000000000D00D /* AnalogSourceDSPTests.swift */,
+				A1000000000000000000D008 /* AnalysisEngineTests.swift */,
+				A1000000000000000000D00E /* LossyArtifactDSPTests.swift */,
 				A10000000000000000000018 /* SessionTests.swift */,
 				A1000000000000000000C00B /* StreamingTrackImportTests.swift */,
 				A1000000000000000000C009 /* TrackAlignerTests.swift */,
@@ -279,6 +332,18 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000000000000000000D019 /* AnalogSourceDSP.swift in Sources */,
+				A1000000000000000000D020 /* AnalysisModule.swift in Sources */,
+				A1000000000000000000D015 /* AnalysisController.swift in Sources */,
+				A1000000000000000000D012 /* AnalysisDSP.swift in Sources */,
+				A1000000000000000000D01A /* LossyArtifactDSP.swift in Sources */,
+				A1000000000000000000D01B /* MP3BitstreamInspector.swift in Sources */,
+				A1000000000000000000D01C /* SourceInference.swift in Sources */,
+				A1000000000000000000D011 /* AnalysisModels.swift in Sources */,
+				A1000000000000000000D014 /* AnalysisVerdicts.swift in Sources */,
+				A1000000000000000000D016 /* AnalysisWindowView.swift in Sources */,
+				A1000000000000000000D013 /* AudioAnalysisEngine.swift in Sources */,
+				A1000000000000000000D017 /* SpectrogramRenderer.swift in Sources */,
 				A1000000000000000000C011 /* AppSettings.swift in Sources */,
 				A10000000000000000000021 /* AudioFileLoader.swift in Sources */,
 				A10000000000000000000022 /* ContentView.swift in Sources */,
@@ -303,6 +368,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000000000000000000D01D /* AnalogSourceDSPTests.swift in Sources */,
+				A1000000000000000000D018 /* AnalysisEngineTests.swift in Sources */,
+				A1000000000000000000D01E /* LossyArtifactDSPTests.swift in Sources */,
 				A10000000000000000000031 /* SessionTests.swift in Sources */,
 				A1000000000000000000C01B /* StreamingTrackImportTests.swift in Sources */,
 				A1000000000000000000C019 /* TrackAlignerTests.swift in Sources */,
@@ -455,7 +523,7 @@
 		A100000000000000000000B1 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconInternal;
 				CODE_SIGN_ENTITLEMENTS = Config/Takes.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;

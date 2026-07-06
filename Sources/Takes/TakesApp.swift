@@ -311,6 +311,7 @@ final class RemotePlaybackCommandController: ObservableObject {
 enum TakesWindowPolicy {
     static let mainWindowID = "main"
     static let appearanceTunerWindowID = "appearance-tuner"
+    static let analysisWindowID = "analysis"
     static let replacesDefaultNewItemCommands = true
     static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
     static let minimumContentWidth: CGFloat = 640
@@ -665,6 +666,7 @@ struct TakesApp: App {
                     Toggle("Show Component Names", isOn: $settings.showsComponentDebugLabels)
                     ResetMainWindowSizeButton()
                     OpenAppearanceTunerButton()
+                    OpenAnalysisWindowButton()
                 }
             }
         }
@@ -673,6 +675,11 @@ struct TakesApp: App {
             AppearanceTunerView(settings: settings)
         }
         .defaultSize(width: 320, height: 680)
+
+        Window("Analysis", id: TakesWindowPolicy.analysisWindowID) {
+            AnalysisWindowView()
+        }
+        .defaultSize(width: 760, height: 640)
 
         Settings {
             SettingsView()
@@ -693,6 +700,18 @@ private struct OpenAppearanceTunerButton: View {
         Button("Appearance Tuner") {
             openWindow(id: TakesWindowPolicy.appearanceTunerWindowID)
         }
+    }
+}
+
+/// Opens the experimental single-file Analysis window from the Debug menu.
+private struct OpenAnalysisWindowButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Analysis") {
+            openWindow(id: TakesWindowPolicy.analysisWindowID)
+        }
+        .keyboardShortcut("l", modifiers: [.command])
     }
 }
 
