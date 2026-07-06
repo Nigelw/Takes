@@ -256,6 +256,7 @@ private struct ModuleRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.leading, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .toggleStyle(.switch)
         .padding(16)
