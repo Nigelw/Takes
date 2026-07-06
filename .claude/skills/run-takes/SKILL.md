@@ -60,7 +60,7 @@ After the script prints `Takes is running`, use computer-use tools to interact:
 
 ## Load audio files (agent path)
 
-To get audio into the app, **don't drive the open dialog with computer-use** — it's flaky (menu timing, list-row selection, cmd-click multi-select that silently doesn't take). Instead load files straight from the shell. The app declares `public.audio` as a handled document type and routes opened URLs through `AppDelegate.application(_:open:)`, so `open -a` lands in the same code path as File ▸ Open / drag-and-drop:
+To get audio into the app, **don't drive the open dialog with computer-use**. Instead load files straight from the shell. The app declares `public.audio` as a handled document type and routes opened URLs through `AppDelegate.application(_:open:)`, so `open -a` lands in the same code path as File ▸ Open / drag-and-drop:
 
 ```bash
 APP="$PWD/.derived-data/Build/Products/Debug/Takes.app"
@@ -96,30 +96,38 @@ bash .claude/skills/run-takes/smoke.sh --no-build
 
 Once the script prints `Takes is running`, you're done — the app is on screen for the user. **Do not** call `request_access`, `screenshot`, or click anything. Tell the user it's ready to test, and optionally offer to preload sample audio (see [Load audio files](#load-audio-files-agent-path)) so they land on a populated timeline. Loading files from the shell is fine in this mode — it's the computer-use interaction you skip, not the setup.
 
-To launch by hand instead of via the script: `open .derived-data/Build/Products/Debug/Takes.app`, or open `Takes.xcodeproj` in Xcode and press Cmd-R (rebuilds from source).
+## UI smoke checks
 
-## Test (non-UI)
+Use only the checks relevant to the change unless the user asks for a full
+manual pass:
 
-Compile both app and test targets without requiring Apple test infrastructure:
-
-```bash
-xcodebuild \
-  -project Takes.xcodeproj \
-  -scheme Takes \
-  -configuration Debug \
-  -derivedDataPath .derived-data \
-  build-for-testing
-```
-
-Use this to verify PRs that touch `TransportMapping.swift`, `Models.swift`, or other non-UI logic. `xcodebuild test` may be blocked in sandboxed environments — `build-for-testing` is the reliable local check.
+1. Confirm the top transport shows play/pause, switch, blind listening,
+   auto-align, zoom, repeat, and signed time readout controls.
+2. Load one file and confirm it creates Track 1 and makes it active.
+3. Load additional files and confirm they append in order.
+4. Confirm switching cycles through three or more tracks in row order.
+5. Confirm waveform lanes render progressively, the playhead spans visible
+   lanes, and clicking a waveform lane seeks.
+6. Confirm positive offsets create leading blank space and negative offsets
+   extend the visible timeline left of zero.
+7. Drag a row and confirm the session order changes without changing the active
+   file unexpectedly.
+8. Remove a non-active track during playback and confirm playback continues.
+9. Remove the active track and confirm playback pauses and selects the next
+    track, or previous if the removed track was last.
+10. Toggle Repeat Off, Repeat One, and Switch & Repeat and confirm end-of-range
+    behavior.
+11. Drag a loop selection, play through it, resize it, then deselect it.
+12. Zoom in/out, zoom to fit, and zoom to selection; confirm scroll/pinch keep
+    the playhead and ruler aligned.
+13. Toggle Blind Listening Mode and confirm rows show anonymous labels and
+    placeholder waveforms without shifting layout.
+14. Use Finder selection import, Music selection import, and Show in Finder from
+    both UI/menu paths when those areas are affected.
 
 ## Gotchas
 
 - **`open` returns immediately** — the process takes ~1 second to appear. `smoke.sh` polls `pgrep -x Takes` to wait. Don't screenshot immediately after calling `open`; wait for the script to confirm the PID.
-- **`Switch Track` is always disabled with fewer than 2 loaded tracks.** Don't interpret a grayed-out Switch Track as a bug when there's only one track.
-- **Music import requires Automation permission.** The first time a user clicks "Open Apple Music Selection", macOS shows a permission dialog. The app will hang on that dialog until approved.
-- **Dropping files from Finder into the Takes window works**; the drop zone is the track area, but the entire window accepts the drop.
-- **The `+` button itself** (not the chevron) opens a native file picker; the chevron opens a dropdown with additional options.
 
 ## Troubleshooting
 
