@@ -242,7 +242,10 @@ private struct ModuleRow: View {
         // A plain Button makes the entire row a hit target; the switch is
         // along for the ride visually (hit-testing disabled on it) so a
         // click anywhere doesn't fire both the row's action and the
-        // switch's own tap and toggle twice.
+        // switch's own tap and toggle twice. The padding/background/
+        // contentShape all live INSIDE the label — modifiers chained after
+        // `.buttonStyle` only affect layout, not the button's tap target,
+        // so putting them outside left the card background unclickable.
         Button {
             isOn.toggle()
         } label: {
@@ -269,19 +272,19 @@ private struct ModuleRow: View {
                     .labelsHidden()
                     .allowsHitTesting(false)
             }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Theme.timelineWellShade)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(isOn ? Theme.primary.opacity(0.35) : Theme.hairline, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Theme.timelineWellShade)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(isOn ? Theme.primary.opacity(0.35) : Theme.hairline, lineWidth: 1)
-        )
         .opacity(isOn ? 1 : 0.6)
     }
 }
