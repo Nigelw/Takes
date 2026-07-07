@@ -42,9 +42,9 @@
 ### New
 
 - Auto-Align tracks: a single button lines your tracks up automatically by listening to the audio itself
-- Auto-Align can also handle tracks recorded at slightly different speeds, offering a deeper tempo analysis when the quick pass can't find a match
-- If tracks have tempo drift, you can auto-align anytime at the current playhead
-- Added setting to auto-align by default when opening files
+  - Auto-Align can also handle tracks recorded at slightly different speeds, offering a deeper tempo analysis when the quick pass can't find a match
+  - If tracks have tempo drift, you can auto-align anytime at the current playhead
+  - Added setting to auto-align by default when opening files
 
 ### Improved
 
