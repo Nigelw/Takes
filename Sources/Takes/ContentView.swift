@@ -321,7 +321,7 @@ enum TrackReorderGeometry {
 /// the drag leaves the list (e.g. on its way out of the window to an external
 /// target), and `performDrop` restores it on a landing drop.
 private struct TrackListDropDelegate: DropDelegate {
-    @ObservedObject var controller: PlaybackController
+    var controller: PlaybackController
     let rowStep: CGFloat
     @Binding var draggingID: SessionTrack.ID?
     @Binding var targetIndex: Int?
@@ -924,7 +924,7 @@ extension FocusedValues {
 }
 
 struct ContentView: View {
-    @ObservedObject var controller: PlaybackController
+    var controller: PlaybackController
     @EnvironmentObject private var settings: AppSettings
     private let appFileOpenRouter: AppFileOpenRouter?
     private let usesTemporaryDefaultWindowLayout: Bool
@@ -933,6 +933,8 @@ struct ContentView: View {
     @StateObject private var waveformStore = WaveformStore()
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
+    /// Whether the playhead grabber's open-hand cursor is currently pushed.
+    @State private var playheadCursorActive = false
     /// Which row is being dragged for reorder (hidden in place; its floating
     /// preview is the OS drag image). Set at drag start, cleared when the drag
     /// commits or is abandoned.
@@ -1254,9 +1256,17 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Pinned to the true window center, independent of the side clusters.
+                // While playing the text comes from `playingReadoutText`,
+                // which changes only when the displayed second rolls over;
+                // while paused it derives from `transportPosition`, whose
+                // writes are then only user seeks. (A TimelineView here kept
+                // the window's display-link layout cycle running at full
+                // refresh for the whole duration of playback.)
                 DigitalTimeReadout(
                     style: settings.readoutStyle,
-                    elapsed: controller.session.transportPosition.formattedSignedTimestamp
+                    elapsed: controller.session.isPlaying
+                        ? controller.playingReadoutText
+                        : controller.session.transportPosition.formattedSignedTimestamp
                 )
                 .background {
                     GeometryReader { readoutProxy in
@@ -1451,7 +1461,10 @@ struct ContentView: View {
                 withAnimation(.easeOut(duration: 0.3)) { alignmentOutcomePulse = false }
             } else {
                 alignmentOutcomePulse = false
-                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                // Finite, matching the 2 s outcome flash (see `flashOutcome`):
+                // a repeatForever here would keep a display link ticking
+                // indefinitely even after the glow faded.
+                withAnimation(.easeInOut(duration: 0.5).repeatCount(4, autoreverses: true)) {
                     alignmentOutcomePulse = true
                 }
             }
@@ -1610,11 +1623,22 @@ struct ContentView: View {
 
                     ScrollView(.vertical) {
                         ZStack(alignment: .topLeading) {
+                            // Shared per-lane geometry, computed once for all
+                            // lanes rather than once per lane.
+                            let laneTickXs = laneMajorTickXs(width: waveformWidth)
+                            let laneZeroX = xPosition(for: 0, width: waveformWidth)
                             VStack(spacing: 0) {
                                 ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
                                     let isLifted = reorderDraggingID == sessionTrack.id
                                         || reorderRevealingID == sessionTrack.id
-                                    trackRow(index: index, sessionTrack: sessionTrack, infoWidth: infoWidth)
+                                    trackRow(
+                                        index: index,
+                                        sessionTrack: sessionTrack,
+                                        infoWidth: infoWidth,
+                                        waveformWidth: waveformWidth,
+                                        laneMajorTickXs: laneTickXs,
+                                        laneZeroTickX: laneZeroX
+                                    )
                                         // The dragged row's floating preview stands in
                                         // for it; its slot stays reserved as the gap the
                                         // other rows slide around. It stays hidden one
@@ -1799,104 +1823,86 @@ struct ContentView: View {
         .componentDebugLabel("Timeline Header", enabled: settings.showsComponentDebugLabels)
     }
 
-    /// GarageBand-style grabber art: a downward pentagon (flat top, straight sides,
-    /// converging to a small flat tip) with beveled dimension and grip lines.
-    /// Positioning, hit area, and gesture are applied by the caller.
-    private var playheadGrabberArt: some View {
-        PlayheadHandle(tipWidth: 2)
-            .fill(Theme.secondary)
-            // Gloss cap over the upper body plus a shadowed taper, the same
-            // top-lit treatment as the transport buttons' faces.
-            .overlay {
-                PlayheadHandle(tipWidth: 2)
-                    .fill(
-                        LinearGradient(
-                            stops: [
-                                .init(color: .white.opacity(0.20), location: 0),
-                                .init(color: .white.opacity(0.14), location: 0.38),
-                                .init(color: .clear, location: 0.55),
-                                .init(color: .black.opacity(0.18), location: 1)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-            }
-            // Beveled rim: a bright lit top edge falling into shadow at the
-            // tip, mirroring the transport buttons' bevel rings.
-            .overlay {
-                PlayheadHandle(tipWidth: 2)
-                    .stroke(
-                        LinearGradient(
-                            colors: [.white.opacity(0.80), .white.opacity(0.12), .black.opacity(0.35)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 0.75
-                    )
-            }
-            .overlay {
-                // Two engraved grip lines: dark grooves with a light catch on
-                // their lower lip, cut into the glossy cap.
-                HStack(spacing: 3) {
-                    Capsule().frame(width: 1, height: 6)
-                    Capsule().frame(width: 1, height: 6)
-                }
-                .foregroundStyle(.black.opacity(0.32))
-                .shadow(color: .white.opacity(0.45), radius: 0.2, y: 0.6)
-                // Sit the grips in the rectangular upper body, above the tapered tip.
-                .offset(y: -1)
-            }
-            // Slight lift off the ruler, like the raised transport controls.
-            .shadow(color: .black.opacity(0.30), radius: 1, y: 0.5)
-            .accessibilityHidden(true)
-    }
-
     /// The full playhead — the grabber seated on the ruler notches plus the line
     /// running down over the lanes — drawn as one overlay on top of the whole
-    /// section so it sits ABOVE the frozen-column and header/row dividers. The
-    /// grabber is draggable to scrub; the line is inert. Mirrors the same
-    /// `isPlayable` + in-range guard used elsewhere.
+    /// section so it sits ABOVE the frozen-column and header/row dividers.
+    ///
+    /// Split into two layers on purpose. The *visuals* are moved by a single
+    /// Core Animation linear tween per transport anchor event (play, pause,
+    /// seek, loop wrap, zoom, scroll, resize) — see `TimelinePlayheadVisual` —
+    /// so steady playback does no per-frame main-thread work at all. The
+    /// *interaction* is a static scrub strip along the ruler's grabber band
+    /// whose gesture never rebuilds; it computes the playhead position on
+    /// demand (event-time, exact) rather than per frame.
     @ViewBuilder
     private func timelinePlayheadOverlay(sectionHeight: CGFloat, infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
-        let playheadX = xPosition(for: controller.session.transportPosition, width: waveformWidth)
-        if controller.session.isPlayable, playheadX >= -1, playheadX <= waveformWidth + 1 {
-            let handleWidth: CGFloat = 14
-            let handleHeight: CGFloat = 16
-            // Comfortable grab target a bit wider than the visible grabber.
-            let hitWidth: CGFloat = 22
-            // Whole-pixel center so the 2pt tip and 2pt line overlap exactly.
-            let centerX = infoWidth + playheadX.rounded()
-            // The grabber's flat tip seats just below the header/rows divider, where the line begins.
-            let seatBottom = trackHeaderHeight + trackTimelineDividerHeight
-            let lineHeight = max(min(trackTimelineHeight, sectionHeight - seatBottom), 0)
-            ZStack(alignment: .topLeading) {
-                Rectangle()
-                    .fill(Theme.secondary)
-                    // Center (not leading edge) of the 2pt line on centerX.
-                    .frame(width: 2, height: lineHeight)
-                    .offset(x: centerX - 1, y: seatBottom)
-                    .allowsHitTesting(false)
+        if controller.session.isPlayable {
+            let position = controller.displayTransportPosition()
+            TimelinePlayheadVisual(
+                currentX: xPosition(for: position, width: waveformWidth),
+                endX: xPosition(for: controller.session.playbackEnd, width: waveformWidth),
+                remaining: max(0, controller.session.playbackEnd - position),
+                isPlaying: controller.session.isPlaying,
+                infoWidth: infoWidth,
+                sectionHeight: sectionHeight,
+                waveformWidth: waveformWidth,
+                seatBottom: trackHeaderHeight + trackTimelineDividerHeight,
+                laneAreaHeight: trackTimelineHeight
+            )
+            // Confine (and clip, via the layer view's masksToBounds) the
+            // playhead to the waveform column so an off-viewport position
+            // never draws over the track-info column.
+            .frame(width: waveformWidth, height: sectionHeight, alignment: .topLeading)
+            .offset(x: infoWidth)
+            .allowsHitTesting(false)
 
-                playheadGrabberArt
-                    .frame(width: handleWidth, height: handleHeight)
-                    // Wider transparent hit area centered on the same x as the art.
-                    .frame(width: hitWidth, height: handleHeight)
-                    .contentShape(Rectangle())
-                    // Seat the grabber so its flat tip lands at seatBottom (on the line's top).
-                    .offset(x: centerX - hitWidth / 2, y: seatBottom - handleHeight)
-                    .onHover { inside in
-                        if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
-                    }
-                    // Drag the grabber to scrub. Reports x across the section space.
-                    .gesture(
-                        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.playheadSpace))
-                            .onChanged { value in
-                                controller.seek(to: globalTime(atX: value.location.x - infoWidth, width: waveformWidth))
-                            }
-                    )
+            timelinePlayheadScrubStrip(infoWidth: infoWidth, waveformWidth: waveformWidth)
+        }
+    }
+
+    static let playheadHandleWidth: CGFloat = 14
+    static let playheadHandleHeight: CGFloat = 16
+    /// Comfortable grab target a bit wider than the visible grabber.
+    private static let playheadHitWidth: CGFloat = 22
+
+    /// The transparent interaction band along the bottom of the ruler where
+    /// the grabber rides. A drag (or click) anywhere on the band seats the
+    /// playhead at that x and scrubs — starting on the grabber behaves as
+    /// before, and the band also catches it when the playhead is off-screen.
+    /// The open-hand cursor still appears only within grabber range, computed
+    /// on demand from the live transport position.
+    private func timelinePlayheadScrubStrip(infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
+        let seatBottom = trackHeaderHeight + trackTimelineDividerHeight
+        return Color.clear
+            .frame(width: waveformWidth, height: Self.playheadHandleHeight)
+            .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case let .active(location):
+                    let playheadX = xPosition(for: controller.displayTransportPosition(), width: waveformWidth)
+                    setPlayheadGrabCursor(abs(location.x - playheadX) <= Self.playheadHitWidth / 2)
+                case .ended:
+                    setPlayheadGrabCursor(false)
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.playheadSpace))
+                    .onChanged { value in
+                        controller.seek(to: globalTime(atX: value.location.x - infoWidth, width: waveformWidth))
+                    }
+            )
+            .offset(x: infoWidth, y: seatBottom - Self.playheadHandleHeight)
+    }
+
+    /// Push/pop bookkeeping for the grabber's open-hand cursor so repeated
+    /// hover callbacks never unbalance the cursor stack.
+    private func setPlayheadGrabCursor(_ active: Bool) {
+        guard active != playheadCursorActive else { return }
+        playheadCursorActive = active
+        if active {
+            NSCursor.openHand.push()
+        } else {
+            NSCursor.pop()
         }
     }
 
@@ -1997,7 +2003,10 @@ struct ContentView: View {
     private func trackRow(
         index: Int,
         sessionTrack: SessionTrack,
-        infoWidth: CGFloat
+        infoWidth: CGFloat,
+        waveformWidth: CGFloat,
+        laneMajorTickXs: [CGFloat],
+        laneZeroTickX: CGFloat
     ) -> some View {
         let isActive = controller.session.activeTrackID == sessionTrack.id
         // Suppress the hover trash button while a reorder drag is in flight: the
@@ -2046,9 +2055,14 @@ struct ContentView: View {
                     )
                 )
 
-            waveformLane(index: index, sessionTrack: sessionTrack)
-                .frame(maxWidth: .infinity)
-                .frame(height: trackRowHeight)
+            waveformLane(
+                sessionTrack: sessionTrack,
+                waveformWidth: waveformWidth,
+                majorTickXs: laneMajorTickXs,
+                zeroTickX: laneZeroTickX
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: trackRowHeight)
         }
         .frame(height: trackRowHeight)
         // Active highlight spans the whole row (info + lane) as one continuous
@@ -2479,42 +2493,28 @@ struct ContentView: View {
         return ruler.majorTicks.map { xPosition(for: $0.time, width: width) }
     }
 
-    private func waveformLane(index: Int, sessionTrack: SessionTrack) -> some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Rectangle()
-                    .fill(.background.opacity(0.01))
-
-                // Faint major-tick guides behind the waveform, aligned with the
-                // ruler's labeled ticks above.
-                ForEach(Array(laneMajorTickXs(width: proxy.size.width).enumerated()), id: \.offset) { _, tickX in
-                    Rectangle()
-                        .fill(Theme.hairline.opacity(0.5))
-                        .frame(width: 1)
-                        .offset(x: tickX)
-                        .accessibilityHidden(true)
-                }
-
-                let isActive = controller.session.activeTrackID == sessionTrack.id
-                if controller.session.isBlindListeningModeEnabled {
-                    blindPlaceholderWaveform()
-                        .frame(width: proxy.size.width, height: 58)
-                        .foregroundStyle(isActive ? Theme.primary.opacity(0.70) : Theme.waveformInactive.opacity(0.58))
-                } else {
-                    let loaded = sessionTrack.loadedTrack
-                    waveformShape(for: waveformStore.waveform(for: sessionTrack.id), track: loaded)
-                        .frame(width: proxy.size.width, height: 58)
-                        .foregroundStyle(isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7))
-                }
-
-                Rectangle()
-                    .fill(.secondary.opacity(0.25))
-                    .frame(width: 1)
-                    .offset(x: xPosition(for: 0, width: proxy.size.width))
-            }
-            .clipped()
-            .componentDebugLabel("Waveform Lane", enabled: settings.showsComponentDebugLabels, color: .purple)
-        }
+    private func waveformLane(
+        sessionTrack: SessionTrack,
+        waveformWidth: CGFloat,
+        majorTickXs: [CGFloat],
+        zeroTickX: CGFloat
+    ) -> some View {
+        WaveformLaneView(
+            width: waveformWidth,
+            waveform: controller.session.isBlindListeningModeEnabled
+                ? nil
+                : waveformStore.waveform(for: sessionTrack.id),
+            isBlindListening: controller.session.isBlindListeningModeEnabled,
+            isActive: controller.session.activeTrackID == sessionTrack.id,
+            trackStart: sessionTrack.loadedTrack.offsetSeconds,
+            trackDuration: sessionTrack.loadedTrack.duration,
+            visibleStart: visibleStart,
+            visibleSpan: visibleSpan,
+            majorTickXs: majorTickXs,
+            zeroTickX: zeroTickX,
+            showsDebugLabel: settings.showsComponentDebugLabels
+        )
+        .equatable()
     }
 
     // MARK: - Loop selection
@@ -2688,7 +2688,7 @@ struct ContentView: View {
             if shiftHeld {
                 // Shift-click: select the range between the playhead and the click.
                 if let region = LoopRegion.normalized(
-                    start: controller.session.transportPosition,
+                    start: controller.displayTransportPosition(),
                     end: t,
                     timelineStart: controller.session.timelineStart,
                     timelineEnd: controller.session.timelineEnd
@@ -2703,159 +2703,6 @@ struct ContentView: View {
                 controller.seek(to: t)
             }
         }
-    }
-
-    @ViewBuilder
-    private func waveformShape(for waveform: Waveform?, track: LoadedTrack) -> some View {
-        let windowStart = visibleStart
-        let windowSpan = visibleSpan
-        Canvas { context, size in
-            guard let waveform, waveform.bucketCount > 0, !waveform.peaks.isEmpty else { return }
-            context.fill(
-                Self.waveformPath(
-                    for: waveform,
-                    in: size,
-                    trackStart: track.offsetSeconds,
-                    trackDuration: track.duration,
-                    visibleStart: windowStart,
-                    visibleSpan: windowSpan
-                ),
-                with: .foreground
-            )
-        }
-    }
-
-    private func blindPlaceholderWaveform() -> some View {
-        Canvas { context, size in
-            context.fill(Self.blindPlaceholderWaveformPath(in: size), with: .foreground)
-        }
-        .accessibilityLabel("Masked waveform")
-    }
-
-    private static func blindPlaceholderWaveformPath(in size: CGSize) -> Path {
-        guard size.width > 0, size.height > 0 else { return Path() }
-
-        let sampleCount = max(Int(size.width / 6), 12)
-        let midline = size.height / 2
-        let minHalfHeight: CGFloat = 1.2
-        var top: [CGPoint] = []
-        top.reserveCapacity(sampleCount + 1)
-
-        for index in 0...sampleCount {
-            let t = CGFloat(index) / CGFloat(sampleCount)
-            let wave = 0.48
-                + 0.24 * sin(t * .pi * 6.0)
-                + 0.16 * sin(t * .pi * 17.0 + 0.8)
-                + 0.08 * sin(t * .pi * 31.0 + 1.7)
-            let envelope = 0.55 + 0.45 * sin(t * .pi)
-            let halfHeight = max(minHalfHeight, min(0.92, wave * envelope) * midline)
-            top.append(CGPoint(x: t * size.width, y: midline - halfHeight))
-        }
-
-        var path = Path()
-        guard let first = top.first else { return path }
-        path.move(to: first)
-        for point in top.dropFirst() {
-            path.addLine(to: point)
-        }
-        for point in top.reversed() {
-            path.addLine(to: CGPoint(x: point.x, y: midline + (midline - point.y)))
-        }
-        path.closeSubpath()
-        return path
-    }
-
-    /// Builds a filled, center-mirrored peak envelope across the visible window.
-    ///
-    /// The Canvas is always the viewport width, never the (potentially enormous)
-    /// full track width, so the work stays O(viewport px) regardless of zoom and
-    /// a partially generated waveform still fills in left-to-right.
-    ///
-    /// Buckets are pooled into fixed `[k·stride, (k+1)·stride)` groups anchored
-    /// to the *file* (bucket index 0), never to the screen, and each group is
-    /// drawn as one vertex at its true sub-pixel x. This is what keeps scrolling
-    /// stable: if pooling were aligned to the on-screen pixel grid, then as
-    /// playback advances `visibleStart` each frame, every fixed pixel column
-    /// would gain/lose a peak bucket at a slightly different moment and the
-    /// envelope would shimmer. File-anchored groups have fixed peaks, so a
-    /// scroll only slides their x — the shape translates cleanly. `stride` is
-    /// chosen so a group is ≈ 1 pixel wide (≥ 1 bucket), preserving transients.
-    private static func waveformPath(
-        for waveform: Waveform,
-        in size: CGSize,
-        trackStart: TimeInterval,
-        trackDuration: TimeInterval,
-        visibleStart: TimeInterval,
-        visibleSpan: TimeInterval
-    ) -> Path {
-        let bucketCount = waveform.bucketCount
-        let peaks = waveform.peaks
-        guard bucketCount > 0, !peaks.isEmpty, size.width > 0, size.height > 0,
-              trackDuration > 0, visibleSpan > 0 else {
-            return Path()
-        }
-
-        let width = size.width
-        let midline = size.height / 2
-        // A visible floor so silent passages still read as a thin line.
-        let minHalfHeight: CGFloat = 0.5
-        let available = peaks.count
-
-        // Portion of the visible window the track actually covers.
-        let trackEnd = trackStart + trackDuration
-        let overlapStart = max(visibleStart, trackStart)
-        let overlapEnd = min(visibleStart + visibleSpan, trackEnd)
-        guard overlapEnd > overlapStart else { return Path() }
-
-        // x for a (fractional) bucket index, mapped through the visible window.
-        func x(forBucket bucket: Double) -> CGFloat {
-            CGFloat((trackStart + bucket / Double(bucketCount) * trackDuration - visibleStart) / visibleSpan) * width
-        }
-
-        // Buckets per drawn vertex ≈ buckets per on-screen pixel, ≥ 1.
-        let bucketsAcrossViewport = visibleSpan / trackDuration * Double(bucketCount)
-        let bucketStride = max(1, Int((bucketsAcrossViewport / Double(width)).rounded()))
-
-        // File-anchored group range overlapping the visible region, padded one
-        // group each side so the envelope crosses the clip edges smoothly.
-        let firstBucket = Int((overlapStart - trackStart) / trackDuration * Double(bucketCount))
-        let lastBucket = Int((overlapEnd - trackStart) / trackDuration * Double(bucketCount))
-        let firstGroup = firstBucket / bucketStride - 1
-        let lastGroup = lastBucket / bucketStride + 1
-
-        // (x, half-height) vertices forming the top edge of the envelope.
-        var vertices: [(x: CGFloat, half: CGFloat)] = []
-        vertices.reserveCapacity(lastGroup - firstGroup + 1)
-        for group in firstGroup...lastGroup {
-            guard group >= 0 else { continue }
-            let bucketLow = group * bucketStride
-            guard bucketLow < available else { break }
-            let bucketHigh = min(bucketLow + bucketStride, bucketCount)
-            let upper = min(bucketHigh, available)
-            guard upper > bucketLow else { break }
-
-            var peak: Float = 0
-            for index in bucketLow..<upper where peaks[index] > peak {
-                peak = peaks[index]
-            }
-            let center = Double(bucketLow + bucketHigh) / 2
-            vertices.append((x(forBucket: center), max(CGFloat(peak) * midline, minHalfHeight)))
-        }
-
-        guard !vertices.isEmpty else { return Path() }
-
-        var path = Path()
-        // Top edge, left to right.
-        for (index, vertex) in vertices.enumerated() {
-            let point = CGPoint(x: vertex.x, y: midline - vertex.half)
-            index == 0 ? path.move(to: point) : path.addLine(to: point)
-        }
-        // Bottom edge, right to left, mirroring the top.
-        for index in stride(from: vertices.count - 1, through: 0, by: -1) {
-            path.addLine(to: CGPoint(x: vertices[index].x, y: midline + vertices[index].half))
-        }
-        path.closeSubpath()
-        return path
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
@@ -2962,6 +2809,14 @@ struct ContentView: View {
         let clickMonitor = MouseMonitor { event in
             guard let window = event.window else { return }
             let locationInWindow = event.locationInWindow
+
+            // Move events exist only to recover from a stuck iBeam cursor, and
+            // they arrive continuously while the pointer is over the window —
+            // gate on the cursor state before paying for the hit test.
+            if event.type == .mouseMoved, NSCursor.current !== NSCursor.iBeam {
+                return
+            }
+
             let clickedView = window.contentView?.hitTest(locationInWindow)
 
             if CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.current, hitView: clickedView) {
@@ -3810,4 +3665,444 @@ private func extractDroppedFileURL(from item: NSSecureCoding?) -> URL? {
     }
 
     return nil
+}
+
+/// One track's waveform lane: the peak-envelope Canvas (or the blind-listening
+/// placeholder), the major-tick guides, and the 0:00 marker.
+///
+/// Deliberately a standalone view over plain value inputs, compared with
+/// `Equatable` (`.equatable()` at the call site): transport ticks, other
+/// tracks' waveform generation progress, and unrelated session changes
+/// structurally cannot reach it — SwiftUI skips the body (and the Canvas
+/// redraw) unless one of these inputs actually changed. Keep observable
+/// objects and closures out of its stored properties.
+private struct WaveformLaneView: View, Equatable {
+    var width: CGFloat
+    /// The waveform to draw, or `nil` while blind listening (so waveform
+    /// progress can't leak identity through redraw timing) or before
+    /// generation starts.
+    var waveform: Waveform?
+    var isBlindListening: Bool
+    var isActive: Bool
+    var trackStart: TimeInterval
+    var trackDuration: TimeInterval
+    var visibleStart: TimeInterval
+    var visibleSpan: TimeInterval
+    /// Guide x-positions for the ruler's labeled major ticks, computed once by
+    /// the parent for all lanes (they share the viewport and width).
+    var majorTickXs: [CGFloat]
+    var zeroTickX: CGFloat
+    var showsDebugLabel: Bool
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Rectangle()
+                .fill(.background.opacity(0.01))
+
+            // Faint major-tick guides behind the waveform, aligned with the
+            // ruler's labeled ticks above.
+            ForEach(Array(majorTickXs.enumerated()), id: \.offset) { _, tickX in
+                Rectangle()
+                    .fill(Theme.hairline.opacity(0.5))
+                    .frame(width: 1)
+                    .offset(x: tickX)
+                    .accessibilityHidden(true)
+            }
+
+            if isBlindListening {
+                blindPlaceholderWaveform
+                    .frame(width: width, height: 58)
+                    .foregroundStyle(isActive ? Theme.primary.opacity(0.70) : Theme.waveformInactive.opacity(0.58))
+            } else {
+                waveformShape
+                    .frame(width: width, height: 58)
+                    .foregroundStyle(isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7))
+            }
+
+            Rectangle()
+                .fill(.secondary.opacity(0.25))
+                .frame(width: 1)
+                .offset(x: zeroTickX)
+        }
+        .clipped()
+        .componentDebugLabel("Waveform Lane", enabled: showsDebugLabel, color: .purple)
+    }
+
+    private var waveformShape: some View {
+        Canvas { [waveform, trackStart, trackDuration, visibleStart, visibleSpan] context, size in
+            guard let waveform, waveform.bucketCount > 0, !waveform.peaks.isEmpty else { return }
+            context.fill(
+                Self.waveformPath(
+                    for: waveform,
+                    in: size,
+                    trackStart: trackStart,
+                    trackDuration: trackDuration,
+                    visibleStart: visibleStart,
+                    visibleSpan: visibleSpan
+                ),
+                with: .foreground
+            )
+        }
+    }
+
+    private var blindPlaceholderWaveform: some View {
+        Canvas { context, size in
+            context.fill(Self.blindPlaceholderWaveformPath(in: size), with: .foreground)
+        }
+        .accessibilityLabel("Masked waveform")
+    }
+
+    private static func blindPlaceholderWaveformPath(in size: CGSize) -> Path {
+        guard size.width > 0, size.height > 0 else { return Path() }
+
+        let sampleCount = max(Int(size.width / 6), 12)
+        let midline = size.height / 2
+        let minHalfHeight: CGFloat = 1.2
+        var top: [CGPoint] = []
+        top.reserveCapacity(sampleCount + 1)
+
+        for index in 0...sampleCount {
+            let t = CGFloat(index) / CGFloat(sampleCount)
+            let wave = 0.48
+                + 0.24 * sin(t * .pi * 6.0)
+                + 0.16 * sin(t * .pi * 17.0 + 0.8)
+                + 0.08 * sin(t * .pi * 31.0 + 1.7)
+            let envelope = 0.55 + 0.45 * sin(t * .pi)
+            let halfHeight = max(minHalfHeight, min(0.92, wave * envelope) * midline)
+            top.append(CGPoint(x: t * size.width, y: midline - halfHeight))
+        }
+
+        var path = Path()
+        guard let first = top.first else { return path }
+        path.move(to: first)
+        for point in top.dropFirst() {
+            path.addLine(to: point)
+        }
+        for point in top.reversed() {
+            path.addLine(to: CGPoint(x: point.x, y: midline + (midline - point.y)))
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    /// Builds a filled, center-mirrored peak envelope across the visible window.
+    ///
+    /// The Canvas is always the viewport width, never the (potentially enormous)
+    /// full track width, so the work stays O(viewport px) regardless of zoom and
+    /// a partially generated waveform still fills in left-to-right.
+    ///
+    /// Buckets are pooled into fixed `[k·stride, (k+1)·stride)` groups anchored
+    /// to the *file* (bucket index 0), never to the screen, and each group is
+    /// drawn as one vertex at its true sub-pixel x. This is what keeps scrolling
+    /// stable: if pooling were aligned to the on-screen pixel grid, then as
+    /// playback advances `visibleStart` each frame, every fixed pixel column
+    /// would gain/lose a peak bucket at a slightly different moment and the
+    /// envelope would shimmer. File-anchored groups have fixed peaks, so a
+    /// scroll only slides their x — the shape translates cleanly. `stride` is
+    /// chosen so a group is ≈ 1 pixel wide (≥ 1 bucket), preserving transients.
+    private static func waveformPath(
+        for waveform: Waveform,
+        in size: CGSize,
+        trackStart: TimeInterval,
+        trackDuration: TimeInterval,
+        visibleStart: TimeInterval,
+        visibleSpan: TimeInterval
+    ) -> Path {
+        let bucketCount = waveform.bucketCount
+        let peaks = waveform.peaks
+        guard bucketCount > 0, !peaks.isEmpty, size.width > 0, size.height > 0,
+              trackDuration > 0, visibleSpan > 0 else {
+            return Path()
+        }
+
+        let width = size.width
+        let midline = size.height / 2
+        // A visible floor so silent passages still read as a thin line.
+        let minHalfHeight: CGFloat = 0.5
+        let available = peaks.count
+
+        // Portion of the visible window the track actually covers.
+        let trackEnd = trackStart + trackDuration
+        let overlapStart = max(visibleStart, trackStart)
+        let overlapEnd = min(visibleStart + visibleSpan, trackEnd)
+        guard overlapEnd > overlapStart else { return Path() }
+
+        // x for a (fractional) bucket index, mapped through the visible window.
+        func x(forBucket bucket: Double) -> CGFloat {
+            CGFloat((trackStart + bucket / Double(bucketCount) * trackDuration - visibleStart) / visibleSpan) * width
+        }
+
+        // Buckets per drawn vertex ≈ buckets per on-screen pixel, ≥ 1.
+        let bucketsAcrossViewport = visibleSpan / trackDuration * Double(bucketCount)
+        let bucketStride = max(1, Int((bucketsAcrossViewport / Double(width)).rounded()))
+
+        // File-anchored group range overlapping the visible region, padded one
+        // group each side so the envelope crosses the clip edges smoothly.
+        let firstBucket = Int((overlapStart - trackStart) / trackDuration * Double(bucketCount))
+        let lastBucket = Int((overlapEnd - trackStart) / trackDuration * Double(bucketCount))
+        let firstGroup = firstBucket / bucketStride - 1
+        let lastGroup = lastBucket / bucketStride + 1
+
+        // (x, half-height) vertices forming the top edge of the envelope.
+        var vertices: [(x: CGFloat, half: CGFloat)] = []
+        vertices.reserveCapacity(lastGroup - firstGroup + 1)
+        for group in firstGroup...lastGroup {
+            guard group >= 0 else { continue }
+            let bucketLow = group * bucketStride
+            guard bucketLow < available else { break }
+            let bucketHigh = min(bucketLow + bucketStride, bucketCount)
+            let upper = min(bucketHigh, available)
+            guard upper > bucketLow else { break }
+
+            var peak: Float = 0
+            for index in bucketLow..<upper where peaks[index] > peak {
+                peak = peaks[index]
+            }
+            let center = Double(bucketLow + bucketHigh) / 2
+            vertices.append((x(forBucket: center), max(CGFloat(peak) * midline, minHalfHeight)))
+        }
+
+        guard !vertices.isEmpty else { return Path() }
+
+        var path = Path()
+        // Top edge, left to right.
+        for (index, vertex) in vertices.enumerated() {
+            let point = CGPoint(x: vertex.x, y: midline - vertex.half)
+            index == 0 ? path.move(to: point) : path.addLine(to: point)
+        }
+        // Bottom edge, right to left, mirroring the top.
+        for index in stride(from: vertices.count - 1, through: 0, by: -1) {
+            path.addLine(to: CGPoint(x: vertices[index].x, y: midline + vertices[index].half))
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+/// The playhead's visual layer: the grabber and the line, hosted in an AppKit
+/// layer tree and moved by ONE `CABasicAnimation` per transport anchor event.
+///
+/// SwiftUI animations on macOS interpolate on the main thread every frame, so
+/// both a `TimelineView`-driven playhead and a SwiftUI-animated offset cost
+/// real CPU for the whole duration of playback. A Core Animation position
+/// animation runs entirely in the render server: the parent re-evaluates only
+/// on observation (play, pause, seek, loop wrap, zoom, scroll, resize),
+/// `updateNSView` re-seats the tween, and between those events the app's main
+/// thread does zero playhead work. Hit testing is disabled by the caller;
+/// interaction lives in the scrub strip.
+private struct TimelinePlayheadVisual: NSViewRepresentable {
+    var currentX: CGFloat
+    var endX: CGFloat
+    var remaining: TimeInterval
+    var isPlaying: Bool
+    var infoWidth: CGFloat
+    var sectionHeight: CGFloat
+    var waveformWidth: CGFloat
+    var seatBottom: CGFloat
+    var laneAreaHeight: CGFloat
+
+    func makeNSView(context: Context) -> PlayheadLayerView {
+        PlayheadLayerView()
+    }
+
+    func updateNSView(_ view: PlayheadLayerView, context: Context) {
+        view.apply(
+            currentX: currentX,
+            endX: endX,
+            remaining: remaining,
+            isPlaying: isPlaying,
+            seatBottom: seatBottom,
+            lineHeight: max(min(laneAreaHeight, sectionHeight - seatBottom), 0)
+        )
+    }
+}
+
+/// Layer-backed host for the playhead visuals. The grabber art is the SwiftUI
+/// `PlayheadGrabberArt` rasterized once per appearance into the grabber
+/// layer's contents, so the art stays identical to the rest of the design
+/// system without any per-frame SwiftUI involvement.
+final class PlayheadLayerView: NSView {
+    /// Zero-size anchor layer that carries the line and grabber; the slide
+    /// animation moves only this layer's x position.
+    private let carrier = CALayer()
+    private let line = CALayer()
+    private let grabber = CALayer()
+
+    /// Padding around the rasterized grabber art so its drop shadow isn't
+    /// clipped by the image bounds.
+    private static let grabberPadding: CGFloat = 4
+
+    /// Inputs of the last `apply`, kept to re-seat after appearance or
+    /// geometry changes.
+    private var lastCurrentX: CGFloat = 0
+    private var lastEndX: CGFloat = 0
+    private var lastRemaining: TimeInterval = 0
+    private var lastIsPlaying = false
+    private var lastSeatBottom: CGFloat = 0
+    private var lastLineHeight: CGFloat = 0
+    /// Host time the current tween was seated at, so re-seats (appearance or
+    /// layout changes mid-playback) can re-derive where the playhead is now.
+    private var seatedAt: CFTimeInterval = 0
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        carrier.anchorPoint = .zero
+        carrier.bounds = .zero
+        line.anchorPoint = .zero
+        grabber.anchorPoint = .zero
+        carrier.addSublayer(line)
+        carrier.addSublayer(grabber)
+        layer?.addSublayer(carrier)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override var isFlipped: Bool { true }
+
+    /// Purely decorative — never intercept clicks meant for the lanes or the
+    /// scrub strip. (SwiftUI's `allowsHitTesting(false)` alone does not stop
+    /// an AppKit-hosted view from hit-testing.)
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func apply(
+        currentX: CGFloat,
+        endX: CGFloat,
+        remaining: TimeInterval,
+        isPlaying: Bool,
+        seatBottom: CGFloat,
+        lineHeight: CGFloat
+    ) {
+        lastCurrentX = currentX
+        lastEndX = endX
+        lastRemaining = remaining
+        lastIsPlaying = isPlaying
+        lastSeatBottom = seatBottom
+        lastLineHeight = lineHeight
+        seatedAt = CACurrentMediaTime()
+        seat()
+    }
+
+    private func seat() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        line.frame = CGRect(x: -1, y: lastSeatBottom, width: 2, height: lastLineHeight)
+        grabber.frame = CGRect(
+            x: -ContentView.playheadHandleWidth / 2 - Self.grabberPadding,
+            y: lastSeatBottom - ContentView.playheadHandleHeight - Self.grabberPadding,
+            width: ContentView.playheadHandleWidth + Self.grabberPadding * 2,
+            height: ContentView.playheadHandleHeight + Self.grabberPadding * 2
+        )
+
+        carrier.removeAnimation(forKey: "slide")
+        if lastIsPlaying, lastRemaining > 0, lastEndX != lastCurrentX {
+            // If this seat is a re-derivation (appearance/layout change mid
+            // playback), the playhead has moved since `apply`; start from
+            // where it is now.
+            let elapsed = CACurrentMediaTime() - seatedAt
+            let fraction = min(max(elapsed / lastRemaining, 0), 1)
+            let fromX = lastCurrentX + (lastEndX - lastCurrentX) * fraction
+            carrier.position = CGPoint(x: lastEndX, y: 0)
+            let slide = CABasicAnimation(keyPath: "position.x")
+            slide.fromValue = fromX
+            slide.toValue = lastEndX
+            slide.duration = max(lastRemaining - elapsed, 0)
+            slide.timingFunction = CAMediaTimingFunction(name: .linear)
+            carrier.add(slide, forKey: "slide")
+        } else {
+            // Whole-pixel position while parked so the 2pt line stays crisp.
+            carrier.position = CGPoint(x: lastCurrentX.rounded(), y: 0)
+        }
+
+        CATransaction.commit()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearanceDependentContent()
+        seat()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshAppearanceDependentContent()
+        seat()
+    }
+
+    private func refreshAppearanceDependentContent() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            line.backgroundColor = NSColor(Theme.secondary).cgColor
+        }
+
+        let renderer = ImageRenderer(
+            content: PlayheadGrabberArt()
+                .frame(
+                    width: ContentView.playheadHandleWidth,
+                    height: ContentView.playheadHandleHeight
+                )
+                .padding(Self.grabberPadding)
+                .environment(\.colorScheme, effectiveAppearance.isDark ? .dark : .light)
+        )
+        renderer.scale = window?.backingScaleFactor ?? 2
+        grabber.contents = renderer.cgImage
+    }
+}
+
+/// GarageBand-style grabber art: a downward pentagon (flat top, straight sides,
+/// converging to a small flat tip) with beveled dimension and grip lines.
+/// Positioning is applied by the caller; `PlayheadLayerView` rasterizes it
+/// into a layer so it never re-renders during playback.
+private struct PlayheadGrabberArt: View {
+    var body: some View {
+        PlayheadHandle(tipWidth: 2)
+            .fill(Theme.secondary)
+            // Gloss cap over the upper body plus a shadowed taper, the same
+            // top-lit treatment as the transport buttons' faces.
+            .overlay {
+                PlayheadHandle(tipWidth: 2)
+                    .fill(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .white.opacity(0.20), location: 0),
+                                .init(color: .white.opacity(0.14), location: 0.38),
+                                .init(color: .clear, location: 0.55),
+                                .init(color: .black.opacity(0.18), location: 1)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            }
+            // Beveled rim: a bright lit top edge falling into shadow at the
+            // tip, mirroring the transport buttons' bevel rings.
+            .overlay {
+                PlayheadHandle(tipWidth: 2)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.80), .white.opacity(0.12), .black.opacity(0.35)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.75
+                    )
+            }
+            .overlay {
+                // Two engraved grip lines: dark grooves with a light catch on
+                // their lower lip, cut into the glossy cap.
+                HStack(spacing: 3) {
+                    Capsule().frame(width: 1, height: 6)
+                    Capsule().frame(width: 1, height: 6)
+                }
+                .foregroundStyle(.black.opacity(0.32))
+                .shadow(color: .white.opacity(0.45), radius: 0.2, y: 0.6)
+                // Sit the grips in the rectangular upper body, above the tapered tip.
+                .offset(y: -1)
+            }
+            // Slight lift off the ruler, like the raised transport controls.
+            .shadow(color: .black.opacity(0.30), radius: 1, y: 0.5)
+    }
 }
