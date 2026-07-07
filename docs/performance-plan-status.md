@@ -140,6 +140,51 @@ not on real audio here); grid-boundary swaps look seamless during fast scroll;
 zoom, offset editing, blind-listening toggle, active-row A/B, loop
 select/resize, and the reorder lifted-row fade-in all still behave.
 
+**3c — kill the per-scroll-event container re-run (added after architect
+measurement: 3a/3b landed the reorder win and removed the boundary hitch, but
+flick scrolling still near-saturated the main thread via a shared
+`sizeThatFits` walk).**
+
+The remaining bottleneck was structural: `@Observable` tracks `session` as ONE
+property, so `scrollTimeline`'s per-event `session.visibleStart` write
+invalidated every view reading any part of `session` — the whole `ContentView`
+body re-ran and the rows ZStack re-laid-out per event even with equatable
+rows. Fix, in three parts:
+
+- `visibleStart` / `visibleSpan` (+ derived `visibleEnd`) moved OUT of
+  `ComparisonSession` onto `PlaybackController` as their own observable stored
+  properties, so per-event window writes no longer touch `\.session`. All
+  mutations go through one guarded `setVisibleWindow(start:span:)` (with
+  `@Observable`, same-value writes still invalidate observers, hence the
+  equality guards).
+- New stored `laneWindowStart`: the grid-quantized window start, updated
+  inside `setVisibleWindow` with an equality guard. `makeLaneViewport` reads
+  it (plus `visibleSpan`) instead of quantizing raw `visibleStart`, so the
+  container body's window dependencies change only at boundary crossings and
+  on zoom — never per scroll event.
+- Every remaining per-event body reader became a self-observing leaf (the
+  3a `LaneShiftView` pattern): `TimelineHeaderRulerView` (the moving ruler —
+  legitimately redraws per event), `TimelineScrollOverlayLeaf` (the
+  scroll-event NSView needs the live window for its event math),
+  `TimelinePlayheadOverlayView` (positions the untouched CALayer playhead;
+  one representable update per event/anchor), and `LoopOverlayContentView`
+  (selection rectangle + resize-handle x-positions; the gesture LOGIC —
+  thresholds, draft state, commit, click-to-seek fallthrough — stays in
+  `ContentView` closures, which are not observation-tracked). `globalTime` /
+  `xPosition` remain as gesture/event-closure helpers only, with a comment
+  banning body use.
+
+Net: a horizontal scroll event now re-runs ~N+4 trivial leaf bodies (lane
+slides, ruler, scroll overlay, playhead, loop overlay) and nothing else — no
+container body re-run, no rows ForEach, no ZStack re-layout. Zoomed
+playback-follow gets the same isolation for free (it writes the same window
+path). Tests updated (`controller.session.visibleStart` →
+`controller.visibleStart` in `SessionTests`); `ComparisonSession` no longer
+carries the visible window. Full suite green (one unrelated flaky
+streaming-cancellation timing test passed on re-run). Needs the measurement
+harness re-run plus a manual pass on zoom (buttons / pinch / slider), ruler
+scrub, loop select/resize, and zoomed playback-follow.
+
 ---
 
 ## Iteration 0 — Baseline instrumentation (do first)

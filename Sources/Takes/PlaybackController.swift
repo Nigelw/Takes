@@ -8,6 +8,42 @@ final class PlaybackController {
     static let maximumTrackCount = 32
 
     private(set) var session = ComparisonSession()
+
+    /// The window currently drawn, in absolute seconds — a sub-window of the
+    /// content range `[timelineStart, timelineEnd]`; when it equals the content
+    /// range the timeline is fully zoomed out ("fit"). See `TimelineViewport`.
+    ///
+    /// Stored OUTSIDE `session` on purpose: Observation tracks `session` as a
+    /// single property, and `visibleStart` is written on every horizontal
+    /// scroll event (and every zoomed playback-follow step). Keeping the
+    /// window here means those writes invalidate only the small leaf views
+    /// that read it, never the views that read `session`. All writes go
+    /// through `setVisibleWindow` so `laneWindowStart` stays in sync.
+    private(set) var visibleStart: TimeInterval = 0
+    private(set) var visibleSpan: TimeInterval = 0
+
+    var visibleEnd: TimeInterval {
+        visibleStart + visibleSpan
+    }
+
+    /// Grid-quantized start of the lane drawing window: `visibleStart` rounded
+    /// down to a half-viewport grid (the lanes draw a 2×-viewport window slid
+    /// by a leaf offset — see `LaneViewport`). Written with an equality guard,
+    /// so views keyed on the window re-run only when the viewport crosses a
+    /// grid boundary or the zoom changes — not per scroll event.
+    private(set) var laneWindowStart: TimeInterval = 0
+
+    /// Sole mutation path for the visible window. Guards every write (with
+    /// `@Observable`, assigning an equal value still invalidates observers).
+    private func setVisibleWindow(start: TimeInterval? = nil, span: TimeInterval? = nil) {
+        if let start, visibleStart != start { visibleStart = start }
+        if let span, visibleSpan != span { visibleSpan = span }
+        // Matches the view's `makeLaneViewport` span clamp.
+        let quantum = max(visibleSpan, 0.001) / 2
+        let windowStart = (visibleStart / quantum).rounded(.down) * quantum
+        if laneWindowStart != windowStart { laneWindowStart = windowStart }
+    }
+
     private(set) var playbackError: PlaybackError?
     /// Whether an auto-align run is in flight (drives the toolbar button's
     /// spinner and blocks re-entry).
@@ -1084,7 +1120,7 @@ final class PlaybackController {
     /// Step the zoom by one −/+ increment, anchored to the playhead (D4).
     func stepZoom(zoomingIn: Bool) {
         let span = TimelineViewport.steppedVisibleSpan(
-            visibleSpan: max(session.visibleSpan, TimelineViewport.minimumVisibleSpan),
+            visibleSpan: max(visibleSpan, TimelineViewport.minimumVisibleSpan),
             zoomingIn: zoomingIn
         )
         applyRezoom(span: span, cursorFraction: nil)
@@ -1094,33 +1130,31 @@ final class PlaybackController {
     func zoomToFit() {
         let span = session.timelineEnd - session.timelineStart
         guard span > 0 else { return }
-        session.visibleStart = session.timelineStart
-        session.visibleSpan = span
+        setVisibleWindow(start: session.timelineStart, span: span)
     }
 
     /// Zoom the timeline to the current waveform loop selection.
     func zoomToSelection() {
         guard let loop = session.loopRegion else { return }
         let selectionSpan = loop.end - loop.start
-        let visibleSpan = max(selectionSpan, TimelineViewport.minimumVisibleSpan)
+        let selectionVisibleSpan = max(selectionSpan, TimelineViewport.minimumVisibleSpan)
         let selectionCenter = loop.start + selectionSpan / 2
         let viewport = TimelineViewport.clampedWindow(
-            visibleStart: selectionCenter - visibleSpan / 2,
-            visibleSpan: visibleSpan,
+            visibleStart: selectionCenter - selectionVisibleSpan / 2,
+            visibleSpan: selectionVisibleSpan,
             contentStart: session.timelineStart,
             contentEnd: session.timelineEnd
         )
-        session.visibleStart = viewport.start
-        session.visibleSpan = viewport.span
+        setVisibleWindow(start: viewport.start, span: viewport.span)
     }
 
     /// Pinch-to-zoom, anchored to the cursor (D5). `magnification` is the
     /// trackpad delta; `fraction` is the cursor's `0...1` position across the
     /// timeline.
     func magnifyTimeline(by magnification: Double, atFraction fraction: Double) {
-        guard session.visibleSpan > 0 else { return }
+        guard visibleSpan > 0 else { return }
         let span = TimelineViewport.magnifiedVisibleSpan(
-            visibleSpan: session.visibleSpan,
+            visibleSpan: visibleSpan,
             magnification: magnification
         )
         applyRezoom(span: span, cursorFraction: fraction)
@@ -1128,25 +1162,25 @@ final class PlaybackController {
 
     /// Native horizontal scroll view offset → visible timeline start. The
     /// scroll view owns gesture physics, including elastic bounce at the edges.
-    func scrollTimeline(toVisibleStart visibleStart: TimeInterval) {
-        guard session.visibleSpan > 0 else { return }
-        session.visibleStart = visibleStart
+    func scrollTimeline(toVisibleStart newVisibleStart: TimeInterval) {
+        guard visibleSpan > 0 else { return }
+        setVisibleWindow(start: newVisibleStart)
     }
 
     private func applyRezoom(span: TimeInterval, cursorFraction: Double?) {
         guard session.timelineEnd > session.timelineStart else { return }
-        let visibleSpan = max(session.visibleSpan, 0.001)
+        let clampedVisibleSpan = max(visibleSpan, 0.001)
 
         let anchorTime: TimeInterval
         let anchorFraction: Double
         if let cursorFraction {
             anchorFraction = min(max(cursorFraction, 0), 1)
-            anchorTime = session.visibleStart + anchorFraction * visibleSpan
+            anchorTime = visibleStart + anchorFraction * clampedVisibleSpan
         } else {
             let anchor = TimelineViewport.anchor(
                 transport: currentTransportPosition(),
-                visibleStart: session.visibleStart,
-                visibleSpan: visibleSpan
+                visibleStart: visibleStart,
+                visibleSpan: clampedVisibleSpan
             )
             anchorTime = anchor.time
             anchorFraction = anchor.fraction
@@ -1159,8 +1193,7 @@ final class PlaybackController {
             contentStart: session.timelineStart,
             contentEnd: session.timelineEnd
         )
-        session.visibleStart = result.start
-        session.visibleSpan = result.span
+        setVisibleWindow(start: result.start, span: result.span)
     }
 
     /// While playing and zoomed in, page the window forward when the playhead
@@ -1172,13 +1205,13 @@ final class PlaybackController {
 
         let contentSpan = session.timelineEnd - session.timelineStart
         guard contentSpan > 0,
-              !TimelineViewport.isFit(visibleSpan: session.visibleSpan, contentSpan: contentSpan)
+              !TimelineViewport.isFit(visibleSpan: visibleSpan, contentSpan: contentSpan)
         else { return }
 
         guard let newStart = TimelineViewport.pagedStart(
             transport: transport,
-            visibleStart: session.visibleStart,
-            visibleSpan: session.visibleSpan,
+            visibleStart: visibleStart,
+            visibleSpan: visibleSpan,
             contentStart: session.timelineStart,
             contentEnd: session.timelineEnd
         ) else { return }
@@ -1193,11 +1226,11 @@ final class PlaybackController {
     private func animateScrollToPlayheadIfNeeded() {
         let contentSpan = session.timelineEnd - session.timelineStart
         guard contentSpan > 0,
-              !TimelineViewport.isFit(visibleSpan: session.visibleSpan, contentSpan: contentSpan),
+              !TimelineViewport.isFit(visibleSpan: visibleSpan, contentSpan: contentSpan),
               let newStart = TimelineViewport.pagedStart(
                   transport: currentTransportPosition(),
-                  visibleStart: session.visibleStart,
-                  visibleSpan: session.visibleSpan,
+                  visibleStart: visibleStart,
+                  visibleSpan: visibleSpan,
                   contentStart: session.timelineStart,
                   contentEnd: session.timelineEnd
               )
@@ -1210,7 +1243,7 @@ final class PlaybackController {
     /// nothing) if the window is already there.
     @discardableResult
     private func startScrollAnimation(to newStart: TimeInterval, duration: CFTimeInterval) -> Bool {
-        let from = session.visibleStart
+        let from = visibleStart
         guard abs(newStart - from) > 0.0001 else { return false }
 
         scrollAnimation = ScrollAnimation(
@@ -1237,10 +1270,10 @@ final class PlaybackController {
         let progress = min(1, (CACurrentMediaTime() - animation.startedAt) / animation.duration)
         // easeOutCubic — decelerates into place.
         let eased = 1 - pow(1 - progress, 3)
-        session.visibleStart = animation.from + (animation.to - animation.from) * eased
+        setVisibleWindow(start: animation.from + (animation.to - animation.from) * eased)
 
         if progress >= 1 {
-            session.visibleStart = animation.to
+            setVisibleWindow(start: animation.to)
             stopScrollAnimation()
         }
     }
@@ -1490,8 +1523,7 @@ final class PlaybackController {
             session.timelineStart = 0
             session.timelineEnd = 0
             session.transportPosition = 0
-            session.visibleStart = 0
-            session.visibleSpan = 0
+            setVisibleWindow(start: 0, span: 0)
             clearLoop()
             return
         }
@@ -1522,14 +1554,13 @@ final class PlaybackController {
         )
 
         let viewport = TimelineViewport.adjustedForContentChange(
-            visibleStart: session.visibleStart,
-            visibleSpan: session.visibleSpan,
+            visibleStart: visibleStart,
+            visibleSpan: visibleSpan,
             previousContentSpan: previousContentSpan,
             contentStart: session.timelineStart,
             contentEnd: session.timelineEnd
         )
-        session.visibleStart = viewport.start
-        session.visibleSpan = viewport.span
+        setVisibleWindow(start: viewport.start, span: viewport.span)
 
         playbackError = nil
     }

@@ -1461,8 +1461,8 @@ struct SessionTests {
 
         controller.zoomToFit()
 
-        #expect(abs(controller.session.visibleStart - controller.session.timelineStart) < 0.0001)
-        #expect(abs(controller.session.visibleSpan - controller.session.duration) < 0.0001)
+        #expect(abs(controller.visibleStart - controller.session.timelineStart) < 0.0001)
+        #expect(abs(controller.visibleSpan - controller.session.duration) < 0.0001)
     }
 
     @MainActor
@@ -1476,8 +1476,8 @@ struct SessionTests {
 
         controller.zoomToSelection()
 
-        #expect(abs(controller.session.visibleStart - 0.2) < 0.0001)
-        #expect(abs(controller.session.visibleSpan - 0.6) < 0.0001)
+        #expect(abs(controller.visibleStart - 0.2) < 0.0001)
+        #expect(abs(controller.visibleSpan - 0.6) < 0.0001)
     }
 
     @MainActor
@@ -1488,13 +1488,13 @@ struct SessionTests {
         let controller = PlaybackController()
         await controller.loadImportedFiles([url])
         controller.zoomVisibleSpan(to: TimelineViewport.minimumVisibleSpan)
-        let visibleStart = controller.session.visibleStart
-        let visibleSpan = controller.session.visibleSpan
+        let visibleStart = controller.visibleStart
+        let visibleSpan = controller.visibleSpan
 
         controller.zoomToSelection()
 
-        #expect(controller.session.visibleStart == visibleStart)
-        #expect(controller.session.visibleSpan == visibleSpan)
+        #expect(controller.visibleStart == visibleStart)
+        #expect(controller.visibleSpan == visibleSpan)
     }
 
     @MainActor

@@ -106,11 +106,10 @@ struct ComparisonSession: Equatable {
     /// wraps at its end. See `playbackStart` / `playbackEnd`.
     var loopRegion: LoopRegion?
 
-    /// The window currently drawn, in absolute seconds. A sub-window of the
-    /// content range `[timelineStart, timelineEnd]`. When it equals the content
-    /// range the timeline is fully zoomed out ("fit"). See `TimelineViewport`.
-    var visibleStart: TimeInterval = 0
-    var visibleSpan: TimeInterval = 0
+    // The visible window (`visibleStart` / `visibleSpan`) deliberately does NOT
+    // live here: Observation tracks `session` as a single property, and the
+    // window is written per scroll/zoom event — see the dedicated properties on
+    // `PlaybackController`.
 
     init(
         tracks: [SessionTrack] = [],
@@ -121,9 +120,7 @@ struct ComparisonSession: Equatable {
         timelineEnd: TimeInterval = 0,
         repeatMode: RepeatMode = .off,
         isBlindListeningModeEnabled: Bool = false,
-        loopRegion: LoopRegion? = nil,
-        visibleStart: TimeInterval = 0,
-        visibleSpan: TimeInterval = 0
+        loopRegion: LoopRegion? = nil
     ) {
         self.tracks = tracks
         self.activeTrackID = activeTrackID
@@ -134,8 +131,6 @@ struct ComparisonSession: Equatable {
         self.repeatMode = repeatMode
         self.isBlindListeningModeEnabled = isBlindListeningModeEnabled
         self.loopRegion = loopRegion
-        self.visibleStart = visibleStart
-        self.visibleSpan = visibleSpan
     }
 
     var duration: TimeInterval {
@@ -150,10 +145,6 @@ struct ComparisonSession: Equatable {
     /// End of the playable range: the loop end when looping, else the timeline end.
     var playbackEnd: TimeInterval {
         loopRegion?.end ?? timelineEnd
-    }
-
-    var visibleEnd: TimeInterval {
-        visibleStart + visibleSpan
     }
 
     var isPlayable: Bool {

@@ -982,8 +982,9 @@ struct ContentView: View {
     private var reorderRowStep: CGFloat { trackRowHeight + trackTimelineDividerHeight }
 
     /// Coordinate space for the waveform column, so loop gestures report x in
-    /// `0...waveformWidth` regardless of the column's offset.
-    private static let loopColumnSpace = "loopColumn"
+    /// `0...waveformWidth` regardless of the column's offset. (`fileprivate` so
+    /// the loop overlay leaf's handle gestures can name the same space.)
+    fileprivate static let loopColumnSpace = "loopColumn"
     /// Coordinate space for the timeline ruler, so ruler gestures report x in
     /// `0...waveformWidth` just like the waveform column.
     private static let rulerSpace = "timelineRuler"
@@ -1375,7 +1376,7 @@ struct ContentView: View {
                 value: Binding(
                     get: {
                         TimelineViewport.sliderValue(
-                            visibleSpan: max(controller.session.visibleSpan, 0.001),
+                            visibleSpan: max(controller.visibleSpan, 0.001),
                             contentSpan: contentSpan
                         )
                     },
@@ -1560,12 +1561,20 @@ struct ContentView: View {
         "Repeat: \(repeatModeName(for: mode))"
     }
 
+    // NOTE: `visibleStart` changes on every horizontal scroll event (and every
+    // zoomed playback-follow step). Nothing evaluated as part of a view BODY in
+    // this file may read it except the dedicated per-event leaves
+    // (`LaneShiftView`, `TimelineHeaderRulerView`, `TimelinePlayheadOverlayView`,
+    // `LoopOverlayContentView`, `TimelineScrollOverlayLeaf`) — reading it in a
+    // container body registers an Observation dependency that re-runs (and
+    // re-layouts) the whole tree per event. Gesture/event closures may read it
+    // freely; they aren't observation-tracked.
     private var visibleStart: TimeInterval {
-        controller.session.visibleStart
+        controller.visibleStart
     }
 
     private var visibleSpan: TimeInterval {
-        max(controller.session.visibleSpan, 0.001)
+        max(controller.visibleSpan, 0.001)
     }
 
     private var trackRowHeight: CGFloat {
@@ -1597,6 +1606,9 @@ struct ContentView: View {
         TakesWindowPolicy.trackTimelineHeight(displayingTrackRows: controller.displayedTrackRowCount)
     }
 
+    // Both helpers read the per-event visible window — call them from gesture
+    // and event-monitor closures only, never from a view body (see the note on
+    // `visibleStart`).
     private func globalTime(atX x: CGFloat, width: CGFloat) -> TimeInterval {
         guard width > 0 else { return visibleStart }
         let normalized = min(max(Double(x / width), 0), 1)
@@ -1608,7 +1620,7 @@ struct ContentView: View {
             TransportMapping.normalizedPosition(
                 globalTime: globalTime,
                 timelineStart: visibleStart,
-                timelineEnd: controller.session.visibleEnd
+                timelineEnd: controller.visibleEnd
             )
         ) * width
     }
@@ -1700,16 +1712,9 @@ struct ContentView: View {
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             .overlay(alignment: .topLeading) {
                 if !controller.session.tracks.isEmpty {
-                    TimelineScrollOverlay(
-                        visibleStart: controller.session.visibleStart,
-                        visibleSpan: visibleSpan,
-                        contentStart: controller.session.timelineStart,
-                        contentEnd: controller.session.timelineEnd,
-                        onScroll: { controller.scrollTimeline(toVisibleStart: $0) },
-                        onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
-                    )
-                    .frame(width: waveformWidth, height: proxy.size.height)
-                    .offset(x: infoWidth)
+                    TimelineScrollOverlayLeaf(controller: controller)
+                        .frame(width: waveformWidth, height: proxy.size.height)
+                        .offset(x: infoWidth)
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -1830,7 +1835,13 @@ struct ContentView: View {
                 .padding(.trailing, 8)
             }
 
-            timelineHeaderRuler(width: waveformWidth)
+            TimelineHeaderRulerView(
+                controller: controller,
+                width: waveformWidth,
+                targetMarkerCount: timelineHeaderTargetMarkerCount,
+                minorTickMinSpacing: timelineHeaderMinorTickMinSpacing,
+                headerHeight: trackHeaderHeight
+            )
                 .frame(maxWidth: .infinity)
                 // Dragging anywhere on the ruler moves the playhead: the
                 // visual follows the pointer and the transport seeks once on
@@ -1861,12 +1872,12 @@ struct ContentView: View {
     @ViewBuilder
     private func timelinePlayheadOverlay(sectionHeight: CGFloat, infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
         if controller.session.isPlayable {
-            let position = controller.displayTransportPosition()
-            TimelinePlayheadVisual(
-                currentX: playheadDragX ?? xPosition(for: position, width: waveformWidth),
-                endX: xPosition(for: controller.session.playbackEnd, width: waveformWidth),
-                remaining: max(0, controller.session.playbackEnd - position),
-                isPlaying: controller.session.isPlaying && playheadDragX == nil,
+            // The x-positioning lives in a leaf that alone reads the per-event
+            // transport/window state, so a scroll or anchor event re-runs only
+            // the leaf (one representable update), not this section body.
+            TimelinePlayheadOverlayView(
+                controller: controller,
+                playheadDragX: playheadDragX,
                 infoWidth: infoWidth,
                 sectionHeight: sectionHeight,
                 waveformWidth: waveformWidth,
@@ -1912,100 +1923,6 @@ struct ContentView: View {
                 // re-evaluates on the next pointer move.
                 NSCursor.openHand.set()
             }
-    }
-
-    private func timelineHeaderRuler(width: CGFloat) -> some View {
-        let rulerStart = max(visibleStart, controller.session.timelineStart)
-        let rulerEnd = min(controller.session.visibleEnd, controller.session.timelineEnd)
-        let ruler = TimelineHeaderMarker.ruler(
-            timelineStart: rulerStart,
-            timelineEnd: rulerEnd,
-            targetMarkerCount: timelineHeaderTargetMarkerCount,
-            // Keep the just-off-screen major tick so its label clips at the left edge while scrolling
-            // rather than blinking out (mirrors the right-edge clipping in TimelineHeaderLabelLayout).
-            leadingMajorTicks: 1
-        )
-
-        // Drop minor ticks once they would pack closer than this; keeps the ruler from turning into
-        // a gray blur at narrow widths or high subdivision counts.
-        let visibleSpan = controller.session.visibleEnd - visibleStart
-        let minorSpacing = visibleSpan > 0 ? ruler.minorInterval / visibleSpan * Double(width) : 0
-        let showMinorTicks = minorSpacing >= timelineHeaderMinorTickMinSpacing
-
-        return ZStack(alignment: .topLeading) {
-            Rectangle()
-                .fill(.background.opacity(0.01))
-
-            if ruler.majorTicks.isEmpty {
-                Text("00:00")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 8)
-                    .frame(maxHeight: .infinity, alignment: .center)
-            } else {
-                if showMinorTicks {
-                    ForEach(ruler.minorTicks, id: \.self) { tickTime in
-                        timelineHeaderMinorTick(at: tickTime, width: width)
-                    }
-                }
-                ForEach(ruler.majorTicks, id: \.time) { marker in
-                    timelineHeaderMarker(marker, width: width)
-                }
-            }
-        }
-        .clipped()
-        .accessibilityLabel("Timeline")
-    }
-
-    // Ruler notches hang downward from below the numbers toward the rows, Fission-style:
-    // major (labeled) ticks are tall — their top edge comes up to just beneath the number so the
-    // label sits against the tick like a baseline — while minor ticks stay short. Both are
-    // bottom-anchored so they hang toward the rows.
-    private var timelineHeaderTickColor: Color { .secondary.opacity(0.45) }
-    private var timelineHeaderMajorTickHeight: CGFloat { 19 }
-    private var timelineHeaderMinorTickHeight: CGFloat { 8 }
-    /// Vertical inset of the time label from the top of the header.
-    private var timelineHeaderLabelTopInset: CGFloat { 7 }
-
-    private func timelineHeaderMinorTick(at time: TimeInterval, width: CGFloat) -> some View {
-        Rectangle()
-            .fill(timelineHeaderTickColor)
-            .frame(width: 1, height: timelineHeaderMinorTickHeight)
-            .offset(x: xPosition(for: time, width: width))
-            // Anchor to the bottom so the notch hangs down toward the waveforms.
-            .frame(width: width, height: trackHeaderHeight, alignment: .bottomLeading)
-            .accessibilityHidden(true)
-    }
-
-    private func timelineHeaderMarker(_ marker: TimelineHeaderMarker, width: CGFloat) -> some View {
-        let tickX = xPosition(for: marker.time, width: width)
-        let labelWidth: CGFloat = 60
-        let labelLayout = TimelineHeaderLabelLayout.leading(
-            tickX: Double(tickX),
-            rulerWidth: Double(width)
-        )
-
-        return ZStack(alignment: .topLeading) {
-            // Number on top.
-            if labelLayout.isVisible {
-                Text(marker.label)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .frame(width: labelWidth, alignment: .leading)
-                    .offset(x: CGFloat(labelLayout.x), y: timelineHeaderLabelTopInset)
-            }
-
-            // Taller notch hanging below the number, anchored to the header bottom.
-            Rectangle()
-                .fill(timelineHeaderTickColor)
-                .frame(width: 1, height: timelineHeaderMajorTickHeight)
-                .offset(x: tickX)
-                .frame(width: width, height: trackHeaderHeight, alignment: .bottomLeading)
-        }
-        .frame(width: width, height: trackHeaderHeight, alignment: .topLeading)
-        .accessibilityLabel(marker.label)
     }
 
     /// Build the value for one equatable track row. All observable reads
@@ -2309,9 +2226,13 @@ struct ContentView: View {
     }
 
     private func makeLaneViewport(waveformWidth: CGFloat) -> LaneViewport {
-        let span = max(visibleSpan, 0.000_1)
-        let quantum = span / 2
-        let windowStart = (visibleStart / quantum).rounded(.down) * quantum
+        let span = visibleSpan
+        // The grid-quantized window start is STORED on the controller (updated
+        // with an equality guard whenever the visible window moves) rather than
+        // derived from `visibleStart` here: reading raw `visibleStart` in the
+        // container body would register a per-scroll-event Observation
+        // dependency and re-run/re-layout the whole track list per event.
+        let windowStart = controller.laneWindowStart
         let windowSpan = span * 2
         let windowEnd = windowStart + windowSpan
         let wideWidth = waveformWidth * 2
@@ -2351,133 +2272,48 @@ struct ContentView: View {
     /// so an off-screen loop never spills into the track-info column.
     private func loopSelectionOverlay(infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
-            // Drag to select a loop; click to seek (and deselect if outside the loop).
+            // Drag to select a loop; click to seek (and deselect if outside the
+            // loop). The gesture surface carries no per-event body reads — the
+            // closures' visible-window reads aren't observation-tracked.
             Color.clear
                 .contentShape(Rectangle())
                 .gesture(loopSelectionGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
 
-            if let range = activeLoopXRange(waveformWidth: waveformWidth) {
-                // Grip tabs only once the loop is committed/resizable — while
-                // drag-selecting, the edges stay plain lines.
-                let showsGrips = loopDraft == nil && displayedLoopRegion != nil
-                Rectangle()
-                    .fill(Theme.secondary.opacity(0.16))
-                    .overlay(alignment: .leading) { loopEdge(showsGrip: showsGrips).offset(x: -3.5) }
-                    .overlay(alignment: .trailing) { loopEdge(showsGrip: showsGrips).offset(x: 3.5) }
-                    .frame(width: max(1, range.upperBound - range.lowerBound), height: trackTimelineHeight)
-                    .offset(x: range.lowerBound)
-                    .allowsHitTesting(false)
-            }
-
-            // During resize, preview locally so playback is rebound only once on mouse-up.
-            if loopDraft == nil, let loop = displayedLoopRegion {
-                loopResizeHandle(atTime: loop.start, waveformWidth: waveformWidth) { time in
-                    updateLoopResizeDraft(start: time)
-                } onEnded: { time in
-                    commitLoopResize(start: time)
+            // Selection rectangle + resize handles. Their x-positioning depends
+            // on the per-scroll-event visible window, so it lives in a leaf that
+            // alone reads it; the gesture LOGIC stays here in closures.
+            LoopOverlayContentView(
+                controller: controller,
+                waveformWidth: waveformWidth,
+                height: trackTimelineHeight,
+                draftRange: loopDraft.map { min($0.start, $0.current)...max($0.start, $0.current) },
+                displayedLoop: loopDraft == nil ? displayedLoopRegion : nil,
+                onHandleChanged: { isStart, value in
+                    // Don't start resizing on a jitter-sized movement, so a
+                    // plain click stays a click (handled below).
+                    let dx = abs(value.location.x - value.startLocation.x)
+                    guard loopResizeDraft != nil || dx > Self.loopDragThreshold else { return }
+                    let time = globalTime(atX: value.location.x, width: waveformWidth)
+                    isStart ? updateLoopResizeDraft(start: time) : updateLoopResizeDraft(end: time)
+                },
+                onHandleEnded: { isStart, value in
+                    if loopResizeDraft == nil {
+                        // A plain click on the handle strip: the strip sits
+                        // over the lane's own gesture and would otherwise
+                        // swallow it — run the same click-to-seek (and
+                        // deselect-if-outside) behaviour as the lane.
+                        handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth)
+                    } else {
+                        let time = globalTime(atX: value.location.x, width: waveformWidth)
+                        isStart ? commitLoopResize(start: time) : commitLoopResize(end: time)
+                    }
                 }
-                loopResizeHandle(atTime: loop.end, waveformWidth: waveformWidth) { time in
-                    updateLoopResizeDraft(end: time)
-                } onEnded: { time in
-                    commitLoopResize(end: time)
-                }
-            }
+            )
         }
         .frame(width: waveformWidth, height: trackTimelineHeight, alignment: .topLeading)
         .clipped()
         .coordinateSpace(name: Self.loopColumnSpace)
         .offset(x: infoWidth)
-    }
-
-    /// Grab handle drawn at each loop edge: a slim accent rod inside a soft
-    /// accent halo, plus (once the loop is committed) a centered grip tab with
-    /// two engraved notches. Deliberately unlike the flat solid playhead line
-    /// and its ruler grabber, so the edges read as draggable resize handles
-    /// and stay distinguishable when the playhead sits on top of them.
-    private func loopEdge(showsGrip: Bool) -> some View {
-        ZStack {
-            Capsule()
-                .fill(Theme.secondary)
-                .shadow(color: Theme.secondary.opacity(0.85), radius: 3)
-                .frame(width: 2)
-
-            if showsGrip {
-                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                    .fill(Theme.secondary)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                            .stroke(.white.opacity(0.35), lineWidth: 0.75)
-                    )
-                    .overlay(
-                        HStack(spacing: 2) {
-                            Capsule().frame(width: 1, height: 10)
-                            Capsule().frame(width: 1, height: 10)
-                        }
-                        .foregroundStyle(.black.opacity(0.35))
-                    )
-                    .frame(width: 9, height: 24)
-                    .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
-            }
-        }
-        .frame(width: 9)
-    }
-
-    /// x-span (points, within the waveform column) of the loop being drawn:
-    /// a new-selection draft, a resize preview, or the committed loop.
-    private func activeLoopXRange(waveformWidth: CGFloat) -> ClosedRange<CGFloat>? {
-        let start: TimeInterval
-        let end: TimeInterval
-        if let draft = loopDraft {
-            start = min(draft.start, draft.current)
-            end = max(draft.start, draft.current)
-        } else if let loop = displayedLoopRegion {
-            start = loop.start
-            end = loop.end
-        } else {
-            return nil
-        }
-        let x0 = xPosition(for: start, width: waveformWidth)
-        let x1 = xPosition(for: end, width: waveformWidth)
-        return min(x0, x1)...max(x0, x1)
-    }
-
-    private func loopResizeHandle(
-        atTime time: TimeInterval,
-        waveformWidth: CGFloat,
-        onChanged: @escaping (TimeInterval) -> Void,
-        onEnded: @escaping (TimeInterval) -> Void
-    ) -> some View {
-        let x = xPosition(for: time, width: waveformWidth)
-        let hitWidth: CGFloat = 12
-        // Cursor feedback (resizeLeftRight) is handled by the mouse-monitor
-        // cursor manager — SwiftUI hover doesn't fire reliably underneath the
-        // NSView-based timeline scroll overlay.
-        return Rectangle()
-            .fill(Color.white.opacity(0.001))
-            .frame(width: hitWidth, height: trackTimelineHeight)
-            .contentShape(Rectangle())
-            .offset(x: x - hitWidth / 2)
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.loopColumnSpace))
-                    .onChanged { value in
-                        // Don't start resizing on a jitter-sized movement, so
-                        // a plain click stays a click (handled below).
-                        let dx = abs(value.location.x - value.startLocation.x)
-                        guard loopResizeDraft != nil || dx > Self.loopDragThreshold else { return }
-                        onChanged(globalTime(atX: value.location.x, width: waveformWidth))
-                    }
-                    .onEnded { value in
-                        if loopResizeDraft == nil {
-                            // A plain click on the handle strip: the strip sits
-                            // over the lane's own gesture and would otherwise
-                            // swallow it — run the same click-to-seek (and
-                            // deselect-if-outside) behaviour as the lane.
-                            handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth)
-                        } else {
-                            onEnded(globalTime(atX: value.location.x, width: waveformWidth))
-                        }
-                    }
-            )
     }
 
     private var displayedLoopRegion: LoopRegion? {
@@ -3936,9 +3772,9 @@ private struct LaneShiftView: View {
     var body: some View {
         // Matches `makeLaneViewport`: `shiftX` maps the live scroll position
         // into the visible (half-window) width.
-        let span = max(controller.session.visibleSpan, 0.001)
+        let span = max(controller.visibleSpan, 0.001)
         let waveformWidth = wideWidth / 2
-        let shiftX = CGFloat((controller.session.visibleStart - windowStart) / span) * waveformWidth
+        let shiftX = CGFloat((controller.visibleStart - windowStart) / span) * waveformWidth
         Color.clear
             .frame(height: rowHeight)
             .frame(maxWidth: .infinity)
@@ -3949,6 +3785,312 @@ private struct LaneShiftView: View {
                     .offset(x: -shiftX)
             }
             .clipped()
+    }
+}
+
+/// The timeline header ruler — moving time labels and tick notches. It
+/// legitimately redraws on every scroll event (it IS the moving ruler), so it
+/// is a self-observing leaf: only this view's body reads the visible window,
+/// and the header/section around it stays untouched per event.
+private struct TimelineHeaderRulerView: View {
+    var controller: PlaybackController
+    var width: CGFloat
+    var targetMarkerCount: Int
+    /// Minimum on-screen spacing (points) between minor ticks before they are hidden.
+    var minorTickMinSpacing: Double
+    var headerHeight: CGFloat
+
+    // Ruler notches hang downward from below the numbers toward the rows, Fission-style:
+    // major (labeled) ticks are tall — their top edge comes up to just beneath the number so the
+    // label sits against the tick like a baseline — while minor ticks stay short. Both are
+    // bottom-anchored so they hang toward the rows.
+    private var tickColor: Color { .secondary.opacity(0.45) }
+    private var majorTickHeight: CGFloat { 19 }
+    private var minorTickHeight: CGFloat { 8 }
+    /// Vertical inset of the time label from the top of the header.
+    private var labelTopInset: CGFloat { 7 }
+
+    var body: some View {
+        let visibleStart = controller.visibleStart
+        let visibleEnd = controller.visibleEnd
+        let rulerStart = max(visibleStart, controller.session.timelineStart)
+        let rulerEnd = min(visibleEnd, controller.session.timelineEnd)
+        let ruler = TimelineHeaderMarker.ruler(
+            timelineStart: rulerStart,
+            timelineEnd: rulerEnd,
+            targetMarkerCount: targetMarkerCount,
+            // Keep the just-off-screen major tick so its label clips at the left edge while scrolling
+            // rather than blinking out (mirrors the right-edge clipping in TimelineHeaderLabelLayout).
+            leadingMajorTicks: 1
+        )
+
+        // Drop minor ticks once they would pack closer than this; keeps the ruler from turning into
+        // a gray blur at narrow widths or high subdivision counts.
+        let visibleSpan = visibleEnd - visibleStart
+        let minorSpacing = visibleSpan > 0 ? ruler.minorInterval / visibleSpan * Double(width) : 0
+        let showMinorTicks = minorSpacing >= minorTickMinSpacing
+
+        return ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(.background.opacity(0.01))
+
+            if ruler.majorTicks.isEmpty {
+                Text("00:00")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 8)
+                    .frame(maxHeight: .infinity, alignment: .center)
+            } else {
+                if showMinorTicks {
+                    ForEach(ruler.minorTicks, id: \.self) { tickTime in
+                        minorTick(at: tickTime, visibleStart: visibleStart, visibleEnd: visibleEnd)
+                    }
+                }
+                ForEach(ruler.majorTicks, id: \.time) { marker in
+                    majorMarker(marker, visibleStart: visibleStart, visibleEnd: visibleEnd)
+                }
+            }
+        }
+        .clipped()
+        .accessibilityLabel("Timeline")
+    }
+
+    private func xPosition(for time: TimeInterval, visibleStart: TimeInterval, visibleEnd: TimeInterval) -> CGFloat {
+        CGFloat(
+            TransportMapping.normalizedPosition(
+                globalTime: time,
+                timelineStart: visibleStart,
+                timelineEnd: visibleEnd
+            )
+        ) * width
+    }
+
+    private func minorTick(at time: TimeInterval, visibleStart: TimeInterval, visibleEnd: TimeInterval) -> some View {
+        Rectangle()
+            .fill(tickColor)
+            .frame(width: 1, height: minorTickHeight)
+            .offset(x: xPosition(for: time, visibleStart: visibleStart, visibleEnd: visibleEnd))
+            // Anchor to the bottom so the notch hangs down toward the waveforms.
+            .frame(width: width, height: headerHeight, alignment: .bottomLeading)
+            .accessibilityHidden(true)
+    }
+
+    private func majorMarker(_ marker: TimelineHeaderMarker, visibleStart: TimeInterval, visibleEnd: TimeInterval) -> some View {
+        let tickX = xPosition(for: marker.time, visibleStart: visibleStart, visibleEnd: visibleEnd)
+        let labelWidth: CGFloat = 60
+        let labelLayout = TimelineHeaderLabelLayout.leading(
+            tickX: Double(tickX),
+            rulerWidth: Double(width)
+        )
+
+        return ZStack(alignment: .topLeading) {
+            // Number on top.
+            if labelLayout.isVisible {
+                Text(marker.label)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(width: labelWidth, alignment: .leading)
+                    .offset(x: CGFloat(labelLayout.x), y: labelTopInset)
+            }
+
+            // Taller notch hanging below the number, anchored to the header bottom.
+            Rectangle()
+                .fill(tickColor)
+                .frame(width: 1, height: majorTickHeight)
+                .offset(x: tickX)
+                .frame(width: width, height: headerHeight, alignment: .bottomLeading)
+        }
+        .frame(width: width, height: headerHeight, alignment: .topLeading)
+        .accessibilityLabel(marker.label)
+    }
+}
+
+/// Leaf wrapper for the scroll/magnify event overlay: it must be fed the live
+/// scroll position (its event math depends on it), so it alone re-runs per
+/// scroll event — one cheap representable update — instead of the section that
+/// mounts it.
+private struct TimelineScrollOverlayLeaf: View {
+    var controller: PlaybackController
+
+    var body: some View {
+        TimelineScrollOverlay(
+            visibleStart: controller.visibleStart,
+            visibleSpan: max(controller.visibleSpan, 0.001),
+            contentStart: controller.session.timelineStart,
+            contentEnd: controller.session.timelineEnd,
+            onScroll: { controller.scrollTimeline(toVisibleStart: $0) },
+            onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
+        )
+    }
+}
+
+/// Leaf around `TimelinePlayheadVisual` so only this body — a single
+/// representable update re-seating the CALayer tween — re-runs when the
+/// visible window or a transport anchor changes, not the whole section
+/// overlay. The CALayer system itself is untouched: steady playback still
+/// costs zero main-thread work between anchor events.
+private struct TimelinePlayheadOverlayView: View {
+    var controller: PlaybackController
+    /// While a ruler scrub is in flight: the preview x within the column.
+    var playheadDragX: CGFloat?
+    var infoWidth: CGFloat
+    var sectionHeight: CGFloat
+    var waveformWidth: CGFloat
+    var seatBottom: CGFloat
+    var laneAreaHeight: CGFloat
+
+    var body: some View {
+        let position = controller.displayTransportPosition()
+        TimelinePlayheadVisual(
+            currentX: playheadDragX ?? xPosition(for: position),
+            endX: xPosition(for: controller.session.playbackEnd),
+            remaining: max(0, controller.session.playbackEnd - position),
+            isPlaying: controller.session.isPlaying && playheadDragX == nil,
+            infoWidth: infoWidth,
+            sectionHeight: sectionHeight,
+            waveformWidth: waveformWidth,
+            seatBottom: seatBottom,
+            laneAreaHeight: laneAreaHeight
+        )
+    }
+
+    private func xPosition(for globalTime: TimeInterval) -> CGFloat {
+        CGFloat(
+            TransportMapping.normalizedPosition(
+                globalTime: globalTime,
+                timelineStart: controller.visibleStart,
+                timelineEnd: controller.visibleEnd
+            )
+        ) * waveformWidth
+    }
+}
+
+/// The loop selection rectangle and resize handles. A leaf because their
+/// x-positions track the per-scroll-event visible window; the gesture LOGIC
+/// (draft thresholds, commit, click-to-seek fallthrough) stays in
+/// `ContentView` closures, so behavior is unchanged. Mounted inside the
+/// container's `loopColumnSpace` so the handle drags report the same
+/// coordinates as before.
+private struct LoopOverlayContentView: View {
+    var controller: PlaybackController
+    var waveformWidth: CGFloat
+    var height: CGFloat
+    /// In-progress drag selection (absolute seconds); takes priority over the loop.
+    var draftRange: ClosedRange<TimeInterval>?
+    /// The resize preview or committed loop; `nil` while drag-selecting (the
+    /// caller suppresses it so the draft owns the rectangle and no grips show).
+    var displayedLoop: LoopRegion?
+    var onHandleChanged: (_ isStart: Bool, _ value: DragGesture.Value) -> Void
+    var onHandleEnded: (_ isStart: Bool, _ value: DragGesture.Value) -> Void
+
+    var body: some View {
+        // The only per-scroll-event reads: this leaf re-runs, the tree above
+        // it doesn't.
+        let visibleStart = controller.visibleStart
+        let visibleEnd = controller.visibleEnd
+
+        ZStack(alignment: .topLeading) {
+            if let range = loopTimeRange {
+                // Grip tabs only once the loop is committed/resizable — while
+                // drag-selecting, the edges stay plain lines.
+                let showsGrips = displayedLoop != nil
+                let x0 = xPosition(for: range.lowerBound, visibleStart: visibleStart, visibleEnd: visibleEnd)
+                let x1 = xPosition(for: range.upperBound, visibleStart: visibleStart, visibleEnd: visibleEnd)
+                Rectangle()
+                    .fill(Theme.secondary.opacity(0.16))
+                    .overlay(alignment: .leading) { loopEdge(showsGrip: showsGrips).offset(x: -3.5) }
+                    .overlay(alignment: .trailing) { loopEdge(showsGrip: showsGrips).offset(x: 3.5) }
+                    .frame(width: max(1, max(x0, x1) - min(x0, x1)), height: height)
+                    .offset(x: min(x0, x1))
+                    .allowsHitTesting(false)
+            }
+
+            // During resize, the preview loop is passed in as `displayedLoop`
+            // so playback is rebound only once on mouse-up.
+            if let loop = displayedLoop {
+                resizeHandle(
+                    atX: xPosition(for: loop.start, visibleStart: visibleStart, visibleEnd: visibleEnd),
+                    isStart: true
+                )
+                resizeHandle(
+                    atX: xPosition(for: loop.end, visibleStart: visibleStart, visibleEnd: visibleEnd),
+                    isStart: false
+                )
+            }
+        }
+    }
+
+    /// Time span of the rectangle: the drag draft, else the displayed loop.
+    private var loopTimeRange: ClosedRange<TimeInterval>? {
+        if let draftRange { return draftRange }
+        if let displayedLoop { return displayedLoop.start...displayedLoop.end }
+        return nil
+    }
+
+    private func xPosition(for time: TimeInterval, visibleStart: TimeInterval, visibleEnd: TimeInterval) -> CGFloat {
+        CGFloat(
+            TransportMapping.normalizedPosition(
+                globalTime: time,
+                timelineStart: visibleStart,
+                timelineEnd: visibleEnd
+            )
+        ) * waveformWidth
+    }
+
+    private func resizeHandle(atX x: CGFloat, isStart: Bool) -> some View {
+        let hitWidth: CGFloat = 12
+        // Cursor feedback (resizeLeftRight) is handled by the mouse-monitor
+        // cursor manager — SwiftUI hover doesn't fire reliably underneath the
+        // NSView-based timeline scroll overlay.
+        return Rectangle()
+            .fill(Color.white.opacity(0.001))
+            .frame(width: hitWidth, height: height)
+            .contentShape(Rectangle())
+            .offset(x: x - hitWidth / 2)
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(ContentView.loopColumnSpace))
+                    .onChanged { value in
+                        onHandleChanged(isStart, value)
+                    }
+                    .onEnded { value in
+                        onHandleEnded(isStart, value)
+                    }
+            )
+    }
+
+    /// Grab handle drawn at each loop edge: a slim accent rod inside a soft
+    /// accent halo, plus (once the loop is committed) a centered grip tab with
+    /// two engraved notches. Deliberately unlike the flat solid playhead line
+    /// and its ruler grabber, so the edges read as draggable resize handles
+    /// and stay distinguishable when the playhead sits on top of them.
+    private func loopEdge(showsGrip: Bool) -> some View {
+        ZStack {
+            Capsule()
+                .fill(Theme.secondary)
+                .shadow(color: Theme.secondary.opacity(0.85), radius: 3)
+                .frame(width: 2)
+
+            if showsGrip {
+                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                    .fill(Theme.secondary)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                            .stroke(.white.opacity(0.35), lineWidth: 0.75)
+                    )
+                    .overlay(
+                        HStack(spacing: 2) {
+                            Capsule().frame(width: 1, height: 10)
+                            Capsule().frame(width: 1, height: 10)
+                        }
+                        .foregroundStyle(.black.opacity(0.35))
+                    )
+                    .frame(width: 9, height: 24)
+                    .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+            }
+        }
+        .frame(width: 9)
     }
 }
 
