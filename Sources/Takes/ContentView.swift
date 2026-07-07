@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct NumericControlConfiguration {
+struct NumericControlConfiguration: Equatable {
     let range: ClosedRange<Int>
     let step: Int
     let largeStep: Int
@@ -1638,12 +1638,13 @@ struct ContentView: View {
                                 ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
                                     let isLifted = reorderDraggingID == sessionTrack.id
                                         || reorderRevealingID == sessionTrack.id
-                                    trackRow(
+                                    trackRowView(
                                         index: index,
                                         sessionTrack: sessionTrack,
                                         infoWidth: infoWidth,
                                         laneViewport: laneViewport
                                     )
+                                        .equatable()
                                         // The dragged row's floating preview stands in
                                         // for it; its slot stays reserved as the gap the
                                         // other rows slide around. It stays hidden one
@@ -2007,89 +2008,81 @@ struct ContentView: View {
         .accessibilityLabel(marker.label)
     }
 
-    private func trackRow(
+    /// Build the value for one equatable track row. All observable reads
+    /// (`controller.session`, `waveformStore`, `settings`) happen here in the
+    /// container so the row itself stays a pure value: a horizontal scroll or a
+    /// reorder gap move re-runs this cheap builder + an `==` check per row, but
+    /// never re-runs a row's body unless one of its compared inputs changed.
+    private func trackRowView(
         index: Int,
         sessionTrack: SessionTrack,
         infoWidth: CGFloat,
         laneViewport: LaneViewport
-    ) -> some View {
+    ) -> TrackRowView {
         let isActive = controller.session.activeTrackID == sessionTrack.id
+        let isBlind = controller.session.isBlindListeningModeEnabled
         // Suppress the hover trash button while a reorder drag is in flight: the
         // drag drives the pointer across rows, so their hover states would flash
         // the button on each one in passing.
-        let isHovered = hoveredTrackID == sessionTrack.id && reorderDraggingID == nil
-        return HStack(spacing: 0) {
-            trackInfoArea(index: index, sessionTrack: sessionTrack, showsTrash: isHovered)
-                .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
-                // Drag the info column to reorder in place (a move), or out of the
-                // window to copy the track's audio file onto Finder / another app /
-                // another Takes window. An AppKit drag source (behind the column's
-                // content, so its own controls still work) runs the drag with the
-                // right move-inside / copy-outside operation; a plain click selects.
-                .background(
-                    TrackRowDragSource(
-                        fileURL: sessionTrack.loadedTrack.url,
-                        trackID: sessionTrack.id,
-                        tooltip: controller.session.isBlindListeningModeEnabled
-                            ? "Track \(index + 1)"
-                            : sessionTrack.loadedTrack.displayName,
-                        onSelect: { controller.selectActiveTrack(sessionTrack.id) },
-                        onDragBegan: { reorderDraggingID = sessionTrack.id },
-                        onDragEnded: {
-                            // A committed reorder has already moved the row into
-                            // the reveal phase via the drop delegate; a cancelled
-                            // or copied-out drag reveals in place the same way.
-                            if let draggingID = reorderDraggingID {
-                                reorderRevealingID = draggingID
-                                reorderDraggingID = nil
-                            }
-                            reorderTargetIndex = nil
-                            // Next tick: the (possibly reordered) layout has
-                            // landed unanimated, so only the opacity animates —
-                            // a fade-in at the row's final position, timed to
-                            // the system's fade-out of the drag image.
-                            DispatchQueue.main.async {
-                                withAnimation(.easeInOut(duration: 0.24)) {
-                                    reorderRevealingID = nil
-                                }
-                            }
-                        },
-                        makeDragImage: {
-                            reorderCardDragImage(index: index, sessionTrack: sessionTrack, width: infoWidth)
-                        }
-                    )
-                )
-
-            // The lane draws a double-width window anchored to a half-viewport
-            // grid; scrolling slides it with this offset and the Canvas only
-            // re-rasterizes when the viewport crosses a grid boundary.
-            Color.clear
-                .frame(height: trackRowHeight)
-                .frame(maxWidth: .infinity)
-                .overlay(alignment: .topLeading) {
-                    waveformLane(sessionTrack: sessionTrack, laneViewport: laneViewport)
-                        .frame(width: laneViewport.wideWidth, height: trackRowHeight)
-                        .offset(x: -laneViewport.shiftX)
+        let showsTrash = hoveredTrackID == sessionTrack.id && reorderDraggingID == nil
+        return TrackRowView(
+            index: index,
+            sessionTrack: sessionTrack,
+            // Blind listening feeds the lane a nil waveform so progress can't
+            // leak identity through redraw timing (an invariant).
+            waveform: isBlind ? nil : waveformStore.waveform(for: sessionTrack.id),
+            isActive: isActive,
+            showsTrash: showsTrash,
+            isBlind: isBlind,
+            isOffsetFocused: focusedOffsetTrackID == sessionTrack.id,
+            infoWidth: infoWidth,
+            rowHeight: trackRowHeight,
+            windowStart: laneViewport.windowStart,
+            windowSpan: laneViewport.windowSpan,
+            wideWidth: laneViewport.wideWidth,
+            majorTickXs: laneViewport.majorTickXs,
+            zeroTickX: laneViewport.zeroTickX,
+            offsetConfiguration: settings.offsetConfiguration,
+            indexBadgeAppearance: settings.indexBadgeAppearance,
+            showsDebugLabel: settings.showsComponentDebugLabels,
+            controller: controller,
+            onSelect: { controller.selectActiveTrack(sessionTrack.id) },
+            onRemove: { controller.removeTrack(sessionTrack.id) },
+            onSetOffsetMs: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) },
+            onOffsetFocusChange: { focused in
+                if focused {
+                    focusedOffsetTrackID = sessionTrack.id
+                } else if focusedOffsetTrackID == sessionTrack.id {
+                    focusedOffsetTrackID = nil
                 }
-                .clipped()
-        }
-        .frame(height: trackRowHeight)
-        // Active highlight spans the whole row (info + lane) as one continuous
-        // band; a leading accent bar anchors the active track to the left edge.
-        // Drawn at the HStack level so the frozen-column edge (a top-level overlay)
-        // reads as crossing a single tinted band rather than two boxes.
-        .background(isActive ? Theme.activeRowFill : Color.clear)
-        .overlay(alignment: .leading) {
-            if isActive {
-                Rectangle()
-                    .fill(Theme.primary)
-                    .frame(width: 3)
-                    .allowsHitTesting(false)
+            },
+            onHover: { inside in
+                hoveredTrackID = inside ? sessionTrack.id : (hoveredTrackID == sessionTrack.id ? nil : hoveredTrackID)
+            },
+            onDragBegan: { reorderDraggingID = sessionTrack.id },
+            onDragEnded: {
+                // A committed reorder has already moved the row into the reveal
+                // phase via the drop delegate; a cancelled or copied-out drag
+                // reveals in place the same way.
+                if let draggingID = reorderDraggingID {
+                    reorderRevealingID = draggingID
+                    reorderDraggingID = nil
+                }
+                reorderTargetIndex = nil
+                // Next tick: the (possibly reordered) layout has landed
+                // unanimated, so only the opacity animates — a fade-in at the
+                // row's final position, timed to the system's fade-out of the
+                // drag image.
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.24)) {
+                        reorderRevealingID = nil
+                    }
+                }
+            },
+            makeDragImage: {
+                reorderCardDragImage(index: index, sessionTrack: sessionTrack, width: infoWidth)
             }
-        }
-        .onHover { inside in
-            hoveredTrackID = inside ? sessionTrack.id : (hoveredTrackID == sessionTrack.id ? nil : hoveredTrackID)
-        }
+        )
     }
 
     /// The floating card shown under the pointer while a track is dragged to
@@ -2101,7 +2094,11 @@ struct ContentView: View {
         let isBlind = controller.session.isBlindListeningModeEnabled
         let title = isBlind ? "Track \(index + 1)" : track.displayName
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            trackIndexBadge(index: index, isActive: controller.session.activeTrackID == sessionTrack.id)
+            TrackIndexBadgeView(
+                index: index,
+                isActive: controller.session.activeTrackID == sessionTrack.id,
+                appearance: settings.indexBadgeAppearance
+            )
                 // Same 1pt optical nudge as the in-row badge: baseline-aligned to
                 // the filename, but the fixed badge frame reads a touch low.
                 .offset(y: -1)
@@ -2291,215 +2288,22 @@ struct ContentView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func trackInfoArea(index: Int, sessionTrack: SessionTrack, showsTrash: Bool) -> some View {
-        let track = sessionTrack.loadedTrack
-        let isActive = controller.session.activeTrackID == sessionTrack.id
-        let isBlind = controller.session.isBlindListeningModeEnabled
-        let title = isBlind ? "Track \(index + 1)" : track.displayName
-        // Badge on the left; filename, metadata, and the Offset row form a single
-        // left-aligned column to its right so all three share the filename's left
-        // edge. Vertically centered so the info column matches the waveform lane.
-        // The badge, filename, and metadata opt out of hit-testing so the drag
-        // source behind the column receives their clicks (a drag anywhere but the
-        // trash button and offset field starts a reorder). The trash button and
-        // offset field keep hit-testing so they still work.
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            trackIndexBadge(index: index, isActive: isActive)
-                // Baseline is technically aligned, but the fixed badge frame makes
-                // the centered number read a touch low; nudge it up 1pt.
-                .offset(y: -1)
-                .allowsHitTesting(false)
-
-            // Outer spacing (12) pushes the Offset row down; the inner group's
-            // spacing (2) keeps the filename and metadata tightly associated.
-            // Tweak these two numbers to taste.
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 2) {
-                        // No `.help` here: hit-testing is off (clicks must reach
-                        // the drag source), which disables SwiftUI tooltips. The
-                        // full-title tooltip lives on the drag source view.
-                        Text(title)
-                            .font(.headline.weight(.medium))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .allowsHitTesting(false)
-
-                        Spacer(minLength: 0)
-
-                        Button {
-                            controller.removeTrack(sessionTrack.id)
-                        } label: {
-                            Image(systemName: "trash")
-                                .accessibilityLabel("Remove Track \(index + 1)")
-                                .frame(width: 16, height: 16)
-                        }
-                        .buttonStyle(.borderless)
-                        .frame(width: 16, height: 16)
-                        // Only surfaces on hover; kept mounted (opacity, not removed) so it
-                        // stays reachable by accessibility/keyboard.
-                        .opacity(showsTrash ? 1 : 0)
-                    }
-
-                    Text(track.metadataSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .opacity(isBlind ? 0 : 1)
-                        .accessibilityHidden(isBlind)
-                        .allowsHitTesting(false)
-                }
-
-                offsetControl(sessionTrack: sessionTrack)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 12)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .componentDebugLabel("Track Info", enabled: settings.showsComponentDebugLabels, color: .green)
-    }
-
-    /// The rounded index badge: filled with the primary color when the row is
-    /// active (white number), a neutral fill otherwise (secondary number).
-    private func trackIndexBadge(index: Int, isActive: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
-        let badge = settings.indexBadgeAppearance
-        return Text("\(index + 1)")
-            .font(.caption.weight(.semibold).monospacedDigit())
-            .foregroundStyle(isActive ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-            .frame(width: 20, height: 20)
-            .background {
-                shape.fill(isActive ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(Theme.indexBadgeInactiveFill))
-            }
-            // A crisp beveled rim all around: bright along the top edge fading to a
-            // dark bottom edge, so the badge reads as a raised, chiseled button.
-            .overlay {
-                shape.strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            .white.opacity(badge.bevelTopOpacity),
-                            .white.opacity(badge.bevelTopOpacity * 0.24),
-                            .black.opacity(badge.bevelBottomOpacity)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: badge.bevelWidth
-                )
-            }
-            .clipShape(shape)
-            .shadow(color: .black.opacity(badge.shadowOpacity), radius: CGFloat(badge.shadowRadius), y: CGFloat(badge.shadowY))
-            .accessibilityHidden(true)
-    }
-
-    private func offsetControl(sessionTrack: SessionTrack) -> some View {
-        let offsetMs = Int((sessionTrack.loadedTrack.offsetSeconds * 1000).rounded())
-        let binding = Binding(
-            get: { offsetMs },
-            set: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) }
-        )
-        // firstTextBaseline so the "Offset" caption sits on the same line as the
-        // field's numeric text; both use .caption so their baselines match.
-        return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("Offset")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            offsetField(binding: binding, trackID: sessionTrack.id)
-        }
-    }
-
-    /// Composite offset control: a single rounded, bordered box holding the
-    /// borderless numeric field, a static "ms" unit, and an embedded stepper — so
-    /// it reads as one input `[  0  ms  ⌃⌄ ]`. Typed-entry/clamping and the
-    /// Shift-large-step behavior come from `IntegerInputField`; the stepper mirrors
-    /// the same step amounts.
-    private func offsetField(binding: Binding<Int>, trackID: SessionTrack.ID) -> some View {
-        let isFocused = focusedOffsetTrackID == trackID
-        return HStack(spacing: 4) {
-            IntegerInputField(
-                value: binding,
-                configuration: settings.offsetConfiguration,
-                onFocusChange: { focused in
-                    if focused {
-                        focusedOffsetTrackID = trackID
-                    } else if focusedOffsetTrackID == trackID {
-                        focusedOffsetTrackID = nil
-                    }
-                }
-            )
-            .frame(width: 44)
-
-            Text("ms")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                    binding.wrappedValue = 0
-                }
-                .accessibilityLabel("Offset units")
-                .accessibilityHint("Double click to reset offset to zero milliseconds.")
-
-            Stepper(
-                "Offset",
-                onIncrement: { stepOffset(binding: binding, direction: 1) },
-                onDecrement: { stepOffset(binding: binding, direction: -1) }
-            )
-            .labelsHidden()
-            .controlSize(.small)
-        }
-        .padding(.leading, 6)
-        .padding(.trailing, 3)
-        .padding(.vertical, 2)
-        .fixedSize(horizontal: true, vertical: false)
-        // Recessed field: a filled surface with a soft top inner shadow, ringed by
-        // an inset bevel (dark top edge fading to a light bottom edge).
-        .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Theme.readoutSurface.shadow(.inner(color: .black.opacity(0.15), radius: 1.5, y: 1)))
-        }
-        // Focused: the bevel gives way to a solid ring in the app's active
-        // indigo, plus a soft matching glow so the live field is unmissable.
-        .overlay {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(
-                    isFocused
-                        ? AnyShapeStyle(Theme.primary)
-                        : AnyShapeStyle(LinearGradient(
-                            colors: [.black.opacity(0.14), .white.opacity(0.45)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )),
-                    lineWidth: isFocused ? 1.5 : 1
-                )
-        }
-        .shadow(color: isFocused ? Theme.primary.opacity(0.55) : .clear, radius: 3)
-        .animation(.easeOut(duration: 0.12), value: isFocused)
-    }
-
-    private func stepOffset(binding: Binding<Int>, direction: Int) {
-        binding.wrappedValue = settings.offsetConfiguration.steppedValue(
-            from: binding.wrappedValue,
-            direction: direction,
-            largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
-        )
-    }
-
     /// Geometry for the windowed waveform lanes. Each lane draws a
     /// 2×-viewport window anchored to a half-viewport grid in *absolute*
     /// timeline time, and the parent slides it with a plain `offset` as the
     /// timeline scrolls — so a horizontal scroll (or zoomed playback follow)
     /// only re-rasterizes the lane Canvases when the viewport crosses a grid
     /// boundary, not on every scroll event.
+    /// All fields are grid-quantized (they change only when the viewport
+    /// crosses a half-viewport boundary or on zoom), so they are safe to feed
+    /// the equatable row. The per-scroll-event slide (`shiftX`) is deliberately
+    /// *not* here — it lives in `LaneShiftView`, a leaf that reads `visibleStart`
+    /// live and applies the offset without re-running the row body.
     struct LaneViewport: Equatable {
         var windowStart: TimeInterval
         var windowSpan: TimeInterval
         /// Drawn width of the window (2× the visible lane width).
         var wideWidth: CGFloat
-        /// Offset of the visible region into the window, in points.
-        var shiftX: CGFloat
         var majorTickXs: [CGFloat]
         var zeroTickX: CGFloat
     }
@@ -2535,32 +2339,9 @@ struct ContentView: View {
             windowStart: windowStart,
             windowSpan: windowSpan,
             wideWidth: wideWidth,
-            shiftX: CGFloat((visibleStart - windowStart) / span) * waveformWidth,
             majorTickXs: ruler.majorTicks.map { windowX($0.time) },
             zeroTickX: windowX(0)
         )
-    }
-
-    private func waveformLane(
-        sessionTrack: SessionTrack,
-        laneViewport: LaneViewport
-    ) -> some View {
-        WaveformLaneView(
-            width: laneViewport.wideWidth,
-            waveform: controller.session.isBlindListeningModeEnabled
-                ? nil
-                : waveformStore.waveform(for: sessionTrack.id),
-            isBlindListening: controller.session.isBlindListeningModeEnabled,
-            isActive: controller.session.activeTrackID == sessionTrack.id,
-            trackStart: sessionTrack.loadedTrack.offsetSeconds,
-            trackDuration: sessionTrack.loadedTrack.duration,
-            visibleStart: laneViewport.windowStart,
-            visibleSpan: laneViewport.windowSpan,
-            majorTickXs: laneViewport.majorTickXs,
-            zeroTickX: laneViewport.zeroTickX,
-            showsDebugLabel: settings.showsComponentDebugLabels
-        )
-        .equatable()
     }
 
     // MARK: - Loop selection
@@ -3846,6 +3627,368 @@ private func extractDroppedFileURL(from item: NSSecureCoding?) -> URL? {
     }
 
     return nil
+}
+
+/// One track row (info column + waveform lane) as a standalone, `Equatable`
+/// value view (`.equatable()` at the call site).
+///
+/// The whole point is isolation: a horizontal scroll writes `visibleStart` and
+/// a reorder gap move bumps parent `@State`, both of which re-run the container
+/// body — but the container only reconstructs these cheap values and runs `==`
+/// per row. Unless a *compared* input changed, SwiftUI skips this body and the
+/// entire info-column subtree (index badge, offset field, drag source) is left
+/// untouched. Two things are deliberately kept OUT of the compared surface so
+/// they can update without re-running the body:
+///   - the per-scroll-event lane slide, handled by the `LaneShiftView` leaf,
+///   - the reorder gap `offset(y:)`/`opacity`/animation, applied by the
+///     container around this view.
+/// `controller` and the action closures are stored but excluded from `==`; the
+/// closures only capture the row's own identity/actions, never per-event state,
+/// so a skipped body can't show stale visuals.
+private struct TrackRowView: View, Equatable {
+    var index: Int
+    var sessionTrack: SessionTrack
+    /// Nil while blind listening (so progress can't leak identity) or before
+    /// generation starts. Array `==` short-circuits on shared storage, so the
+    /// common scroll case is O(1).
+    var waveform: Waveform?
+    var isActive: Bool
+    var showsTrash: Bool
+    var isBlind: Bool
+    var isOffsetFocused: Bool
+    var infoWidth: CGFloat
+    var rowHeight: CGFloat
+    var windowStart: TimeInterval
+    var windowSpan: TimeInterval
+    var wideWidth: CGFloat
+    var majorTickXs: [CGFloat]
+    var zeroTickX: CGFloat
+    var offsetConfiguration: NumericControlConfiguration
+    var indexBadgeAppearance: IndexBadgeAppearance
+    var showsDebugLabel: Bool
+
+    /// Reference forwarded to the lane-slide leaf; never read in this body.
+    var controller: PlaybackController
+    var onSelect: () -> Void
+    var onRemove: () -> Void
+    var onSetOffsetMs: (Int) -> Void
+    var onOffsetFocusChange: (Bool) -> Void
+    var onHover: (Bool) -> Void
+    var onDragBegan: () -> Void
+    var onDragEnded: () -> Void
+    var makeDragImage: () -> NSImage?
+
+    nonisolated static func == (lhs: TrackRowView, rhs: TrackRowView) -> Bool {
+        lhs.index == rhs.index
+            && lhs.sessionTrack == rhs.sessionTrack
+            && lhs.waveform == rhs.waveform
+            && lhs.isActive == rhs.isActive
+            && lhs.showsTrash == rhs.showsTrash
+            && lhs.isBlind == rhs.isBlind
+            && lhs.isOffsetFocused == rhs.isOffsetFocused
+            && lhs.infoWidth == rhs.infoWidth
+            && lhs.rowHeight == rhs.rowHeight
+            && lhs.windowStart == rhs.windowStart
+            && lhs.windowSpan == rhs.windowSpan
+            && lhs.wideWidth == rhs.wideWidth
+            && lhs.majorTickXs == rhs.majorTickXs
+            && lhs.zeroTickX == rhs.zeroTickX
+            && lhs.offsetConfiguration == rhs.offsetConfiguration
+            && lhs.indexBadgeAppearance == rhs.indexBadgeAppearance
+            && lhs.showsDebugLabel == rhs.showsDebugLabel
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            infoArea
+                .frame(width: infoWidth, height: rowHeight, alignment: .leading)
+                // Drag the info column to reorder in place (a move), or out of the
+                // window to copy the track's audio file onto Finder / another app /
+                // another Takes window. An AppKit drag source (behind the column's
+                // content, so its own controls still work) runs the drag with the
+                // right move-inside / copy-outside operation; a plain click selects.
+                .background(
+                    TrackRowDragSource(
+                        fileURL: sessionTrack.loadedTrack.url,
+                        trackID: sessionTrack.id,
+                        tooltip: isBlind
+                            ? "Track \(index + 1)"
+                            : sessionTrack.loadedTrack.displayName,
+                        onSelect: onSelect,
+                        onDragBegan: onDragBegan,
+                        onDragEnded: onDragEnded,
+                        makeDragImage: makeDragImage
+                    )
+                )
+
+            // The lane draws a double-width window anchored to a half-viewport
+            // grid; the leaf slides it per scroll event so the Canvas only
+            // re-rasterizes when the viewport crosses a grid boundary.
+            LaneShiftView(
+                controller: controller,
+                lane: lane,
+                windowStart: windowStart,
+                wideWidth: wideWidth,
+                rowHeight: rowHeight
+            )
+        }
+        .frame(height: rowHeight)
+        // Active highlight spans the whole row (info + lane) as one continuous
+        // band; a leading accent bar anchors the active track to the left edge.
+        // Drawn at the HStack level so the frozen-column edge (a top-level overlay)
+        // reads as crossing a single tinted band rather than two boxes.
+        .background(isActive ? Theme.activeRowFill : Color.clear)
+        .overlay(alignment: .leading) {
+            if isActive {
+                Rectangle()
+                    .fill(Theme.primary)
+                    .frame(width: 3)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onHover { onHover($0) }
+    }
+
+    private var lane: WaveformLaneView {
+        WaveformLaneView(
+            width: wideWidth,
+            waveform: waveform,
+            isBlindListening: isBlind,
+            isActive: isActive,
+            trackStart: sessionTrack.loadedTrack.offsetSeconds,
+            trackDuration: sessionTrack.loadedTrack.duration,
+            visibleStart: windowStart,
+            visibleSpan: windowSpan,
+            majorTickXs: majorTickXs,
+            zeroTickX: zeroTickX,
+            showsDebugLabel: showsDebugLabel
+        )
+    }
+
+    private var infoArea: some View {
+        let track = sessionTrack.loadedTrack
+        let title = isBlind ? "Track \(index + 1)" : track.displayName
+        // Badge on the left; filename, metadata, and the Offset row form a single
+        // left-aligned column to its right so all three share the filename's left
+        // edge. Vertically centered so the info column matches the waveform lane.
+        // The badge, filename, and metadata opt out of hit-testing so the drag
+        // source behind the column receives their clicks (a drag anywhere but the
+        // trash button and offset field starts a reorder). The trash button and
+        // offset field keep hit-testing so they still work.
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            TrackIndexBadgeView(index: index, isActive: isActive, appearance: indexBadgeAppearance)
+                // Baseline is technically aligned, but the fixed badge frame makes
+                // the centered number read a touch low; nudge it up 1pt.
+                .offset(y: -1)
+                .allowsHitTesting(false)
+
+            // Outer spacing (12) pushes the Offset row down; the inner group's
+            // spacing (2) keeps the filename and metadata tightly associated.
+            // Tweak these two numbers to taste.
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 2) {
+                        // No `.help` here: hit-testing is off (clicks must reach
+                        // the drag source), which disables SwiftUI tooltips. The
+                        // full-title tooltip lives on the drag source view.
+                        Text(title)
+                            .font(.headline.weight(.medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .allowsHitTesting(false)
+
+                        Spacer(minLength: 0)
+
+                        Button(action: onRemove) {
+                            Image(systemName: "trash")
+                                .accessibilityLabel("Remove Track \(index + 1)")
+                                .frame(width: 16, height: 16)
+                        }
+                        .buttonStyle(.borderless)
+                        .frame(width: 16, height: 16)
+                        // Only surfaces on hover; kept mounted (opacity, not removed) so it
+                        // stays reachable by accessibility/keyboard.
+                        .opacity(showsTrash ? 1 : 0)
+                    }
+
+                    Text(track.metadataSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .opacity(isBlind ? 0 : 1)
+                        .accessibilityHidden(isBlind)
+                        .allowsHitTesting(false)
+                }
+
+                offsetControl
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxHeight: .infinity, alignment: .center)
+        .componentDebugLabel("Track Info", enabled: showsDebugLabel, color: .green)
+    }
+
+    private var offsetControl: some View {
+        let offsetMs = Int((sessionTrack.loadedTrack.offsetSeconds * 1000).rounded())
+        let binding = Binding(
+            get: { offsetMs },
+            set: { onSetOffsetMs($0) }
+        )
+        // firstTextBaseline so the "Offset" caption sits on the same line as the
+        // field's numeric text; both use .caption so their baselines match.
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("Offset")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            offsetField(binding: binding)
+        }
+    }
+
+    /// Composite offset control: a single rounded, bordered box holding the
+    /// borderless numeric field, a static "ms" unit, and an embedded stepper — so
+    /// it reads as one input `[  0  ms  ⌃⌄ ]`. Typed-entry/clamping and the
+    /// Shift-large-step behavior come from `IntegerInputField`; the stepper mirrors
+    /// the same step amounts.
+    private func offsetField(binding: Binding<Int>) -> some View {
+        HStack(spacing: 4) {
+            IntegerInputField(
+                value: binding,
+                configuration: offsetConfiguration,
+                onFocusChange: onOffsetFocusChange
+            )
+            .frame(width: 44)
+
+            Text("ms")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    binding.wrappedValue = 0
+                }
+                .accessibilityLabel("Offset units")
+                .accessibilityHint("Double click to reset offset to zero milliseconds.")
+
+            Stepper(
+                "Offset",
+                onIncrement: { stepOffset(binding, direction: 1) },
+                onDecrement: { stepOffset(binding, direction: -1) }
+            )
+            .labelsHidden()
+            .controlSize(.small)
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 3)
+        .padding(.vertical, 2)
+        .fixedSize(horizontal: true, vertical: false)
+        // Recessed field: a filled surface with a soft top inner shadow, ringed by
+        // an inset bevel (dark top edge fading to a light bottom edge).
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Theme.readoutSurface.shadow(.inner(color: .black.opacity(0.15), radius: 1.5, y: 1)))
+        }
+        // Focused: the bevel gives way to a solid ring in the app's active
+        // indigo, plus a soft matching glow so the live field is unmissable.
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(
+                    isOffsetFocused
+                        ? AnyShapeStyle(Theme.primary)
+                        : AnyShapeStyle(LinearGradient(
+                            colors: [.black.opacity(0.14), .white.opacity(0.45)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )),
+                    lineWidth: isOffsetFocused ? 1.5 : 1
+                )
+        }
+        .shadow(color: isOffsetFocused ? Theme.primary.opacity(0.55) : .clear, radius: 3)
+        .animation(.easeOut(duration: 0.12), value: isOffsetFocused)
+    }
+
+    private func stepOffset(_ binding: Binding<Int>, direction: Int) {
+        binding.wrappedValue = offsetConfiguration.steppedValue(
+            from: binding.wrappedValue,
+            direction: direction,
+            largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
+        )
+    }
+}
+
+/// The per-scroll-event slide for one lane's grid-quantized window.
+///
+/// This leaf alone reads `visibleStart`/`visibleSpan`, so a horizontal scroll
+/// re-runs only N of these trivial bodies (recompute `shiftX`, re-apply the
+/// `.offset`) rather than the equatable rows around it. The lane image is
+/// `.equatable()`, so the Canvas is never touched by the slide — only when its
+/// grid-quantized window inputs change (a boundary crossing or zoom), at which
+/// point the parent row rebuilds and hands down a fresh `lane`.
+private struct LaneShiftView: View {
+    var controller: PlaybackController
+    var lane: WaveformLaneView
+    var windowStart: TimeInterval
+    var wideWidth: CGFloat
+    var rowHeight: CGFloat
+
+    var body: some View {
+        // Matches `makeLaneViewport`: `shiftX` maps the live scroll position
+        // into the visible (half-window) width.
+        let span = max(controller.session.visibleSpan, 0.001)
+        let waveformWidth = wideWidth / 2
+        let shiftX = CGFloat((controller.session.visibleStart - windowStart) / span) * waveformWidth
+        Color.clear
+            .frame(height: rowHeight)
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .topLeading) {
+                lane
+                    .equatable()
+                    .frame(width: wideWidth, height: rowHeight)
+                    .offset(x: -shiftX)
+            }
+            .clipped()
+    }
+}
+
+/// The rounded index badge: filled with the primary color when the row is
+/// active (white number), a neutral fill otherwise (secondary number).
+private struct TrackIndexBadgeView: View {
+    var index: Int
+    var isActive: Bool
+    var appearance: IndexBadgeAppearance
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let badge = appearance
+        return Text("\(index + 1)")
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(isActive ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+            .frame(width: 20, height: 20)
+            .background {
+                shape.fill(isActive ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(Theme.indexBadgeInactiveFill))
+            }
+            // A crisp beveled rim all around: bright along the top edge fading to a
+            // dark bottom edge, so the badge reads as a raised, chiseled button.
+            .overlay {
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(badge.bevelTopOpacity),
+                            .white.opacity(badge.bevelTopOpacity * 0.24),
+                            .black.opacity(badge.bevelBottomOpacity)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: badge.bevelWidth
+                )
+            }
+            .clipShape(shape)
+            .shadow(color: .black.opacity(badge.shadowOpacity), radius: CGFloat(badge.shadowRadius), y: CGFloat(badge.shadowY))
+            .accessibilityHidden(true)
+    }
 }
 
 /// One track's waveform lane: the peak-envelope Canvas (or the blind-listening
