@@ -77,7 +77,10 @@ final class WaveformStore: ObservableObject {
         sourceIdentities[trackID] = identity
         waveforms[trackID] = .empty
 
-        tasks[trackID] = Task.detached(priority: .utility) {
+        // User-initiated, not utility: the progressive fill is the visible
+        // feedback for a just-imported track, and utility QoS gets throttled
+        // onto efficiency cores.
+        tasks[trackID] = Task.detached(priority: .userInitiated) {
             await WaveformSource.generate(url: url) { peaks, bucketCount, isComplete in
                 await MainActor.run { [weak self] in
                     self?.apply(

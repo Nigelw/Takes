@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import MediaPlayer
 import SwiftUI
 import UniformTypeIdentifiers
@@ -214,7 +213,6 @@ final class RemotePlaybackCommandController: ObservableObject {
     private let commandCenter: MPRemoteCommandCenter
     private let nowPlayingInfoCenter: MPNowPlayingInfoCenter
     private var commandTargets: [CommandTarget] = []
-    private var sessionCancellable: AnyCancellable?
 
     init(
         commandCenter: MPRemoteCommandCenter = .shared(),
@@ -228,10 +226,24 @@ final class RemotePlaybackCommandController: ObservableObject {
         guard self.controller == nil else { return }
         self.controller = controller
         configureCommands()
-        sessionCancellable = controller.$session.sink { [weak self] session in
-            self?.updateRemoteState(for: session)
+        refreshRemoteState()
+    }
+
+    /// Push the current transport snapshot to the system, re-arming
+    /// observation so the next transport change (play/pause/seek/track
+    /// switch/loop wrap) pushes again. The snapshot deliberately has no
+    /// dependency on per-tick state, so this does not run during steady
+    /// playback — the system extrapolates position from elapsed + rate.
+    private func refreshRemoteState() {
+        guard let controller else { return }
+        let snapshot = withObservationTracking {
+            controller.remotePlaybackSnapshot()
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.refreshRemoteState()
+            }
         }
-        updateRemoteState(for: controller.session)
+        updateRemoteState(with: snapshot)
     }
 
     private func configureCommands() {
@@ -267,41 +279,34 @@ final class RemotePlaybackCommandController: ObservableObject {
         commandTargets.append(CommandTarget(command: command, target: target))
     }
 
-    private func updateRemoteState(for session: ComparisonSession) {
-        commandCenter.playCommand.isEnabled = session.isPlayable && !session.isPlaying
-        commandCenter.pauseCommand.isEnabled = session.isPlayable && session.isPlaying
-        commandCenter.togglePlayPauseCommand.isEnabled = session.isPlayable
-        commandCenter.nextTrackCommand.isEnabled = session.canSwitchPlayback
-        commandCenter.previousTrackCommand.isEnabled = session.canSwitchPlayback
+    private func updateRemoteState(with snapshot: PlaybackController.RemotePlaybackSnapshot) {
+        commandCenter.playCommand.isEnabled = snapshot.isPlayable && !snapshot.isPlaying
+        commandCenter.pauseCommand.isEnabled = snapshot.isPlayable && snapshot.isPlaying
+        commandCenter.togglePlayPauseCommand.isEnabled = snapshot.isPlayable
+        commandCenter.nextTrackCommand.isEnabled = snapshot.canSwitchPlayback
+        commandCenter.previousTrackCommand.isEnabled = snapshot.canSwitchPlayback
 
-        if session.isPlayable {
-            nowPlayingInfoCenter.nowPlayingInfo = nowPlayingInfo(for: session)
-            nowPlayingInfoCenter.playbackState = session.isPlaying ? .playing : .paused
+        if snapshot.isPlayable {
+            nowPlayingInfoCenter.nowPlayingInfo = nowPlayingInfo(for: snapshot)
+            nowPlayingInfoCenter.playbackState = snapshot.isPlaying ? .playing : .paused
         } else {
             nowPlayingInfoCenter.nowPlayingInfo = nil
             nowPlayingInfoCenter.playbackState = .stopped
         }
     }
 
-    private func nowPlayingInfo(for session: ComparisonSession) -> [String: Any] {
-        let title: String
-        if session.isBlindListeningModeEnabled, let activeTrackIndex = session.activeTrackIndex {
-            title = "Track \(activeTrackIndex + 1)"
-        } else {
-            title = session.activeTrack?.loadedTrack.displayName ?? "Takes"
-        }
-
+    private func nowPlayingInfo(for snapshot: PlaybackController.RemotePlaybackSnapshot) -> [String: Any] {
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle: title,
-            MPMediaItemPropertyPlaybackDuration: session.playbackEnd - session.playbackStart,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: session.transportPosition - session.playbackStart,
-            MPNowPlayingInfoPropertyPlaybackRate: session.isPlaying ? 1.0 : 0.0,
+            MPMediaItemPropertyTitle: snapshot.title,
+            MPMediaItemPropertyPlaybackDuration: snapshot.duration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: snapshot.elapsed,
+            MPNowPlayingInfoPropertyPlaybackRate: snapshot.isPlaying ? 1.0 : 0.0,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue
         ]
 
-        if let activeTrackIndex = session.activeTrackIndex {
-            info[MPMediaItemPropertyAlbumTrackNumber] = activeTrackIndex + 1
-            info[MPMediaItemPropertyAlbumTrackCount] = session.tracks.count
+        if let trackNumber = snapshot.trackNumber {
+            info[MPMediaItemPropertyAlbumTrackNumber] = trackNumber
+            info[MPMediaItemPropertyAlbumTrackCount] = snapshot.trackCount
         }
 
         return info
@@ -522,7 +527,7 @@ struct TakesLaunchOptions {
 @main
 struct TakesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var controller = PlaybackController()
+    @State private var controller = PlaybackController()
     @StateObject private var remotePlaybackCommands = RemotePlaybackCommandController()
     @StateObject private var settings = AppSettings()
     @StateObject private var updater = SoftwareUpdater()
@@ -860,7 +865,7 @@ private struct FileCommands: Commands {
 }
 
 private struct ViewCommands: Commands {
-    @ObservedObject var controller: PlaybackController
+    var controller: PlaybackController
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
 
     var body: some Commands {

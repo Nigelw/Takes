@@ -1,27 +1,35 @@
 import AVFoundation
-import Combine
 import Foundation
+import Observation
 
 @MainActor
-final class PlaybackController: ObservableObject {
+@Observable
+final class PlaybackController {
     static let maximumTrackCount = 32
 
-    @Published private(set) var session = ComparisonSession()
-    @Published private(set) var playbackError: PlaybackError?
+    private(set) var session = ComparisonSession()
+    private(set) var playbackError: PlaybackError?
     /// Whether an auto-align run is in flight (drives the toolbar button's
     /// spinner and blocks re-entry).
-    @Published private(set) var isAligning = false
+    private(set) var isAligning = false
     /// Progress (0...1) of the tempo-analysis pass, or `nil` while idle or
     /// during the quick first pass (which shows an indeterminate spinner).
-    @Published private(set) var alignmentProgress: Double?
+    private(set) var alignmentProgress: Double?
     /// Set when the quick pass leaves unaligned tracks: the UI surfaces a
     /// warning control beside the button whose popover offers the slower tempo
     /// analysis on them.
-    @Published private(set) var tempoAnalysisOffer: TempoAnalysisOffer?
+    private(set) var tempoAnalysisOffer: TempoAnalysisOffer?
     /// A brief success/failure flash on the Auto-Align button, auto-cleared a
     /// couple seconds after an alignment run finishes.
-    @Published private(set) var alignmentOutcome: AlignmentOutcome?
-    weak var settings: AppSettings?
+    private(set) var alignmentOutcome: AlignmentOutcome?
+    /// The transport timestamp string shown while playing. Maintained by the
+    /// transport tick but written only when the rendered text changes (~1×/s
+    /// at mm:ss precision), so the readout re-renders per displayed second
+    /// instead of per tick — and, unlike a `TimelineView(.animation)` readout,
+    /// keeps the window's display-link layout cycle idle. While paused the
+    /// readout derives directly from `transportPosition`.
+    private(set) var playingReadoutText = 0.0.formattedSignedTimestamp
+    @ObservationIgnored weak var settings: AppSettings?
 
     /// Tracks the quick alignment pass couldn't match, held while the user
     /// decides whether to run tempo analysis on them.
@@ -35,26 +43,32 @@ final class PlaybackController: ObservableObject {
         case failure
     }
 
-    private var alignmentOutcomeClearTask: Task<Void, Never>?
+    @ObservationIgnored private var alignmentOutcomeClearTask: Task<Void, Never>?
 
-    private let loader: AudioFileLoading
-    private let libraryTrackSelector: LibraryTrackSelecting
-    private let streamingTrackResolver: StreamingTrackResolving
-    private let streamingDownloadCache: StreamingDownloadCache
-    private let ytdlpManager: YTDLPManaging
-    private let engine = AVAudioEngine()
+    @ObservationIgnored private let loader: AudioFileLoading
+    @ObservationIgnored private let libraryTrackSelector: LibraryTrackSelecting
+    @ObservationIgnored private let streamingTrackResolver: StreamingTrackResolving
+    @ObservationIgnored private let streamingDownloadCache: StreamingDownloadCache
+    @ObservationIgnored private let ytdlpManager: YTDLPManaging
+    @ObservationIgnored private let engine = AVAudioEngine()
     nonisolated private static let maximumSilenceBufferDuration: TimeInterval = 5
 
-    private var engineConfigured = false
-    private var runtimeTracksByID: [SessionTrack.ID: RuntimeTrack] = [:]
+    @ObservationIgnored private var engineConfigured = false
+    @ObservationIgnored private var runtimeTracksByID: [SessionTrack.ID: RuntimeTrack] = [:]
+    /// Schedule anchors: the transport position playback started from and the
+    /// host time it started at. Observable (not ignored) on purpose — they
+    /// change exactly when the transport is re-anchored (play, pause, seek,
+    /// loop wrap), so observers of `remotePlaybackSnapshot()` and the playhead
+    /// can track those events without depending on the ticking
+    /// `transportPosition`.
     private var playbackStartedAt: CFTimeInterval?
     private var playbackStartedFromTransport: TimeInterval = 0
-    private var transportStoppedAtTimelineStart = true
-    private var timer: Timer?
-    private var engineConfigurationObserver: NotificationObserverToken?
-    private var scrollAnimationTimer: Timer?
-    private var scrollAnimation: ScrollAnimation?
-    private var streamingCacheFilesByTrackID: [SessionTrack.ID: URL] = [:]
+    @ObservationIgnored private var transportStoppedAtTimelineStart = true
+    @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var engineConfigurationObserver: NotificationObserverToken?
+    @ObservationIgnored private var scrollAnimationTimer: Timer?
+    @ObservationIgnored private var scrollAnimation: ScrollAnimation?
+    @ObservationIgnored private var streamingCacheFilesByTrackID: [SessionTrack.ID: URL] = [:]
 
     /// A short tween of `visibleStart`, used to animate the catch-up scroll when
     /// playback starts with the playhead off-screen.
@@ -452,6 +466,7 @@ final class PlaybackController: ObservableObject {
         playbackStartedAt = nil
         playbackStartedFromTransport = session.transportPosition
         timer?.invalidate()
+        pauseEngine()
     }
 
     func stop() {
@@ -466,6 +481,16 @@ final class PlaybackController: ObservableObject {
         playbackStartedFromTransport = session.transportPosition
         timer?.invalidate()
         applyAudibility()
+        pauseEngine()
+    }
+
+    /// Stop the engine's render thread while no transport is running so an
+    /// idle Takes costs ~0% CPU. Every resume path goes through `play()`,
+    /// which calls `ensureEngineRunning()` and reschedules players from
+    /// scratch, so nothing depends on the engine staying hot while paused.
+    private func pauseEngine() {
+        guard engine.isRunning else { return }
+        engine.pause()
     }
 
     func seek(to seconds: TimeInterval) {
@@ -879,7 +904,7 @@ final class PlaybackController: ObservableObject {
     }
 
     func skip(by delta: TimeInterval) {
-        seek(to: session.transportPosition + delta)
+        seek(to: currentTransportPosition() + delta)
     }
 
     // MARK: - Blind listening
@@ -1119,7 +1144,7 @@ final class PlaybackController: ObservableObject {
             anchorTime = session.visibleStart + anchorFraction * visibleSpan
         } else {
             let anchor = TimelineViewport.anchor(
-                transport: session.transportPosition,
+                transport: currentTransportPosition(),
                 visibleStart: session.visibleStart,
                 visibleSpan: visibleSpan
             )
@@ -1142,7 +1167,7 @@ final class PlaybackController: ObservableObject {
     /// runs off the edge (D6). Between pages `visibleStart` is left untouched so
     /// the timeline holds still. Suppressed while a scroll is animating (the
     /// tween is already moving the window).
-    private func followPlayheadIfZoomed() {
+    private func followPlayheadIfZoomed(transport: TimeInterval) {
         guard scrollAnimation == nil else { return }
 
         let contentSpan = session.timelineEnd - session.timelineStart
@@ -1151,7 +1176,7 @@ final class PlaybackController: ObservableObject {
         else { return }
 
         guard let newStart = TimelineViewport.pagedStart(
-            transport: session.transportPosition,
+            transport: transport,
             visibleStart: session.visibleStart,
             visibleSpan: session.visibleSpan,
             contentStart: session.timelineStart,
@@ -1170,7 +1195,7 @@ final class PlaybackController: ObservableObject {
         guard contentSpan > 0,
               !TimelineViewport.isFit(visibleSpan: session.visibleSpan, contentSpan: contentSpan),
               let newStart = TimelineViewport.pagedStart(
-                  transport: session.transportPosition,
+                  transport: currentTransportPosition(),
                   visibleStart: session.visibleStart,
                   visibleSpan: session.visibleSpan,
                   contentStart: session.timelineStart,
@@ -1488,11 +1513,12 @@ final class PlaybackController: ObservableObject {
                 clearLoop()
             }
         }
+        let recalculationPosition = currentTransportPosition()
         session.transportPosition = Self.transportPositionAfterTimelineRecalculation(
-            currentPosition: session.transportPosition,
+            currentPosition: recalculationPosition,
             timelineStart: session.timelineStart,
             timelineEnd: session.timelineEnd,
-            preferZero: preferZero || session.transportPosition == 0
+            preferZero: preferZero || recalculationPosition == 0
         )
 
         let viewport = TimelineViewport.adjustedForContentChange(
@@ -1620,8 +1646,19 @@ final class PlaybackController: ObservableObject {
     private func refreshTransportTick() {
         guard session.isPlaying else { return }
         let transport = currentTransportPosition()
-        session.transportPosition = transport
-        followPlayheadIfZoomed()
+        // Deliberately no `session.transportPosition` write here: `session` is
+        // one observable property, so a per-tick write would invalidate every
+        // view reading any part of it — the exact coarse invalidation this
+        // architecture avoids. During playback the position is derived from
+        // the schedule anchors (`displayTransportPosition()`); the stored
+        // position is written only at anchor events (play/pause/seek/stop/
+        // wrap), keeping it correct whenever playback is not running.
+        followPlayheadIfZoomed(transport: transport)
+
+        let readoutText = transport.formattedSignedTimestamp
+        if readoutText != playingReadoutText {
+            playingReadoutText = readoutText
+        }
 
         guard transport >= session.playbackEnd else { return }
 
@@ -1650,6 +1687,7 @@ final class PlaybackController: ObservableObject {
         playbackStartedFromTransport = session.transportPosition
         timer?.invalidate()
         applyAudibility()
+        pauseEngine()
     }
 
     /// Jump the playhead back to `start` and keep playing without tearing the
@@ -1690,6 +1728,56 @@ final class PlaybackController: ObservableObject {
             playbackStartedFromTransport + elapsed,
             timelineStart: session.timelineStart,
             timelineEnd: session.timelineEnd
+        )
+    }
+
+    /// The transport position to display right now.
+    ///
+    /// While playing this is derived from the schedule anchors and the clock —
+    /// not the periodically written `transportPosition` — so a
+    /// display-refresh-rate caller (the `TimelineView`-driven playhead) gets
+    /// smooth motion, and reading it in a view body does not subscribe that
+    /// view to per-tick state writes. While paused it falls back to
+    /// `transportPosition`, whose writes are then only user seeks.
+    func displayTransportPosition() -> TimeInterval {
+        currentTransportPosition()
+    }
+
+    /// Transport state relevant to Now Playing info and remote command
+    /// enablement. Built to be read inside `withObservationTracking`: every
+    /// field it derives from is observable, and while playing the elapsed time
+    /// comes from the schedule anchors, so the snapshot's dependencies change
+    /// on play/pause/seek/track-switch/loop-wrap — never on a 20 Hz tick. The
+    /// system extrapolates playback position from `elapsed` + `rate`, so no
+    /// periodic Now-Playing writes are needed.
+    struct RemotePlaybackSnapshot: Equatable {
+        var isPlayable: Bool
+        var isPlaying: Bool
+        var canSwitchPlayback: Bool
+        var title: String
+        var duration: TimeInterval
+        var elapsed: TimeInterval
+        var trackNumber: Int?
+        var trackCount: Int
+    }
+
+    func remotePlaybackSnapshot() -> RemotePlaybackSnapshot {
+        let title: String
+        if session.isBlindListeningModeEnabled, let activeTrackIndex = session.activeTrackIndex {
+            title = "Track \(activeTrackIndex + 1)"
+        } else {
+            title = session.activeTrack?.loadedTrack.displayName ?? "Takes"
+        }
+
+        return RemotePlaybackSnapshot(
+            isPlayable: session.isPlayable,
+            isPlaying: session.isPlaying,
+            canSwitchPlayback: session.canSwitchPlayback,
+            title: title,
+            duration: session.playbackEnd - session.playbackStart,
+            elapsed: currentTransportPosition() - session.playbackStart,
+            trackNumber: session.activeTrackIndex.map { $0 + 1 },
+            trackCount: session.tracks.count
         )
     }
 }
