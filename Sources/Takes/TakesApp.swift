@@ -529,6 +529,7 @@ struct TakesApp: App {
     @StateObject private var ytdlpUpdates = YTDLPUpdateState()
     private let launchOptions = TakesLaunchOptions()
     private let appearanceTunerPanel = AppearanceTunerPanelController()
+    private let analysisWindowController = AnalysisWindowController()
 
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
@@ -666,15 +667,10 @@ struct TakesApp: App {
                     Toggle("Show Component Names", isOn: $settings.showsComponentDebugLabels)
                     ResetMainWindowSizeButton()
                     OpenAppearanceTunerButton(panel: appearanceTunerPanel, settings: settings)
-                    OpenAnalysisWindowButton()
+                    OpenAnalysisWindowButton(controller: analysisWindowController)
                 }
             }
         }
-
-        Window("Analysis", id: TakesWindowPolicy.analysisWindowID) {
-            AnalysisWindowView()
-        }
-        .defaultSize(width: 760, height: 640)
 
         Settings {
             SettingsView()
@@ -750,13 +746,41 @@ final class AppearanceTunerPanelController {
     }
 }
 
+/// Hosts the experimental Analysis tool outside SwiftUI's `Window` scene list
+/// so it remains reachable only from Help > Debug instead of Window > Analysis.
+@MainActor
+final class AnalysisWindowController {
+    private var window: NSWindow?
+
+    func show() {
+        if let window {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let hosting = NSHostingController(rootView: AnalysisWindowView())
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Analysis"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.isExcludedFromWindowsMenu = true
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 760, height: 640))
+        window.setFrameAutosaveName(TakesWindowPolicy.analysisWindowID)
+        window.center()
+        self.window = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
 /// Opens the experimental single-file Analysis window from the Debug menu.
 private struct OpenAnalysisWindowButton: View {
-    @Environment(\.openWindow) private var openWindow
+    let controller: AnalysisWindowController
 
     var body: some View {
         Button("Analysis") {
-            openWindow(id: TakesWindowPolicy.analysisWindowID)
+            controller.show()
         }
         .keyboardShortcut("l", modifiers: [.command])
     }
