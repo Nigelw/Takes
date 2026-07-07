@@ -933,8 +933,16 @@ struct ContentView: View {
     @StateObject private var waveformStore = WaveformStore()
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
-    /// Whether the playhead grabber's open-hand cursor is currently pushed.
-    @State private var playheadCursorActive = false
+    /// While a ruler scrub is in flight: the playhead preview's x within the
+    /// waveform column. `nil` when not scrubbing.
+    @State private var playheadDragX: CGFloat?
+    /// Timeline frame + column split, captured for the mouse-monitor cursor
+    /// manager (which works in window coordinates, outside SwiftUI hover).
+    @State private var timelineCursorGeometry: TimelineCursorGeometry?
+    /// The cursor shape the cursor manager last applied, so it only calls
+    /// `NSCursor.set()` on transitions and never fights other controls'
+    /// cursors while the pointer is elsewhere.
+    @State private var timelineCursorShape = TimelineCursorShape.standard
     /// Which row is being dragged for reorder (hidden in place; its floating
     /// preview is the OS drag image). Set at drag start, cleared when the drag
     /// commits or is abandoned.
@@ -1625,8 +1633,7 @@ struct ContentView: View {
                         ZStack(alignment: .topLeading) {
                             // Shared per-lane geometry, computed once for all
                             // lanes rather than once per lane.
-                            let laneTickXs = laneMajorTickXs(width: waveformWidth)
-                            let laneZeroX = xPosition(for: 0, width: waveformWidth)
+                            let laneViewport = makeLaneViewport(waveformWidth: waveformWidth)
                             VStack(spacing: 0) {
                                 ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
                                     let isLifted = reorderDraggingID == sessionTrack.id
@@ -1635,9 +1642,7 @@ struct ContentView: View {
                                         index: index,
                                         sessionTrack: sessionTrack,
                                         infoWidth: infoWidth,
-                                        waveformWidth: waveformWidth,
-                                        laneMajorTickXs: laneTickXs,
-                                        laneZeroTickX: laneZeroX
+                                        laneViewport: laneViewport
                                     )
                                         // The dragged row's floating preview stands in
                                         // for it; its slot stays reserved as the gap the
@@ -1736,6 +1741,18 @@ struct ContentView: View {
                 }
             }
             .coordinateSpace(name: Self.playheadSpace)
+            // Keep the mouse-monitor cursor manager's picture of the timeline
+            // geometry current (window resize, column resize, scrolling).
+            .onChange(
+                of: TimelineCursorGeometry(
+                    sectionFrame: proxy.frame(in: .global),
+                    infoWidth: infoWidth,
+                    waveformWidth: waveformWidth
+                ),
+                initial: true
+            ) { _, geometry in
+                timelineCursorGeometry = geometry
+            }
         }
     }
 
@@ -1814,9 +1831,12 @@ struct ContentView: View {
 
             timelineHeaderRuler(width: waveformWidth)
                 .frame(maxWidth: .infinity)
-                // Same click-to-seek / drag-to-loop behaviour as the waveform column.
+                // Dragging anywhere on the ruler moves the playhead: the
+                // visual follows the pointer and the transport seeks once on
+                // mouse-up (no live scrubbing mid-drag). Loop selection is a
+                // lane-only gesture.
                 .contentShape(Rectangle())
-                .gesture(loopSelectionGesture(waveformWidth: waveformWidth, in: Self.rulerSpace))
+                .gesture(playheadScrubGesture(waveformWidth: waveformWidth))
                 .coordinateSpace(name: Self.rulerSpace)
                 .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
         }
@@ -1827,22 +1847,25 @@ struct ContentView: View {
     /// running down over the lanes — drawn as one overlay on top of the whole
     /// section so it sits ABOVE the frozen-column and header/row dividers.
     ///
-    /// Split into two layers on purpose. The *visuals* are moved by a single
-    /// Core Animation linear tween per transport anchor event (play, pause,
-    /// seek, loop wrap, zoom, scroll, resize) — see `TimelinePlayheadVisual` —
-    /// so steady playback does no per-frame main-thread work at all. The
-    /// *interaction* is a static scrub strip along the ruler's grabber band
-    /// whose gesture never rebuilds; it computes the playhead position on
-    /// demand (event-time, exact) rather than per frame.
+    /// Visuals only: the layers are moved by a single Core Animation linear
+    /// tween per transport anchor event (play, pause, seek, loop wrap, zoom,
+    /// scroll, resize) — see `TimelinePlayheadVisual` — so steady playback
+    /// does no per-frame main-thread work at all. Interaction lives on the
+    /// ruler (`playheadScrubGesture`); cursor feedback lives in the central
+    /// mouse-monitor cursor manager.
+    ///
+    /// While a ruler scrub is in flight (`playheadDragX != nil`) the playhead
+    /// parks at the pointer as a preview; the transport itself doesn't move
+    /// (and audio keeps playing from the old position) until mouse-up.
     @ViewBuilder
     private func timelinePlayheadOverlay(sectionHeight: CGFloat, infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
         if controller.session.isPlayable {
             let position = controller.displayTransportPosition()
             TimelinePlayheadVisual(
-                currentX: xPosition(for: position, width: waveformWidth),
+                currentX: playheadDragX ?? xPosition(for: position, width: waveformWidth),
                 endX: xPosition(for: controller.session.playbackEnd, width: waveformWidth),
                 remaining: max(0, controller.session.playbackEnd - position),
-                isPlaying: controller.session.isPlaying,
+                isPlaying: controller.session.isPlaying && playheadDragX == nil,
                 infoWidth: infoWidth,
                 sectionHeight: sectionHeight,
                 waveformWidth: waveformWidth,
@@ -1855,8 +1878,6 @@ struct ContentView: View {
             .frame(width: waveformWidth, height: sectionHeight, alignment: .topLeading)
             .offset(x: infoWidth)
             .allowsHitTesting(false)
-
-            timelinePlayheadScrubStrip(infoWidth: infoWidth, waveformWidth: waveformWidth)
         }
     }
 
@@ -1865,45 +1886,31 @@ struct ContentView: View {
     /// Comfortable grab target a bit wider than the visible grabber.
     private static let playheadHitWidth: CGFloat = 22
 
-    /// The transparent interaction band along the bottom of the ruler where
-    /// the grabber rides. A drag (or click) anywhere on the band seats the
-    /// playhead at that x and scrubs — starting on the grabber behaves as
-    /// before, and the band also catches it when the playhead is off-screen.
-    /// The open-hand cursor still appears only within grabber range, computed
-    /// on demand from the live transport position.
-    private func timelinePlayheadScrubStrip(infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
-        let seatBottom = trackHeaderHeight + trackTimelineDividerHeight
-        return Color.clear
-            .frame(width: waveformWidth, height: Self.playheadHandleHeight)
-            .contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case let .active(location):
-                    let playheadX = xPosition(for: controller.displayTransportPosition(), width: waveformWidth)
-                    setPlayheadGrabCursor(abs(location.x - playheadX) <= Self.playheadHitWidth / 2)
-                case .ended:
-                    setPlayheadGrabCursor(false)
+    /// Drag anywhere on the ruler to move the playhead. The playhead visual
+    /// follows the pointer as a preview; the seek happens once on mouse-up,
+    /// so nothing scrubs live mid-drag. A plain click behaves like the lane
+    /// click: deselect the loop when the click lands outside it, then seek.
+    private func playheadScrubGesture(waveformWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.rulerSpace))
+            .onChanged { value in
+                if playheadDragX == nil {
+                    NSCursor.closedHand.set()
                 }
+                playheadDragX = min(max(value.location.x, 0), waveformWidth)
             }
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.playheadSpace))
-                    .onChanged { value in
-                        controller.seek(to: globalTime(atX: value.location.x - infoWidth, width: waveformWidth))
-                    }
-            )
-            .offset(x: infoWidth, y: seatBottom - Self.playheadHandleHeight)
-    }
-
-    /// Push/pop bookkeeping for the grabber's open-hand cursor so repeated
-    /// hover callbacks never unbalance the cursor stack.
-    private func setPlayheadGrabCursor(_ active: Bool) {
-        guard active != playheadCursorActive else { return }
-        playheadCursorActive = active
-        if active {
-            NSCursor.openHand.push()
-        } else {
-            NSCursor.pop()
-        }
+            .onEnded { value in
+                playheadDragX = nil
+                let x = min(max(value.location.x, 0), waveformWidth)
+                let time = globalTime(atX: x, width: waveformWidth)
+                if let loop = controller.session.loopRegion, time < loop.start || time > loop.end {
+                    controller.deselectLoop()
+                }
+                controller.seek(to: time)
+                // The playhead now sits under the pointer, so the grab cursor
+                // is the right resting state; the central cursor manager
+                // re-evaluates on the next pointer move.
+                NSCursor.openHand.set()
+            }
     }
 
     private func timelineHeaderRuler(width: CGFloat) -> some View {
@@ -2004,9 +2011,7 @@ struct ContentView: View {
         index: Int,
         sessionTrack: SessionTrack,
         infoWidth: CGFloat,
-        waveformWidth: CGFloat,
-        laneMajorTickXs: [CGFloat],
-        laneZeroTickX: CGFloat
+        laneViewport: LaneViewport
     ) -> some View {
         let isActive = controller.session.activeTrackID == sessionTrack.id
         // Suppress the hover trash button while a reorder drag is in flight: the
@@ -2055,14 +2060,18 @@ struct ContentView: View {
                     )
                 )
 
-            waveformLane(
-                sessionTrack: sessionTrack,
-                waveformWidth: waveformWidth,
-                majorTickXs: laneMajorTickXs,
-                zeroTickX: laneZeroTickX
-            )
-            .frame(maxWidth: .infinity)
-            .frame(height: trackRowHeight)
+            // The lane draws a double-width window anchored to a half-viewport
+            // grid; scrolling slides it with this offset and the Canvas only
+            // re-rasterizes when the viewport crosses a grid boundary.
+            Color.clear
+                .frame(height: trackRowHeight)
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .topLeading) {
+                    waveformLane(sessionTrack: sessionTrack, laneViewport: laneViewport)
+                        .frame(width: laneViewport.wideWidth, height: trackRowHeight)
+                        .offset(x: -laneViewport.shiftX)
+                }
+                .clipped()
         }
         .frame(height: trackRowHeight)
         // Active highlight spans the whole row (info + lane) as one continuous
@@ -2478,29 +2487,66 @@ struct ContentView: View {
         )
     }
 
-    /// Major-tick x-positions (points) across a lane of the given width, using the
-    /// same ruler computation the header draws so the faint lane lines line up with
-    /// the labeled ticks and scroll/zoom in lockstep.
-    private func laneMajorTickXs(width: CGFloat) -> [CGFloat] {
-        let rulerStart = max(visibleStart, controller.session.timelineStart)
-        let rulerEnd = min(controller.session.visibleEnd, controller.session.timelineEnd)
+    /// Geometry for the windowed waveform lanes. Each lane draws a
+    /// 2×-viewport window anchored to a half-viewport grid in *absolute*
+    /// timeline time, and the parent slides it with a plain `offset` as the
+    /// timeline scrolls — so a horizontal scroll (or zoomed playback follow)
+    /// only re-rasterizes the lane Canvases when the viewport crosses a grid
+    /// boundary, not on every scroll event.
+    struct LaneViewport: Equatable {
+        var windowStart: TimeInterval
+        var windowSpan: TimeInterval
+        /// Drawn width of the window (2× the visible lane width).
+        var wideWidth: CGFloat
+        /// Offset of the visible region into the window, in points.
+        var shiftX: CGFloat
+        var majorTickXs: [CGFloat]
+        var zeroTickX: CGFloat
+    }
+
+    private func makeLaneViewport(waveformWidth: CGFloat) -> LaneViewport {
+        let span = max(visibleSpan, 0.000_1)
+        let quantum = span / 2
+        let windowStart = (visibleStart / quantum).rounded(.down) * quantum
+        let windowSpan = span * 2
+        let windowEnd = windowStart + windowSpan
+        let wideWidth = waveformWidth * 2
+        func windowX(_ time: TimeInterval) -> CGFloat {
+            CGFloat((time - windowStart) / windowSpan) * wideWidth
+        }
+
+        // Same tick computation the header draws, over the window's (clamped)
+        // range, with the marker budget scaled by the clamped-span ratio so
+        // the chosen interval matches the header's and the faint lane guides
+        // stay aligned with the labeled ticks.
+        let clampedStart = max(windowStart, controller.session.timelineStart)
+        let clampedEnd = min(windowEnd, controller.session.timelineEnd)
+        let targetCount = max(1, Int((
+            Double(timelineHeaderTargetMarkerCount) * (clampedEnd - clampedStart) / span
+        ).rounded()))
         let ruler = TimelineHeaderMarker.ruler(
-            timelineStart: rulerStart,
-            timelineEnd: rulerEnd,
-            targetMarkerCount: timelineHeaderTargetMarkerCount,
+            timelineStart: clampedStart,
+            timelineEnd: clampedEnd,
+            targetMarkerCount: targetCount,
             leadingMajorTicks: 1
         )
-        return ruler.majorTicks.map { xPosition(for: $0.time, width: width) }
+
+        return LaneViewport(
+            windowStart: windowStart,
+            windowSpan: windowSpan,
+            wideWidth: wideWidth,
+            shiftX: CGFloat((visibleStart - windowStart) / span) * waveformWidth,
+            majorTickXs: ruler.majorTicks.map { windowX($0.time) },
+            zeroTickX: windowX(0)
+        )
     }
 
     private func waveformLane(
         sessionTrack: SessionTrack,
-        waveformWidth: CGFloat,
-        majorTickXs: [CGFloat],
-        zeroTickX: CGFloat
+        laneViewport: LaneViewport
     ) -> some View {
         WaveformLaneView(
-            width: waveformWidth,
+            width: laneViewport.wideWidth,
             waveform: controller.session.isBlindListeningModeEnabled
                 ? nil
                 : waveformStore.waveform(for: sessionTrack.id),
@@ -2508,10 +2554,10 @@ struct ContentView: View {
             isActive: controller.session.activeTrackID == sessionTrack.id,
             trackStart: sessionTrack.loadedTrack.offsetSeconds,
             trackDuration: sessionTrack.loadedTrack.duration,
-            visibleStart: visibleStart,
-            visibleSpan: visibleSpan,
-            majorTickXs: majorTickXs,
-            zeroTickX: zeroTickX,
+            visibleStart: laneViewport.windowStart,
+            visibleSpan: laneViewport.windowSpan,
+            majorTickXs: laneViewport.majorTickXs,
+            zeroTickX: laneViewport.zeroTickX,
             showsDebugLabel: settings.showsComponentDebugLabels
         )
         .equatable()
@@ -2530,10 +2576,13 @@ struct ContentView: View {
                 .gesture(loopSelectionGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
 
             if let range = activeLoopXRange(waveformWidth: waveformWidth) {
+                // Grip tabs only once the loop is committed/resizable — while
+                // drag-selecting, the edges stay plain lines.
+                let showsGrips = loopDraft == nil && displayedLoopRegion != nil
                 Rectangle()
                     .fill(Theme.secondary.opacity(0.16))
-                    .overlay(alignment: .leading) { loopEdge() }
-                    .overlay(alignment: .trailing) { loopEdge() }
+                    .overlay(alignment: .leading) { loopEdge(showsGrip: showsGrips).offset(x: -3.5) }
+                    .overlay(alignment: .trailing) { loopEdge(showsGrip: showsGrips).offset(x: 3.5) }
                     .frame(width: max(1, range.upperBound - range.lowerBound), height: trackTimelineHeight)
                     .offset(x: range.lowerBound)
                     .allowsHitTesting(false)
@@ -2560,14 +2609,36 @@ struct ContentView: View {
     }
 
     /// Grab handle drawn at each loop edge: a slim accent rod inside a soft
-    /// accent halo. Deliberately unlike the flat solid playhead line, so it
-    /// reads as draggable and stays distinguishable when the playhead sits on
-    /// top of it.
-    private func loopEdge() -> some View {
-        Capsule()
-            .fill(Theme.secondary)
-            .shadow(color: Theme.secondary.opacity(0.85), radius: 3)
-            .frame(width: 2)
+    /// accent halo, plus (once the loop is committed) a centered grip tab with
+    /// two engraved notches. Deliberately unlike the flat solid playhead line
+    /// and its ruler grabber, so the edges read as draggable resize handles
+    /// and stay distinguishable when the playhead sits on top of them.
+    private func loopEdge(showsGrip: Bool) -> some View {
+        ZStack {
+            Capsule()
+                .fill(Theme.secondary)
+                .shadow(color: Theme.secondary.opacity(0.85), radius: 3)
+                .frame(width: 2)
+
+            if showsGrip {
+                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                    .fill(Theme.secondary)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                            .stroke(.white.opacity(0.35), lineWidth: 0.75)
+                    )
+                    .overlay(
+                        HStack(spacing: 2) {
+                            Capsule().frame(width: 1, height: 10)
+                            Capsule().frame(width: 1, height: 10)
+                        }
+                        .foregroundStyle(.black.opacity(0.35))
+                    )
+                    .frame(width: 9, height: 24)
+                    .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+            }
+        }
+        .frame(width: 9)
     }
 
     /// x-span (points, within the waveform column) of the loop being drawn:
@@ -2597,21 +2668,33 @@ struct ContentView: View {
     ) -> some View {
         let x = xPosition(for: time, width: waveformWidth)
         let hitWidth: CGFloat = 12
+        // Cursor feedback (resizeLeftRight) is handled by the mouse-monitor
+        // cursor manager — SwiftUI hover doesn't fire reliably underneath the
+        // NSView-based timeline scroll overlay.
         return Rectangle()
             .fill(Color.white.opacity(0.001))
             .frame(width: hitWidth, height: trackTimelineHeight)
             .contentShape(Rectangle())
             .offset(x: x - hitWidth / 2)
-            .onHover { inside in
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.loopColumnSpace))
                     .onChanged { value in
+                        // Don't start resizing on a jitter-sized movement, so
+                        // a plain click stays a click (handled below).
+                        let dx = abs(value.location.x - value.startLocation.x)
+                        guard loopResizeDraft != nil || dx > Self.loopDragThreshold else { return }
                         onChanged(globalTime(atX: value.location.x, width: waveformWidth))
                     }
                     .onEnded { value in
-                        onEnded(globalTime(atX: value.location.x, width: waveformWidth))
+                        if loopResizeDraft == nil {
+                            // A plain click on the handle strip: the strip sits
+                            // over the lane's own gesture and would otherwise
+                            // swallow it — run the same click-to-seek (and
+                            // deselect-if-outside) behaviour as the lane.
+                            handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth)
+                        } else {
+                            onEnded(globalTime(atX: value.location.x, width: waveformWidth))
+                        }
                     }
             )
     }
@@ -2810,10 +2893,21 @@ struct ContentView: View {
             guard let window = event.window else { return }
             let locationInWindow = event.locationInWindow
 
-            // Move events exist only to recover from a stuck iBeam cursor, and
-            // they arrive continuously while the pointer is over the window —
-            // gate on the cursor state before paying for the hit test.
-            if event.type == .mouseMoved, NSCursor.current !== NSCursor.iBeam {
+            if event.type == .mouseMoved {
+                // Timeline cursor feedback (playhead grabber, loop resize
+                // handles) is driven from here, in window coordinates —
+                // SwiftUI hover tracking is unreliable underneath the
+                // NSView-based timeline scroll overlay.
+                updateTimelineCursor(for: event)
+
+                // Recover from a stuck iBeam cursor; gate on the cursor state
+                // before paying for the hit test.
+                if NSCursor.current === NSCursor.iBeam {
+                    let hoveredView = window.contentView?.hitTest(locationInWindow)
+                    if CursorResetPolicy.shouldUseArrowCursor(currentCursor: NSCursor.current, hitView: hoveredView) {
+                        NSCursor.arrow.set()
+                    }
+                }
                 return
             }
 
@@ -2823,7 +2917,6 @@ struct ContentView: View {
                 NSCursor.arrow.set()
             }
 
-            guard event.type != .mouseMoved else { return }
             if NumericControlFocusPolicy.shouldClearEditingFocus(
                 firstResponder: window.firstResponder,
                 clickedView: clickedView
@@ -2833,6 +2926,94 @@ struct ContentView: View {
         }
         clickMonitor.start()
         mouseMonitor = clickMonitor
+    }
+
+    // MARK: - Timeline cursor management
+
+    struct TimelineCursorGeometry: Equatable {
+        var sectionFrame: CGRect
+        var infoWidth: CGFloat
+        var waveformWidth: CGFloat
+    }
+
+    enum TimelineCursorShape {
+        case standard
+        case playheadGrab
+        case loopResize
+    }
+
+    /// Pointer distance (points) from a loop edge within which the resize
+    /// cursor shows; matches the resize handles' hit strip half-width.
+    private static let loopResizeCursorRange: CGFloat = 6
+
+    /// Decide which timeline cursor applies at the pointer and apply it on
+    /// transitions only. Runs on every mouse-move; the math is a handful of
+    /// float compares against the captured section geometry.
+    private func updateTimelineCursor(for event: NSEvent) {
+        // A ruler scrub owns the cursor (closed hand) for its duration.
+        guard playheadDragX == nil else { return }
+        guard
+            let geometry = timelineCursorGeometry,
+            let window = event.window,
+            window.frameAutosaveName == TakesWindowPolicy.mainWindowFrameAutosaveName,
+            let contentView = window.contentView
+        else {
+            setTimelineCursor(.standard)
+            return
+        }
+
+        var point = contentView.convert(event.locationInWindow, from: nil)
+        if !contentView.isFlipped {
+            point.y = contentView.bounds.height - point.y
+        }
+
+        let columnX = point.x - geometry.sectionFrame.minX - geometry.infoWidth
+        let y = point.y - geometry.sectionFrame.minY
+        guard
+            geometry.sectionFrame.contains(point),
+            columnX >= 0, columnX <= geometry.waveformWidth,
+            controller.session.isPlayable
+        else {
+            setTimelineCursor(.standard)
+            return
+        }
+
+        let seatBottom = trackHeaderHeight + trackTimelineDividerHeight
+
+        // The grabber band along the bottom of the ruler.
+        if y >= seatBottom - Self.playheadHandleHeight, y <= seatBottom {
+            let playheadX = xPosition(for: controller.displayTransportPosition(), width: geometry.waveformWidth)
+            if abs(columnX - playheadX) <= Self.playheadHitWidth / 2 {
+                setTimelineCursor(.playheadGrab)
+                return
+            }
+        }
+
+        // The lanes: loop resize handles at the loop edges.
+        if y > seatBottom, let loop = displayedLoopRegion {
+            let startX = xPosition(for: loop.start, width: geometry.waveformWidth)
+            let endX = xPosition(for: loop.end, width: geometry.waveformWidth)
+            if abs(columnX - startX) <= Self.loopResizeCursorRange
+                || abs(columnX - endX) <= Self.loopResizeCursorRange {
+                setTimelineCursor(.loopResize)
+                return
+            }
+        }
+
+        setTimelineCursor(.standard)
+    }
+
+    private func setTimelineCursor(_ shape: TimelineCursorShape) {
+        guard shape != timelineCursorShape else { return }
+        timelineCursorShape = shape
+        switch shape {
+        case .standard:
+            NSCursor.arrow.set()
+        case .playheadGrab:
+            NSCursor.openHand.set()
+        case .loopResize:
+            NSCursor.resizeLeftRight.set()
+        }
     }
 
     private func configureAppOpenRouter() {
