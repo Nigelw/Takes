@@ -310,7 +310,6 @@ final class RemotePlaybackCommandController: ObservableObject {
 
 enum TakesWindowPolicy {
     static let mainWindowID = "main"
-    static let appearanceTunerWindowID = "appearance-tuner"
     static let analysisWindowID = "analysis"
     static let replacesDefaultNewItemCommands = true
     static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
@@ -529,6 +528,7 @@ struct TakesApp: App {
     @StateObject private var updater = SoftwareUpdater()
     @StateObject private var ytdlpUpdates = YTDLPUpdateState()
     private let launchOptions = TakesLaunchOptions()
+    private let appearanceTunerPanel = AppearanceTunerPanelController()
 
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
@@ -665,16 +665,11 @@ struct TakesApp: App {
                 Menu("Debug") {
                     Toggle("Show Component Names", isOn: $settings.showsComponentDebugLabels)
                     ResetMainWindowSizeButton()
-                    OpenAppearanceTunerButton()
+                    OpenAppearanceTunerButton(panel: appearanceTunerPanel, settings: settings)
                     OpenAnalysisWindowButton()
                 }
             }
         }
-
-        Window("Appearance Tuner", id: TakesWindowPolicy.appearanceTunerWindowID) {
-            AppearanceTunerView(settings: settings)
-        }
-        .defaultSize(width: 320, height: 680)
 
         Window("Analysis", id: TakesWindowPolicy.analysisWindowID) {
             AnalysisWindowView()
@@ -691,15 +686,67 @@ struct TakesApp: App {
     }
 }
 
-/// Opens the standalone Appearance Tuner window from the Debug menu. A tiny
-/// view (rather than an inline command button) so it can read `openWindow`.
+/// Opens the Appearance Tuner from the Debug menu as a floating palette that
+/// stays above the main window without stealing key focus, so slider tweaks
+/// update the transport controls live in the window behind it.
 private struct OpenAppearanceTunerButton: View {
-    @Environment(\.openWindow) private var openWindow
+    let panel: AppearanceTunerPanelController
+    let settings: AppSettings
 
     var body: some View {
         Button("Appearance Tuner") {
-            openWindow(id: TakesWindowPolicy.appearanceTunerWindowID)
+            panel.show(settings: settings)
         }
+    }
+}
+
+/// Hosts the Appearance Tuner in a non-activating utility `NSPanel`. A panel
+/// (rather than a SwiftUI `Window` scene) gives us a floating palette that
+/// never becomes the key window on its own — so adjusting a slider leaves the
+/// main window key and the transport buttons visibly updating behind it — and
+/// keeps the tuner out of the standard Window menu.
+///
+/// The panel is attached as a *child* of the main window rather than raised to
+/// the global floating level, so it hovers above the Takes window only and
+/// drops behind other apps normally instead of floating over everything.
+@MainActor
+final class AppearanceTunerPanelController {
+    private var panel: NSPanel?
+
+    func show(settings: AppSettings) {
+        if let panel {
+            reparent(panel)
+            panel.orderFront(nil)
+            return
+        }
+
+        let hosting = NSHostingController(rootView: AppearanceTunerView(settings: settings))
+        let panel = NSPanel(contentViewController: hosting)
+        panel.title = "Appearance Tuner"
+        panel.styleMask = [.titled, .closable, .utilityWindow, .nonactivatingPanel]
+        // Takes key only when a control that needs text entry is focused, so it
+        // never steals focus from the main window by itself.
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.isExcludedFromWindowsMenu = true
+        // We hold the only strong reference; closing just orders it out so it
+        // can be reopened without reconstructing the view.
+        panel.isReleasedWhenClosed = false
+        panel.setContentSize(NSSize(width: 320, height: 680))
+        panel.setFrameAutosaveName("AppearanceTunerPanel")
+        panel.center()
+        self.panel = panel
+        reparent(panel)
+        panel.orderFront(nil)
+    }
+
+    /// Attach the panel above the current main window so it tracks that window's
+    /// stacking (above it, hidden with it) instead of floating over every app.
+    private func reparent(_ panel: NSPanel) {
+        let parent = NSApp.mainWindow ?? NSApp.windows.first { $0 !== panel && $0.isVisible }
+        guard let parent, parent !== panel else { return }
+        panel.parent?.removeChildWindow(panel)
+        parent.addChildWindow(panel, ordered: .above)
     }
 }
 

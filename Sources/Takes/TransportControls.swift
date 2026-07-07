@@ -72,6 +72,11 @@ struct TransportButtonAppearance: Equatable {
     /// wash comes from the backlight pool below.
     var activeGlyphGlowOpacity: Double = 0
     var activeGlyphGlowRadius: Double = 0
+    /// Second, wider bloom around the active glyph — the soft colored corona
+    /// outside the tight halo that makes the glyph read as emitting light
+    /// rather than merely tinted.
+    var activeGlyphBloomOpacity: Double = 0
+    var activeGlyphBloomRadius: Double = 0
     /// Radial pool of primary light under the face when a secondary button is
     /// active — brightest behind the glyph, fading out before the rim, like a
     /// lamp beneath a translucent button cap.
@@ -126,12 +131,14 @@ struct TransportAppearance: Equatable {
         glossOpacity: 0.70,
         bevelWidth: 1.0,
         bevelBottomOpacity: 0.20,
-        activeFillOpacity: 0.06,
-        activeGlyphGlowOpacity: 0.45,
-        activeGlyphGlowRadius: 4.0,
-        activeBacklightOpacity: 0.07,
-        activeSpillOpacity: 0.35,
-        activeSpillRadius: 5.0,
+        activeFillOpacity: 0.04,
+        activeGlyphGlowOpacity: 0.50,
+        activeGlyphGlowRadius: 3.0,
+        activeGlyphBloomOpacity: 0.30,
+        activeGlyphBloomRadius: 7.0,
+        activeBacklightOpacity: 0.0,
+        activeSpillOpacity: 0.11,
+        activeSpillRadius: 0.0,
         insetDarkRadius: 1.0,
         insetDarkY: -0.75,
         insetLightRadius: 0.75,
@@ -158,12 +165,14 @@ struct TransportAppearance: Equatable {
         bevelWidth: 1.0,
         bevelTopOpacity: 0.35,
         bevelBottomOpacity: 0.50,
-        activeFillOpacity: 0.12,
-        activeGlyphGlowOpacity: 0.85,
-        activeGlyphGlowRadius: 2.0,
-        activeBacklightOpacity: 0.30,
-        activeSpillOpacity: 0.50,
-        activeSpillRadius: 6.0,
+        activeFillOpacity: 0.16,
+        activeGlyphGlowOpacity: 0.90,
+        activeGlyphGlowRadius: 2.5,
+        activeGlyphBloomOpacity: 0.65,
+        activeGlyphBloomRadius: 8.0,
+        activeBacklightOpacity: 0.45,
+        activeSpillOpacity: 0.60,
+        activeSpillRadius: 8.0,
         insetDarkOpacity: 0.45,
         insetDarkRadius: 1.0,
         insetDarkY: -0.75,
@@ -222,7 +231,11 @@ struct CircleTransportButtonStyle: ButtonStyle {
         return configuration.label
             .font(.system(size: glyphSize, weight: .semibold))
             .foregroundStyle(foreground)
-            .shadow(color: activeGlyphGlowColor(), radius: activeGlyphGlowRadius)
+            // Two glow layers sell the lit glyph: a tight halo hugging the
+            // glyph edge, then a wider soft bloom — white-hot core, colored
+            // corona, like an LED behind the glyph.
+            .shadow(color: activeGlyphGlowColor(opacity: appearance.activeGlyphGlowOpacity), radius: activeGlyphRadius(appearance.activeGlyphGlowRadius))
+            .shadow(color: activeGlyphGlowColor(opacity: appearance.activeGlyphBloomOpacity), radius: activeGlyphRadius(appearance.activeGlyphBloomRadius))
             // Pressed: the glyph sinks with the surface instead of shrinking.
             .offset(y: pressed ? pressedGlyphOffset : 0)
             .frame(width: diameter, height: diameter)
@@ -249,17 +262,17 @@ struct CircleTransportButtonStyle: ButtonStyle {
         case .primary:
             return .white
         case .secondary:
-            return isOn ? Theme.primary : Color.primary.opacity(0.75)
+            return isOn ? Theme.primaryLitGlyph : Color.primary.opacity(0.75)
         }
     }
 
-    private var activeGlyphGlowRadius: CGFloat {
-        kind == .secondary && isOn ? CGFloat(appearance.activeGlyphGlowRadius) : 0
+    private func activeGlyphRadius(_ radius: Double) -> CGFloat {
+        kind == .secondary && isOn ? CGFloat(radius) : 0
     }
 
-    private func activeGlyphGlowColor() -> Color {
+    private func activeGlyphGlowColor(opacity: Double) -> Color {
         guard kind == .secondary, isOn else { return .clear }
-        return Theme.primary.opacity(appearance.activeGlyphGlowOpacity)
+        return Theme.primary.opacity(opacity)
     }
 
     private var activeSpillColor: Color {
@@ -797,6 +810,8 @@ struct AppearanceTunerView: View {
                 tuner("Active highlight", value: b.activeFillOpacity, in: 0...1, default: d.activeFillOpacity)
                 tuner("Active glyph glow", value: b.activeGlyphGlowOpacity, in: 0...1, default: d.activeGlyphGlowOpacity)
                 tuner("Active glow radius", value: b.activeGlyphGlowRadius, in: 0...12, default: d.activeGlyphGlowRadius)
+                tuner("Active glyph bloom", value: b.activeGlyphBloomOpacity, in: 0...1, default: d.activeGlyphBloomOpacity)
+                tuner("Active bloom radius", value: b.activeGlyphBloomRadius, in: 0...16, default: d.activeGlyphBloomRadius)
                 tuner("Active backlight", value: b.activeBacklightOpacity, in: 0...1, default: d.activeBacklightOpacity)
                 tuner("Active spill", value: b.activeSpillOpacity, in: 0...1, default: d.activeSpillOpacity)
                 tuner("Active spill radius", value: b.activeSpillRadius, in: 0...16, default: d.activeSpillRadius)
