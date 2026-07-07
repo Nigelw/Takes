@@ -36,6 +36,16 @@ enum Theme {
         dark: (0.561, 0.529, 0.961)   // #8F87F5
     )
 
+    /// Lit glyph of an engaged secondary transport button. In dark mode the
+    /// glyph is pushed well past `primary` toward white so it reads as the hot
+    /// core of an LED inside its indigo glow; in light mode the surrounding
+    /// fill is pale, so the saturated `primary` hue itself is the lit read and
+    /// the glow layers do the emitting.
+    static let primaryLitGlyph = dynamic(
+        light: (0.424, 0.388, 0.914), // #6C63E9 — matches primary
+        dark: (0.855, 0.843, 1.0)     // #DAD7FF — near-white indigo core
+    )
+
     /// Accent for the playhead and the loop-selection highlight. Tied to the
     /// transport readout's display color (`readoutGlass`/`readoutGlow`): amber
     /// in light mode, LED cyan in dark. The light amber is deepened a touch
