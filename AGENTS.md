@@ -112,3 +112,10 @@ These are here to prevent parallel implementations and subtle regressions:
 - `LoopingTests.swift`, `TimelineHeaderMarkerTests.swift`,
   `TrackAlignerTests.swift`, `TrackDropHighlightTests.swift`, and
   `WaveformSourceTests.swift`: their named subsystems.
+
+## Ongoing Work
+
+- [docs/performance-plan-status.md](docs/performance-plan-status.md): status
+  of the playback/UI performance improvement effort (what's landed, what's
+  measured, what's left). Check this before starting new perf work so it
+  isn't duplicated or redone.
