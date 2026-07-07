@@ -72,6 +72,76 @@ speed), and re-checking blind-listening + loop behaviors manually.
 
 ---
 
+## STATUS 2026-07-07 — Iteration 3 work packages 3a + 3b DONE
+
+Both landed in this worktree branch as two commits (3a, then 3b), each with a
+green Debug build and full `xcodebuild test` pass. They target the two
+Iteration-3 root causes for jerky horizontal scroll and drag-to-reorder at ~20
+tracks: per-scroll-event whole-row diffing, and synchronized grid-boundary
+rasterization. Not yet measured with Instruments / the CPU table and not yet
+manually driven (the worktree has no `Private/Audio Samples`), so the numbers
+and feel still need a pass on a checkout that can load 20 tracks.
+
+**3a — row-body isolation (all in `ContentView.swift`):**
+
+- The track row is now `TrackRowView: View, Equatable`, applied `.equatable()`
+  in the container `ForEach`. It stores only value inputs (index, `SessionTrack`,
+  `Waveform?`, isActive, showsTrash, isBlind, offset-field focus, infoWidth,
+  row height, offset config, badge appearance, debug flag, and the
+  grid-quantized lane-window fields) plus `controller`/action closures that are
+  excluded from a hand-written `==`. The row body reads no observable state; the
+  container builds the values (`trackRowView(...)`) and passes actions as
+  closures. A scroll event or reorder gap move now costs N `==` checks + trivial
+  leaf/transform updates instead of N full row rebuilds.
+- The per-scroll-event lane slide moved into a new `LaneShiftView` leaf that
+  alone reads `visibleStart`/`visibleSpan` and applies `.offset(x: -shiftX)`;
+  `LaneViewport.shiftX` was removed (the struct now carries only grid-quantized
+  fields). The reorder gap `offset(y:)`/`opacity`/animation stay applied by the
+  container outside the equatable row, so gap moves animate transforms without
+  re-running row bodies.
+- Support changes: index badge extracted to shared `TrackIndexBadgeView` (also
+  used by the reorder preview card); `NumericControlConfiguration` made
+  `Equatable`. `==` is marked `nonisolated` (Swift 6 mode, since the type stores
+  main-actor closures/`controller`).
+
+**3b — async lane-window rasterization (all in `ContentView.swift`):**
+
+- `WaveformLaneView`'s non-blind Canvas path-fill is replaced by
+  `LaneWaveformImage`, which shows a pre-rendered template image of the 2×
+  window. Rendering runs off the main thread via `LaneWaveformRenderer.makeImage`
+  (a `nonisolated` enum method, so it executes on the cooperative pool), reusing
+  the moved `waveformPath` math to fill into a CGContext. `.task(id: renderKey)`
+  coalesces: a new window/zoom/waveform-revision/scale/offset cancels the prior
+  render and starts one; the result of a superseded render is dropped.
+- The previous image is retained (`@State`) and shown until the next is ready,
+  positioned by its own `windowStart` (`translation` term) so its peaks stay at
+  the correct absolute time within the target-window frame — the 2× window's
+  half-viewport slack covers the screen during the swap, and it stays aligned
+  with the vector tick guides (which still track the target window). First frame
+  is a clean empty→drawn cut (no flash).
+- The image is an alpha (template) mask tinted by `foregroundStyle`, so an
+  active/inactive A/B color swap re-tints without re-rasterizing (`isActive` is
+  excluded from `renderKey`). Rendered at `displayScale` (2×) for crispness.
+  In-memory only; nothing hits disk. Major-tick guides, the 0:00 marker, and the
+  blind-listening placeholder stay cheap vector/Canvas overlays; blind lanes
+  still get a `nil` waveform so nothing routes through the image renderer.
+
+**Deviations from the 3b spec:** none material. The alpha-only 8-bit context
+(`CGColorSpaceCreateDeviceGray()` + `.alphaOnly`) was verified at runtime to
+create successfully and to tint correctly through an `isTemplate` `NSImage`, so
+the tiny-memory goal is met; a `premultipliedLast` RGBA context is kept as an
+automatic fallback in case a future OS rejects that layout. `NSImage` crosses
+the actor boundary via `-> sending NSImage?` (Swift 6).
+
+**Still needs manual re-testing** (couldn't be done in-worktree): the actual
+scroll/reorder smoothness and CPU/Instruments numbers at 20 tracks; that the
+waveform envelope renders visibly (template path exercised only in unit build,
+not on real audio here); grid-boundary swaps look seamless during fast scroll;
+zoom, offset editing, blind-listening toggle, active-row A/B, loop
+select/resize, and the reorder lifted-row fade-in all still behave.
+
+---
+
 ## Iteration 0 — Baseline instrumentation (do first)
 
 Establish repeatable measurement before changing anything.

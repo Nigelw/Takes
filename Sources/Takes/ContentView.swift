@@ -4038,9 +4038,21 @@ private struct WaveformLaneView: View, Equatable {
                     .frame(width: width, height: 58)
                     .foregroundStyle(isActive ? Theme.primary.opacity(0.70) : Theme.waveformInactive.opacity(0.58))
             } else {
-                waveformShape
-                    .frame(width: width, height: 58)
-                    .foregroundStyle(isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7))
+                // The peak envelope is a pre-rendered, off-main-thread image of
+                // the 2× window (see `LaneWaveformImage`), so crossing a window
+                // grid boundary no longer rasterizes a viewport-wide path on the
+                // main thread across all N lanes in one frame.
+                LaneWaveformImage(
+                    waveform: waveform,
+                    isActive: isActive,
+                    trackStart: trackStart,
+                    trackDuration: trackDuration,
+                    windowStart: visibleStart,
+                    windowSpan: visibleSpan,
+                    wideWidth: width,
+                    laneHeight: 58
+                )
+                .frame(width: width, height: 58)
             }
 
             Rectangle()
@@ -4050,23 +4062,6 @@ private struct WaveformLaneView: View, Equatable {
         }
         .clipped()
         .componentDebugLabel("Waveform Lane", enabled: showsDebugLabel, color: .purple)
-    }
-
-    private var waveformShape: some View {
-        Canvas { [waveform, trackStart, trackDuration, visibleStart, visibleSpan] context, size in
-            guard let waveform, waveform.bucketCount > 0, !waveform.peaks.isEmpty else { return }
-            context.fill(
-                Self.waveformPath(
-                    for: waveform,
-                    in: size,
-                    trackStart: trackStart,
-                    trackDuration: trackDuration,
-                    visibleStart: visibleStart,
-                    visibleSpan: visibleSpan
-                ),
-                with: .foreground
-            )
-        }
     }
 
     private var blindPlaceholderWaveform: some View {
@@ -4109,10 +4104,214 @@ private struct WaveformLaneView: View, Equatable {
         return path
     }
 
+}
+
+/// One lane's waveform envelope, drawn as a pre-rendered template image of the
+/// 2× window rather than a per-frame `Canvas` path-fill.
+///
+/// Why: rasterizing a viewport-wide filled path is the expensive part, and the
+/// old design did it synchronously on the main thread for all N lanes in the
+/// same frame whenever the window grid boundary was crossed — a periodic hitch
+/// while scrolling. Here the fill happens off the main thread (a `nonisolated`
+/// async render, coalesced by `.task(id:)`), and the image is retained until the
+/// next one is ready. The 2× window carries half a viewport of slack, so the
+/// previous image — translated to sit at its own rendered window position —
+/// still covers the screen during the swap. The image is a template (alpha)
+/// mask tinted by `foregroundStyle`, so an active/inactive color swap re-tints
+/// without re-rasterizing.
+private struct LaneWaveformImage: View {
+    var waveform: Waveform?
+    var isActive: Bool
+    var trackStart: TimeInterval
+    var trackDuration: TimeInterval
+    /// Absolute start/span of the grid-quantized lane window (2× the viewport).
+    var windowStart: TimeInterval
+    var windowSpan: TimeInterval
+    var wideWidth: CGFloat
+    var laneHeight: CGFloat
+
+    @Environment(\.displayScale) private var displayScale
+    @State private var rendered: Rendered?
+
+    /// A finished render plus the window it was drawn for, so a stale image can
+    /// be positioned by its own `windowStart` while a fresh render is in flight.
+    private struct Rendered {
+        var image: NSImage
+        var windowStart: TimeInterval
+        var windowSpan: TimeInterval
+        var wideWidth: CGFloat
+    }
+
+    /// The inputs that actually change the rendered pixels. `isActive` is
+    /// excluded on purpose (tint is applied at display time), so an A/B switch
+    /// never re-renders.
+    private struct RenderKey: Equatable {
+        var windowStart: TimeInterval
+        var windowSpan: TimeInterval
+        var wideWidth: CGFloat
+        var laneHeight: CGFloat
+        var scale: CGFloat
+        var trackStart: TimeInterval
+        var trackDuration: TimeInterval
+        var peaksCount: Int
+        var bucketCount: Int
+        var isComplete: Bool
+    }
+
+    private var renderKey: RenderKey {
+        RenderKey(
+            windowStart: windowStart,
+            windowSpan: windowSpan,
+            wideWidth: wideWidth,
+            laneHeight: laneHeight,
+            scale: displayScale,
+            trackStart: trackStart,
+            trackDuration: trackDuration,
+            peaksCount: waveform?.peaks.count ?? 0,
+            bucketCount: waveform?.bucketCount ?? 0,
+            isComplete: waveform?.isComplete ?? false
+        )
+    }
+
+    private var tint: Color {
+        isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7)
+    }
+
+    var body: some View {
+        // Position the current image (fresh or stale) at its own window so its
+        // peaks land at the correct absolute time within the row's target
+        // window frame; when the render for the target window lands, this
+        // collapses to zero and the swap is seamless.
+        content
+            .frame(width: wideWidth, height: laneHeight, alignment: .leading)
+            .task(id: renderKey) { await render(for: renderKey) }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let rendered {
+            let translation = windowSpan > 0
+                ? CGFloat((rendered.windowStart - windowStart) / windowSpan) * wideWidth
+                : 0
+            Image(nsImage: rendered.image)
+                .resizable()
+                .frame(width: rendered.wideWidth, height: laneHeight)
+                .foregroundStyle(tint)
+                .offset(x: translation)
+        } else {
+            // Nothing yet: stay empty (the row + ticks are already on screen) so
+            // the envelope appears with a clean cut, never a flash.
+            Color.clear
+        }
+    }
+
+    private func render(for key: RenderKey) async {
+        // No data yet (pre-generation): keep any previous image rather than
+        // clearing it, so a scroll during load doesn't blank the lane.
+        guard let waveform, !waveform.peaks.isEmpty else { return }
+        let image = await LaneWaveformRenderer.makeImage(
+            waveform: waveform,
+            trackStart: trackStart,
+            trackDuration: trackDuration,
+            windowStart: windowStart,
+            windowSpan: windowSpan,
+            wideWidth: wideWidth,
+            laneHeight: laneHeight,
+            scale: displayScale
+        )
+        // `.task(id:)` cancels this task when the key changes; drop the result
+        // of a superseded render so only the latest window is shown.
+        guard !Task.isCancelled, let image else { return }
+        rendered = Rendered(
+            image: image,
+            windowStart: windowStart,
+            windowSpan: windowSpan,
+            wideWidth: wideWidth
+        )
+    }
+}
+
+/// Off-main-thread rasterizer for a lane's peak envelope. Deliberately a
+/// `nonisolated` enum so its `async` `makeImage` runs on the cooperative pool,
+/// not the main actor.
+enum LaneWaveformRenderer {
+    /// Render the envelope for one window into a template (alpha) `NSImage`.
+    /// Returns `nil` when there's nothing to draw.
+    static func makeImage(
+        waveform: Waveform,
+        trackStart: TimeInterval,
+        trackDuration: TimeInterval,
+        windowStart: TimeInterval,
+        windowSpan: TimeInterval,
+        wideWidth: CGFloat,
+        laneHeight: CGFloat,
+        scale: CGFloat
+    ) async -> sending NSImage? {
+        guard wideWidth > 0, laneHeight > 0, scale > 0 else { return nil }
+
+        let pointSize = CGSize(width: wideWidth, height: laneHeight)
+        let path = waveformPath(
+            for: waveform,
+            in: pointSize,
+            trackStart: trackStart,
+            trackDuration: trackDuration,
+            visibleStart: windowStart,
+            visibleSpan: windowSpan
+        )
+        if path.isEmpty { return nil }
+        if Task.isCancelled { return nil }
+
+        let pixelWidth = Int((wideWidth * scale).rounded())
+        let pixelHeight = Int((laneHeight * scale).rounded())
+        guard pixelWidth > 0, pixelHeight > 0,
+              let context = makeMaskContext(pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+        else { return nil }
+
+        // Work in points with a top-left origin (matching the path's y-down
+        // coordinates) while the backing store is at device scale.
+        context.translateBy(x: 0, y: CGFloat(pixelHeight))
+        context.scaleBy(x: scale, y: -scale)
+        // Solid opaque fill: the color is irrelevant for an alpha-only mask and
+        // becomes the template's coverage for an RGBA fallback context.
+        context.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+        context.addPath(path.cgPath)
+        context.fillPath()
+
+        guard !Task.isCancelled, let cgImage = context.makeImage() else { return nil }
+        let image = NSImage(cgImage: cgImage, size: pointSize)
+        image.isTemplate = true
+        return image
+    }
+
+    /// Prefer a 1-byte-per-pixel alpha-only mask; fall back to RGBA if the
+    /// platform rejects that bitmap layout. Either way the result templates.
+    private static func makeMaskContext(pixelWidth: Int, pixelHeight: Int) -> CGContext? {
+        if let context = CGContext(
+            data: nil,
+            width: pixelWidth,
+            height: pixelHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: pixelWidth,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue
+        ) {
+            return context
+        }
+        return CGContext(
+            data: nil,
+            width: pixelWidth,
+            height: pixelHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+    }
+
     /// Builds a filled, center-mirrored peak envelope across the visible window.
     ///
-    /// The Canvas is always the viewport width, never the (potentially enormous)
-    /// full track width, so the work stays O(viewport px) regardless of zoom and
+    /// The output is always the window width, never the (potentially enormous)
+    /// full track width, so the work stays O(window px) regardless of zoom and
     /// a partially generated waveform still fills in left-to-right.
     ///
     /// Buckets are pooled into fixed `[k·stride, (k+1)·stride)` groups anchored
@@ -4124,7 +4323,7 @@ private struct WaveformLaneView: View, Equatable {
     /// envelope would shimmer. File-anchored groups have fixed peaks, so a
     /// scroll only slides their x — the shape translates cleanly. `stride` is
     /// chosen so a group is ≈ 1 pixel wide (≥ 1 bucket), preserving transients.
-    private static func waveformPath(
+    static func waveformPath(
         for waveform: Waveform,
         in size: CGSize,
         trackStart: TimeInterval,
