@@ -3954,6 +3954,10 @@ private struct TimelinePlayheadOverlayView: View {
             seatBottom: seatBottom,
             laneAreaHeight: laneAreaHeight
         )
+        // Purely decorative (the caller disables hit testing too, and the layer
+        // view overrides `hitTest` to nil); kept here so the leaf can never
+        // intercept clicks regardless of how it's mounted.
+        .allowsHitTesting(false)
     }
 
     private func xPosition(for globalTime: TimeInterval) -> CGFloat {
@@ -4203,6 +4207,13 @@ private struct WaveformLaneView: View, Equatable {
                 .offset(x: zeroTickX)
         }
         .clipped()
+        // Lane visuals must NEVER hit-test: `.clipped()` clips drawing but NOT
+        // hit testing, and this subtree is 2× the viewport wide and slid left
+        // by up to a viewport width (plus a stale render can sit translated
+        // further), so it extends invisibly over the track-info column and
+        // would swallow its clicks. All lane interaction lives on the loop
+        // overlay / scroll overlay.
+        .allowsHitTesting(false)
         .componentDebugLabel("Waveform Lane", enabled: showsDebugLabel, color: .purple)
     }
 
@@ -4273,35 +4284,16 @@ private struct LaneWaveformImage: View {
     var laneHeight: CGFloat
 
     @Environment(\.displayScale) private var displayScale
-    @State private var rendered: Rendered?
+    @State private var model = LaneRenderModel()
 
-    /// A finished render plus the window it was drawn for, so a stale image can
-    /// be positioned by its own `windowStart` while a fresh render is in flight.
-    private struct Rendered {
-        var image: NSImage
-        var windowStart: TimeInterval
-        var windowSpan: TimeInterval
-        var wideWidth: CGFloat
-    }
+    /// Don't draw a stale image stretched past this multiple of the lane width
+    /// (a deep zoom-in since the render): beyond it the bitmap is featureless
+    /// mush and its layout frame grows unboundedly. Blank-until-fresh is the
+    /// better failure mode there.
+    private static let maxStaleStretch: CGFloat = 16
 
-    /// The inputs that actually change the rendered pixels. `isActive` is
-    /// excluded on purpose (tint is applied at display time), so an A/B switch
-    /// never re-renders.
-    private struct RenderKey: Equatable {
-        var windowStart: TimeInterval
-        var windowSpan: TimeInterval
-        var wideWidth: CGFloat
-        var laneHeight: CGFloat
-        var scale: CGFloat
-        var trackStart: TimeInterval
-        var trackDuration: TimeInterval
-        var peaksCount: Int
-        var bucketCount: Int
-        var isComplete: Bool
-    }
-
-    private var renderKey: RenderKey {
-        RenderKey(
+    private var renderKey: LaneRenderKey {
+        LaneRenderKey(
             windowStart: windowStart,
             windowSpan: windowSpan,
             wideWidth: wideWidth,
@@ -4320,56 +4312,199 @@ private struct LaneWaveformImage: View {
     }
 
     var body: some View {
-        // Position the current image (fresh or stale) at its own window so its
-        // peaks land at the correct absolute time within the row's target
-        // window frame; when the render for the target window lands, this
-        // collapses to zero and the swap is seamless.
         content
             .frame(width: wideWidth, height: laneHeight, alignment: .leading)
-            .task(id: renderKey) { await render(for: renderKey) }
+            // Forward the newest state to the render loop. `onChange` (not
+            // `.task(id:)`) on purpose: the loop must never cancel an in-flight
+            // render — cancelling on every key change starves the pipeline
+            // whenever keys churn faster than a render completes (generation
+            // progress, pinch-zoom, fast scroll) and nothing ever lands.
+            .onChange(of: renderKey, initial: true) {
+                model.request(LaneRenderRequest(key: renderKey, waveform: waveform))
+            }
     }
 
+    /// Position the newest finished image so its absolute time range stays
+    /// pinned to the ruler: translated by its window offset AND rescaled by the
+    /// current points-per-second, both in *current* window units. While a fresh
+    /// render is in flight this shows the previous window stretched/translated
+    /// (never frozen at the wrong scale); the moment the fresh image lands its
+    /// translation is 0 and its width is exactly `wideWidth`, in the same body
+    /// update — an atomic swap with no intermediate frame.
     @ViewBuilder
     private var content: some View {
-        if let rendered {
-            let translation = windowSpan > 0
-                ? CGFloat((rendered.windowStart - windowStart) / windowSpan) * wideWidth
-                : 0
-            Image(nsImage: rendered.image)
-                .resizable()
-                .frame(width: rendered.wideWidth, height: laneHeight)
-                .foregroundStyle(tint)
-                .offset(x: translation)
+        if let rendered = model.rendered, windowSpan > 0, rendered.windowSpan > 0 {
+            let pointsPerSecond = wideWidth / CGFloat(windowSpan)
+            let displayedWidth = CGFloat(rendered.windowSpan) * pointsPerSecond
+            let translation = CGFloat(rendered.windowStart - windowStart) * pointsPerSecond
+            // Draw only while the (possibly stretched) image still intersects
+            // the lane frame and the stretch is sane — this also bounds the
+            // offset so a stale bitmap can never extend far outside the lane's
+            // clip region.
+            if displayedWidth > 0,
+               displayedWidth <= wideWidth * Self.maxStaleStretch,
+               translation < wideWidth,
+               translation + displayedWidth > 0 {
+                Image(nsImage: rendered.image)
+                    .resizable()
+                    .frame(width: displayedWidth, height: laneHeight)
+                    .foregroundStyle(tint)
+                    .offset(x: translation)
+            } else {
+                Color.clear
+            }
         } else {
             // Nothing yet: stay empty (the row + ticks are already on screen) so
             // the envelope appears with a clean cut, never a flash.
             Color.clear
         }
     }
+}
 
-    private func render(for key: RenderKey) async {
-        // No data yet (pre-generation): keep any previous image rather than
-        // clearing it, so a scroll during load doesn't blank the lane.
-        guard let waveform, !waveform.peaks.isEmpty else { return }
-        let image = await LaneWaveformRenderer.makeImage(
-            waveform: waveform,
-            trackStart: trackStart,
-            trackDuration: trackDuration,
-            windowStart: windowStart,
-            windowSpan: windowSpan,
-            wideWidth: wideWidth,
-            laneHeight: laneHeight,
-            scale: displayScale
-        )
-        // `.task(id:)` cancels this task when the key changes; drop the result
-        // of a superseded render so only the latest window is shown.
-        guard !Task.isCancelled, let image else { return }
-        rendered = Rendered(
-            image: image,
-            windowStart: windowStart,
-            windowSpan: windowSpan,
-            wideWidth: wideWidth
-        )
+/// The inputs that actually change a lane's rendered pixels. `isActive` is
+/// excluded on purpose (tint is applied at display time), so an A/B switch
+/// never re-renders.
+private struct LaneRenderKey: Equatable {
+    var windowStart: TimeInterval
+    var windowSpan: TimeInterval
+    var wideWidth: CGFloat
+    var laneHeight: CGFloat
+    var scale: CGFloat
+    var trackStart: TimeInterval
+    var trackDuration: TimeInterval
+    var peaksCount: Int
+    var bucketCount: Int
+    var isComplete: Bool
+
+    /// Whether the only difference from `previous` is generation progress
+    /// (more peaks / completion) — the case worth throttling, since progress
+    /// updates arrive up to ~20 Hz per lane while a file decodes.
+    func isProgressOnlyAdvance(from previous: LaneRenderKey) -> Bool {
+        var normalized = self
+        normalized.peaksCount = previous.peaksCount
+        normalized.isComplete = previous.isComplete
+        return normalized == previous
+    }
+}
+
+private struct LaneRenderRequest {
+    var key: LaneRenderKey
+    var waveform: Waveform?
+}
+
+/// A finished render plus the window it was drawn for, so a stale image can be
+/// re-positioned/re-scaled against the current window while a fresh render is
+/// in flight.
+private struct LaneRenderedWindow {
+    var image: NSImage
+    var windowStart: TimeInterval
+    var windowSpan: TimeInterval
+    var wideWidth: CGFloat
+}
+
+/// Per-lane render loop. The contract that fixes the cancellation-starvation
+/// class of bugs (blank lanes during load, frozen lanes during zoom, blank
+/// stretches during fast scroll):
+///
+/// - An in-flight render is NEVER cancelled. It finishes, publishes, and then
+///   the loop immediately starts a render for the newest requested key if it
+///   has advanced. Intermediate keys are skipped; the newest never is.
+/// - Renders that differ from the last one only by generation progress are
+///   throttled to ~5 Hz per lane, trailing-edge guaranteed (a deferred kick
+///   always re-checks the newest request), and a completed waveform bypasses
+///   the throttle — so the final state always renders promptly.
+/// - Rasterization stays off the main thread (`LaneWaveformRenderer.makeImage`
+///   is nonisolated); only the tiny publish/bookkeeping runs on the main actor.
+@MainActor
+@Observable
+private final class LaneRenderModel {
+    /// The newest finished image. The only observable property — the lane view
+    /// re-runs exactly when a render lands.
+    private(set) var rendered: LaneRenderedWindow?
+
+    /// The newest requested state; only it matters, older requests are skipped.
+    @ObservationIgnored private var latest: LaneRenderRequest?
+    @ObservationIgnored private var isRendering = false
+    /// Key of the last render that ran to completion (even if it produced no
+    /// image), so the loop knows when it has caught up.
+    @ObservationIgnored private var completedKey: LaneRenderKey?
+    @ObservationIgnored private var lastRenderStartedAt: CFTimeInterval = 0
+    @ObservationIgnored private var throttleTimer: Task<Void, Never>?
+
+    /// Minimum gap between renders that only advance generation progress.
+    private static let progressRenderInterval: CFTimeInterval = 0.2
+
+    func request(_ request: LaneRenderRequest) {
+        latest = request
+        kick()
+    }
+
+    private func kick() {
+        guard !isRendering, let request = latest, request.key != completedKey else { return }
+
+        if let completedKey,
+           !request.key.isComplete,
+           request.key.isProgressOnlyAdvance(from: completedKey) {
+            let elapsed = CACurrentMediaTime() - lastRenderStartedAt
+            if elapsed < Self.progressRenderInterval {
+                scheduleThrottledKick(after: Self.progressRenderInterval - elapsed)
+                return
+            }
+        }
+
+        throttleTimer?.cancel()
+        throttleTimer = nil
+        startRender(request)
+    }
+
+    private func scheduleThrottledKick(after delay: CFTimeInterval) {
+        guard throttleTimer == nil else { return }
+        throttleTimer = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(delay, 0) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.throttleTimer = nil
+            self?.kick()
+        }
+    }
+
+    private func startRender(_ request: LaneRenderRequest) {
+        // No data yet (pre-generation): nothing to draw for this key. Keep any
+        // previous image (so a scroll during load doesn't blank the lane) and
+        // mark the key completed so the loop doesn't spin on it.
+        guard let waveform = request.waveform, !waveform.peaks.isEmpty else {
+            completedKey = request.key
+            return
+        }
+
+        isRendering = true
+        lastRenderStartedAt = CACurrentMediaTime()
+        let key = request.key
+        Task { [weak self] in
+            let image = await LaneWaveformRenderer.makeImage(
+                waveform: waveform,
+                trackStart: key.trackStart,
+                trackDuration: key.trackDuration,
+                windowStart: key.windowStart,
+                windowSpan: key.windowSpan,
+                wideWidth: key.wideWidth,
+                laneHeight: key.laneHeight,
+                scale: key.scale
+            )
+            guard let self else { return }
+            self.isRendering = false
+            self.completedKey = key
+            if let image {
+                self.rendered = LaneRenderedWindow(
+                    image: image,
+                    windowStart: key.windowStart,
+                    windowSpan: key.windowSpan,
+                    wideWidth: key.wideWidth
+                )
+            }
+            // The newest request may have advanced while this render ran —
+            // chain straight into it.
+            self.kick()
+        }
     }
 }
 
