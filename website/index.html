@@ -376,7 +376,7 @@
     }
 
     .hero-shot {
-      border-radius: 12px;
+      border-radius: clamp(8px, 1.2vw, 40px);
       box-shadow:
         0 34px 70px var(--hero-shadow-one),
         0 12px 24px var(--hero-shadow-two);
@@ -445,7 +445,7 @@
     .feature-grid {
       display: flex;
       flex-wrap: wrap;
-      gap: 16px;
+      gap: 24px;
     }
 
     .feature {
@@ -456,13 +456,14 @@
         radial-gradient(circle at 18% 0%, rgba(var(--feature-accent-rgb), 0.18), transparent 13rem),
         var(--panel);
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 16px;
       box-shadow:
         0 18px 44px rgba(40, 30, 90, 0.09),
         inset 0 1px 0 rgba(255, 255, 255, 0.74);
-      flex: 1 1 calc((100% - 32px) / 3);
+      flex: 1 1 calc((100% - 48px) / 3);
       min-height: 190px;
       min-width: 0;
+      overflow: hidden;
       padding: 24px;
       position: relative;
     }
@@ -485,31 +486,6 @@
       position: absolute;
       right: 0;
       top: 0;
-    }
-
-    .feature:nth-child(2) {
-      --feature-accent: #d99a28;
-      --feature-accent-rgb: 217, 154, 40;
-    }
-
-    .feature:nth-child(3) {
-      --feature-accent: #237c73;
-      --feature-accent-rgb: 35, 124, 115;
-    }
-
-    .feature:nth-child(4) {
-      --feature-accent: #d44f86;
-      --feature-accent-rgb: 212, 79, 134;
-    }
-
-    .feature:nth-child(5) {
-      --feature-accent: #4f77d8;
-      --feature-accent-rgb: 79, 119, 216;
-    }
-
-    .feature:nth-child(6) {
-      --feature-accent: #4a8f45;
-      --feature-accent-rgb: 74, 143, 69;
     }
 
     .feature-header {
@@ -580,7 +556,7 @@
 
     @media (max-width: 800px) {
       .feature {
-        flex-basis: calc((100% - 16px) / 2);
+        flex-basis: calc((100% - 24px) / 2);
       }
     }
 
@@ -654,17 +630,13 @@
         margin-top: 54px;
       }
 
-      .hero-shot {
-        border-radius: 16px;
-      }
-
       .features-band {
         padding-top: 68px;
         padding-bottom: 78px;
       }
 
       .feature-grid {
-        gap: 14px;
+        gap: 20px;
       }
 
       .feature {

@@ -257,6 +257,41 @@ WP-4a (items 1–4, ContentView) and WP-4b (item 5, PlaybackController) are
 delegated to parallel agents; WP-4b branches off the perf branch in its own
 worktree since the files are disjoint.
 
+## STATUS 2026-07-08 — WP-4a verified good; WP-5 in flight; WP-4b parked
+
+WP-4a landed (commits `f5139b0`, `72622c2`): never-cancelled per-lane render
+loop with ~5 Hz progress throttling, scale-aware stale-image placement (pinned
+to the ruler under zoom), `.allowsHitTesting(false)` across all lane visuals,
+cursor fixes ported. Notable finding: the zoomed-in dead info column was
+primarily the lanes' near-transparent full-window base fill overhanging the
+frozen column (hit-testable despite `.clipped()`) — present since Iteration 1.
+
+User re-test ([docs/performance-manual-testing-results.md](performance-manual-testing-results.md)):
+zoom sync GOOD, info-column clicks GOOD, playhead/loop-handle drags GOOD,
+vertical scroll during initial render decent. Cursor probes re-verified at
+runtime (grabber/handles/scrub cycle all pass on the branch build).
+
+**WP-5 (in flight, same branch)** from the user's remaining items:
+
+- **5a — peak pyramid.** `waveformPath` walks every bucket in the window per
+  render (256 frames/bucket, ≈41k buckets per 4-min track; ~800k bucket
+  visits × 20 lanes per zoom-out step) — why hi-res renders lag the stale
+  placeholders ("scaled low-res then pop-in" / blank zoom-out). Fix is the
+  GarageBand technique: in-memory multi-resolution peak levels, path built
+  from the level nearest ~1–2 buckets/vertex → O(viewport px) at any zoom.
+- **5b — vertical visibility culling.** Only lanes in the vertical viewport
+  (±2 rows overscan) rasterize; fixed row heights make the range pure math;
+  quantized/equality-guarded so per-event vertical scroll stays off the
+  container (3c pattern). Addresses the user's resize-to-1-track test.
+- **5c — bounded, top-first waveform generation.** Concurrency cap (2–3) in
+  session order + a static "pending" lane visual (no repeat-forever SwiftUI
+  animation — CA-only rule).
+
+**WP-4b (loop-gap) parked, lowest priority per user:** its agent hit a session
+limit mid-implementation; `/private/tmp/takes-loopgap` (branch
+`perf/loop-gap-fix`) holds partial uncommitted pre-queue work. Resume after
+WP-5 lands and is verified.
+
 ---
 
 ## Iteration 0 — Baseline instrumentation (do first)

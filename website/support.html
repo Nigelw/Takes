@@ -326,7 +326,7 @@
 
     .faq-grid {
       display: grid;
-      gap: 14px;
+      gap: 24px;
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -334,7 +334,7 @@
     .help-card {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 16px;
       padding: 24px;
     }
 
@@ -370,7 +370,7 @@
 
     .help-stack {
       display: grid;
-      gap: 14px;
+      gap: 24px;
       margin: 0 auto;
       max-width: 620px;
       min-width: 0;
@@ -415,7 +415,7 @@
     .help-card-grid,
     .shortcut-groups {
       display: grid;
-      gap: 14px;
+      gap: 24px;
     }
 
     .shortcut-groups {
@@ -591,7 +591,13 @@
       }
 
       .faq-grid {
+        gap: 20px;
         grid-template-columns: 1fr;
+      }
+
+      .help-stack,
+      .help-card-grid {
+        gap: 20px;
       }
 
       .shortcut-row {

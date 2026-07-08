@@ -39,16 +39,16 @@ Build time: ~30 s cold, seconds incremental. Look for `** BUILD SUCCEEDED **` at
 
 ## Run (agent path)
 
-Use `smoke.sh` to kill any existing instance, build, and launch:
+Use `build-debug.sh` to kill any existing instance, build, and launch:
 
 ```bash
-bash .claude/skills/run-takes/smoke.sh
+bash scripts/build-debug.sh
 ```
 
 Skip the rebuild if the app is already built:
 
 ```bash
-bash .claude/skills/run-takes/smoke.sh --no-build
+bash scripts/build-debug.sh --no-build
 ```
 
 After the script prints `Takes is running`, use computer-use tools to interact:
@@ -69,7 +69,7 @@ open -a "$APP" "/abs/path/track-a.m4a" "/abs/path/track-b.m4a"
 
 - Use **absolute file paths** (and an absolute path to the `.app`).
 - This **appends** to the current session, like opening files normally. For a clean load, quit/relaunch first (or click Clear All).
-- The app must already be built and launched once so Launch Services has it registered (`smoke.sh` handles build + launch).
+- The app must already be built and launched once so Launch Services has it registered (`build-debug.sh` handles build + launch).
 - Sample audio for testing lives in `Private/Audio Samples/` (e.g. the two `Where to Begin` takes make a good comparison pair).
 
 After loading, use computer-use only for what genuinely needs eyes — confirming the waveform rendered, checking playback, reading the UI.
@@ -82,24 +82,23 @@ pkill -x Takes
 
 ## Run (hand-off to user)
 
-Build and launch, then stop and let the user drive it. `smoke.sh` kills any existing instance, builds, and launches:
+Build and launch, then stop and let the user drive it. `build-debug.sh` kills any existing instance, builds, and launches:
 
 ```bash
-bash .claude/skills/run-takes/smoke.sh
+bash scripts/build-debug.sh
 ```
 
 Skip the rebuild if the app is already built and you only need it relaunched:
 
 ```bash
-bash .claude/skills/run-takes/smoke.sh --no-build
+bash scripts/build-debug.sh --no-build
 ```
 
 Once the script prints `Takes is running`, you're done — the app is on screen for the user. **Do not** call `request_access`, `screenshot`, or click anything. Tell the user it's ready to test, and optionally offer to preload sample audio (see [Load audio files](#load-audio-files-agent-path)) so they land on a populated timeline. Loading files from the shell is fine in this mode — it's the computer-use interaction you skip, not the setup.
 
 ## UI smoke checks
 
-Use only the checks relevant to the change unless the user asks for a full
-manual pass:
+Use only the checks relevant to the change unless the user asks for a full manual pass:
 
 1. Confirm the top transport shows play/pause, switch, blind listening,
    auto-align, zoom, repeat, and signed time readout controls.
@@ -127,7 +126,7 @@ manual pass:
 
 ## Gotchas
 
-- **`open` returns immediately** — the process takes ~1 second to appear. `smoke.sh` polls `pgrep -x Takes` to wait. Don't screenshot immediately after calling `open`; wait for the script to confirm the PID.
+- **`open` returns immediately** — the process takes ~1 second to appear. `build-debug.sh` polls `pgrep -x Takes` to wait. Don't screenshot immediately after calling `open`; wait for the script to confirm the PID.
 
 ## Troubleshooting
 
@@ -136,4 +135,4 @@ manual pass:
 | `** BUILD FAILED **` with missing Sparkle framework | Run `xcodebuild` once; it fetches the SPM dependency automatically on first run. If it still fails, open `Takes.xcodeproj` in Xcode once to resolve packages. |
 | `open` reports the app can't be opened (damaged/quarantine) | Run `xattr -d com.apple.quarantine .derived-data/Build/Products/Debug/Takes.app` |
 | `pgrep -x Takes` never succeeds after launch | Check Console.app for crash logs; usually a missing entitlement or code-signing issue on unsigned builds. Re-run the full build step. |
-| Takes is already running from a previous session | `pkill -x Takes` before launching, or `smoke.sh` does this automatically. |
+| Takes is already running from a previous session | `pkill -x Takes` before launching, or `build-debug.sh` does this automatically. |

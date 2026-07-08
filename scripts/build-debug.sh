@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: bash .claude/skills/run-takes/smoke.sh [--no-build]
+# Usage: bash .claude/skills/run-takes/build-debug.sh [--no-build]
 # Kills any running Takes instance, optionally rebuilds, then launches the app.
 # Run from the Takes/ repo root.
 set -euo pipefail
