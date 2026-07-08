@@ -1859,6 +1859,18 @@ struct SessionTests {
         #expect(TrackSwitchArrowHotkey.direction(forKeyCode: 124, modifierFlags: []) == nil)
     }
 
+    @Test
+    func renderableRowRangeTracksViewportWithOverscan() {
+        // Viewport shows rows 0–2 (3 × 100pt): overscan extends the tail.
+        #expect(ContentView.renderableRowRange(contentMinY: 0, viewportHeight: 300, rowStep: 100) == 0...5)
+        // Scrolled 250pt down: rows 2–5 visible, ±2 overscan → 0...7.
+        #expect(ContentView.renderableRowRange(contentMinY: -250, viewportHeight: 300, rowStep: 100) == 0...7)
+        // Deep scroll clamps nothing at the top anymore.
+        #expect(ContentView.renderableRowRange(contentMinY: -1000, viewportHeight: 300, rowStep: 100) == 8...15)
+        // Degenerate geometry stays fully open (nothing culled).
+        #expect(ContentView.renderableRowRange(contentMinY: 0, viewportHeight: 0, rowStep: 100) == 0...Int.max)
+    }
+
     private func makeTrack(name: String) -> LoadedTrack {
         LoadedTrack(
             url: URL(fileURLWithPath: "/tmp/\(name)"),

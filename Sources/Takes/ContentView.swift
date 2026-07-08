@@ -967,6 +967,12 @@ struct ContentView: View {
     @State private var mainWindowIsKey = true
     @State private var loopDraft: LoopDraft?
     @State private var loopResizeDraft: LoopRegion?
+    /// Row indices whose lanes may rasterize: the rows intersecting the
+    /// vertical scroll viewport plus overscan. Row-quantized and written with
+    /// an equality guard, so vertical scrolling within the band never re-runs
+    /// the container. Starts fully open so nothing is culled before the first
+    /// geometry pass lands.
+    @State private var renderableRows: ClosedRange<Int> = 0...Int.max
     @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
     @State private var trackInfoColumnWidth: Double
     @State private var showsAlignmentAttentionPopover = false
@@ -989,6 +995,26 @@ struct ContentView: View {
     /// Coordinate space for the timeline ruler, so ruler gestures report x in
     /// `0...waveformWidth` just like the waveform column.
     private static let rulerSpace = "timelineRuler"
+    /// Coordinate space of the vertical track ScrollView, for reading the rows'
+    /// content offset when computing the renderable row range.
+    private static let trackScrollSpace = "trackScroll"
+    /// Rows beyond the visible viewport on each side that still rasterize, so
+    /// small scrolls reveal already-rendered lanes.
+    private static let renderableRowOverscan = 2
+
+    /// Row indices intersecting the vertical viewport ± overscan. Rows are
+    /// fixed-height, so this is pure math on the content offset.
+    static func renderableRowRange(
+        contentMinY: CGFloat,
+        viewportHeight: CGFloat,
+        rowStep: CGFloat
+    ) -> ClosedRange<Int> {
+        guard rowStep > 0, viewportHeight > 0 else { return 0...Int.max }
+        let topVisible = -contentMinY
+        let first = Int((topVisible / rowStep).rounded(.down)) - renderableRowOverscan
+        let last = Int(((topVisible + viewportHeight) / rowStep).rounded(.down)) + renderableRowOverscan
+        return max(first, 0)...max(last, 0)
+    }
     /// Coordinate space for the section-level playhead overlay (grabber + line),
     /// so a grabber drag reports x across the whole section.
     private static let playheadSpace = "timelinePlayhead"
@@ -1688,6 +1714,29 @@ struct ContentView: View {
                             }
                         }
                         .frame(width: proxy.size.width)
+                        // Vertical visibility culling: track which row indices
+                        // intersect the scroll viewport (± overscan) so
+                        // off-screen lanes don't rasterize. The GeometryReader
+                        // body is the only thing re-evaluated per vertical
+                        // scroll event (a Color.clear — the 3c rule holds); the
+                        // @State write is equality-guarded and the range is
+                        // row-quantized, so the container re-runs only when a
+                        // row actually enters or leaves the overscan band.
+                        .background(
+                            GeometryReader { rowsGeometry in
+                                let range = Self.renderableRowRange(
+                                    contentMinY: rowsGeometry.frame(in: .named(Self.trackScrollSpace)).minY,
+                                    viewportHeight: max(proxy.size.height - trackHeaderHeight, 0),
+                                    rowStep: reorderRowStep
+                                )
+                                Color.clear
+                                    .onChange(of: range, initial: true) { _, newRange in
+                                        if renderableRows != newRange {
+                                            renderableRows = newRange
+                                        }
+                                    }
+                            }
+                        )
                         // One drop target spanning the rows, taking reorders and
                         // external file drops. For reorders it opens the gap as the
                         // pointer moves and commits on drop. A single target (rather
@@ -1707,6 +1756,7 @@ struct ContentView: View {
                             )
                         )
                     }
+                    .coordinateSpace(name: Self.trackScrollSpace)
                     .frame(maxHeight: .infinity)
                 }
             }
@@ -1955,6 +2005,7 @@ struct ContentView: View {
             isActive: isActive,
             showsTrash: showsTrash,
             isBlind: isBlind,
+            isRenderable: renderableRows.contains(index),
             isOffsetFocused: focusedOffsetTrackID == sessionTrack.id,
             infoWidth: infoWidth,
             rowHeight: trackRowHeight,
@@ -3509,6 +3560,9 @@ private struct TrackRowView: View, Equatable {
     var isActive: Bool
     var showsTrash: Bool
     var isBlind: Bool
+    /// Whether this row's lane may rasterize (it intersects the vertical
+    /// viewport ± overscan). Culled lanes keep showing their last image.
+    var isRenderable: Bool
     var isOffsetFocused: Bool
     var infoWidth: CGFloat
     var rowHeight: CGFloat
@@ -3539,6 +3593,7 @@ private struct TrackRowView: View, Equatable {
             && lhs.isActive == rhs.isActive
             && lhs.showsTrash == rhs.showsTrash
             && lhs.isBlind == rhs.isBlind
+            && lhs.isRenderable == rhs.isRenderable
             && lhs.isOffsetFocused == rhs.isOffsetFocused
             && lhs.infoWidth == rhs.infoWidth
             && lhs.rowHeight == rhs.rowHeight
@@ -3609,6 +3664,7 @@ private struct TrackRowView: View, Equatable {
             waveform: waveform,
             isBlindListening: isBlind,
             isActive: isActive,
+            isRenderable: isRenderable,
             trackStart: sessionTrack.loadedTrack.offsetSeconds,
             trackDuration: sessionTrack.loadedTrack.duration,
             visibleStart: windowStart,
@@ -4172,6 +4228,9 @@ private struct WaveformLaneView: View, Equatable {
     var waveform: Waveform?
     var isBlindListening: Bool
     var isActive: Bool
+    /// Whether the lane intersects the vertical viewport (± overscan) and may
+    /// kick renders; culled lanes keep showing their last image.
+    var isRenderable: Bool
     var trackStart: TimeInterval
     var trackDuration: TimeInterval
     var visibleStart: TimeInterval
@@ -4209,6 +4268,7 @@ private struct WaveformLaneView: View, Equatable {
                 LaneWaveformImage(
                     waveform: waveform,
                     isActive: isActive,
+                    isRenderable: isRenderable,
                     trackStart: trackStart,
                     trackDuration: trackDuration,
                     windowStart: visibleStart,
@@ -4283,8 +4343,8 @@ private struct WaveformLaneView: View, Equatable {
 /// Why: rasterizing a viewport-wide filled path is the expensive part, and the
 /// old design did it synchronously on the main thread for all N lanes in the
 /// same frame whenever the window grid boundary was crossed — a periodic hitch
-/// while scrolling. Here the fill happens off the main thread (a `nonisolated`
-/// async render, coalesced by `.task(id:)`), and the image is retained until the
+/// while scrolling. Here the fill happens off the main thread (a per-lane
+/// render loop, see `LaneRenderModel`), and the image is retained until the
 /// next one is ready. The 2× window carries half a viewport of slack, so the
 /// previous image — translated to sit at its own rendered window position —
 /// still covers the screen during the swap. The image is a template (alpha)
@@ -4293,6 +4353,11 @@ private struct WaveformLaneView: View, Equatable {
 private struct LaneWaveformImage: View {
     var waveform: Waveform?
     var isActive: Bool
+    /// Vertical visibility culling: while false, no renders are requested (the
+    /// last image keeps showing). On flipping true the lane lazily renders the
+    /// then-current key, so zoom changes made while hidden are not rendered
+    /// eagerly for off-screen rows.
+    var isRenderable: Bool
     var trackStart: TimeInterval
     var trackDuration: TimeInterval
     /// Absolute start/span of the grid-quantized lane window (2× the viewport).
@@ -4329,6 +4394,14 @@ private struct LaneWaveformImage: View {
         isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7)
     }
 
+    /// One trigger value covering both "the pixels would change" and "the lane
+    /// became renderable", so a culled lane re-requests the current key the
+    /// moment it scrolls back into the overscan band.
+    private struct RequestTrigger: Equatable {
+        var key: LaneRenderKey
+        var isRenderable: Bool
+    }
+
     var body: some View {
         content
             .frame(width: wideWidth, height: laneHeight, alignment: .leading)
@@ -4337,7 +4410,8 @@ private struct LaneWaveformImage: View {
             // render — cancelling on every key change starves the pipeline
             // whenever keys churn faster than a render completes (generation
             // progress, pinch-zoom, fast scroll) and nothing ever lands.
-            .onChange(of: renderKey, initial: true) {
+            .onChange(of: RequestTrigger(key: renderKey, isRenderable: isRenderable), initial: true) {
+                guard isRenderable else { return }
                 model.request(LaneRenderRequest(key: renderKey, waveform: waveform))
             }
     }
