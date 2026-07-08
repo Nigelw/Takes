@@ -1907,8 +1907,11 @@ struct ContentView: View {
                 }
                 controller.seek(to: time)
                 // The playhead now sits under the pointer, so the grab cursor
-                // is the right resting state; the central cursor manager
-                // re-evaluates on the next pointer move.
+                // is the right resting state. Record the shape in the central
+                // cursor manager too, so it knows a non-standard cursor is up
+                // and resets it on the next pointer move if the pointer isn't
+                // actually on the grabber (e.g. mouse-up higher on the ruler).
+                timelineCursorShape = .playheadGrab
                 NSCursor.openHand.set()
             }
     }
@@ -2955,7 +2958,7 @@ struct ContentView: View {
         guard
             let geometry = timelineCursorGeometry,
             let window = event.window,
-            window.frameAutosaveName == TakesWindowPolicy.mainWindowFrameAutosaveName,
+            window === mainWindow,
             let contentView = window.contentView
         else {
             setTimelineCursor(.standard)
@@ -3004,15 +3007,29 @@ struct ContentView: View {
     }
 
     private func setTimelineCursor(_ shape: TimelineCursorShape) {
-        guard shape != timelineCursorShape else { return }
-        timelineCursorShape = shape
         switch shape {
         case .standard:
+            // Push arrow only on the transition out of a timeline cursor so
+            // the manager never fights other controls' cursors (text fields'
+            // iBeam, the column-resize handle) while the pointer is elsewhere.
+            guard timelineCursorShape != .standard else { return }
+            timelineCursorShape = .standard
             NSCursor.arrow.set()
         case .playheadGrab:
-            NSCursor.openHand.set()
+            reassertTimelineCursor(NSCursor.openHand, shape: shape)
         case .loopResize:
-            NSCursor.resizeLeftRight.set()
+            reassertTimelineCursor(NSCursor.resizeLeftRight, shape: shape)
+        }
+    }
+
+    /// AppKit's cursor-rect machinery (the timeline scroll overlay, view
+    /// boundary crossings) can quietly reset the cursor to arrow after this
+    /// manager sets it, so inside a timeline hot zone the cursor is
+    /// re-asserted on every mouse move rather than only on shape transitions.
+    private func reassertTimelineCursor(_ cursor: NSCursor, shape: TimelineCursorShape) {
+        timelineCursorShape = shape
+        if NSCursor.current !== cursor {
+            cursor.set()
         }
     }
 

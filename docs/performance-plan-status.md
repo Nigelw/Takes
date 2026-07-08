@@ -72,6 +72,193 @@ speed), and re-checking blind-listening + loop behaviors manually.
 
 ---
 
+## STATUS 2026-07-07 — Manual re-test done; Iteration 3 root causes pinpointed
+
+User re-tested with many tracks loaded. Confirmed still bad: **horizontal
+scroll of waveforms** and **drag-to-reorder** both remain jerky. Both are
+covered by Iteration 3; code reading pinpointed the shared root cause, so the
+Iteration 3 items are now concretized as work packages 3a/3b below.
+
+What the code already does (landed with Iteration 1, keep intact):
+
+- Lanes draw a **2×-viewport window on a half-viewport grid** in absolute
+  timeline time (`LaneViewport`, `makeLaneViewport`), and the parent slides
+  the window with `.offset(x: -shiftX)`
+  ([ContentView.swift:2490-2542](Sources/Takes/ContentView.swift:2490)). So the
+  lane `Canvas` (equatable `WaveformLaneView`) only re-rasterizes when the
+  viewport crosses a half-viewport grid boundary — not per scroll event.
+
+Remaining root causes:
+
+1. **Per-scroll-event row diffing (3a).** Every scroll event writes
+   `session.visibleStart`; the container body re-runs and rebuilds/diffs the
+   *entire* `trackRow` tree for all N tracks
+   ([ContentView.swift:1632-1695](Sources/Takes/ContentView.swift:1632),
+   [ContentView.swift:2010](Sources/Takes/ContentView.swift:2010)) — info
+   column with badges/gradients/steppers/drag-source closures included — at
+   60–120 Hz on the main thread. Only the lane leaf is equatable; the row is
+   not. **Reorder is the same bug**: each gap move bumps
+   `reorderTargetIndex`/`reorderGapGeneration` (parent `@State`) → same full
+   N-row rebuild + diff per pointer move, plus the offset animation.
+2. **Synchronized grid-boundary rasterization (3b).** When the window grid
+   boundary is crossed, all N lane Canvases re-rasterize a 2×-viewport-wide
+   filled path in the same frame on the main thread → periodic hitch every
+   half-viewport of scrolling; worse with more tracks.
+
+**Work package 3a — isolate row bodies (fixes both continuous scroll jank and
+reorder jank):**
+
+- Extract the track row into an `Equatable` struct view keyed on value inputs
+  (index, `SessionTrack`, `Waveform` (storage-identity-cheap `==`), isActive,
+  isHovered/showsTrash, isBlind, offset-field focus, infoWidth, and the lane
+  *window* fields — NOT `shiftX`). Closures excluded from `==`.
+- Keep per-event work out of rows: apply the scroll `shiftX` in a tiny leaf
+  wrapper that alone reads `visibleStart` (per-event body = one `.offset`), or
+  apply it once to a shared lanes container. Rows must not receive any value
+  that changes per scroll event or per reorder gap move (gap `.offset(y:)` and
+  lifted `.opacity` stay applied *outside* the equatable row, as today).
+- Result: scroll event → N trivial `==` checks + leaf offset updates; gap move
+  → same. No row body re-runs.
+
+**Work package 3b — async lane-window rasterization (fixes boundary hitch):**
+
+- Replace the lane Canvas path-fill with a pre-rendered image of the lane
+  window, rendered **off the main thread** (reuse the existing
+  `waveformPath` math into a CGContext). On window/zoom/waveform-revision
+  change, kick a background render; **keep showing the previous window's image
+  (offset by its own windowStart) until the new one is ready** — the 2×
+  window has a half-viewport of slack, so stale content still covers the
+  viewport during the swap.
+- Render the image as a template/alpha mask so active-track tint switches
+  don't force re-rasterization.
+- This subsumes the plan's "translatable waveform bitmaps" fallback without
+  an NSView/CALayer rewrite; if measurement later shows SwiftUI image
+  compositing per lane is still hot, CALayer contents is the escalation path.
+
+Sequencing: 3a first (biggest, fixes both symptoms), then 3b, re-test feel
+between. Loop-drag re-test after 3a (same root cause; likely fixed by it).
+
+Also fixed today (unrelated bug, main tree): the timeline cursor manager was
+entirely dead — its guard compared `window.frameAutosaveName` ("main") against
+the UserDefaults key string "NSWindow Frame main", which can never match. Now
+compares against the captured `mainWindow` reference. Plus: re-assert cursors
+on every move inside a hot zone (AppKit cursor rects fight the manager), and
+the ruler scrub's mouse-up records its openHand in the manager state so it
+can't stick. Verified at runtime with synthetic pointer events reading
+`NSCursor.currentSystem`.
+
+### 3a/3b landed (worktree branch `worktree-agent-adebd280fa1ca3dfb`) + measured
+
+Commits `10568b8` (3a: equatable `TrackRowView`, `LaneShiftView` leaf slide)
+and `abb54ee` (3b: `LaneWaveformImage`/`LaneWaveformRenderer` off-main template
+rasterization). Full test suite passes; lanes verified pixel-correct at
+runtime against baseline.
+
+Measured (Debug builds, 20 tracks, ~2.5 s visible span, scripted 8 s
+horizontal scroll + 8 s reorder drag, main-thread CPU sampled via `ps -M`):
+
+| Interaction | Baseline MT avg/max | 3a+3b MT avg/max |
+|---|---|---|
+| Horizontal scroll | 89.3% / 100% | 78.6% / 98.7% |
+| Reorder drag | 62.7% / 92.1% | 47.1% / 70.0% |
+
+Reorder is fixed. Scroll improved (and the synchronized 20-lane
+boundary-rasterization hitch is gone; rasterization now runs on background
+cores — total process CPU during scroll rose 72%→109% *by design*), but the
+main thread stays near-saturated from a **pre-existing shared bottleneck**
+`sample` exposed in both builds: every scroll event writes `visibleStart`, the
+scroll-ZStack container reads it (`makeLaneViewport`), and rebuilding the
+ZStack children forces `_ZStackLayout.sizeThatFits` → `StackLayout` to
+re-measure all 20 rows per event — a layout walk that equatable row bodies
+don't prevent.
+
+**Work package 3c (landed, same branch, commit `cd2a8b9`):** the fix had to go
+one level deeper than leaf-ifying readers: `@Observable` tracks `session` as
+ONE property, so the per-event `session.visibleStart` write invalidated every
+`session` reader regardless. `visibleStart`/`visibleSpan`/`visibleEnd` moved
+out of `ComparisonSession` onto `PlaybackController` (same medicine Iteration
+1 applied to `transportPosition`), mutated only via an equality-guarded
+`setVisibleWindow(start:span:)` which also maintains a stored, grid-quantized
+`laneWindowStart`. The container reads only the quantized window; per-event
+readers are self-observing leaves (`LaneShiftView`, `TimelineHeaderRulerView`,
+`TimelineScrollOverlayLeaf`, `TimelinePlayheadOverlayView`,
+`LoopOverlayContentView` — gesture logic stays in ContentView closures, which
+are not observation-tracked).
+
+### Final Iteration 3 measurements (20 tracks, ~2.5 s visible span, scripted
+8 s flick-scroll / 8 s reorder drag, main-thread CPU via `ps -M`)
+
+| Interaction | Config | Baseline MT avg/max | 3a+3b | 3a+3b+3c |
+|---|---|---|---|---|
+| Horizontal scroll | Debug | 89.3% / 100% | 78.6% / 98.7% | 69.5% / 93.7% |
+| Horizontal scroll | Release | 98.0% / 100% | — | 77.2% / 97.3% |
+| Reorder drag | Debug | 62.7% / 92.1% | 47.1% / 70.0% | 46.1% / 67.9% |
+| Reorder drag | Release | 60.7% / 88.7% | — | 43.1% / 64.0% |
+
+`sample` profiles across the stages: baseline/3a+3b spent the scroll in
+AttributeGraph body+layout storms (`_ZStackLayout.sizeThatFits` re-measuring
+all rows per event); after 3c that is gone and the remaining main-thread cost
+is `DisplayList.ViewUpdater` geometry updates — SwiftUI's per-frame
+bookkeeping for physically moving ~20 wide image layers (`CoreViewSetGeometry`
+→ `setFrameOrigin`). The synchronized boundary-rasterization hitch is gone
+(renders are async on background cores; total-process CPU during scroll rises
+by design).
+
+**Assessment / designed escalation (WP-3d, only if scroll still feels bad in
+manual testing):** the remaining per-event work is inherent to letting SwiftUI
+move the lanes. The escalation is the plan's original "translatable bitmaps on
+CALayer" end-state: host all lane images in one layer-backed NSView and set
+sublayer positions directly from the scroll overlay's callback — zero SwiftUI
+involvement per scroll event. Hold until the user feel-tests the 3c build;
+reorder and boundary hitches are already fixed, and 77% avg with the hitch
+source gone may well feel smooth.
+
+## STATUS 2026-07-07 (evening) — User feel-test: wins confirmed, regressions found
+
+User verdict on the 3a–3c build (20+ tracks): scroll better, reorder "buttery
+smooth" — but the async render pipeline shipped regressions, all triaged to
+two root causes plus separates:
+
+1. **Cancellation starvation** (`LaneWaveformImage` uses `.task(id:renderKey)`,
+   which cancels the in-flight render on every key change): during file load,
+   waveform-generation progress bumps the key ~20 Hz/lane, so renders die
+   before finishing → lanes stay blank, then "flash in chunks". Same
+   starvation during zoom (continuous key churn → waveform frozen while
+   ruler/playhead move live) and fast scroll (blank lanes at high zoom,
+   flicker at low zoom). Fix: never-cancel render loop per lane (finish,
+   publish, then re-render at the latest key; drop only intermediate keys) +
+   throttle generation-progress re-renders (~5 Hz/lane, never dropping the
+   final render).
+2. **Stale-image placement is scale-blind and unbounded**: the previous
+   window's image is translated by its own `windowStart` but NOT rescaled when
+   zoom changes points-per-second — the frozen-waveform look during zoom. The
+   translation is also unbounded, and `.clipped()` does not clip HIT TESTING
+   in SwiftUI — after deep zoom the stale wide image can sit invisibly over
+   the track-info column swallowing clicks (matches "info area dead when
+   zoomed in"). Fix: scale stale images by the points-per-second ratio, and
+   mark the entire lane visual subtree (+ playhead overlay leaf)
+   `.allowsHitTesting(false)` — lane interaction lives on the loop overlay,
+   never on the lane visuals.
+3. **Zoomed playback-follow flicker** — expected to be the same two causes;
+   re-test after.
+4. **Timeline cursor fixes were never on this branch** (they live uncommitted
+   in the main tree) — port them (dead `frameAutosaveName` guard →
+   `window === mainWindow`; hot-zone re-assert; scrub-end shape recording).
+5. **New, pre-existing audio bug (WP-4b): audible gap between loop repeats at
+   20+ tracks.** At wrap, `restartPlayback` synchronously stops → reschedules
+   → restarts all N player nodes on the main thread at the moment the loop
+   ends ([PlaybackController.swift:1726](Sources/Takes/PlaybackController.swift:1726)).
+   Fix: gapless pre-queueing — schedule the next loop iteration's segments
+   onto the players before the current iteration ends; the wrap becomes an
+   anchor/audibility update only. Invalidate pre-queues on seek / loop change
+   / track changes / repeat-mode change.
+
+WP-4a (items 1–4, ContentView) and WP-4b (item 5, PlaybackController) are
+delegated to parallel agents; WP-4b branches off the perf branch in its own
+worktree since the files are disjoint.
+
+---
+
 ## Iteration 0 — Baseline instrumentation (do first)
 
 Establish repeatable measurement before changing anything.
