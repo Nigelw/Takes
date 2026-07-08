@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import os
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -4529,6 +4530,10 @@ private final class LaneRenderModel {
 /// `nonisolated` enum so its `async` `makeImage` runs on the cooperative pool,
 /// not the main actor.
 enum LaneWaveformRenderer {
+    #if DEBUG
+    private static let renderLog = Logger(subsystem: "com.nigelwarren.Takes", category: "waveform-render")
+    #endif
+
     /// Render the envelope for one window into a template (alpha) `NSImage`.
     /// Returns `nil` when there's nothing to draw.
     static func makeImage(
@@ -4542,6 +4547,17 @@ enum LaneWaveformRenderer {
         scale: CGFloat
     ) async -> sending NSImage? {
         guard wideWidth > 0, laneHeight > 0, scale > 0 else { return nil }
+
+        #if DEBUG
+        // Perf probe for the WP-5 pyramid work: one debug-level line per lane
+        // render with the wall time of path build + fill. Watch in Console
+        // with subsystem com.nigelwarren.Takes, category waveform-render.
+        let renderStartedAt = CACurrentMediaTime()
+        defer {
+            let milliseconds = (CACurrentMediaTime() - renderStartedAt) * 1000
+            renderLog.debug("lane render \(Int(wideWidth))pt in \(milliseconds, format: .fixed(precision: 2)) ms")
+        }
+        #endif
 
         let pointSize = CGSize(width: wideWidth, height: laneHeight)
         let path = waveformPath(
@@ -4626,8 +4642,7 @@ enum LaneWaveformRenderer {
         visibleSpan: TimeInterval
     ) -> Path {
         let bucketCount = waveform.bucketCount
-        let peaks = waveform.peaks
-        guard bucketCount > 0, !peaks.isEmpty, size.width > 0, size.height > 0,
+        guard bucketCount > 0, !waveform.peaks.isEmpty, size.width > 0, size.height > 0,
               trackDuration > 0, visibleSpan > 0 else {
             return Path()
         }
@@ -4636,7 +4651,6 @@ enum LaneWaveformRenderer {
         let midline = size.height / 2
         // A visible floor so silent passages still read as a thin line.
         let minHalfHeight: CGFloat = 0.5
-        let available = peaks.count
 
         // Portion of the visible window the track actually covers.
         let trackEnd = trackStart + trackDuration
@@ -4644,21 +4658,45 @@ enum LaneWaveformRenderer {
         let overlapEnd = min(visibleStart + visibleSpan, trackEnd)
         guard overlapEnd > overlapStart else { return Path() }
 
-        // x for a (fractional) bucket index, mapped through the visible window.
-        func x(forBucket bucket: Double) -> CGFloat {
+        // Pick the pyramid level whose buckets-per-pixel lands in [1, 2): each
+        // level halves the previous, so walk down until fewer than two of its
+        // buckets cover one pixel (or the pyramid runs out). This keeps the
+        // build O(viewport px) at ANY zoom — a zoomed-out window pools a few
+        // hundred coarse buckets instead of walking every base bucket.
+        let bucketsAcrossViewport = visibleSpan / trackDuration * Double(bucketCount)
+        var bucketsPerPixel = bucketsAcrossViewport / Double(width)
+        var levelIndex = 0
+        while bucketsPerPixel >= 2, levelIndex < waveform.reducedLevels.count {
+            levelIndex += 1
+            bucketsPerPixel /= 2
+        }
+        // Base buckets per bucket of the chosen level.
+        let levelScale = 1 << levelIndex
+        let peaks = levelIndex == 0 ? waveform.peaks : waveform.reducedLevels[levelIndex - 1]
+        guard !peaks.isEmpty else { return Path() }
+        let available = peaks.count
+        // ceil(ceil(n/2)/2)… collapses to ceil(n/2^k), so the full-file bucket
+        // count at this level is a single ceil-division.
+        let levelBucketCount = (bucketCount + levelScale - 1) / levelScale
+
+        // x for a (fractional) BASE bucket index, mapped through the window.
+        func x(forBaseBucket bucket: Double) -> CGFloat {
             CGFloat((trackStart + bucket / Double(bucketCount) * trackDuration - visibleStart) / visibleSpan) * width
         }
 
-        // Buckets per drawn vertex ≈ buckets per on-screen pixel, ≥ 1.
-        let bucketsAcrossViewport = visibleSpan / trackDuration * Double(bucketCount)
-        let bucketStride = max(1, Int((bucketsAcrossViewport / Double(width)).rounded()))
+        // Level buckets per drawn vertex ≈ level buckets per pixel — 1 or 2 by
+        // construction while pyramid levels remain.
+        let bucketStride = max(1, Int(bucketsPerPixel.rounded()))
 
         // File-anchored group range overlapping the visible region, padded one
         // group each side so the envelope crosses the clip edges smoothly.
-        let firstBucket = Int((overlapStart - trackStart) / trackDuration * Double(bucketCount))
-        let lastBucket = Int((overlapEnd - trackStart) / trackDuration * Double(bucketCount))
-        let firstGroup = firstBucket / bucketStride - 1
-        let lastGroup = lastBucket / bucketStride + 1
+        // Level buckets pool fixed base-bucket ranges, so groups of them are
+        // just as file-anchored as base buckets — the anti-shimmer argument
+        // above applies unchanged at any level.
+        let firstBaseBucket = Int((overlapStart - trackStart) / trackDuration * Double(bucketCount))
+        let lastBaseBucket = Int((overlapEnd - trackStart) / trackDuration * Double(bucketCount))
+        let firstGroup = firstBaseBucket / (levelScale * bucketStride) - 1
+        let lastGroup = lastBaseBucket / (levelScale * bucketStride) + 1
 
         // (x, half-height) vertices forming the top edge of the envelope.
         var vertices: [(x: CGFloat, half: CGFloat)] = []
@@ -4667,7 +4705,7 @@ enum LaneWaveformRenderer {
             guard group >= 0 else { continue }
             let bucketLow = group * bucketStride
             guard bucketLow < available else { break }
-            let bucketHigh = min(bucketLow + bucketStride, bucketCount)
+            let bucketHigh = min(bucketLow + bucketStride, levelBucketCount)
             let upper = min(bucketHigh, available)
             guard upper > bucketLow else { break }
 
@@ -4675,8 +4713,11 @@ enum LaneWaveformRenderer {
             for index in bucketLow..<upper where peaks[index] > peak {
                 peak = peaks[index]
             }
-            let center = Double(bucketLow + bucketHigh) / 2
-            vertices.append((x(forBucket: center), max(CGFloat(peak) * midline, minHalfHeight)))
+            // Vertex at the group's center in base-bucket units; the last
+            // level bucket may cover fewer base buckets, so clamp to the file.
+            let baseLow = Double(bucketLow * levelScale)
+            let baseHigh = min(Double(bucketHigh * levelScale), Double(bucketCount))
+            vertices.append((x(forBaseBucket: (baseLow + baseHigh) / 2), max(CGFloat(peak) * midline, minHalfHeight)))
         }
 
         guard !vertices.isEmpty else { return Path() }

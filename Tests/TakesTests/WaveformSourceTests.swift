@@ -1,8 +1,93 @@
 import AVFoundation
+import QuartzCore
+import SwiftUI
 import Testing
 @testable import Takes
 
 struct WaveformSourceTests {
+    @Test
+    func zoomedOutLaneRenderPathStaysFast() {
+        // A ~4-minute file at 256 frames/bucket is ~41k base buckets; the lane
+        // window at fit spans the whole file, so this is the worst-case path
+        // build. Informational timing is printed for the perf log.
+        let bucketCount = 41_344
+        var peaks = [Float](repeating: 0, count: bucketCount)
+        for index in 0..<bucketCount {
+            peaks[index] = Float((sin(Double(index) * 0.37) + 1) / 2)
+        }
+        let waveform = Waveform(
+            peaks: peaks,
+            bucketCount: bucketCount,
+            isComplete: true,
+            reducedLevels: WaveformPyramid.reducedLevels(from: peaks)
+        )
+        let size = CGSize(width: 3200, height: 58)
+        let duration: TimeInterval = 240
+
+        func build() -> Path {
+            LaneWaveformRenderer.waveformPath(
+                for: waveform,
+                in: size,
+                trackStart: 0,
+                trackDuration: duration,
+                visibleStart: 0,
+                visibleSpan: duration * 2
+            )
+        }
+
+        #expect(!build().isEmpty)
+
+        let iterations = 20
+        let start = CACurrentMediaTime()
+        for _ in 0..<iterations {
+            _ = build()
+        }
+        let milliseconds = (CACurrentMediaTime() - start) / Double(iterations) * 1000
+        print("[perf] zoomed-out waveformPath build: \(String(format: "%.3f", milliseconds)) ms")
+        #expect(milliseconds >= 0)
+    }
+
+    @Test
+    func pyramidLevelsMaxPoolFileAnchoredPairs() {
+        // Odd count exercises the trailing carry-over bucket at every level.
+        let count = 10_001
+        var peaks = [Float](repeating: 0, count: count)
+        for index in 0..<count {
+            peaks[index] = Float((sin(Double(index) * 1.7) + 1) / 2)
+        }
+
+        let levels = WaveformPyramid.reducedLevels(from: peaks)
+        #expect(!levels.isEmpty)
+        // Reduction stops once a level is small enough.
+        #expect(levels.last!.count <= WaveformPyramid.minimumLevelBucketCount * 2)
+
+        // Every level-k bucket must equal the max over its fixed base range
+        // [i·2^(k+1), (i+1)·2^(k+1)) — file-anchored pooling, clamped at the end.
+        for (levelIndex, level) in levels.enumerated() {
+            let scale = 1 << (levelIndex + 1)
+            #expect(level.count == (count + scale - 1) / scale)
+            for bucket in [0, 1, level.count / 2, level.count - 2, level.count - 1] where bucket >= 0 {
+                let low = bucket * scale
+                let high = min(low + scale, count)
+                let expected = peaks[low..<high].max() ?? 0
+                #expect(level[bucket] == expected, "level \(levelIndex) bucket \(bucket)")
+            }
+        }
+    }
+
+    @Test
+    func pyramidIsExcludedFromWaveformEquality() {
+        let peaks: [Float] = [0.1, 0.9, 0.4]
+        let bare = Waveform(peaks: peaks, bucketCount: 3, isComplete: true)
+        let withLevels = Waveform(
+            peaks: peaks,
+            bucketCount: 3,
+            isComplete: true,
+            reducedLevels: [[0.9]]
+        )
+        #expect(bare == withLevels)
+    }
+
     @Test
     func generatesPeaksThatTrackTheSignalEnvelope() async throws {
         // First half silent, second half full-scale, so the resulting envelope

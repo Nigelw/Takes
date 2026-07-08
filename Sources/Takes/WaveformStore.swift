@@ -19,8 +19,60 @@ struct Waveform: Equatable {
     var bucketCount: Int
     /// Whether generation has finished (or was cut short by a read error).
     var isComplete: Bool
+    /// Multi-resolution max-pooled reductions of `peaks` (the peak pyramid):
+    /// `reducedLevels[k]` halves the previous level (level -1 being `peaks`
+    /// itself), down to a few hundred buckets, so a zoomed-out render can draw
+    /// from ~1 bucket per pixel instead of walking every base bucket. Total
+    /// extra memory ≈ 1× `peaks`. Derived data — excluded from `==`.
+    var reducedLevels: [[Float]] = []
+
+    /// `reducedLevels` are ignored on purpose: equal peaks imply equal levels,
+    /// and this `==` gates the per-row equality checks so it must stay
+    /// effectively O(1) (Array `==` short-circuits on shared storage).
+    static func == (lhs: Waveform, rhs: Waveform) -> Bool {
+        lhs.peaks == rhs.peaks
+            && lhs.bucketCount == rhs.bucketCount
+            && lhs.isComplete == rhs.isComplete
+    }
 
     static let empty = Waveform(peaks: [], bucketCount: 0, isComplete: false)
+}
+
+/// Builds the max-pooled peak pyramid for a waveform. O(n) total work
+/// (n/2 + n/4 + …) with vectorized pooling, so it's cheap enough to rebuild on
+/// every generation-progress emission — always off the main thread.
+enum WaveformPyramid {
+    /// Stop reducing once a level is this small: coarser levels stop paying
+    /// for themselves (a whole-file window already draws from ~1 bucket per
+    /// pixel around here).
+    static let minimumLevelBucketCount = 256
+
+    /// Levels above the base: `result[0]` halves `peaks`, `result[k]` halves
+    /// `result[k-1]`. A bucket `i` of `result[k]` covers the fixed base range
+    /// `[i·2^(k+1), (i+1)·2^(k+1))` (the last bucket may cover fewer), so level
+    /// buckets stay file-anchored — the renderer's anti-shimmer pooling
+    /// argument applies unchanged at any level.
+    static func reducedLevels(from peaks: [Float]) -> [[Float]] {
+        var levels: [[Float]] = []
+        var current = peaks
+        while current.count > minimumLevelBucketCount * 2 {
+            let pairCount = current.count / 2
+            var next = [Float](repeating: 0, count: (current.count + 1) / 2)
+            current.withUnsafeBufferPointer { source in
+                next.withUnsafeMutableBufferPointer { destination in
+                    guard let src = source.baseAddress, let dst = destination.baseAddress else { return }
+                    // dst[i] = max(src[2i], src[2i+1])
+                    vDSP_vmax(src, 2, src + 1, 2, dst, 1, vDSP_Length(pairCount))
+                }
+            }
+            if current.count % 2 == 1 {
+                next[next.count - 1] = current[current.count - 1]
+            }
+            levels.append(next)
+            current = next
+        }
+        return levels
+    }
 }
 
 /// Owns waveform generation for the loaded session tracks.
@@ -82,11 +134,15 @@ final class WaveformStore: ObservableObject {
         // onto efficiency cores.
         tasks[trackID] = Task.detached(priority: .userInitiated) {
             await WaveformSource.generate(url: url) { peaks, bucketCount, isComplete in
+                // Build the pyramid here, on the generation task, so the main
+                // actor only ever receives finished derived data.
+                let reducedLevels = WaveformPyramid.reducedLevels(from: peaks)
                 await MainActor.run { [weak self] in
                     self?.apply(
                         peaks: peaks,
                         bucketCount: bucketCount,
                         isComplete: isComplete,
+                        reducedLevels: reducedLevels,
                         to: trackID,
                         identity: identity
                     )
@@ -99,6 +155,7 @@ final class WaveformStore: ObservableObject {
         peaks: [Float],
         bucketCount: Int,
         isComplete: Bool,
+        reducedLevels: [[Float]],
         to trackID: SessionTrack.ID,
         identity: WaveformSource.Identity
     ) {
@@ -109,7 +166,8 @@ final class WaveformStore: ObservableObject {
         waveforms[trackID] = Waveform(
             peaks: peaks,
             bucketCount: bucketCount,
-            isComplete: isComplete
+            isComplete: isComplete,
+            reducedLevels: reducedLevels
         )
 
         if isComplete {
