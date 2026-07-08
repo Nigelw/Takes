@@ -185,6 +185,52 @@ streaming-cancellation timing test passed on re-run). Needs the measurement
 harness re-run plus a manual pass on zoom (buttons / pinch / slider), ruler
 scrub, loop select/resize, and zoomed playback-follow.
 
+**WP-4a — async-render regressions from the 20+-track feel test (scroll +
+reorder wins confirmed; these were the reported breakages):**
+
+- *Cancellation starvation* (blank lanes on load that then "flash in in
+  chunks"; waveforms frozen during zoom; blank/flicker during fast scroll and
+  zoomed follow): `.task(id: renderKey)` cancelled the in-flight render on
+  every key change, so any key churn faster than one render (generation
+  progress ~20 Hz/lane, pinch-zoom, fast scroll) meant nothing ever landed.
+  Replaced with a per-lane render loop (`LaneRenderModel`): in-flight renders
+  are never cancelled — finish, publish, then chain into the newest key;
+  intermediate keys skipped, newest never. Progress-only re-renders throttled
+  to ~5 Hz/lane with a guaranteed trailing edge; `isComplete` bypasses the
+  throttle. Rasterization stays off-main.
+- *Stale-image placement* was scale-blind: the previous window's bitmap kept
+  its rendered width during zoom while ruler/playhead moved live. Now the
+  stale image is translated AND rescaled in current points-per-second so its
+  absolute time range stays pinned to the ruler (stretched until the fresh
+  render lands, never frozen); the fresh swap is atomic (translation 0 /
+  width = wideWidth in the same body update). Drawing is bounded: skipped
+  when off the lane frame or stretched beyond 16×.
+- *Track-info column un-clickable when zoomed in*: `.clipped()` does not clip
+  SwiftUI hit-testing, and the lane subtree (2× viewport wide, slid left by
+  `shiftX` — which is > 0 whenever the viewport is off the half-viewport grid,
+  i.e. effectively always when zoomed in) extended invisibly over the info
+  column; its near-transparent base fill (and post-3b the translated stale
+  image) swallowed the clicks. The whole `WaveformLaneView` subtree and
+  `TimelinePlayheadOverlayView` are now `.allowsHitTesting(false)` — lane
+  interaction lives only on the loop/scroll overlays. Note this base-fill
+  overhang predates 3b (it came with Iteration 1's windowed lanes); the stale
+  image made it worse.
+- *Cursor fixes ported* from the main tree (they were never on this branch):
+  `updateTimelineCursor` window guard compares `window === mainWindow` (the
+  old `frameAutosaveName` compare against the defaults-key string was dead
+  code), timeline cursors are re-asserted on every mouse move inside a hot
+  zone (AppKit cursor-rects quietly reset them), and a ruler-scrub mouse-up
+  records `.playheadGrab` in the manager so the next move can reset it.
+- Span-clamp audit: `LaneShiftView`, `makeLaneViewport`, and
+  `setVisibleWindow` all clamp with `max(visibleSpan, 0.001)` — no quantum
+  mismatch left.
+
+Still open for runtime verification: progressive load rendering feel, zoom
+tracking, scroll blanking, zoomed-in info-column clicks, cursor probe, and
+whether zoomed playback-follow is still jumpy after these fixes (if so, next
+suspect is follow's `setVisibleWindow` writes interleaving with
+boundary-triggered row rebuilds — investigate before changing architecture).
+
 ---
 
 ## Iteration 0 — Baseline instrumentation (do first)
