@@ -231,6 +231,48 @@ whether zoomed playback-follow is still jumpy after these fixes (if so, next
 suspect is follow's `setVisibleWindow` writes interleaving with
 boundary-triggered row rebuilds — investigate before changing architecture).
 
+**WP-5 — GarageBand-class render cost (after the 20+-track feel test: zoom
+sync, info-column clicks, and drag smoothness confirmed fixed; remaining
+complaints were low-res-then-pop zoom rendering, off-screen lanes rendering,
+and 20-way generation contention):**
+
+- *5a — peak pyramid.* `Waveform.reducedLevels`: max-pooled halvings of
+  `peaks` (vDSP strided `vmax`) down to ~256 buckets, ≈1× peaks of extra
+  memory, in-memory only, built on the generation task per progress emission,
+  excluded from a custom `Waveform.==` (still storage-identity cheap).
+  `waveformPath` picks the level whose buckets-per-pixel lands in [1, 2) and
+  keeps the file-anchored stride pooling at that level (anti-shimmer argument
+  unchanged; vertex x mapped back through base-bucket units). Path build is
+  now O(viewport px) at any zoom. Measured (Debug, 41,344 buckets, 3200 pt
+  window, whole file visible): 6.449 ms → 1.564 ms per build (~16× fewer
+  bucket visits; the remainder is per-vertex Path overhead that -Onone
+  exaggerates — Release is far lower). A DEBUG-only `os.Logger` probe
+  (subsystem `com.nigelwarren.Takes`, category `waveform-render`) logs each
+  lane render's wall time.
+- *5b — vertical visibility culling.* Lanes rasterize only while their row
+  intersects the vertical viewport ± 2 rows of overscan. The scroll offset is
+  read by a `GeometryReader` background on the rows stack (per-event cost: one
+  `Color.clear` body — the 3c no-container-invalidation rule holds), reduced
+  to a row-quantized index range, and written to `@State` behind an equality
+  guard; `isRenderable` flows through the row/lane equatable inputs. Hidden
+  lanes keep their last image and render lazily on becoming visible, so zoom
+  responsiveness scales with visible lanes, not track count.
+- *5c — bounded, prioritized generation + pending look.* `WaveformStore` caps
+  decoding at 2 concurrent generations, queued top-first in session order
+  (reorders re-prioritize the waiting queue; removals/regenerations pump the
+  queue). All tracks register an empty waveform immediately; lanes with a
+  registered waveform but no rendered image yet show a static dimmed midline
+  hairline ("queued", no animation) that holds until the first image lands.
+  Blind mode unchanged (placeholder branch, `nil` waveform).
+
+Needs runtime verification: zoom feel at 20+ tracks with a small window
+(acceptance: responsiveness scales with visible lanes), progressive top-first
+load with the pending hairline, and whether zoom-out pop-in is still
+perceptible (if renders are fast enough now it should read as instant; if
+any residual pop remains, the next step would be rendering the NEW window
+synchronously from the coarsest pyramid level as a first approximation —
+propose before building).
+
 ---
 
 ## Iteration 0 — Baseline instrumentation (do first)

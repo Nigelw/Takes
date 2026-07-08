@@ -4445,6 +4445,19 @@ private struct LaneWaveformImage: View {
             } else {
                 Color.clear
             }
+        } else if let waveform, !(waveform.isComplete && waveform.peaks.isEmpty) {
+            // No image yet but a waveform is registered: the track is queued
+            // for generation (or its first render is in flight). A static,
+            // dimmed midline hairline reads as "pending" — deliberately no
+            // animation (continuous motion is CA-only per project rule) — and
+            // it holds until the first image lands, so the transition is
+            // queued → drawn with no blank gap. A file that completed with no
+            // peaks (unreadable) stays empty instead.
+            Rectangle()
+                .fill(tint)
+                .opacity(0.35)
+                .frame(height: 1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             // Nothing yet: stay empty (the row + ticks are already on screen) so
             // the envelope appears with a clean cut, never a flash.
