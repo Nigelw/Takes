@@ -273,6 +273,57 @@ any residual pop remains, the next step would be rendering the NEW window
 synchronously from the coarsest pyramid level as a first approximation —
 propose before building).
 
+**WP-6 — zoom re-layout (the 3c scroll bug leaking through on zoom).**
+
+Runtime profiling of a zoom sweep (Debug, 20 tracks) showed the main thread
+pinned ~65% by `StackLayout.sizeThatFits` / `LayoutEngineBox.sizeThatFits` —
+i.e. the rows VStack re-laying-out every zoom step — and IDENTICAL cost with 1
+visible track vs 8 (the non-lazy VStack lays out all rows regardless of
+vertical visibility). Rasterization was NOT in the hot path (5a/5b did their
+job). Root cause: zoom changes `visibleSpan` → the lane-window quantum
+(`visibleSpan/2`) and the tick positions change every step, and those
+(`windowStart`, `windowSpan`, `majorTickXs`, `zeroTickX`) were `TrackRowView`
+equatable inputs, so every row's `==` flipped and every row body re-ran +
+re-measured. 3c's quantization can't help because zoom inherently changes the
+span. The delayed/low-res fill-in was downstream: the render publish is
+`@MainActor`, so a layout-pinned main thread delayed every fresh image.
+
+Fix (ContentView only): the zoom-varying window moved into a shared
+`@Observable LaneViewportStore` that ONLY the lane leaf observes. `LaneViewport`
+lost `wideWidth` (that's geometry, fixed on zoom — it stays a row input). The
+old `LaneShiftView` (scroll-only leaf) became `LaneView`, which now reads BOTH
+`controller.visibleStart`/`visibleSpan` (scroll `shiftX`) AND
+`viewportStore.viewport` (zoom window + ticks) and builds the equatable
+`WaveformLaneView` itself. Its outer frame is `wideWidth × rowHeight` — fixed
+on zoom and scroll — so its re-runs move the image by transforms only and never
+propagate layout up into the VStack. The container computes the viewport once
+per change and pushes it to the store via an equality-guarded
+`.onChange(of: laneViewport, initial: true)`; the ruler tick computation stays
+once-per-change, not once-per-lane.
+
+Final `TrackRowView` equatable inputs (all zoom-invariant): `index`,
+`sessionTrack`, `waveform`, `isActive`, `showsTrash`, `isBlind`,
+`isRenderable`, `isOffsetFocused`, `infoWidth`, `rowHeight`, `wideWidth`,
+`offsetConfiguration`, `indexBadgeAppearance`, `showsDebugLabel`. No
+zoom-varying value remains a row input (verified: `trackRowView`'s reads are
+session/geometry/settings only; the tick guides inside `WaveformLaneView` now
+come from the store via `LaneView`, not row inputs). So a zoom sweep leaves
+every row `==`-stable → the non-lazy VStack never re-measures (StackLayout
+caches), and only the N fixed-frame lane leaves re-run. Kept LazyVStack OFF
+(the plan's warning about loop-overlay/reorder alignment stands, and it's
+unnecessary once rows are `==`-stable). 3c scroll isolation, 5a pyramid, 5b
+culling (`isRenderable` stays a row input — not zoom-varying), 5c generation,
+and the 4a render loop / stale placement / hit-testing-off are all intact.
+
+Expected (coordinator will measure): zoom-sweep main-thread CPU drops from
+~65% to a small fraction dominated by the container body + N cheap leaf
+updates, with 1-visible and all-visible both low; and the low-res/blank
+fill-in should largely resolve once publishes are no longer delayed by the
+layout storm. Held-back follow-up if any residual low-res-during-zoom remains
+after the main thread is freed: a synchronous coarsest-pyramid-level preview of
+the new window (deliberately NOT implemented here — land the layout fix alone
+so its effect can be measured in isolation).
+
 ---
 
 ## Iteration 0 — Baseline instrumentation (do first)

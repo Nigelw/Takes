@@ -973,6 +973,12 @@ struct ContentView: View {
     /// the container. Starts fully open so nothing is culled before the first
     /// geometry pass lands.
     @State private var renderableRows: ClosedRange<Int> = 0...Int.max
+    /// Shared source for the zoom-varying lane window (window bounds + tick
+    /// guides). Only the lane leaves observe it, so a zoom step re-runs those
+    /// fixed-frame leaves — never the row bodies — keeping the VStack from
+    /// re-laying-out. Written from the container via an equality-guarded
+    /// `.onChange`; see `LaneViewport` for why it can't be a row input.
+    @State private var laneViewportStore = LaneViewportStore()
     @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
     @State private var trackInfoColumnWidth: Double
     @State private var showsAlignmentAttentionPopover = false
@@ -1591,7 +1597,7 @@ struct ContentView: View {
     // NOTE: `visibleStart` changes on every horizontal scroll event (and every
     // zoomed playback-follow step). Nothing evaluated as part of a view BODY in
     // this file may read it except the dedicated per-event leaves
-    // (`LaneShiftView`, `TimelineHeaderRulerView`, `TimelinePlayheadOverlayView`,
+    // (`LaneView`, `TimelineHeaderRulerView`, `TimelinePlayheadOverlayView`,
     // `LoopOverlayContentView`, `TimelineScrollOverlayLeaf`) — reading it in a
     // container body registers an Observation dependency that re-runs (and
     // re-layouts) the whole tree per event. Gesture/event closures may read it
@@ -1670,9 +1676,15 @@ struct ContentView: View {
 
                     ScrollView(.vertical) {
                         ZStack(alignment: .topLeading) {
-                            // Shared per-lane geometry, computed once for all
-                            // lanes rather than once per lane.
+                            // Shared, zoom-varying lane window (window bounds +
+                            // ticks), computed once for all lanes and pushed to
+                            // the store the lane leaves observe. It is
+                            // deliberately NOT threaded through the rows: doing
+                            // so would flip every row's `==` on each zoom step
+                            // and re-lay-out the VStack (WP-6). `wideWidth` is
+                            // geometry (fixed on zoom) and DOES ride the rows.
                             let laneViewport = makeLaneViewport(waveformWidth: waveformWidth)
+                            let wideWidth = waveformWidth * 2
                             VStack(spacing: 0) {
                                 ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
                                     let isLifted = reorderDraggingID == sessionTrack.id
@@ -1681,7 +1693,7 @@ struct ContentView: View {
                                         index: index,
                                         sessionTrack: sessionTrack,
                                         infoWidth: infoWidth,
-                                        laneViewport: laneViewport
+                                        wideWidth: wideWidth
                                     )
                                         .equatable()
                                         // The dragged row's floating preview stands in
@@ -1707,6 +1719,16 @@ struct ContentView: View {
                                     .fill(Theme.hairline)
                                     .frame(height: trackTimelineDividerHeight)
                                     .allowsHitTesting(false)
+                            }
+                            // Publish the zoom-varying window to the store the
+                            // lane leaves observe. The container body re-running
+                            // per zoom step is fine (it's cheap and produces
+                            // `==`-stable rows); this hands the new window to the
+                            // leaves without touching row layout.
+                            .onChange(of: laneViewport, initial: true) { _, newViewport in
+                                if laneViewportStore.viewport != newViewport {
+                                    laneViewportStore.viewport = newViewport
+                                }
                             }
 
                             if controller.session.isPlayable {
@@ -1988,7 +2010,7 @@ struct ContentView: View {
         index: Int,
         sessionTrack: SessionTrack,
         infoWidth: CGFloat,
-        laneViewport: LaneViewport
+        wideWidth: CGFloat
     ) -> TrackRowView {
         let isActive = controller.session.activeTrackID == sessionTrack.id
         let isBlind = controller.session.isBlindListeningModeEnabled
@@ -2009,15 +2031,12 @@ struct ContentView: View {
             isOffsetFocused: focusedOffsetTrackID == sessionTrack.id,
             infoWidth: infoWidth,
             rowHeight: trackRowHeight,
-            windowStart: laneViewport.windowStart,
-            windowSpan: laneViewport.windowSpan,
-            wideWidth: laneViewport.wideWidth,
-            majorTickXs: laneViewport.majorTickXs,
-            zeroTickX: laneViewport.zeroTickX,
+            wideWidth: wideWidth,
             offsetConfiguration: settings.offsetConfiguration,
             indexBadgeAppearance: settings.indexBadgeAppearance,
             showsDebugLabel: settings.showsComponentDebugLabels,
             controller: controller,
+            viewportStore: laneViewportStore,
             onSelect: { controller.selectActiveTrack(sessionTrack.id) },
             onRemove: { controller.removeTrack(sessionTrack.id) },
             onSetOffsetMs: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) },
@@ -2262,22 +2281,24 @@ struct ContentView: View {
 
     /// Geometry for the windowed waveform lanes. Each lane draws a
     /// 2×-viewport window anchored to a half-viewport grid in *absolute*
-    /// timeline time, and the parent slides it with a plain `offset` as the
-    /// timeline scrolls — so a horizontal scroll (or zoomed playback follow)
-    /// only re-rasterizes the lane Canvases when the viewport crosses a grid
-    /// boundary, not on every scroll event.
-    /// All fields are grid-quantized (they change only when the viewport
-    /// crosses a half-viewport boundary or on zoom), so they are safe to feed
-    /// the equatable row. The per-scroll-event slide (`shiftX`) is deliberately
-    /// *not* here — it lives in `LaneShiftView`, a leaf that reads `visibleStart`
-    /// live and applies the offset without re-running the row body.
+    /// timeline time; a leaf slides it with a plain `offset` as the timeline
+    /// scrolls (`shiftX`, kept out of here) and rasterizes only when the window
+    /// crosses a grid boundary.
+    ///
+    /// Crucially, EVERY field here varies with zoom (the quantum is
+    /// `visibleSpan/2`, and the ticks are mapped through the span). So these
+    /// must NOT be `TrackRowView` equatable inputs — if they were, a zoom step
+    /// would flip every row's `==` and force the non-lazy VStack to re-lay-out
+    /// all rows (the WP-6 bug). Instead the viewport lives in a shared
+    /// `LaneViewportStore` that only the lane leaf observes, so a zoom step
+    /// re-runs the N fixed-frame lane leaves, never the row bodies.
     struct LaneViewport: Equatable {
         var windowStart: TimeInterval
         var windowSpan: TimeInterval
-        /// Drawn width of the window (2× the visible lane width).
-        var wideWidth: CGFloat
         var majorTickXs: [CGFloat]
         var zeroTickX: CGFloat
+
+        static let empty = LaneViewport(windowStart: 0, windowSpan: 0, majorTickXs: [], zeroTickX: 0)
     }
 
     private func makeLaneViewport(waveformWidth: CGFloat) -> LaneViewport {
@@ -2286,10 +2307,13 @@ struct ContentView: View {
         // with an equality guard whenever the visible window moves) rather than
         // derived from `visibleStart` here: reading raw `visibleStart` in the
         // container body would register a per-scroll-event Observation
-        // dependency and re-run/re-layout the whole track list per event.
+        // dependency and re-run the whole track list per event.
         let windowStart = controller.laneWindowStart
         let windowSpan = span * 2
         let windowEnd = windowStart + windowSpan
+        // Ticks are mapped over the drawn window width (2× the visible lane
+        // width) so they line up with the lane frame; `wideWidth` itself is
+        // geometry (fixed on zoom) and travels to the lane as a row input.
         let wideWidth = waveformWidth * 2
         func windowX(_ time: TimeInterval) -> CGFloat {
             CGFloat((time - windowStart) / windowSpan) * wideWidth
@@ -2314,7 +2338,6 @@ struct ContentView: View {
         return LaneViewport(
             windowStart: windowStart,
             windowSpan: windowSpan,
-            wideWidth: wideWidth,
             majorTickXs: ruler.majorTicks.map { windowX($0.time) },
             zeroTickX: windowX(0)
         )
@@ -3542,14 +3565,17 @@ private func extractDroppedFileURL(from item: NSSecureCoding?) -> URL? {
 /// body — but the container only reconstructs these cheap values and runs `==`
 /// per row. Unless a *compared* input changed, SwiftUI skips this body and the
 /// entire info-column subtree (index badge, offset field, drag source) is left
-/// untouched. Two things are deliberately kept OUT of the compared surface so
+/// untouched. Three things are deliberately kept OUT of the compared surface so
 /// they can update without re-running the body:
-///   - the per-scroll-event lane slide, handled by the `LaneShiftView` leaf,
+///   - the per-scroll-event lane slide AND the zoom-varying lane window
+///     (window bounds + tick guides), both handled inside the `LaneView` leaf
+///     (which reads `controller.visibleStart` and `viewportStore` itself), so
+///     scroll and zoom re-run only that fixed-frame leaf, not the row;
 ///   - the reorder gap `offset(y:)`/`opacity`/animation, applied by the
 ///     container around this view.
-/// `controller` and the action closures are stored but excluded from `==`; the
-/// closures only capture the row's own identity/actions, never per-event state,
-/// so a skipped body can't show stale visuals.
+/// `controller`, `viewportStore`, and the action closures are stored but
+/// excluded from `==`; the closures only capture the row's own identity /
+/// actions, never per-event state, so a skipped body can't show stale visuals.
 private struct TrackRowView: View, Equatable {
     var index: Int
     var sessionTrack: SessionTrack
@@ -3566,17 +3592,19 @@ private struct TrackRowView: View, Equatable {
     var isOffsetFocused: Bool
     var infoWidth: CGFloat
     var rowHeight: CGFloat
-    var windowStart: TimeInterval
-    var windowSpan: TimeInterval
+    /// Drawn width of the 2× lane window. Geometry-driven (2× the waveform
+    /// column), so it changes on window/column resize but NOT on zoom — safe
+    /// as an equatable input.
     var wideWidth: CGFloat
-    var majorTickXs: [CGFloat]
-    var zeroTickX: CGFloat
     var offsetConfiguration: NumericControlConfiguration
     var indexBadgeAppearance: IndexBadgeAppearance
     var showsDebugLabel: Bool
 
-    /// Reference forwarded to the lane-slide leaf; never read in this body.
+    /// References forwarded to the lane leaf; never read in this body. The
+    /// zoom-varying window/ticks live in `viewportStore` (observed only by the
+    /// leaf), so they can't be equatable inputs here — see `LaneViewport`.
     var controller: PlaybackController
+    var viewportStore: LaneViewportStore
     var onSelect: () -> Void
     var onRemove: () -> Void
     var onSetOffsetMs: (Int) -> Void
@@ -3597,11 +3625,7 @@ private struct TrackRowView: View, Equatable {
             && lhs.isOffsetFocused == rhs.isOffsetFocused
             && lhs.infoWidth == rhs.infoWidth
             && lhs.rowHeight == rhs.rowHeight
-            && lhs.windowStart == rhs.windowStart
-            && lhs.windowSpan == rhs.windowSpan
             && lhs.wideWidth == rhs.wideWidth
-            && lhs.majorTickXs == rhs.majorTickXs
-            && lhs.zeroTickX == rhs.zeroTickX
             && lhs.offsetConfiguration == rhs.offsetConfiguration
             && lhs.indexBadgeAppearance == rhs.indexBadgeAppearance
             && lhs.showsDebugLabel == rhs.showsDebugLabel
@@ -3630,15 +3654,23 @@ private struct TrackRowView: View, Equatable {
                     )
                 )
 
-            // The lane draws a double-width window anchored to a half-viewport
-            // grid; the leaf slides it per scroll event so the Canvas only
-            // re-rasterizes when the viewport crosses a grid boundary.
-            LaneShiftView(
+            // The lane is a self-observing leaf: it reads the shared viewport
+            // (zoom) and the live scroll position (`shiftX`) itself, so zoom and
+            // scroll re-run only this fixed-frame leaf, never the row body. Its
+            // frame is `wideWidth × rowHeight` (both fixed on zoom), so its
+            // re-runs never propagate layout up into the VStack.
+            LaneView(
                 controller: controller,
-                lane: lane,
-                windowStart: windowStart,
+                viewportStore: viewportStore,
+                waveform: waveform,
+                isActive: isActive,
+                isBlind: isBlind,
+                isRenderable: isRenderable,
+                trackStart: sessionTrack.loadedTrack.offsetSeconds,
+                trackDuration: sessionTrack.loadedTrack.duration,
                 wideWidth: wideWidth,
-                rowHeight: rowHeight
+                rowHeight: rowHeight,
+                showsDebugLabel: showsDebugLabel
             )
         }
         .frame(height: rowHeight)
@@ -3656,23 +3688,6 @@ private struct TrackRowView: View, Equatable {
             }
         }
         .onHover { onHover($0) }
-    }
-
-    private var lane: WaveformLaneView {
-        WaveformLaneView(
-            width: wideWidth,
-            waveform: waveform,
-            isBlindListening: isBlind,
-            isActive: isActive,
-            isRenderable: isRenderable,
-            trackStart: sessionTrack.loadedTrack.offsetSeconds,
-            trackDuration: sessionTrack.loadedTrack.duration,
-            visibleStart: windowStart,
-            visibleSpan: windowSpan,
-            majorTickXs: majorTickXs,
-            zeroTickX: zeroTickX,
-            showsDebugLabel: showsDebugLabel
-        )
     }
 
     private var infoArea: some View {
@@ -3828,35 +3843,70 @@ private struct TrackRowView: View, Equatable {
     }
 }
 
-/// The per-scroll-event slide for one lane's grid-quantized window.
+/// Shared, self-observing source for the zoom-varying lane window (window
+/// bounds + tick guides). Only the lane leaves read it, so a zoom step (which
+/// changes every field) re-runs those N fixed-frame leaves instead of every
+/// row body — the WP-6 fix. The container writes it via an equality-guarded
+/// `.onChange` on the computed `LaneViewport`.
+@MainActor
+@Observable
+final class LaneViewportStore {
+    var viewport: ContentView.LaneViewport = .empty
+}
+
+/// One lane: the pre-rendered waveform window, positioned for the live scroll
+/// (`shiftX`) and drawn from the shared zoom-varying window (`viewportStore`).
 ///
-/// This leaf alone reads `visibleStart`/`visibleSpan`, so a horizontal scroll
-/// re-runs only N of these trivial bodies (recompute `shiftX`, re-apply the
-/// `.offset`) rather than the equatable rows around it. The lane image is
-/// `.equatable()`, so the Canvas is never touched by the slide — only when its
-/// grid-quantized window inputs change (a boundary crossing or zoom), at which
-/// point the parent row rebuilds and hands down a fresh `lane`.
-private struct LaneShiftView: View {
+/// A self-observing leaf. It reads `viewportStore.viewport` (zoom / grid
+/// boundary) and `controller.visibleStart`/`visibleSpan` (per scroll event),
+/// so both zoom and scroll re-run only this body — never the equatable row
+/// around it. Its outer frame is `wideWidth × rowHeight`, both fixed on zoom
+/// AND scroll, so a re-run never propagates layout up into the VStack; the
+/// image moves purely by transforms inside that fixed frame. `WaveformLaneView`
+/// stays `.equatable()`, so its Canvas/image request is touched only when the
+/// window actually changes (boundary or zoom), not on an intra-window scroll.
+private struct LaneView: View {
     var controller: PlaybackController
-    var lane: WaveformLaneView
-    var windowStart: TimeInterval
+    var viewportStore: LaneViewportStore
+    // Per-row, zoom-invariant inputs (captured when the row body last ran).
+    var waveform: Waveform?
+    var isActive: Bool
+    var isBlind: Bool
+    var isRenderable: Bool
+    var trackStart: TimeInterval
+    var trackDuration: TimeInterval
     var wideWidth: CGFloat
     var rowHeight: CGFloat
+    var showsDebugLabel: Bool
 
     var body: some View {
+        let viewport = viewportStore.viewport
         // Matches `makeLaneViewport`: `shiftX` maps the live scroll position
         // into the visible (half-window) width.
         let span = max(controller.visibleSpan, 0.001)
         let waveformWidth = wideWidth / 2
-        let shiftX = CGFloat((controller.visibleStart - windowStart) / span) * waveformWidth
+        let shiftX = CGFloat((controller.visibleStart - viewport.windowStart) / span) * waveformWidth
         Color.clear
             .frame(height: rowHeight)
             .frame(maxWidth: .infinity)
             .overlay(alignment: .topLeading) {
-                lane
-                    .equatable()
-                    .frame(width: wideWidth, height: rowHeight)
-                    .offset(x: -shiftX)
+                WaveformLaneView(
+                    width: wideWidth,
+                    waveform: waveform,
+                    isBlindListening: isBlind,
+                    isActive: isActive,
+                    isRenderable: isRenderable,
+                    trackStart: trackStart,
+                    trackDuration: trackDuration,
+                    visibleStart: viewport.windowStart,
+                    visibleSpan: viewport.windowSpan,
+                    majorTickXs: viewport.majorTickXs,
+                    zeroTickX: viewport.zeroTickX,
+                    showsDebugLabel: showsDebugLabel
+                )
+                .equatable()
+                .frame(width: wideWidth, height: rowHeight)
+                .offset(x: -shiftX)
             }
             .clipped()
     }
