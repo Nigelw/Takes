@@ -290,7 +290,89 @@ runtime (grabber/handles/scrub cycle all pass on the branch build).
 **WP-4b (loop-gap) parked, lowest priority per user:** its agent hit a session
 limit mid-implementation; `/private/tmp/takes-loopgap` (branch
 `perf/loop-gap-fix`) holds partial uncommitted pre-queue work. Resume after
-WP-5 lands and is verified.
+WP-5/6 land and are verified.
+
+## STATUS 2026-07-08 (afternoon) — WP-5 tested; zoom root cause found; WP-6
+
+WP-5 (`238f4ed`/`95399a1`/`2c90584`) tested by user. Wins: 2-at-a-time
+decoding, smooth playhead/handle drag. Two 👎 remained: zoom still jerky with
+low-res/blank fill-in; and NO responsiveness change with 1 track visible vs 20.
+
+**Architect profiled zoom at runtime (Debug, 20 tracks, AX zoom-button
+in/out sweep, `ps -M` main-thread + `sample`):**
+
+| Zoom sweep | main-thread avg / max |
+|---|---|
+| ~8 tracks visible | 65.5% / 80.5% |
+| 1 track visible (window ~300pt) | 63.3% / 76.9% |
+
+Identical → cost is independent of visible count. `sample` call graph during
+zoom is ~entirely `StackLayout.sizeThatFits` / `LayoutEngineBox.sizeThatFits`
+(SwiftUI re-laying-out the rows VStack); rasterization is NOT in the
+main-thread hot path (pyramid worked; renders are off-main).
+
+**Root cause — the 3c scroll bug leaking through on zoom.** Zoom changes
+`visibleSpan` every step → lane-window quantum (`span/2`) changes →
+`windowStart`/`windowSpan`/`majorTickXs`/`zeroTickX` all change every step →
+they're `TrackRowView` equatable inputs → every row `==` fails → the non-lazy
+VStack re-measures all rows per step. 3c quantized this away for scroll, but
+zoom inherently changes the span so quantization can't. Because the VStack
+lays out all rows regardless of on-screen visibility, cost is visible-count
+independent (explains the second 👎). 5b culling only offloaded
+rasterization (off-main, never the bottleneck), so it correctly showed no
+perceived change. Low-res/blank is downstream: the render publish is
+`@MainActor`, so a layout-pinned main thread delays fresh images landing.
+
+**WP-6 (in flight, same branch, ContentView only):** extend 3c leaf-isolation
+to zoom — move the zoom-varying lane-window params OUT of `TrackRowView`
+equatable inputs into a shared self-observing source the lane leaves read
+directly (leaf frame stays zoom-invariant so no layout propagates). Rows then
+stay `==`-stable across a zoom sweep → VStack never re-lays-out. Not switching
+to LazyVStack (stable rows already skip re-measure; LazyVStack risks loop/
+reorder alignment). Expected: zoom main-thread drops from ~65% to a small
+fraction; low-res/blank should largely self-resolve once publishes aren't
+delayed. Coarse-preview idea held back until WP-6's isolated effect is
+measured. Verification workflow: agent ships build → hand to user for a quick
+feel pass → architect deep-measures only if needed.
+
+## STATUS 2026-07-08 (evening) — WP-6 good but async-image artifact remains → WP-7
+
+WP-6 (`dc9fcdf`) confirmed working: zoom no longer triggers the row-VStack
+layout storm. But the user's persistent complaint stands, now captured on
+video and frame-analyzed by the architect: during zoom-in, scroll, AND
+zoom-out the lanes go FULLY BLANK during the gesture (at deep zoom the stale
+image exceeds `maxStaleStretch` → `Color.clear`), snapping to crisp only when
+motion settles. Settled frames are perfect.
+
+**Root cause is architectural, not a bug:** the async NSImage pipeline
+(3b/4a) always has a latency gap between "window changed" and "new image
+published"; during that gap the lane is blank or a stretched-stale blur.
+Caching pre-rendered rasterized images at zoom levels cannot close this gap.
+User's directive (correct): draw waveforms SYNCHRONOUSLY every frame from the
+peak cache, GarageBand-style — content always correct for the current window,
+no async load.
+
+**Why this is now viable (it wasn't when 3b introduced async):** 5a pyramid
+cut per-lane path cost ~16× (O(viewport px), ~700–1400 pts, not 41k buckets);
+5b culling limits drawing to ~8 visible lanes; WP-6 freed the main thread from
+the zoom layout storm. The single-frame cost of synchronously drawing all
+visible lanes is now small — the "synchronized N-lane rasterization hitch" 3b
+was built to avoid is affordable, and 3b's async cure now causes the
+blank/blur.
+
+**WP-7 (in flight, fresh agent — prior agent's session was reset):** delete
+the async image machinery (`LaneRenderModel`, `LaneRenderedWindow`,
+`LaneRenderKey`/request/trigger, `makeImage`/`makeMaskContext`, stale-image
+placement) and draw the lane with a SYNCHRONOUS `Canvas` filling the existing
+`waveformPath` (pyramid level-selection) for the current window each frame.
+Keep: 2×-window translate-for-scroll, culling gate (draw nothing when not
+renderable), 5c pending visual, blind placeholder, hit-testing-off, cursor
+fixes, WP-6 no-relayout invariant (leaf outer frame stays zoom-invariant).
+Escalation if synchronous Canvas can't hold frame rate under aggressive zoom:
+layer-backed NSView / CAShapeLayer GPU path (scroll = free layer translate,
+zoom = synchronous path rebuild) — documented, NOT implemented until WP-7's
+isolated effect is measured. If WP-7 still isn't smooth enough, the user may
+bring in fresh eyes.
 
 ---
 

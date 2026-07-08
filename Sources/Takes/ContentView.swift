@@ -1532,7 +1532,12 @@ struct ContentView: View {
         return Button {
             controller.toggleBlindListeningMode()
         } label: {
-            Image(systemName: isOn ? "eye.slash" : "eye")
+            if isOn {
+                Image("BlindListening")
+                    .offset(y: 2.5)
+            } else {
+                Image(systemName: "eye")
+            }
         }
         .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: isOn, diameter: 40, glyphSize: 15))
         .help("Blind Listening Mode")
