@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 struct TransportMapping {
@@ -47,6 +48,115 @@ struct TransportMapping {
 
     static func linearGain(fromDB db: Float) -> Float {
         powf(10, db / 20)
+    }
+
+    // MARK: - Gapless loop pre-queue
+
+    /// How one track's audio maps onto a single bounded playback window
+    /// `[windowStart, windowEnd]`, padded with silence so the described segment
+    /// occupies the *entire* window (`leadingSilence + frameCount + trailingSilence`
+    /// == `windowEnd − windowStart`). This is the single source of truth for
+    /// transport→file mapping used by both the one-shot scheduler
+    /// (`scheduleTrack`, which ignores the trailing pad) and the gapless loop
+    /// pre-queue (`scheduleLoopIteration`, which schedules all three parts so
+    /// every player advances by exactly one loop length per iteration and stays
+    /// phase-locked across wraps).
+    struct LoopIterationSegment: Equatable {
+        /// Silence before the file first becomes audible in this window.
+        var leadingSilence: TimeInterval
+        /// First audible frame of the file (0 when the file starts at/after the
+        /// window start).
+        var startFrame: AVAudioFramePosition
+        /// Number of file frames to play. Zero means the track is entirely out
+        /// of range for this window (silence only).
+        var frameCount: AVAudioFramePosition
+        /// Silence after the file goes out of range, filling the window to its
+        /// end. Ignored by callers that leave the player idle after the content.
+        var trailingSilence: TimeInterval
+    }
+
+    /// Map a track (given its `offsetSeconds`, `fileLength` in frames and
+    /// `sampleRate`) onto the window `[windowStart, windowEnd]`. Pass
+    /// `windowEnd = .greatestFiniteMagnitude` for an uncapped window (play to
+    /// the natural end of the file with no rounding loss).
+    static func loopIterationSegment(
+        offsetSeconds: TimeInterval,
+        fileLength: AVAudioFramePosition,
+        sampleRate: Double,
+        windowStart: TimeInterval,
+        windowEnd: TimeInterval
+    ) -> LoopIterationSegment {
+        let windowLength = max(0, windowEnd - windowStart)
+        guard windowLength > 0, sampleRate > 0, fileLength > 0 else {
+            return LoopIterationSegment(
+                leadingSilence: windowLength,
+                startFrame: 0,
+                frameCount: 0,
+                trailingSilence: 0
+            )
+        }
+
+        // Silence until the file becomes audible (offset later than the window
+        // start), capped to the window so a track starting past the window is
+        // fully silent.
+        let leadingSilence = min(max(offsetSeconds - windowStart, 0), windowLength)
+        // Global time where audible content would begin (== max(windowStart, offset)).
+        let contentGlobalStart = windowStart + leadingSilence
+        let startFrameRaw = (contentGlobalStart - offsetSeconds) * sampleRate
+        let startFrame = max(0, AVAudioFramePosition(startFrameRaw.rounded(.towardZero)))
+        guard startFrame < fileLength else {
+            // The file has already ended by the time this window starts sounding.
+            return LoopIterationSegment(
+                leadingSilence: windowLength,
+                startFrame: 0,
+                frameCount: 0,
+                trailingSilence: 0
+            )
+        }
+
+        let framesInFile = fileLength - startFrame
+        let framesToWindowEndRaw = max(0, windowEnd - contentGlobalStart) * sampleRate
+        let frameCount: AVAudioFramePosition
+        if framesToWindowEndRaw >= Double(framesInFile) {
+            // Window extends to or past the file end: play the rest exactly, with
+            // no frame lost to rounding the (effectively unbounded) cap.
+            frameCount = framesInFile
+        } else {
+            frameCount = max(0, min(framesInFile, AVAudioFramePosition(framesToWindowEndRaw.rounded())))
+        }
+
+        let contentDuration = Double(frameCount) / sampleRate
+        let trailingSilence = max(0, windowLength - leadingSilence - contentDuration)
+        return LoopIterationSegment(
+            leadingSilence: leadingSilence,
+            startFrame: startFrame,
+            frameCount: frameCount,
+            trailingSilence: trailingSilence
+        )
+    }
+
+    /// The re-anchor produced by a gapless loop wrap.
+    ///
+    /// The wrap happens at an *exact* audio moment — one iteration length after
+    /// the current iteration was anchored — not at the (up to a tick late)
+    /// instant the transport timer notices it. Deriving the new anchor from the
+    /// previous anchor plus the exact iteration length keeps the transport clock
+    /// from drifting later on every wrap.
+    ///
+    /// - Parameters:
+    ///   - previousStartHostTime: host time the current iteration was anchored at.
+    ///   - previousStartTransport: transport position the current iteration started from.
+    ///   - playbackStart: start of the playable range (where the next iteration begins).
+    ///   - playbackEnd: end of the playable range (where the current iteration wraps).
+    /// - Returns: the host time and transport position to anchor the next iteration at.
+    static func wrapAnchors(
+        previousStartHostTime: CFTimeInterval,
+        previousStartTransport: TimeInterval,
+        playbackStart: TimeInterval,
+        playbackEnd: TimeInterval
+    ) -> (startHostTime: CFTimeInterval, startTransport: TimeInterval) {
+        let currentIterationLength = playbackEnd - previousStartTransport
+        return (previousStartHostTime + currentIterationLength, playbackStart)
     }
 }
 

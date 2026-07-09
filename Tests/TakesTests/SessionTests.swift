@@ -1450,6 +1450,79 @@ struct SessionTests {
         #expect(controller.session.isPlaying)
         #expect(controller.session.loopRegion == nil)
         #expect(controller.session.repeatMode == .off)
+        controller.pause()
+    }
+
+    @MainActor
+    @Test
+    func togglingRepeatModeWhilePlayingKeepsPlaybackRunning() async throws {
+        // Exercises the pre-queue arm/tear-down path in setRepeatMode: Off (no
+        // wrap) → One (wrap, arm) → Off (tear down).
+        let url = try makeTemporaryAudioFile(name: "repeat-toggle.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+
+        controller.play()
+        #expect(controller.session.isPlaying)
+
+        controller.setRepeatMode(.one)
+        #expect(controller.session.isPlaying)
+        #expect(controller.session.repeatMode == .one)
+
+        controller.setRepeatMode(.off)
+        #expect(controller.session.isPlaying)
+        #expect(controller.session.repeatMode == .off)
+
+        controller.pause()
+    }
+
+    @MainActor
+    @Test
+    func changingOffsetWhileLoopingKeepsPlaybackWithinLoop() async throws {
+        // setOffsets while a loop is active must reschedule and re-arm the
+        // gapless pre-queue without disturbing the loop or the playhead.
+        let first = try makeTemporaryAudioFile(name: "offset-loop-1.wav")
+        let second = try makeTemporaryAudioFile(name: "offset-loop-2.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([first, second])
+        let secondID = try #require(controller.session.tracks.last?.id)
+
+        controller.beginLoop(LoopRegion(start: 0.2, end: 0.8))
+        controller.play()
+        controller.setOffset(secondID, seconds: 0.1)
+
+        #expect(controller.session.isPlaying)
+        #expect(controller.session.loopRegion == LoopRegion(start: 0.2, end: 0.8))
+        #expect(controller.session.transportPosition >= 0.2)
+        #expect(controller.session.transportPosition < 0.8)
+        controller.pause()
+    }
+
+    @MainActor
+    @Test
+    func switchAndRepeatLoopWithMultipleTracksPlays() async throws {
+        let first = try makeTemporaryAudioFile(name: "switch-loop-1.wav")
+        let second = try makeTemporaryAudioFile(name: "switch-loop-2.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([first, second])
+        let firstID = try #require(controller.session.tracks.first?.id)
+
+        controller.beginLoop(LoopRegion(start: 0.2, end: 0.5))
+        controller.play()
+
+        #expect(controller.session.isPlaying)
+        #expect(controller.session.repeatMode == .switchAndRepeat)
+        #expect(controller.session.activeTrackID == firstID)
+        controller.pause()
     }
 
     @MainActor

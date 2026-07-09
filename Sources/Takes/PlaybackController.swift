@@ -1,6 +1,9 @@
 import AVFoundation
 import Foundation
 import Observation
+#if DEBUG
+import os
+#endif
 
 @MainActor
 @Observable
@@ -89,6 +92,16 @@ final class PlaybackController {
     @ObservationIgnored private let engine = AVAudioEngine()
     nonisolated private static let maximumSilenceBufferDuration: TimeInterval = 5
 
+    #if DEBUG
+    /// Verification signal for the gapless-loop work: logs, at each loop wrap,
+    /// whether it was handled by the pre-queued path or a full reschedule, and
+    /// the main-thread time the wrap handling took.
+    nonisolated private static let loopWrapLog = Logger(
+        subsystem: "com.nigelwarren.Takes",
+        category: "loop-wrap"
+    )
+    #endif
+
     @ObservationIgnored private var engineConfigured = false
     @ObservationIgnored private var runtimeTracksByID: [SessionTrack.ID: RuntimeTrack] = [:]
     /// Schedule anchors: the transport position playback started from and the
@@ -100,6 +113,12 @@ final class PlaybackController {
     private var playbackStartedAt: CFTimeInterval?
     private var playbackStartedFromTransport: TimeInterval = 0
     @ObservationIgnored private var transportStoppedAtTimelineStart = true
+    /// Whether the next loop iteration is already scheduled behind the current
+    /// one on every player, so a wrap is gapless bookkeeping rather than a
+    /// stop/reschedule/play round-trip. Armed by `establishLoopPreQueue` after
+    /// any (re)schedule while a wrapping end-action is active; cleared whenever
+    /// the players are stopped (which wipes their scheduled queue).
+    @ObservationIgnored private var isLoopPreQueued = false
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var engineConfigurationObserver: NotificationObserverToken?
     @ObservationIgnored private var scrollAnimationTimer: Timer?
@@ -271,8 +290,15 @@ final class PlaybackController {
 
         do {
             try ensureEngineRunning()
-            try scheduleTracks(trackIDs, startingAt: restoredPosition, stoppingExistingSchedule: false)
-            startScheduledPlayers(for: trackIDs)
+            if wrappingModeActive {
+                // A wrapping session keeps a gapless pre-queue armed; appending
+                // new players out of band would desync it, so rebuild the whole
+                // schedule (a one-time import cost, not a per-wrap one).
+                try rescheduleAndStart(from: restoredPosition)
+            } else {
+                try scheduleTracks(trackIDs, startingAt: restoredPosition, stoppingExistingSchedule: false)
+                startScheduledPlayers(for: trackIDs)
+            }
         } catch let error as PlaybackError {
             failImportPlaybackResume(with: error, at: restoredPosition)
             return false
@@ -309,8 +335,7 @@ final class PlaybackController {
 
         do {
             if engineConfigured {
-                try reschedulePlayers(startingAt: restoredPosition)
-                startScheduledPlayers()
+                try rescheduleAndStart(from: restoredPosition)
             }
             session.isPlaying = true
             playbackStartedFromTransport = session.transportPosition
@@ -475,8 +500,7 @@ final class PlaybackController {
         }
         do {
             try ensureEngineRunning()
-            try reschedulePlayers(startingAt: session.transportPosition)
-            startScheduledPlayers()
+            try rescheduleAndStart(from: session.transportPosition)
             session.isPlaying = true
             transportStoppedAtTimelineStart = false
             playbackStartedFromTransport = session.transportPosition
@@ -501,6 +525,10 @@ final class PlaybackController {
         transportStoppedAtTimelineStart = false
         playbackStartedAt = nil
         playbackStartedFromTransport = session.transportPosition
+        // Pausing the nodes leaves their scheduled queue in place, but the next
+        // resume goes through `play()` (a full reschedule), so any pre-queued
+        // iteration is discarded — forget it now.
+        isLoopPreQueued = false
         timer?.invalidate()
         pauseEngine()
     }
@@ -515,6 +543,7 @@ final class PlaybackController {
         transportStoppedAtTimelineStart = true
         playbackStartedAt = nil
         playbackStartedFromTransport = session.transportPosition
+        isLoopPreQueued = false
         timer?.invalidate()
         applyAudibility()
         pauseEngine()
@@ -543,8 +572,7 @@ final class PlaybackController {
 
         guard session.isPlaying else { return }
         do {
-            try reschedulePlayers(startingAt: clamped)
-            startScheduledPlayers()
+            try rescheduleAndStart(from: clamped)
             playbackStartedFromTransport = clamped
             playbackStartedAt = CACurrentMediaTime()
             applyAudibility()
@@ -665,6 +693,20 @@ final class PlaybackController {
             }
             session.isPlaying = true
             session.transportPosition = restoredPosition
+            // Removing a track can shrink the timeline (and so the wrap point)
+            // and detaches its player; a wrapping session's pre-queue was padded
+            // to the old bounds, so rebuild it against the new range.
+            if engineConfigured, wrappingModeActive {
+                do {
+                    try rescheduleAndStart(from: restoredPosition)
+                } catch let error as PlaybackError {
+                    failImportPlaybackResume(with: error, at: restoredPosition)
+                    return
+                } catch {
+                    failImportPlaybackResume(with: .schedulingFailed, at: restoredPosition)
+                    return
+                }
+            }
             playbackStartedFromTransport = restoredPosition
             playbackStartedAt = CACurrentMediaTime()
             startTimer()
@@ -691,6 +733,7 @@ final class PlaybackController {
         transportStoppedAtTimelineStart = true
         playbackStartedAt = nil
         playbackStartedFromTransport = 0
+        isLoopPreQueued = false
         timer?.invalidate()
         recalculateSessionDuration()
         applyAudibility()
@@ -744,8 +787,7 @@ final class PlaybackController {
 
         guard session.isPlaying else { return }
         do {
-            try reschedulePlayers(startingAt: resumePosition)
-            startScheduledPlayers()
+            try rescheduleAndStart(from: resumePosition)
             playbackStartedFromTransport = session.transportPosition
             playbackStartedAt = CACurrentMediaTime()
             applyAudibility()
@@ -1006,7 +1048,32 @@ final class PlaybackController {
     // MARK: - Repeat & loop
 
     func setRepeatMode(_ mode: RepeatMode) {
+        guard session.repeatMode != mode else { return }
+        let wasWrapping = wrappingModeActive
         session.repeatMode = mode
+
+        // When playing, a change that flips whether the range wraps (e.g. Off ↔
+        // One) must add or drop the gapless pre-queue; a full reschedule from the
+        // live transport does both. One ↔ Switch keeps the same schedule (the
+        // wrap just flips which track is audible), so no reschedule is needed.
+        guard session.isPlaying, engineConfigured, wasWrapping != wrappingModeActive else { return }
+
+        let resumePosition = TransportMapping.clampedTransport(
+            currentTransportPosition(),
+            timelineStart: session.timelineStart,
+            timelineEnd: session.timelineEnd
+        )
+        session.transportPosition = resumePosition
+        do {
+            try rescheduleAndStart(from: resumePosition)
+            playbackStartedFromTransport = resumePosition
+            playbackStartedAt = CACurrentMediaTime()
+            applyAudibility()
+        } catch let error as PlaybackError {
+            failImportPlaybackResume(with: error, at: resumePosition)
+        } catch {
+            failImportPlaybackResume(with: .schedulingFailed, at: resumePosition)
+        }
     }
 
     func cycleRepeatMode() {
@@ -1018,7 +1085,6 @@ final class PlaybackController {
     /// inside it. Replacing an active loop while playing preserves playback when
     /// the new loop still contains the live transport.
     func beginLoop(_ region: LoopRegion) {
-        let previousLoop = session.loopRegion
         let transport = session.isPlaying ? currentTransportPosition() : session.transportPosition
         session.loopRegion = region
         session.repeatMode = .switchAndRepeat
@@ -1033,21 +1099,9 @@ final class PlaybackController {
             return
         }
 
-        guard let previousLoop else {
-            seek(to: transport)
-            return
-        }
-
-        if Self.canResizeLoopWithoutRescheduling(from: previousLoop, to: region, transport: transport) {
-            session.transportPosition = transport
-            if region.end > previousLoop.end {
-                appendLoopExtension(from: previousLoop, currentPosition: transport)
-            }
-            return
-        }
-
-        // The new loop still contains the playhead, but queued audio needs to be
-        // rebound to the new loop boundary.
+        // Rebind the gapless schedule to the new loop boundary from the live
+        // playhead (which the new loop still contains). `seek` reschedules and
+        // re-arms the pre-queue against the new range.
         seek(to: transport)
     }
 
@@ -1065,35 +1119,38 @@ final class PlaybackController {
 
         let transport = session.isPlaying ? currentTransportPosition() : session.transportPosition
         session.loopRegion = region
-        guard session.isPlaying else {
-            seek(to: transport)
-            return
-        }
-
-        if Self.canResizeLoopWithoutRescheduling(from: current, to: region, transport: transport) {
-            session.transportPosition = transport
-            if region.end > current.end {
-                appendLoopExtension(from: current, currentPosition: transport)
-            }
-            return
-        }
-
-        // Destructive edits, such as shrinking the end under already-scheduled
-        // audio or moving the start past the playhead, still need a precise rebind.
+        // The new bounds change where playback wraps, so the padded pre-queue
+        // must be rebuilt; `seek` clamps into the new loop, reschedules and
+        // re-arms it. (A per-drag reschedule is a transient user-action cost,
+        // not the per-wrap gap this work removes.)
         seek(to: transport)
     }
 
     /// Clear the loop and turn repeat off.
     func deselectLoop() {
-        guard let previousLoop = session.loopRegion else { return }
+        guard session.loopRegion != nil else { return }
         let wasPlaying = session.isPlaying
         let resumePosition = wasPlaying ? currentTransportPosition() : nil
         clearLoop()
         guard wasPlaying, let resumePosition else { return }
 
-        session.transportPosition = resumePosition
-        if resumePosition < previousLoop.end {
-            appendPlaybackAfterDeselectingLoop(previousLoop, currentPosition: resumePosition)
+        // The range is no longer wrapping (Repeat Off): rebuild the schedule so
+        // playback flows past the old loop end and the pre-queue is torn down.
+        let restoredPosition = TransportMapping.clampedTransport(
+            resumePosition,
+            timelineStart: session.timelineStart,
+            timelineEnd: session.timelineEnd
+        )
+        session.transportPosition = restoredPosition
+        do {
+            try rescheduleAndStart(from: restoredPosition)
+            playbackStartedFromTransport = restoredPosition
+            playbackStartedAt = CACurrentMediaTime()
+            applyAudibility()
+        } catch let error as PlaybackError {
+            failImportPlaybackResume(with: error, at: restoredPosition)
+        } catch {
+            failImportPlaybackResume(with: .schedulingFailed, at: restoredPosition)
         }
     }
 
@@ -1385,8 +1442,7 @@ final class PlaybackController {
 
         do {
             try ensureEngineRunning()
-            try reschedulePlayers(startingAt: resumePosition)
-            startScheduledPlayers()
+            try rescheduleAndStart(from: resumePosition)
             playbackStartedFromTransport = session.transportPosition
             playbackStartedAt = CACurrentMediaTime()
             applyAudibility()
@@ -1397,6 +1453,26 @@ final class PlaybackController {
         }
     }
 
+    /// Whether reaching the end of the playable range should wrap (loop) rather
+    /// than stop — i.e. Repeat One, Switch & Repeat, or any active loop region
+    /// (which forces Switch & Repeat). This is exactly the set of states where a
+    /// gapless pre-queue applies.
+    private var wrappingModeActive: Bool {
+        guard session.isPlayable else { return false }
+        return Self.advanceAtEnd(mode: session.repeatMode, canSwitch: session.canSwitchPlayback) != .stop
+    }
+
+    /// Full (re)schedule from `pos` for a playing session: stops every player,
+    /// schedules the current iteration, starts them, and — when the range wraps
+    /// — arms the gapless loop pre-queue. The caller sets the schedule anchors.
+    /// This is the single entry point every non-wrap playback (re)start goes
+    /// through, so any invalidating edit re-establishes the pre-queue for free.
+    private func rescheduleAndStart(from pos: TimeInterval) throws {
+        try reschedulePlayers(startingAt: pos)
+        startScheduledPlayers()
+        establishLoopPreQueue()
+    }
+
     private func reschedulePlayers(startingAt globalTime: TimeInterval) throws {
         let transport = TransportMapping.clampedTransport(
             globalTime,
@@ -1404,13 +1480,66 @@ final class PlaybackController {
             timelineEnd: session.timelineEnd
         )
 
-        try scheduleTracks(
-            session.tracks.map(\.id),
-            startingAt: transport,
-            stoppingExistingSchedule: true
-        )
+        if wrappingModeActive {
+            // Schedule the (possibly partial) current iteration padded to the
+            // wrap point so every player advances by the same amount and the
+            // pre-queued next iteration lines up exactly at the wrap.
+            guard session.isPlayable else { throw PlaybackError.schedulingFailed }
+            let windowEnd = session.playbackEnd
+            for sessionTrack in session.tracks {
+                guard let runtime = runtimeTracksByID[sessionTrack.id] else { continue }
+                runtime.player.stop()
+                scheduleLoopIteration(
+                    sessionTrack.loadedTrack,
+                    file: runtime.file,
+                    on: runtime.player,
+                    windowStart: transport,
+                    windowEnd: windowEnd
+                )
+            }
+        } else {
+            try scheduleTracks(
+                session.tracks.map(\.id),
+                startingAt: transport,
+                stoppingExistingSchedule: true
+            )
+        }
 
+        // Stopping the players wiped any queued iteration; the caller re-arms it
+        // through `establishLoopPreQueue` (via `rescheduleAndStart`).
+        isLoopPreQueued = false
         session.transportPosition = transport
+    }
+
+    /// Arm the gapless pre-queue: append one full loop iteration behind the
+    /// currently-scheduled content on every player, so the next wrap is seamless.
+    /// A no-op (and disarm) when the range does not wrap.
+    private func establishLoopPreQueue() {
+        guard wrappingModeActive else {
+            isLoopPreQueued = false
+            return
+        }
+        enqueueNextLoopIteration()
+        isLoopPreQueued = true
+    }
+
+    /// Schedule one full `[playbackStart, playbackEnd]` iteration behind the
+    /// existing queue on every player, without stopping them. Reuses the same
+    /// transport→file mapping as one-shot scheduling.
+    private func enqueueNextLoopIteration() {
+        let windowStart = session.playbackStart
+        let windowEnd = session.playbackEnd
+        guard windowEnd > windowStart else { return }
+        for sessionTrack in session.tracks {
+            guard let runtime = runtimeTracksByID[sessionTrack.id] else { continue }
+            scheduleLoopIteration(
+                sessionTrack.loadedTrack,
+                file: runtime.file,
+                on: runtime.player,
+                windowStart: windowStart,
+                windowEnd: windowEnd
+            )
+        }
     }
 
     private func startScheduledPlayers() {
@@ -1452,68 +1581,39 @@ final class PlaybackController {
         }
     }
 
-    private func appendPlaybackAfterDeselectingLoop(_ previousLoop: LoopRegion, currentPosition: TimeInterval) {
-        guard session.isPlayable else { return }
-        do {
-            for sessionTrack in session.tracks {
-                let continuationStart = trackHadPlaybackScheduledThroughLoopEnd(
-                    sessionTrack.loadedTrack,
-                    loop: previousLoop,
-                    currentPosition: currentPosition
-                ) ? previousLoop.end : currentPosition
-                try scheduleTracks(
-                    [sessionTrack.id],
-                    startingAt: continuationStart,
-                    stoppingExistingSchedule: false
-                )
-            }
-        } catch let error as PlaybackError {
-            playbackError = error
-            stopAtEnd()
-        } catch {
-            playbackError = .schedulingFailed
-            stopAtEnd()
-        }
-    }
-
-    private func appendLoopExtension(from previousLoop: LoopRegion, currentPosition: TimeInterval) {
-        guard session.isPlayable else { return }
-        let extensionStart = max(previousLoop.end, currentPosition)
-        guard extensionStart < session.playbackEnd else { return }
-
-        do {
-            try scheduleTracks(
-                session.tracks.map(\.id),
-                startingAt: extensionStart,
-                stoppingExistingSchedule: false
-            )
-        } catch let error as PlaybackError {
-            playbackError = error
-            stopAtEnd()
-        } catch {
-            playbackError = .schedulingFailed
-            stopAtEnd()
-        }
-    }
-
-    nonisolated static func canResizeLoopWithoutRescheduling(
-        from previousLoop: LoopRegion,
-        to resizedLoop: LoopRegion,
-        transport: TimeInterval
-    ) -> Bool {
-        resizedLoop.end >= previousLoop.end
-            && transport >= resizedLoop.start
-            && transport < resizedLoop.end
-    }
-
-    private func trackHadPlaybackScheduledThroughLoopEnd(
+    /// Schedule one full loop iteration for a track over `[windowStart,
+    /// windowEnd]`, padded with silence so the player advances by exactly the
+    /// window length — keeping every player phase-locked across seamless wraps.
+    /// Appends behind whatever is already queued (`at: nil`); never stops the
+    /// player. Uses the shared `TransportMapping.loopIterationSegment` mapping.
+    private func scheduleLoopIteration(
         _ track: LoadedTrack,
-        loop: LoopRegion,
-        currentPosition: TimeInterval
-    ) -> Bool {
-        let trackStart = track.offsetSeconds
-        let trackEnd = track.offsetSeconds + track.duration
-        return trackStart < loop.end && trackEnd > currentPosition
+        file: AVAudioFile,
+        on player: AVAudioPlayerNode,
+        windowStart: TimeInterval,
+        windowEnd: TimeInterval
+    ) {
+        let segment = TransportMapping.loopIterationSegment(
+            offsetSeconds: track.offsetSeconds,
+            fileLength: file.length,
+            sampleRate: track.sampleRate,
+            windowStart: windowStart,
+            windowEnd: windowEnd
+        )
+        if segment.leadingSilence > 0 {
+            scheduleSilence(on: player, format: file.processingFormat, duration: segment.leadingSilence)
+        }
+        if segment.frameCount > 0 {
+            player.scheduleSegment(
+                file,
+                startingFrame: segment.startFrame,
+                frameCount: AVAudioFrameCount(segment.frameCount),
+                at: nil
+            )
+        }
+        if segment.trailingSilence > 0, segment.trailingSilence.isFinite {
+            scheduleSilence(on: player, format: file.processingFormat, duration: segment.trailingSilence)
+        }
     }
 
     private func recalculateSessionDuration(preferZero: Bool = false) {
@@ -1565,59 +1665,40 @@ final class PlaybackController {
         playbackError = nil
     }
 
+    /// One-shot schedule of a track from `globalTime` to the wrap cap (the loop
+    /// end when looping, else the natural file end), leaving the player idle
+    /// afterwards. Shares `TransportMapping.loopIterationSegment` with the
+    /// gapless pre-queue so there is a single transport→file mapping; the only
+    /// difference is that this path discards the trailing silence pad (a
+    /// one-shot player simply goes idle when its content ends).
     private func scheduleTrack(
         _ track: LoadedTrack,
         file: AVAudioFile,
         on player: AVAudioPlayerNode,
         atGlobalTime globalTime: TimeInterval
     ) {
-        let filePosition = TransportMapping.filePosition(
-            forGlobalTime: globalTime,
-            offset: track.offsetSeconds
+        // A loop caps content at its end; without one, play to the natural file
+        // end (an effectively unbounded window, no rounding loss).
+        let windowEnd = session.loopRegion?.end ?? .greatestFiniteMagnitude
+        let segment = TransportMapping.loopIterationSegment(
+            offsetSeconds: track.offsetSeconds,
+            fileLength: file.length,
+            sampleRate: track.sampleRate,
+            windowStart: globalTime,
+            windowEnd: windowEnd
         )
-
-        if filePosition >= track.duration {
-            return
+        // No audible content in this window: leave the player idle, matching the
+        // prior behaviour of scheduling nothing when out of range.
+        guard segment.frameCount > 0 else { return }
+        if segment.leadingSilence > 0 {
+            scheduleSilence(on: player, format: file.processingFormat, duration: segment.leadingSilence)
         }
-
-        // When a loop is active, cap everything at the loop end so no audio past
-        // the loop is ever heard. The transport clock still wraps precisely; the
-        // worst case is a sub-tick silent tail at the loop seam.
-        let loopEnd = session.loopRegion?.end
-
-        if filePosition < 0 {
-            let delaySeconds = -filePosition
-            if let loopEnd {
-                // The file becomes audible at global time == offset; anything that
-                // would sound after the loop end is dropped.
-                let audibleSeconds = loopEnd - track.offsetSeconds
-                guard audibleSeconds > 0 else { return }
-                scheduleSilence(on: player, format: file.processingFormat, duration: min(delaySeconds, loopEnd - globalTime))
-                let loopFrames = AVAudioFramePosition(audibleSeconds * track.sampleRate)
-                let frameCount = min(file.length, loopFrames)
-                guard frameCount > 0 else { return }
-                player.scheduleSegment(file, startingFrame: 0, frameCount: AVAudioFrameCount(frameCount), at: nil)
-                return
-            }
-            scheduleSilence(on: player, format: file.processingFormat, duration: delaySeconds)
-            player.scheduleSegment(
-                file,
-                startingFrame: 0,
-                frameCount: AVAudioFrameCount(file.length),
-                at: nil
-            )
-            return
-        }
-
-        let frame = AVAudioFramePosition(filePosition * track.sampleRate)
-        var framesRemaining = max(0, file.length - frame)
-        guard framesRemaining > 0 else { return }
-        if let loopEnd {
-            let loopFrames = AVAudioFramePosition(max(0, loopEnd - globalTime) * track.sampleRate)
-            framesRemaining = min(framesRemaining, loopFrames)
-            guard framesRemaining > 0 else { return }
-        }
-        player.scheduleSegment(file, startingFrame: frame, frameCount: AVAudioFrameCount(framesRemaining), at: nil)
+        player.scheduleSegment(
+            file,
+            startingFrame: segment.startFrame,
+            frameCount: AVAudioFrameCount(segment.frameCount),
+            at: nil
+        )
     }
 
     private func scheduleSilence(on player: AVAudioPlayerNode, format: AVAudioFormat, duration: TimeInterval) {
@@ -1697,11 +1778,70 @@ final class PlaybackController {
         case .stop:
             stopAtEnd()
         case .restart:
-            restartPlayback(from: session.playbackStart)
+            handleLoopWrap(switchTrack: false)
         case .switchThenRestart:
-            selectNextTrack()
-            restartPlayback(from: session.playbackStart)
+            handleLoopWrap(switchTrack: true)
         }
+    }
+
+    /// Handle the transport reaching the wrap point.
+    ///
+    /// The gapless path: the next iteration is already sounding (it was
+    /// pre-queued behind the current one), so this is pure bookkeeping — re-anchor
+    /// the transport clock to the *exact* wrap moment (never `CACurrentMediaTime`,
+    /// which the 20 Hz tick reads up to a tick late), advance the active track for
+    /// Switch & Repeat (an audibility flip; every player keeps playing), and
+    /// pre-queue the following iteration. No player is stopped, scheduled or
+    /// started, so it stays flat as track count grows.
+    ///
+    /// The fallback path (no armed pre-queue, or the tick fell more than one
+    /// iteration behind — e.g. a loop shorter than the tick interval): a full
+    /// reschedule, as before.
+    private func handleLoopWrap(switchTrack: Bool) {
+        #if DEBUG
+        let startedAt = DispatchTime.now()
+        let trackCount = session.tracks.count
+        func logWrap(preQueued: Bool) {
+            let elapsedMicros = Double(DispatchTime.now().uptimeNanoseconds &- startedAt.uptimeNanoseconds) / 1000.0
+            Self.loopWrapLog.debug(
+                "wrap handled=\(preQueued ? "pre-queued" : "reschedule", privacy: .public) tracks=\(trackCount, privacy: .public) elapsed=\(elapsedMicros, format: .fixed(precision: 1), privacy: .public)us"
+            )
+        }
+        #else
+        func logWrap(preQueued: Bool) {}
+        #endif
+
+        if isLoopPreQueued,
+           let previousStartedAt = playbackStartedAt,
+           session.playbackEnd > session.playbackStart {
+            let anchors = TransportMapping.wrapAnchors(
+                previousStartHostTime: previousStartedAt,
+                previousStartTransport: playbackStartedFromTransport,
+                playbackStart: session.playbackStart,
+                playbackEnd: session.playbackEnd
+            )
+            let iterationLength = session.playbackEnd - session.playbackStart
+            // Only take the gapless path while the pre-queued iteration is still
+            // the one sounding; if we fell further behind, its audio has already
+            // run out, so rebuild the schedule instead of drifting.
+            if CACurrentMediaTime() - anchors.startHostTime < iterationLength {
+                playbackStartedAt = anchors.startHostTime
+                playbackStartedFromTransport = anchors.startTransport
+                session.transportPosition = anchors.startTransport
+                if switchTrack {
+                    selectNextTrack()
+                }
+                enqueueNextLoopIteration()
+                logWrap(preQueued: true)
+                return
+            }
+        }
+
+        if switchTrack {
+            selectNextTrack()
+        }
+        restartPlayback(from: session.playbackStart)
+        logWrap(preQueued: false)
     }
 
     /// Stop playback at the end of the playable range (Repeat Off).
@@ -1731,8 +1871,7 @@ final class PlaybackController {
         )
         session.transportPosition = clamped
         do {
-            try reschedulePlayers(startingAt: clamped)
-            startScheduledPlayers()
+            try rescheduleAndStart(from: clamped)
             playbackStartedFromTransport = clamped
             playbackStartedAt = CACurrentMediaTime()
             applyAudibility()
