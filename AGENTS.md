@@ -3,6 +3,15 @@
 Takes is an Xcode-based native macOS SwiftUI app, not a SwiftPM package. Do not
 use `swift test` as the verification path.
 
+## Keeping this file current
+
+After any merge or PR, review this file and update it to match the merged code
+before considering the work done. Check the ownership list, Playback Model,
+Behavior Invariants (especially the performance-architecture ones), and Test
+Map against what changed, and verify any symbol or behavior it names still
+exists before relying on it. Treat a stale AGENTS.md as a bug: its whole value
+is that an agent can trust it without re-deriving the codebase.
+
 ## Verification
 
 Use `xcodebuild test` with fresh DerivedData under `/private/tmp` for the
@@ -52,7 +61,10 @@ Key ownership:
   transport-to-file mapping, audibility checks, and gain conversion.
 - `TrackAligner.swift`: audio-derived quick alignment and deeper tempo
   analysis.
-- `WaveformStore.swift`: process-local waveform generation and caching.
+- `WaveformStore.swift`: in-memory (process-lifetime) waveform generation —
+  bounded to 2 concurrent decodes in session (top-first) order — plus the
+  multi-resolution peak pyramid (`Waveform.reducedLevels`) the lanes draw
+  from. No disk caches.
 - `AudioFileLoader.swift`: local file loading through `AVAudioFile`.
 - `LibraryTrackSelectionLoader.swift`: AppleScript-based Music.app selection
   loading.
@@ -101,17 +113,54 @@ These are here to prevent parallel implementations and subtle regressions:
 - Keep global shortcuts focus-safe; active numeric text fields should retain
   normal text editing behavior.
 
+Performance-architecture invariants (established by the perf effort; breaking
+these reintroduces the exact regressions it fixed):
+
+- **Waveform lanes draw synchronously from the peak pyramid every frame**
+  (`WaveformLaneView`'s `Canvas` → `LaneWaveformRenderer.waveformPath`, fed by
+  `Waveform.reducedLevels`, picking the level nearest ~1 bucket/pixel). Do NOT
+  reintroduce async or cached rasterized-image (`NSImage`) waveform rendering —
+  that caused blank/stale lanes during zoom and scroll. Off-screen lanes are
+  culled via `isRenderable`; waveform data is in-memory only.
+- **Continuous on-screen motion must use Core Animation, never SwiftUI
+  `TimelineView(.animation)` or `withAnimation`** — both burn main-thread CPU
+  per frame on macOS. The playhead is CALayer-driven (one `CABasicAnimation`
+  per transport anchor event); steady playback does zero per-frame main-thread
+  work.
+- **`PlaybackController` is `@Observable`** (not `ObservableObject`). Live
+  transport position is derived from schedule anchors via
+  `displayTransportPosition()`; `session.transportPosition` is written only at
+  anchor events (play/pause/seek/stop/wrap), never per tick. The visible window
+  (`visibleStart`/`visibleSpan`/`laneWindowStart`) lives on the controller and
+  is written only on real change (equality-guarded).
+- **Keep the track-row / lane-leaf isolation.** `TrackRowView` is `Equatable`
+  and must not receive any per-scroll or per-zoom value; the zoom/scroll-varying
+  lane window flows through `LaneViewportStore` → `LaneView` leaves, so
+  scrolling and zooming never re-lay-out the track `VStack`.
+- **Loop/repeat wraps are gapless via a pre-queued next iteration**
+  (`establishLoopPreQueue` / `handleLoopWrap`, `isLoopPreQueued`): a wrap is
+  bookkeeping-only (re-anchor + audibility flip + enqueue the following
+  iteration), never a stop/reschedule/play. Any schedule-changing action routes
+  through `rescheduleAndStart`, which re-arms the pre-queue. Loop resize while
+  playing deliberately does a full reschedule (a one-time interactive cost, not
+  per-wrap).
+
 ## Test Map
 
-- `TransportMappingTests.swift`: transport math and range behavior.
+- `TransportMappingTests.swift`: transport math and range behavior, plus
+  loop-wrap anchor math and gapless pre-queue segment mapping.
 - `SessionTests.swift`: higher-level state, import behavior, Music/Finder
   selection handling, numeric control stepping, blind listening, window policy,
   and other non-UI logic.
 - `StreamingTrackImportTests.swift`: streaming metadata, yt-dlp resolution,
   download/import behavior, checksum parsing, and error handling.
+- `WaveformSourceTests.swift`: waveform generation and the peak pyramid
+  (file-anchored pooling vs brute force, pyramid excluded from `Waveform` `==`).
+- `AnalysisEngineTests.swift`, `AnalogSourceDSPTests.swift`, and
+  `LossyArtifactDSPTests.swift`: the single-file analysis window's DSP.
 - `LoopingTests.swift`, `TimelineHeaderMarkerTests.swift`,
-  `TrackAlignerTests.swift`, `TrackDropHighlightTests.swift`, and
-  `WaveformSourceTests.swift`: their named subsystems.
+  `TrackAlignerTests.swift`, and `TrackDropHighlightTests.swift`: their named
+  subsystems.
 
 ## Ongoing Work
 
