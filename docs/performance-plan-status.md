@@ -374,6 +374,23 @@ zoom = synchronous path rebuild) — documented, NOT implemented until WP-7's
 isolated effect is measured. If WP-7 still isn't smooth enough, the user may
 bring in fresh eyes.
 
+**WP-7 LANDED + MEASURED (commit `1649160`).** Async NSImage pipeline fully
+removed; lanes now draw synchronously from the pyramid in a `Canvas` each
+frame. (Its agent hit a session limit before committing/verifying; architect
+finished verification, committed, and measured.) Build + full test suite green.
+
+Architect runtime measurement (Debug, 20 tracks, AX zoom-button sweep):
+- Zoom-sweep main-thread CPU: **65.5% (WP-6) → 47.2% avg / 55.3% max**.
+- **Blanking eliminated:** captured 30 window frames during a live zoom sweep;
+  sampled frames at 00:15 / 00:10 / 02:00 spans (three very different zoom
+  levels, mid-gesture) all show every lane crisply rendered. Where the WP-6
+  video showed fully blank lanes mid-zoom, WP-7 shows none — the synchronous
+  draw makes the waveform correct in the same frame the window changes.
+
+Handed a Release build to the user for a feel pass (zoom in/out + scroll at
+20 tracks). CALayer escalation remains the documented fallback but looks
+unnecessary — synchronous Canvas holds up. Loop-gap (WP-4b) still parked.
+
 ---
 
 ## Iteration 0 — Baseline instrumentation (do first)
