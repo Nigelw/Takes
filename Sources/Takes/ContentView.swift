@@ -4311,22 +4311,14 @@ private struct WaveformLaneView: View, Equatable {
                     .frame(width: width, height: 58)
                     .foregroundStyle(isActive ? Theme.primary.opacity(0.70) : Theme.waveformInactive.opacity(0.58))
             } else {
-                // The peak envelope is a pre-rendered, off-main-thread image of
-                // the 2× window (see `LaneWaveformImage`), so crossing a window
-                // grid boundary no longer rasterizes a viewport-wide path on the
-                // main thread across all N lanes in one frame.
-                LaneWaveformImage(
-                    waveform: waveform,
-                    isActive: isActive,
-                    isRenderable: isRenderable,
-                    trackStart: trackStart,
-                    trackDuration: trackDuration,
-                    windowStart: visibleStart,
-                    windowSpan: visibleSpan,
-                    wideWidth: width,
-                    laneHeight: 58
-                )
-                .frame(width: width, height: 58)
+                // The peak envelope is drawn SYNCHRONOUSLY every frame straight
+                // from the 5a pyramid (WP-7): the `Canvas` draw closure runs
+                // during the frame's render pass, so the correct waveform for the
+                // CURRENT window is drawn in the same frame the window changes —
+                // no async image pipeline to fall behind, no blank/stale-stretch
+                // gap during zoom or scroll.
+                waveformContent
+                    .frame(width: width, height: 58)
             }
 
             Rectangle()
@@ -4337,12 +4329,65 @@ private struct WaveformLaneView: View, Equatable {
         .clipped()
         // Lane visuals must NEVER hit-test: `.clipped()` clips drawing but NOT
         // hit testing, and this subtree is 2× the viewport wide and slid left
-        // by up to a viewport width (plus a stale render can sit translated
-        // further), so it extends invisibly over the track-info column and
-        // would swallow its clicks. All lane interaction lives on the loop
-        // overlay / scroll overlay.
+        // by up to a viewport width, so it extends invisibly over the
+        // track-info column and would swallow its clicks. All lane interaction
+        // lives on the loop overlay / scroll overlay.
         .allowsHitTesting(false)
         .componentDebugLabel("Waveform Lane", enabled: showsDebugLabel, color: .purple)
+    }
+
+    /// Envelope tint. `isActive` is a color-only distinction, so an A/B switch
+    /// only re-tints — the pyramid path build is identical either way.
+    private var tint: Color {
+        isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7)
+    }
+
+    /// The real-waveform branch (never reached while blind). Drawn synchronously
+    /// so the current window is always correct; `WaveformLaneView` is equatable
+    /// and depends on the window (zoom / grid boundary) but not on
+    /// `transportPosition`, so the Canvas redraws exactly when the window or the
+    /// waveform changes — not on playback ticks or an intra-window scroll (that
+    /// stays a free `.offset` translate in `LaneView`).
+    @ViewBuilder
+    private var waveformContent: some View {
+        if let waveform {
+            if !waveform.peaks.isEmpty {
+                Canvas { context, size in
+                    // Vertical visibility culling (5b): a non-renderable lane
+                    // skips the fill entirely. With synchronous drawing, only
+                    // lanes inside the vertical viewport (± overscan) do any
+                    // path work, so cost scales with visible lanes, not track
+                    // count.
+                    guard isRenderable else { return }
+                    LaneWaveformRenderer.fillEnvelope(
+                        in: context,
+                        size: size,
+                        waveform: waveform,
+                        trackStart: trackStart,
+                        trackDuration: trackDuration,
+                        visibleStart: visibleStart,
+                        visibleSpan: visibleSpan,
+                        color: tint
+                    )
+                }
+            } else if !waveform.isComplete {
+                // Registered but not yet generated (peaks empty, not complete):
+                // a static dimmed midline hairline reads as "queued". No
+                // animation — continuous motion is CA-only per project rule.
+                Rectangle()
+                    .fill(tint)
+                    .opacity(0.35)
+                    .frame(height: 1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Completed with no peaks (unreadable file): draw nothing.
+                Color.clear
+            }
+        } else {
+            // No waveform registered yet: stay empty so the envelope appears
+            // with a clean cut, never a flash.
+            Color.clear
+        }
     }
 
     private var blindPlaceholderWaveform: some View {
@@ -4387,372 +4432,52 @@ private struct WaveformLaneView: View, Equatable {
 
 }
 
-/// One lane's waveform envelope, drawn as a pre-rendered template image of the
-/// 2× window rather than a per-frame `Canvas` path-fill.
-///
-/// Why: rasterizing a viewport-wide filled path is the expensive part, and the
-/// old design did it synchronously on the main thread for all N lanes in the
-/// same frame whenever the window grid boundary was crossed — a periodic hitch
-/// while scrolling. Here the fill happens off the main thread (a per-lane
-/// render loop, see `LaneRenderModel`), and the image is retained until the
-/// next one is ready. The 2× window carries half a viewport of slack, so the
-/// previous image — translated to sit at its own rendered window position —
-/// still covers the screen during the swap. The image is a template (alpha)
-/// mask tinted by `foregroundStyle`, so an active/inactive color swap re-tints
-/// without re-rasterizing.
-private struct LaneWaveformImage: View {
-    var waveform: Waveform?
-    var isActive: Bool
-    /// Vertical visibility culling: while false, no renders are requested (the
-    /// last image keeps showing). On flipping true the lane lazily renders the
-    /// then-current key, so zoom changes made while hidden are not rendered
-    /// eagerly for off-screen rows.
-    var isRenderable: Bool
-    var trackStart: TimeInterval
-    var trackDuration: TimeInterval
-    /// Absolute start/span of the grid-quantized lane window (2× the viewport).
-    var windowStart: TimeInterval
-    var windowSpan: TimeInterval
-    var wideWidth: CGFloat
-    var laneHeight: CGFloat
-
-    @Environment(\.displayScale) private var displayScale
-    @State private var model = LaneRenderModel()
-
-    /// Don't draw a stale image stretched past this multiple of the lane width
-    /// (a deep zoom-in since the render): beyond it the bitmap is featureless
-    /// mush and its layout frame grows unboundedly. Blank-until-fresh is the
-    /// better failure mode there.
-    private static let maxStaleStretch: CGFloat = 16
-
-    private var renderKey: LaneRenderKey {
-        LaneRenderKey(
-            windowStart: windowStart,
-            windowSpan: windowSpan,
-            wideWidth: wideWidth,
-            laneHeight: laneHeight,
-            scale: displayScale,
-            trackStart: trackStart,
-            trackDuration: trackDuration,
-            peaksCount: waveform?.peaks.count ?? 0,
-            bucketCount: waveform?.bucketCount ?? 0,
-            isComplete: waveform?.isComplete ?? false
-        )
-    }
-
-    private var tint: Color {
-        isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7)
-    }
-
-    /// One trigger value covering both "the pixels would change" and "the lane
-    /// became renderable", so a culled lane re-requests the current key the
-    /// moment it scrolls back into the overscan band.
-    private struct RequestTrigger: Equatable {
-        var key: LaneRenderKey
-        var isRenderable: Bool
-    }
-
-    var body: some View {
-        content
-            .frame(width: wideWidth, height: laneHeight, alignment: .leading)
-            // Forward the newest state to the render loop. `onChange` (not
-            // `.task(id:)`) on purpose: the loop must never cancel an in-flight
-            // render — cancelling on every key change starves the pipeline
-            // whenever keys churn faster than a render completes (generation
-            // progress, pinch-zoom, fast scroll) and nothing ever lands.
-            .onChange(of: RequestTrigger(key: renderKey, isRenderable: isRenderable), initial: true) {
-                guard isRenderable else { return }
-                model.request(LaneRenderRequest(key: renderKey, waveform: waveform))
-            }
-    }
-
-    /// Position the newest finished image so its absolute time range stays
-    /// pinned to the ruler: translated by its window offset AND rescaled by the
-    /// current points-per-second, both in *current* window units. While a fresh
-    /// render is in flight this shows the previous window stretched/translated
-    /// (never frozen at the wrong scale); the moment the fresh image lands its
-    /// translation is 0 and its width is exactly `wideWidth`, in the same body
-    /// update — an atomic swap with no intermediate frame.
-    @ViewBuilder
-    private var content: some View {
-        if let rendered = model.rendered, windowSpan > 0, rendered.windowSpan > 0 {
-            let pointsPerSecond = wideWidth / CGFloat(windowSpan)
-            let displayedWidth = CGFloat(rendered.windowSpan) * pointsPerSecond
-            let translation = CGFloat(rendered.windowStart - windowStart) * pointsPerSecond
-            // Draw only while the (possibly stretched) image still intersects
-            // the lane frame and the stretch is sane — this also bounds the
-            // offset so a stale bitmap can never extend far outside the lane's
-            // clip region.
-            if displayedWidth > 0,
-               displayedWidth <= wideWidth * Self.maxStaleStretch,
-               translation < wideWidth,
-               translation + displayedWidth > 0 {
-                Image(nsImage: rendered.image)
-                    .resizable()
-                    .frame(width: displayedWidth, height: laneHeight)
-                    .foregroundStyle(tint)
-                    .offset(x: translation)
-            } else {
-                Color.clear
-            }
-        } else if let waveform, !(waveform.isComplete && waveform.peaks.isEmpty) {
-            // No image yet but a waveform is registered: the track is queued
-            // for generation (or its first render is in flight). A static,
-            // dimmed midline hairline reads as "pending" — deliberately no
-            // animation (continuous motion is CA-only per project rule) — and
-            // it holds until the first image lands, so the transition is
-            // queued → drawn with no blank gap. A file that completed with no
-            // peaks (unreadable) stays empty instead.
-            Rectangle()
-                .fill(tint)
-                .opacity(0.35)
-                .frame(height: 1)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            // Nothing yet: stay empty (the row + ticks are already on screen) so
-            // the envelope appears with a clean cut, never a flash.
-            Color.clear
-        }
-    }
-}
-
-/// The inputs that actually change a lane's rendered pixels. `isActive` is
-/// excluded on purpose (tint is applied at display time), so an A/B switch
-/// never re-renders.
-private struct LaneRenderKey: Equatable {
-    var windowStart: TimeInterval
-    var windowSpan: TimeInterval
-    var wideWidth: CGFloat
-    var laneHeight: CGFloat
-    var scale: CGFloat
-    var trackStart: TimeInterval
-    var trackDuration: TimeInterval
-    var peaksCount: Int
-    var bucketCount: Int
-    var isComplete: Bool
-
-    /// Whether the only difference from `previous` is generation progress
-    /// (more peaks / completion) — the case worth throttling, since progress
-    /// updates arrive up to ~20 Hz per lane while a file decodes.
-    func isProgressOnlyAdvance(from previous: LaneRenderKey) -> Bool {
-        var normalized = self
-        normalized.peaksCount = previous.peaksCount
-        normalized.isComplete = previous.isComplete
-        return normalized == previous
-    }
-}
-
-private struct LaneRenderRequest {
-    var key: LaneRenderKey
-    var waveform: Waveform?
-}
-
-/// A finished render plus the window it was drawn for, so a stale image can be
-/// re-positioned/re-scaled against the current window while a fresh render is
-/// in flight.
-private struct LaneRenderedWindow {
-    var image: NSImage
-    var windowStart: TimeInterval
-    var windowSpan: TimeInterval
-    var wideWidth: CGFloat
-}
-
-/// Per-lane render loop. The contract that fixes the cancellation-starvation
-/// class of bugs (blank lanes during load, frozen lanes during zoom, blank
-/// stretches during fast scroll):
-///
-/// - An in-flight render is NEVER cancelled. It finishes, publishes, and then
-///   the loop immediately starts a render for the newest requested key if it
-///   has advanced. Intermediate keys are skipped; the newest never is.
-/// - Renders that differ from the last one only by generation progress are
-///   throttled to ~5 Hz per lane, trailing-edge guaranteed (a deferred kick
-///   always re-checks the newest request), and a completed waveform bypasses
-///   the throttle — so the final state always renders promptly.
-/// - Rasterization stays off the main thread (`LaneWaveformRenderer.makeImage`
-///   is nonisolated); only the tiny publish/bookkeeping runs on the main actor.
-@MainActor
-@Observable
-private final class LaneRenderModel {
-    /// The newest finished image. The only observable property — the lane view
-    /// re-runs exactly when a render lands.
-    private(set) var rendered: LaneRenderedWindow?
-
-    /// The newest requested state; only it matters, older requests are skipped.
-    @ObservationIgnored private var latest: LaneRenderRequest?
-    @ObservationIgnored private var isRendering = false
-    /// Key of the last render that ran to completion (even if it produced no
-    /// image), so the loop knows when it has caught up.
-    @ObservationIgnored private var completedKey: LaneRenderKey?
-    @ObservationIgnored private var lastRenderStartedAt: CFTimeInterval = 0
-    @ObservationIgnored private var throttleTimer: Task<Void, Never>?
-
-    /// Minimum gap between renders that only advance generation progress.
-    private static let progressRenderInterval: CFTimeInterval = 0.2
-
-    func request(_ request: LaneRenderRequest) {
-        latest = request
-        kick()
-    }
-
-    private func kick() {
-        guard !isRendering, let request = latest, request.key != completedKey else { return }
-
-        if let completedKey,
-           !request.key.isComplete,
-           request.key.isProgressOnlyAdvance(from: completedKey) {
-            let elapsed = CACurrentMediaTime() - lastRenderStartedAt
-            if elapsed < Self.progressRenderInterval {
-                scheduleThrottledKick(after: Self.progressRenderInterval - elapsed)
-                return
-            }
-        }
-
-        throttleTimer?.cancel()
-        throttleTimer = nil
-        startRender(request)
-    }
-
-    private func scheduleThrottledKick(after delay: CFTimeInterval) {
-        guard throttleTimer == nil else { return }
-        throttleTimer = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(max(delay, 0) * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            self?.throttleTimer = nil
-            self?.kick()
-        }
-    }
-
-    private func startRender(_ request: LaneRenderRequest) {
-        // No data yet (pre-generation): nothing to draw for this key. Keep any
-        // previous image (so a scroll during load doesn't blank the lane) and
-        // mark the key completed so the loop doesn't spin on it.
-        guard let waveform = request.waveform, !waveform.peaks.isEmpty else {
-            completedKey = request.key
-            return
-        }
-
-        isRendering = true
-        lastRenderStartedAt = CACurrentMediaTime()
-        let key = request.key
-        Task { [weak self] in
-            let image = await LaneWaveformRenderer.makeImage(
-                waveform: waveform,
-                trackStart: key.trackStart,
-                trackDuration: key.trackDuration,
-                windowStart: key.windowStart,
-                windowSpan: key.windowSpan,
-                wideWidth: key.wideWidth,
-                laneHeight: key.laneHeight,
-                scale: key.scale
-            )
-            guard let self else { return }
-            self.isRendering = false
-            self.completedKey = key
-            if let image {
-                self.rendered = LaneRenderedWindow(
-                    image: image,
-                    windowStart: key.windowStart,
-                    windowSpan: key.windowSpan,
-                    wideWidth: key.wideWidth
-                )
-            }
-            // The newest request may have advanced while this render ran —
-            // chain straight into it.
-            self.kick()
-        }
-    }
-}
-
-/// Off-main-thread rasterizer for a lane's peak envelope. Deliberately a
-/// `nonisolated` enum so its `async` `makeImage` runs on the cooperative pool,
-/// not the main actor.
+/// Synchronous peak-envelope drawing for a lane. `waveformPath` builds the
+/// O(viewport px) filled path from the 5a pyramid; `fillEnvelope` fills it into
+/// a `Canvas`'s `GraphicsContext` during the frame's render pass (WP-7 — no
+/// async pipeline, no cached `NSImage`).
 enum LaneWaveformRenderer {
     #if DEBUG
     private static let renderLog = Logger(subsystem: "com.nigelwarren.Takes", category: "waveform-render")
     #endif
 
-    /// Render the envelope for one window into a template (alpha) `NSImage`.
-    /// Returns `nil` when there's nothing to draw.
-    static func makeImage(
+    /// Synchronously fill one lane's peak envelope for the CURRENT window into a
+    /// `Canvas` graphics context, tinted by `color`. Called inside the Canvas
+    /// draw closure, so the correct waveform is drawn in the same frame the
+    /// window changes; path build is O(viewport px) via the pyramid, cheap
+    /// enough to run every frame across the (culled) visible lanes.
+    static func fillEnvelope(
+        in context: GraphicsContext,
+        size: CGSize,
         waveform: Waveform,
         trackStart: TimeInterval,
         trackDuration: TimeInterval,
-        windowStart: TimeInterval,
-        windowSpan: TimeInterval,
-        wideWidth: CGFloat,
-        laneHeight: CGFloat,
-        scale: CGFloat
-    ) async -> sending NSImage? {
-        guard wideWidth > 0, laneHeight > 0, scale > 0 else { return nil }
-
+        visibleStart: TimeInterval,
+        visibleSpan: TimeInterval,
+        color: Color
+    ) {
         #if DEBUG
-        // Perf probe for the WP-5 pyramid work: one debug-level line per lane
-        // render with the wall time of path build + fill. Watch in Console
-        // with subsystem com.nigelwarren.Takes, category waveform-render.
-        let renderStartedAt = CACurrentMediaTime()
+        // Perf probe for the WP-5 pyramid + WP-7 synchronous draw: one
+        // debug-level line per lane draw with the wall time of path build +
+        // fill. Watch in Console with subsystem com.nigelwarren.Takes, category
+        // waveform-render.
+        let drawStartedAt = CACurrentMediaTime()
         defer {
-            let milliseconds = (CACurrentMediaTime() - renderStartedAt) * 1000
-            renderLog.debug("lane render \(Int(wideWidth))pt in \(milliseconds, format: .fixed(precision: 2)) ms")
+            let milliseconds = (CACurrentMediaTime() - drawStartedAt) * 1000
+            renderLog.debug("lane draw \(Int(size.width))pt in \(milliseconds, format: .fixed(precision: 2)) ms")
         }
         #endif
 
-        let pointSize = CGSize(width: wideWidth, height: laneHeight)
         let path = waveformPath(
             for: waveform,
-            in: pointSize,
+            in: size,
             trackStart: trackStart,
             trackDuration: trackDuration,
-            visibleStart: windowStart,
-            visibleSpan: windowSpan
+            visibleStart: visibleStart,
+            visibleSpan: visibleSpan
         )
-        if path.isEmpty { return nil }
-        if Task.isCancelled { return nil }
-
-        let pixelWidth = Int((wideWidth * scale).rounded())
-        let pixelHeight = Int((laneHeight * scale).rounded())
-        guard pixelWidth > 0, pixelHeight > 0,
-              let context = makeMaskContext(pixelWidth: pixelWidth, pixelHeight: pixelHeight)
-        else { return nil }
-
-        // Work in points with a top-left origin (matching the path's y-down
-        // coordinates) while the backing store is at device scale.
-        context.translateBy(x: 0, y: CGFloat(pixelHeight))
-        context.scaleBy(x: scale, y: -scale)
-        // Solid opaque fill: the color is irrelevant for an alpha-only mask and
-        // becomes the template's coverage for an RGBA fallback context.
-        context.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
-        context.addPath(path.cgPath)
-        context.fillPath()
-
-        guard !Task.isCancelled, let cgImage = context.makeImage() else { return nil }
-        let image = NSImage(cgImage: cgImage, size: pointSize)
-        image.isTemplate = true
-        return image
-    }
-
-    /// Prefer a 1-byte-per-pixel alpha-only mask; fall back to RGBA if the
-    /// platform rejects that bitmap layout. Either way the result templates.
-    private static func makeMaskContext(pixelWidth: Int, pixelHeight: Int) -> CGContext? {
-        if let context = CGContext(
-            data: nil,
-            width: pixelWidth,
-            height: pixelHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: pixelWidth,
-            space: CGColorSpaceCreateDeviceGray(),
-            bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue
-        ) {
-            return context
-        }
-        return CGContext(
-            data: nil,
-            width: pixelWidth,
-            height: pixelHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        )
+        if path.isEmpty { return }
+        context.fill(path, with: .color(color))
     }
 
     /// Builds a filled, center-mirrored peak envelope across the visible window.

@@ -324,6 +324,68 @@ after the main thread is freed: a synchronous coarsest-pyramid-level preview of
 the new window (deliberately NOT implemented here — land the layout fix alone
 so its effect can be measured in isolation).
 
+**WP-7 — synchronous pyramid-fed Canvas (kills the async image pipeline).**
+
+The reported symptom that survived WP-6: during ANY zoom or scroll gesture,
+especially at deep zoom, lanes went FULLY BLANK (the stale image exceeded the
+16× stretch cap → `Color.clear`) and snapped crisp only when motion stopped.
+Root cause was structural to the async design, not tunable: the off-main
+`NSImage` pipeline always has latency between "window changed" and "new image
+published", and during that gap the lane showed a stretched-stale bitmap or
+blank. Caching rasterized images at zoom levels can never close that gap.
+
+Fix (ContentView only): the async machinery is DELETED and the lane's waveform
+is now drawn SYNCHRONOUSLY by a SwiftUI `Canvas` every frame, straight from the
+5a pyramid. What's gone: `LaneWaveformImage`, `LaneRenderModel` (the never-cancel
+render loop), `LaneRenderKey` / `LaneRenderRequest` / `LaneRenderedWindow`, the
+`RequestTrigger`, `LaneWaveformRenderer.makeImage` + `makeMaskContext`, and the
+stale-image placement logic (translation/rescale/`maxStaleStretch`/
+`Color.clear`-on-overstretch). No `Task`, no `NSImage`, no cached bitmap remains
+on the waveform path. Kept: `LaneWaveformRenderer.waveformPath` (the pyramid
+level selection + file-anchored anti-shimmer pooling) — now called directly —
+plus a new `fillEnvelope(in:size:…color:)` that wraps the path build + a
+`GraphicsContext.fill` (with the DEBUG `waveform-render` timing probe around it,
+now measuring per-frame draw cost).
+
+- `WaveformLaneView` (still `.equatable()`) draws the envelope via
+  `Canvas { … LaneWaveformRenderer.fillEnvelope(…) }`, tinted `Theme.primary`
+  0.85 active / `Theme.waveformInactive` 0.7 inactive (unchanged). Because the
+  view is equatable and depends on the window (zoom / grid boundary) but NOT on
+  `transportPosition`, the Canvas redraws exactly when the window or the waveform
+  changes — never on playback ticks, and never on an intra-window scroll.
+- WP-6 structure preserved: the leaf `LaneView` still reads `viewportStore`
+  (zoom window + ticks) and `controller.visibleStart/visibleSpan` (scroll
+  `shiftX`), keeps the 2×-window + `.offset(x: -shiftX)` translate for
+  intra-boundary scroll, and its outer frame stays `wideWidth × rowHeight`
+  (zoom- AND scroll-invariant), so a Canvas redraw never propagates layout up
+  into the rows VStack. `TrackRowView`'s equatable inputs are unchanged.
+- Culling (5b): the Canvas draw closure `guard isRenderable else { return }` —
+  a non-renderable lane skips the fill, so draw cost scales with visible lanes,
+  not track count. `isRenderable` stays a row input.
+- Pending (5c) + blind: registered-but-not-generated (peaks empty, not
+  complete) draws the static dimmed midline "queued" hairline; complete-but-
+  empty (unreadable) draws nothing; peaks present draws the envelope. Blind
+  lanes keep their `nil` waveform + anonymized placeholder Canvas and never take
+  the real-waveform branch — no identity leak. Hit-testing stays off on all lane
+  visuals.
+
+Tests: no test referenced the deleted types (the 3b/5a coverage in
+`WaveformSourceTests` already exercises `waveformPath` + `WaveformPyramid`
+directly), so pyramid/path correctness coverage is intact and unchanged. Debug
+build + full `xcodebuild test` green.
+
+Engineering read (for the coordinator's runtime measurement): synchronous Canvas
+should hold frame rate for scroll (unchanged — free `.offset` translate between
+boundaries) and for moderate zoom, since each visible lane is now one
+O(viewport-px) pyramid path build + a `GraphicsContext.fill` per frame, only for
+the ~8 culled-visible lanes, on a main thread WP-6 already freed from the layout
+storm. The open risk is AGGRESSIVE/continuous zoom: `Canvas` fills paths on the
+CPU, so a fast pinch that redraws all visible lanes every display frame could
+still saturate the main thread at large `wideWidth`. If measurement shows that,
+the escalation is CALayer/CAShapeLayer (GPU-composited path, re-rasterized only
+on zoom) — deliberately NOT implemented here so the synchronous-Canvas version's
+isolated effect can be measured first.
+
 ---
 
 ## Iteration 0 — Baseline instrumentation (do first)
