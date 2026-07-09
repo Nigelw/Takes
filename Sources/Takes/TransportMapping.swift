@@ -53,7 +53,7 @@ struct TransportMapping {
 /// Pure viewport math for timeline zoom.
 ///
 /// The canonical zoom state is the visible window in absolute seconds
-/// (`visibleStart` / `visibleSpan` on `ComparisonSession`); the displayed zoom
+/// (`visibleStart` / `visibleSpan` on `PlaybackController`); the displayed zoom
 /// factor is *derived* (`contentSpan / visibleSpan`). "Fit" is not a flag — it
 /// is simply the state `visibleSpan ≈ contentSpan` (zoom ≈ 1). Storing the
 /// window in absolute seconds keeps a zoomed view stable as content grows and

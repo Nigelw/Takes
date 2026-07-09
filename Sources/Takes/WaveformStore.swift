@@ -19,8 +19,60 @@ struct Waveform: Equatable {
     var bucketCount: Int
     /// Whether generation has finished (or was cut short by a read error).
     var isComplete: Bool
+    /// Multi-resolution max-pooled reductions of `peaks` (the peak pyramid):
+    /// `reducedLevels[k]` halves the previous level (level -1 being `peaks`
+    /// itself), down to a few hundred buckets, so a zoomed-out render can draw
+    /// from ~1 bucket per pixel instead of walking every base bucket. Total
+    /// extra memory ≈ 1× `peaks`. Derived data — excluded from `==`.
+    var reducedLevels: [[Float]] = []
+
+    /// `reducedLevels` are ignored on purpose: equal peaks imply equal levels,
+    /// and this `==` gates the per-row equality checks so it must stay
+    /// effectively O(1) (Array `==` short-circuits on shared storage).
+    static func == (lhs: Waveform, rhs: Waveform) -> Bool {
+        lhs.peaks == rhs.peaks
+            && lhs.bucketCount == rhs.bucketCount
+            && lhs.isComplete == rhs.isComplete
+    }
 
     static let empty = Waveform(peaks: [], bucketCount: 0, isComplete: false)
+}
+
+/// Builds the max-pooled peak pyramid for a waveform. O(n) total work
+/// (n/2 + n/4 + …) with vectorized pooling, so it's cheap enough to rebuild on
+/// every generation-progress emission — always off the main thread.
+enum WaveformPyramid {
+    /// Stop reducing once a level is this small: coarser levels stop paying
+    /// for themselves (a whole-file window already draws from ~1 bucket per
+    /// pixel around here).
+    static let minimumLevelBucketCount = 256
+
+    /// Levels above the base: `result[0]` halves `peaks`, `result[k]` halves
+    /// `result[k-1]`. A bucket `i` of `result[k]` covers the fixed base range
+    /// `[i·2^(k+1), (i+1)·2^(k+1))` (the last bucket may cover fewer), so level
+    /// buckets stay file-anchored — the renderer's anti-shimmer pooling
+    /// argument applies unchanged at any level.
+    static func reducedLevels(from peaks: [Float]) -> [[Float]] {
+        var levels: [[Float]] = []
+        var current = peaks
+        while current.count > minimumLevelBucketCount * 2 {
+            let pairCount = current.count / 2
+            var next = [Float](repeating: 0, count: (current.count + 1) / 2)
+            current.withUnsafeBufferPointer { source in
+                next.withUnsafeMutableBufferPointer { destination in
+                    guard let src = source.baseAddress, let dst = destination.baseAddress else { return }
+                    // dst[i] = max(src[2i], src[2i+1])
+                    vDSP_vmax(src, 2, src + 1, 2, dst, 1, vDSP_Length(pairCount))
+                }
+            }
+            if current.count % 2 == 1 {
+                next[next.count - 1] = current[current.count - 1]
+            }
+            levels.append(next)
+            current = next
+        }
+        return levels
+    }
 }
 
 /// Owns waveform generation for the loaded session tracks.
@@ -33,18 +85,29 @@ struct Waveform: Equatable {
 final class WaveformStore: ObservableObject {
     @Published private(set) var waveforms: [SessionTrack.ID: Waveform] = [:]
 
+    /// How many files decode at once. Bounded so a 20-track import doesn't run
+    /// 20 decoders competing for cores (and starving the lane renders); with a
+    /// small cap the top tracks fill in fast, one after another, instead of
+    /// all crawling together.
+    private static let maxConcurrentGenerations = 2
+
     private var tasks: [SessionTrack.ID: Task<Void, Never>] = [:]
     /// Identity (url + size + mod date) the in-flight/finished waveform was built
     /// from, so we can detect when a track's file changes and regenerate.
     private var sourceIdentities: [SessionTrack.ID: WaveformSource.Identity] = [:]
+    /// Tracks registered for generation but not yet started, in priority
+    /// (session) order — top of the list first.
+    private var pendingQueue: [SessionTrack.ID] = []
+    private var pendingSources: [SessionTrack.ID: (url: URL, identity: WaveformSource.Identity)] = [:]
 
-    /// Reconcile generation tasks with the current set of session tracks.
-    /// Starts generation for newly added tracks, cancels and drops waveforms for
-    /// removed ones, and regenerates if a track's underlying file changed.
+    /// Reconcile generation with the current set of session tracks: enqueue
+    /// newly added tracks, cancel and drop waveforms for removed ones,
+    /// regenerate if a track's underlying file changed, and re-prioritize the
+    /// waiting queue to match the (possibly reordered) session order.
     func sync(tracks: [SessionTrack]) {
         let liveIDs = Set(tracks.map(\.id))
 
-        for id in tasks.keys where !liveIDs.contains(id) {
+        for id in Array(sourceIdentities.keys) where !liveIDs.contains(id) {
             cancel(id)
         }
 
@@ -54,8 +117,13 @@ final class WaveformStore: ObservableObject {
                 continue
             }
             cancel(id: track.id)
-            start(trackID: track.id, url: track.loadedTrack.url, identity: identity)
+            enqueue(trackID: track.id, url: track.loadedTrack.url, identity: identity)
         }
+
+        let order = Dictionary(uniqueKeysWithValues: tracks.enumerated().map { ($1.id, $0) })
+        pendingQueue.sort { (order[$0] ?? .max) < (order[$1] ?? .max) }
+
+        pump()
     }
 
     func waveform(for trackID: SessionTrack.ID) -> Waveform? {
@@ -69,24 +137,45 @@ final class WaveformStore: ObservableObject {
     private func cancel(id: SessionTrack.ID) {
         tasks[id]?.cancel()
         tasks[id] = nil
+        pendingQueue.removeAll { $0 == id }
+        pendingSources[id] = nil
         sourceIdentities[id] = nil
         waveforms[id] = nil
     }
 
-    private func start(trackID: SessionTrack.ID, url: URL, identity: WaveformSource.Identity) {
+    private func enqueue(trackID: SessionTrack.ID, url: URL, identity: WaveformSource.Identity) {
         sourceIdentities[trackID] = identity
+        pendingSources[trackID] = (url, identity)
+        pendingQueue.append(trackID)
+        // Registered immediately: an empty, incomplete waveform is the
+        // "queued" signal the lane's pending visual keys off.
         waveforms[trackID] = .empty
+    }
 
+    /// Start queued generations until the concurrency cap is reached.
+    private func pump() {
+        while tasks.count < Self.maxConcurrentGenerations, !pendingQueue.isEmpty {
+            let id = pendingQueue.removeFirst()
+            guard let source = pendingSources.removeValue(forKey: id) else { continue }
+            start(trackID: id, url: source.url, identity: source.identity)
+        }
+    }
+
+    private func start(trackID: SessionTrack.ID, url: URL, identity: WaveformSource.Identity) {
         // User-initiated, not utility: the progressive fill is the visible
         // feedback for a just-imported track, and utility QoS gets throttled
         // onto efficiency cores.
         tasks[trackID] = Task.detached(priority: .userInitiated) {
             await WaveformSource.generate(url: url) { peaks, bucketCount, isComplete in
+                // Build the pyramid here, on the generation task, so the main
+                // actor only ever receives finished derived data.
+                let reducedLevels = WaveformPyramid.reducedLevels(from: peaks)
                 await MainActor.run { [weak self] in
                     self?.apply(
                         peaks: peaks,
                         bucketCount: bucketCount,
                         isComplete: isComplete,
+                        reducedLevels: reducedLevels,
                         to: trackID,
                         identity: identity
                     )
@@ -99,6 +188,7 @@ final class WaveformStore: ObservableObject {
         peaks: [Float],
         bucketCount: Int,
         isComplete: Bool,
+        reducedLevels: [[Float]],
         to trackID: SessionTrack.ID,
         identity: WaveformSource.Identity
     ) {
@@ -109,11 +199,14 @@ final class WaveformStore: ObservableObject {
         waveforms[trackID] = Waveform(
             peaks: peaks,
             bucketCount: bucketCount,
-            isComplete: isComplete
+            isComplete: isComplete,
+            reducedLevels: reducedLevels
         )
 
         if isComplete {
             tasks[trackID] = nil
+            // A generation slot opened up — start the next queued track.
+            pump()
         }
     }
 }

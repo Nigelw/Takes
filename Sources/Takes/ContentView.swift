@@ -1,9 +1,10 @@
 import AppKit
 import Combine
+import os
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct NumericControlConfiguration {
+struct NumericControlConfiguration: Equatable {
     let range: ClosedRange<Int>
     let step: Int
     let largeStep: Int
@@ -966,6 +967,18 @@ struct ContentView: View {
     @State private var mainWindowIsKey = true
     @State private var loopDraft: LoopDraft?
     @State private var loopResizeDraft: LoopRegion?
+    /// Row indices whose lanes may rasterize: the rows intersecting the
+    /// vertical scroll viewport plus overscan. Row-quantized and written with
+    /// an equality guard, so vertical scrolling within the band never re-runs
+    /// the container. Starts fully open so nothing is culled before the first
+    /// geometry pass lands.
+    @State private var renderableRows: ClosedRange<Int> = 0...Int.max
+    /// Shared source for the zoom-varying lane window (window bounds + tick
+    /// guides). Only the lane leaves observe it, so a zoom step re-runs those
+    /// fixed-frame leaves — never the row bodies — keeping the VStack from
+    /// re-laying-out. Written from the container via an equality-guarded
+    /// `.onChange`; see `LaneViewport` for why it can't be a row input.
+    @State private var laneViewportStore = LaneViewportStore()
     @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
     @State private var trackInfoColumnWidth: Double
     @State private var showsAlignmentAttentionPopover = false
@@ -982,11 +995,32 @@ struct ContentView: View {
     private var reorderRowStep: CGFloat { trackRowHeight + trackTimelineDividerHeight }
 
     /// Coordinate space for the waveform column, so loop gestures report x in
-    /// `0...waveformWidth` regardless of the column's offset.
-    private static let loopColumnSpace = "loopColumn"
+    /// `0...waveformWidth` regardless of the column's offset. (`fileprivate` so
+    /// the loop overlay leaf's handle gestures can name the same space.)
+    fileprivate static let loopColumnSpace = "loopColumn"
     /// Coordinate space for the timeline ruler, so ruler gestures report x in
     /// `0...waveformWidth` just like the waveform column.
     private static let rulerSpace = "timelineRuler"
+    /// Coordinate space of the vertical track ScrollView, for reading the rows'
+    /// content offset when computing the renderable row range.
+    private static let trackScrollSpace = "trackScroll"
+    /// Rows beyond the visible viewport on each side that still rasterize, so
+    /// small scrolls reveal already-rendered lanes.
+    private static let renderableRowOverscan = 2
+
+    /// Row indices intersecting the vertical viewport ± overscan. Rows are
+    /// fixed-height, so this is pure math on the content offset.
+    static func renderableRowRange(
+        contentMinY: CGFloat,
+        viewportHeight: CGFloat,
+        rowStep: CGFloat
+    ) -> ClosedRange<Int> {
+        guard rowStep > 0, viewportHeight > 0 else { return 0...Int.max }
+        let topVisible = -contentMinY
+        let first = Int((topVisible / rowStep).rounded(.down)) - renderableRowOverscan
+        let last = Int(((topVisible + viewportHeight) / rowStep).rounded(.down)) + renderableRowOverscan
+        return max(first, 0)...max(last, 0)
+    }
     /// Coordinate space for the section-level playhead overlay (grabber + line),
     /// so a grabber drag reports x across the whole section.
     private static let playheadSpace = "timelinePlayhead"
@@ -1375,7 +1409,7 @@ struct ContentView: View {
                 value: Binding(
                     get: {
                         TimelineViewport.sliderValue(
-                            visibleSpan: max(controller.session.visibleSpan, 0.001),
+                            visibleSpan: max(controller.visibleSpan, 0.001),
                             contentSpan: contentSpan
                         )
                     },
@@ -1565,12 +1599,20 @@ struct ContentView: View {
         "Repeat: \(repeatModeName(for: mode))"
     }
 
+    // NOTE: `visibleStart` changes on every horizontal scroll event (and every
+    // zoomed playback-follow step). Nothing evaluated as part of a view BODY in
+    // this file may read it except the dedicated per-event leaves
+    // (`LaneView`, `TimelineHeaderRulerView`, `TimelinePlayheadOverlayView`,
+    // `LoopOverlayContentView`, `TimelineScrollOverlayLeaf`) — reading it in a
+    // container body registers an Observation dependency that re-runs (and
+    // re-layouts) the whole tree per event. Gesture/event closures may read it
+    // freely; they aren't observation-tracked.
     private var visibleStart: TimeInterval {
-        controller.session.visibleStart
+        controller.visibleStart
     }
 
     private var visibleSpan: TimeInterval {
-        max(controller.session.visibleSpan, 0.001)
+        max(controller.visibleSpan, 0.001)
     }
 
     private var trackRowHeight: CGFloat {
@@ -1602,6 +1644,9 @@ struct ContentView: View {
         TakesWindowPolicy.trackTimelineHeight(displayingTrackRows: controller.displayedTrackRowCount)
     }
 
+    // Both helpers read the per-event visible window — call them from gesture
+    // and event-monitor closures only, never from a view body (see the note on
+    // `visibleStart`).
     private func globalTime(atX x: CGFloat, width: CGFloat) -> TimeInterval {
         guard width > 0 else { return visibleStart }
         let normalized = min(max(Double(x / width), 0), 1)
@@ -1613,7 +1658,7 @@ struct ContentView: View {
             TransportMapping.normalizedPosition(
                 globalTime: globalTime,
                 timelineStart: visibleStart,
-                timelineEnd: controller.session.visibleEnd
+                timelineEnd: controller.visibleEnd
             )
         ) * width
     }
@@ -1636,19 +1681,26 @@ struct ContentView: View {
 
                     ScrollView(.vertical) {
                         ZStack(alignment: .topLeading) {
-                            // Shared per-lane geometry, computed once for all
-                            // lanes rather than once per lane.
+                            // Shared, zoom-varying lane window (window bounds +
+                            // ticks), computed once for all lanes and pushed to
+                            // the store the lane leaves observe. It is
+                            // deliberately NOT threaded through the rows: doing
+                            // so would flip every row's `==` on each zoom step
+                            // and re-lay-out the VStack (WP-6). `wideWidth` is
+                            // geometry (fixed on zoom) and DOES ride the rows.
                             let laneViewport = makeLaneViewport(waveformWidth: waveformWidth)
+                            let wideWidth = waveformWidth * 2
                             VStack(spacing: 0) {
                                 ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
                                     let isLifted = reorderDraggingID == sessionTrack.id
                                         || reorderRevealingID == sessionTrack.id
-                                    trackRow(
+                                    trackRowView(
                                         index: index,
                                         sessionTrack: sessionTrack,
                                         infoWidth: infoWidth,
-                                        laneViewport: laneViewport
+                                        wideWidth: wideWidth
                                     )
+                                        .equatable()
                                         // The dragged row's floating preview stands in
                                         // for it; its slot stays reserved as the gap the
                                         // other rows slide around. It stays hidden one
@@ -1673,12 +1725,45 @@ struct ContentView: View {
                                     .frame(height: trackTimelineDividerHeight)
                                     .allowsHitTesting(false)
                             }
+                            // Publish the zoom-varying window to the store the
+                            // lane leaves observe. The container body re-running
+                            // per zoom step is fine (it's cheap and produces
+                            // `==`-stable rows); this hands the new window to the
+                            // leaves without touching row layout.
+                            .onChange(of: laneViewport, initial: true) { _, newViewport in
+                                if laneViewportStore.viewport != newViewport {
+                                    laneViewportStore.viewport = newViewport
+                                }
+                            }
 
                             if controller.session.isPlayable {
                                 loopSelectionOverlay(infoWidth: infoWidth, waveformWidth: waveformWidth)
                             }
                         }
                         .frame(width: proxy.size.width)
+                        // Vertical visibility culling: track which row indices
+                        // intersect the scroll viewport (± overscan) so
+                        // off-screen lanes don't rasterize. The GeometryReader
+                        // body is the only thing re-evaluated per vertical
+                        // scroll event (a Color.clear — the 3c rule holds); the
+                        // @State write is equality-guarded and the range is
+                        // row-quantized, so the container re-runs only when a
+                        // row actually enters or leaves the overscan band.
+                        .background(
+                            GeometryReader { rowsGeometry in
+                                let range = Self.renderableRowRange(
+                                    contentMinY: rowsGeometry.frame(in: .named(Self.trackScrollSpace)).minY,
+                                    viewportHeight: max(proxy.size.height - trackHeaderHeight, 0),
+                                    rowStep: reorderRowStep
+                                )
+                                Color.clear
+                                    .onChange(of: range, initial: true) { _, newRange in
+                                        if renderableRows != newRange {
+                                            renderableRows = newRange
+                                        }
+                                    }
+                            }
+                        )
                         // One drop target spanning the rows, taking reorders and
                         // external file drops. For reorders it opens the gap as the
                         // pointer moves and commits on drop. A single target (rather
@@ -1698,22 +1783,16 @@ struct ContentView: View {
                             )
                         )
                     }
+                    .coordinateSpace(name: Self.trackScrollSpace)
                     .frame(maxHeight: .infinity)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             .overlay(alignment: .topLeading) {
                 if !controller.session.tracks.isEmpty {
-                    TimelineScrollOverlay(
-                        visibleStart: controller.session.visibleStart,
-                        visibleSpan: visibleSpan,
-                        contentStart: controller.session.timelineStart,
-                        contentEnd: controller.session.timelineEnd,
-                        onScroll: { controller.scrollTimeline(toVisibleStart: $0) },
-                        onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
-                    )
-                    .frame(width: waveformWidth, height: proxy.size.height)
-                    .offset(x: infoWidth)
+                    TimelineScrollOverlayLeaf(controller: controller)
+                        .frame(width: waveformWidth, height: proxy.size.height)
+                        .offset(x: infoWidth)
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -1834,7 +1913,13 @@ struct ContentView: View {
                 .padding(.trailing, 8)
             }
 
-            timelineHeaderRuler(width: waveformWidth)
+            TimelineHeaderRulerView(
+                controller: controller,
+                width: waveformWidth,
+                targetMarkerCount: timelineHeaderTargetMarkerCount,
+                minorTickMinSpacing: timelineHeaderMinorTickMinSpacing,
+                headerHeight: trackHeaderHeight
+            )
                 .frame(maxWidth: .infinity)
                 // Dragging anywhere on the ruler moves the playhead: the
                 // visual follows the pointer and the transport seeks once on
@@ -1865,12 +1950,12 @@ struct ContentView: View {
     @ViewBuilder
     private func timelinePlayheadOverlay(sectionHeight: CGFloat, infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
         if controller.session.isPlayable {
-            let position = controller.displayTransportPosition()
-            TimelinePlayheadVisual(
-                currentX: playheadDragX ?? xPosition(for: position, width: waveformWidth),
-                endX: xPosition(for: controller.session.playbackEnd, width: waveformWidth),
-                remaining: max(0, controller.session.playbackEnd - position),
-                isPlaying: controller.session.isPlaying && playheadDragX == nil,
+            // The x-positioning lives in a leaf that alone reads the per-event
+            // transport/window state, so a scroll or anchor event re-runs only
+            // the leaf (one representable update), not this section body.
+            TimelinePlayheadOverlayView(
+                controller: controller,
+                playheadDragX: playheadDragX,
                 infoWidth: infoWidth,
                 sectionHeight: sectionHeight,
                 waveformWidth: waveformWidth,
@@ -1921,183 +2006,79 @@ struct ContentView: View {
             }
     }
 
-    private func timelineHeaderRuler(width: CGFloat) -> some View {
-        let rulerStart = max(visibleStart, controller.session.timelineStart)
-        let rulerEnd = min(controller.session.visibleEnd, controller.session.timelineEnd)
-        let ruler = TimelineHeaderMarker.ruler(
-            timelineStart: rulerStart,
-            timelineEnd: rulerEnd,
-            targetMarkerCount: timelineHeaderTargetMarkerCount,
-            // Keep the just-off-screen major tick so its label clips at the left edge while scrolling
-            // rather than blinking out (mirrors the right-edge clipping in TimelineHeaderLabelLayout).
-            leadingMajorTicks: 1
-        )
-
-        // Drop minor ticks once they would pack closer than this; keeps the ruler from turning into
-        // a gray blur at narrow widths or high subdivision counts.
-        let visibleSpan = controller.session.visibleEnd - visibleStart
-        let minorSpacing = visibleSpan > 0 ? ruler.minorInterval / visibleSpan * Double(width) : 0
-        let showMinorTicks = minorSpacing >= timelineHeaderMinorTickMinSpacing
-
-        return ZStack(alignment: .topLeading) {
-            Rectangle()
-                .fill(.background.opacity(0.01))
-
-            if ruler.majorTicks.isEmpty {
-                Text("00:00")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 8)
-                    .frame(maxHeight: .infinity, alignment: .center)
-            } else {
-                if showMinorTicks {
-                    ForEach(ruler.minorTicks, id: \.self) { tickTime in
-                        timelineHeaderMinorTick(at: tickTime, width: width)
-                    }
-                }
-                ForEach(ruler.majorTicks, id: \.time) { marker in
-                    timelineHeaderMarker(marker, width: width)
-                }
-            }
-        }
-        .clipped()
-        .accessibilityLabel("Timeline")
-    }
-
-    // Ruler notches hang downward from below the numbers toward the rows, Fission-style:
-    // major (labeled) ticks are tall — their top edge comes up to just beneath the number so the
-    // label sits against the tick like a baseline — while minor ticks stay short. Both are
-    // bottom-anchored so they hang toward the rows.
-    private var timelineHeaderTickColor: Color { .secondary.opacity(0.45) }
-    private var timelineHeaderMajorTickHeight: CGFloat { 19 }
-    private var timelineHeaderMinorTickHeight: CGFloat { 8 }
-    /// Vertical inset of the time label from the top of the header.
-    private var timelineHeaderLabelTopInset: CGFloat { 7 }
-
-    private func timelineHeaderMinorTick(at time: TimeInterval, width: CGFloat) -> some View {
-        Rectangle()
-            .fill(timelineHeaderTickColor)
-            .frame(width: 1, height: timelineHeaderMinorTickHeight)
-            .offset(x: xPosition(for: time, width: width))
-            // Anchor to the bottom so the notch hangs down toward the waveforms.
-            .frame(width: width, height: trackHeaderHeight, alignment: .bottomLeading)
-            .accessibilityHidden(true)
-    }
-
-    private func timelineHeaderMarker(_ marker: TimelineHeaderMarker, width: CGFloat) -> some View {
-        let tickX = xPosition(for: marker.time, width: width)
-        let labelWidth: CGFloat = 60
-        let labelLayout = TimelineHeaderLabelLayout.leading(
-            tickX: Double(tickX),
-            rulerWidth: Double(width)
-        )
-
-        return ZStack(alignment: .topLeading) {
-            // Number on top.
-            if labelLayout.isVisible {
-                Text(marker.label)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .frame(width: labelWidth, alignment: .leading)
-                    .offset(x: CGFloat(labelLayout.x), y: timelineHeaderLabelTopInset)
-            }
-
-            // Taller notch hanging below the number, anchored to the header bottom.
-            Rectangle()
-                .fill(timelineHeaderTickColor)
-                .frame(width: 1, height: timelineHeaderMajorTickHeight)
-                .offset(x: tickX)
-                .frame(width: width, height: trackHeaderHeight, alignment: .bottomLeading)
-        }
-        .frame(width: width, height: trackHeaderHeight, alignment: .topLeading)
-        .accessibilityLabel(marker.label)
-    }
-
-    private func trackRow(
+    /// Build the value for one equatable track row. All observable reads
+    /// (`controller.session`, `waveformStore`, `settings`) happen here in the
+    /// container so the row itself stays a pure value: a horizontal scroll or a
+    /// reorder gap move re-runs this cheap builder + an `==` check per row, but
+    /// never re-runs a row's body unless one of its compared inputs changed.
+    private func trackRowView(
         index: Int,
         sessionTrack: SessionTrack,
         infoWidth: CGFloat,
-        laneViewport: LaneViewport
-    ) -> some View {
+        wideWidth: CGFloat
+    ) -> TrackRowView {
         let isActive = controller.session.activeTrackID == sessionTrack.id
+        let isBlind = controller.session.isBlindListeningModeEnabled
         // Suppress the hover trash button while a reorder drag is in flight: the
         // drag drives the pointer across rows, so their hover states would flash
         // the button on each one in passing.
-        let isHovered = hoveredTrackID == sessionTrack.id && reorderDraggingID == nil
-        return HStack(spacing: 0) {
-            trackInfoArea(index: index, sessionTrack: sessionTrack, showsTrash: isHovered)
-                .frame(width: infoWidth, height: trackRowHeight, alignment: .leading)
-                // Drag the info column to reorder in place (a move), or out of the
-                // window to copy the track's audio file onto Finder / another app /
-                // another Takes window. An AppKit drag source (behind the column's
-                // content, so its own controls still work) runs the drag with the
-                // right move-inside / copy-outside operation; a plain click selects.
-                .background(
-                    TrackRowDragSource(
-                        fileURL: sessionTrack.loadedTrack.url,
-                        trackID: sessionTrack.id,
-                        tooltip: controller.session.isBlindListeningModeEnabled
-                            ? "Track \(index + 1)"
-                            : sessionTrack.loadedTrack.displayName,
-                        onSelect: { controller.selectActiveTrack(sessionTrack.id) },
-                        onDragBegan: { reorderDraggingID = sessionTrack.id },
-                        onDragEnded: {
-                            // A committed reorder has already moved the row into
-                            // the reveal phase via the drop delegate; a cancelled
-                            // or copied-out drag reveals in place the same way.
-                            if let draggingID = reorderDraggingID {
-                                reorderRevealingID = draggingID
-                                reorderDraggingID = nil
-                            }
-                            reorderTargetIndex = nil
-                            // Next tick: the (possibly reordered) layout has
-                            // landed unanimated, so only the opacity animates —
-                            // a fade-in at the row's final position, timed to
-                            // the system's fade-out of the drag image.
-                            DispatchQueue.main.async {
-                                withAnimation(.easeInOut(duration: 0.24)) {
-                                    reorderRevealingID = nil
-                                }
-                            }
-                        },
-                        makeDragImage: {
-                            reorderCardDragImage(index: index, sessionTrack: sessionTrack, width: infoWidth)
-                        }
-                    )
-                )
-
-            // The lane draws a double-width window anchored to a half-viewport
-            // grid; scrolling slides it with this offset and the Canvas only
-            // re-rasterizes when the viewport crosses a grid boundary.
-            Color.clear
-                .frame(height: trackRowHeight)
-                .frame(maxWidth: .infinity)
-                .overlay(alignment: .topLeading) {
-                    waveformLane(sessionTrack: sessionTrack, laneViewport: laneViewport)
-                        .frame(width: laneViewport.wideWidth, height: trackRowHeight)
-                        .offset(x: -laneViewport.shiftX)
+        let showsTrash = hoveredTrackID == sessionTrack.id && reorderDraggingID == nil
+        return TrackRowView(
+            index: index,
+            sessionTrack: sessionTrack,
+            // Blind listening feeds the lane a nil waveform so progress can't
+            // leak identity through redraw timing (an invariant).
+            waveform: isBlind ? nil : waveformStore.waveform(for: sessionTrack.id),
+            isActive: isActive,
+            showsTrash: showsTrash,
+            isBlind: isBlind,
+            isRenderable: renderableRows.contains(index),
+            isOffsetFocused: focusedOffsetTrackID == sessionTrack.id,
+            infoWidth: infoWidth,
+            rowHeight: trackRowHeight,
+            wideWidth: wideWidth,
+            offsetConfiguration: settings.offsetConfiguration,
+            indexBadgeAppearance: settings.indexBadgeAppearance,
+            showsDebugLabel: settings.showsComponentDebugLabels,
+            controller: controller,
+            viewportStore: laneViewportStore,
+            onSelect: { controller.selectActiveTrack(sessionTrack.id) },
+            onRemove: { controller.removeTrack(sessionTrack.id) },
+            onSetOffsetMs: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) },
+            onOffsetFocusChange: { focused in
+                if focused {
+                    focusedOffsetTrackID = sessionTrack.id
+                } else if focusedOffsetTrackID == sessionTrack.id {
+                    focusedOffsetTrackID = nil
                 }
-                .clipped()
-        }
-        .frame(height: trackRowHeight)
-        // Active highlight spans the whole row (info + lane) as one continuous
-        // band; a leading accent bar anchors the active track to the left edge.
-        // Drawn at the HStack level so the frozen-column edge (a top-level overlay)
-        // reads as crossing a single tinted band rather than two boxes.
-        .background(isActive ? Theme.activeRowFill : Color.clear)
-        .overlay(alignment: .leading) {
-            if isActive {
-                Rectangle()
-                    .fill(Theme.primary)
-                    .frame(width: 3)
-                    .allowsHitTesting(false)
+            },
+            onHover: { inside in
+                hoveredTrackID = inside ? sessionTrack.id : (hoveredTrackID == sessionTrack.id ? nil : hoveredTrackID)
+            },
+            onDragBegan: { reorderDraggingID = sessionTrack.id },
+            onDragEnded: {
+                // A committed reorder has already moved the row into the reveal
+                // phase via the drop delegate; a cancelled or copied-out drag
+                // reveals in place the same way.
+                if let draggingID = reorderDraggingID {
+                    reorderRevealingID = draggingID
+                    reorderDraggingID = nil
+                }
+                reorderTargetIndex = nil
+                // Next tick: the (possibly reordered) layout has landed
+                // unanimated, so only the opacity animates — a fade-in at the
+                // row's final position, timed to the system's fade-out of the
+                // drag image.
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.24)) {
+                        reorderRevealingID = nil
+                    }
+                }
+            },
+            makeDragImage: {
+                reorderCardDragImage(index: index, sessionTrack: sessionTrack, width: infoWidth)
             }
-        }
-        .onHover { inside in
-            hoveredTrackID = inside ? sessionTrack.id : (hoveredTrackID == sessionTrack.id ? nil : hoveredTrackID)
-        }
+        )
     }
 
     /// The floating card shown under the pointer while a track is dragged to
@@ -2109,7 +2090,11 @@ struct ContentView: View {
         let isBlind = controller.session.isBlindListeningModeEnabled
         let title = isBlind ? "Track \(index + 1)" : track.displayName
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            trackIndexBadge(index: index, isActive: controller.session.activeTrackID == sessionTrack.id)
+            TrackIndexBadgeView(
+                index: index,
+                isActive: controller.session.activeTrackID == sessionTrack.id,
+                appearance: settings.indexBadgeAppearance
+            )
                 // Same 1pt optical nudge as the in-row badge: baseline-aligned to
                 // the filename, but the fixed badge frame reads a touch low.
                 .offset(y: -1)
@@ -2299,225 +2284,41 @@ struct ContentView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func trackInfoArea(index: Int, sessionTrack: SessionTrack, showsTrash: Bool) -> some View {
-        let track = sessionTrack.loadedTrack
-        let isActive = controller.session.activeTrackID == sessionTrack.id
-        let isBlind = controller.session.isBlindListeningModeEnabled
-        let title = isBlind ? "Track \(index + 1)" : track.displayName
-        // Badge on the left; filename, metadata, and the Offset row form a single
-        // left-aligned column to its right so all three share the filename's left
-        // edge. Vertically centered so the info column matches the waveform lane.
-        // The badge, filename, and metadata opt out of hit-testing so the drag
-        // source behind the column receives their clicks (a drag anywhere but the
-        // trash button and offset field starts a reorder). The trash button and
-        // offset field keep hit-testing so they still work.
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            trackIndexBadge(index: index, isActive: isActive)
-                // Baseline is technically aligned, but the fixed badge frame makes
-                // the centered number read a touch low; nudge it up 1pt.
-                .offset(y: -1)
-                .allowsHitTesting(false)
-
-            // Outer spacing (12) pushes the Offset row down; the inner group's
-            // spacing (2) keeps the filename and metadata tightly associated.
-            // Tweak these two numbers to taste.
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 2) {
-                        // No `.help` here: hit-testing is off (clicks must reach
-                        // the drag source), which disables SwiftUI tooltips. The
-                        // full-title tooltip lives on the drag source view.
-                        Text(title)
-                            .font(.headline.weight(.medium))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .allowsHitTesting(false)
-
-                        Spacer(minLength: 0)
-
-                        Button {
-                            controller.removeTrack(sessionTrack.id)
-                        } label: {
-                            Image(systemName: "trash")
-                                .accessibilityLabel("Remove Track \(index + 1)")
-                                .frame(width: 16, height: 16)
-                        }
-                        .buttonStyle(.borderless)
-                        .frame(width: 16, height: 16)
-                        // Only surfaces on hover; kept mounted (opacity, not removed) so it
-                        // stays reachable by accessibility/keyboard.
-                        .opacity(showsTrash ? 1 : 0)
-                    }
-
-                    Text(track.metadataSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .opacity(isBlind ? 0 : 1)
-                        .accessibilityHidden(isBlind)
-                        .allowsHitTesting(false)
-                }
-
-                offsetControl(sessionTrack: sessionTrack)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 12)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .componentDebugLabel("Track Info", enabled: settings.showsComponentDebugLabels, color: .green)
-    }
-
-    /// The rounded index badge: filled with the primary color when the row is
-    /// active (white number), a neutral fill otherwise (secondary number).
-    private func trackIndexBadge(index: Int, isActive: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
-        let badge = settings.indexBadgeAppearance
-        return Text("\(index + 1)")
-            .font(.caption.weight(.semibold).monospacedDigit())
-            .foregroundStyle(isActive ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-            .frame(width: 20, height: 20)
-            .background {
-                shape.fill(isActive ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(Theme.indexBadgeInactiveFill))
-            }
-            // A crisp beveled rim all around: bright along the top edge fading to a
-            // dark bottom edge, so the badge reads as a raised, chiseled button.
-            .overlay {
-                shape.strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            .white.opacity(badge.bevelTopOpacity),
-                            .white.opacity(badge.bevelTopOpacity * 0.24),
-                            .black.opacity(badge.bevelBottomOpacity)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: badge.bevelWidth
-                )
-            }
-            .clipShape(shape)
-            .shadow(color: .black.opacity(badge.shadowOpacity), radius: CGFloat(badge.shadowRadius), y: CGFloat(badge.shadowY))
-            .accessibilityHidden(true)
-    }
-
-    private func offsetControl(sessionTrack: SessionTrack) -> some View {
-        let offsetMs = Int((sessionTrack.loadedTrack.offsetSeconds * 1000).rounded())
-        let binding = Binding(
-            get: { offsetMs },
-            set: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) }
-        )
-        // firstTextBaseline so the "Offset" caption sits on the same line as the
-        // field's numeric text; both use .caption so their baselines match.
-        return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("Offset")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            offsetField(binding: binding, trackID: sessionTrack.id)
-        }
-    }
-
-    /// Composite offset control: a single rounded, bordered box holding the
-    /// borderless numeric field, a static "ms" unit, and an embedded stepper — so
-    /// it reads as one input `[  0  ms  ⌃⌄ ]`. Typed-entry/clamping and the
-    /// Shift-large-step behavior come from `IntegerInputField`; the stepper mirrors
-    /// the same step amounts.
-    private func offsetField(binding: Binding<Int>, trackID: SessionTrack.ID) -> some View {
-        let isFocused = focusedOffsetTrackID == trackID
-        return HStack(spacing: 4) {
-            IntegerInputField(
-                value: binding,
-                configuration: settings.offsetConfiguration,
-                onFocusChange: { focused in
-                    if focused {
-                        focusedOffsetTrackID = trackID
-                    } else if focusedOffsetTrackID == trackID {
-                        focusedOffsetTrackID = nil
-                    }
-                }
-            )
-            .frame(width: 44)
-
-            Text("ms")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                    binding.wrappedValue = 0
-                }
-                .accessibilityLabel("Offset units")
-                .accessibilityHint("Double click to reset offset to zero milliseconds.")
-
-            Stepper(
-                "Offset",
-                onIncrement: { stepOffset(binding: binding, direction: 1) },
-                onDecrement: { stepOffset(binding: binding, direction: -1) }
-            )
-            .labelsHidden()
-            .controlSize(.small)
-        }
-        .padding(.leading, 6)
-        .padding(.trailing, 3)
-        .padding(.vertical, 2)
-        .fixedSize(horizontal: true, vertical: false)
-        // Recessed field: a filled surface with a soft top inner shadow, ringed by
-        // an inset bevel (dark top edge fading to a light bottom edge).
-        .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Theme.readoutSurface.shadow(.inner(color: .black.opacity(0.15), radius: 1.5, y: 1)))
-        }
-        // Focused: the bevel gives way to a solid ring in the app's active
-        // indigo, plus a soft matching glow so the live field is unmissable.
-        .overlay {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(
-                    isFocused
-                        ? AnyShapeStyle(Theme.primary)
-                        : AnyShapeStyle(LinearGradient(
-                            colors: [.black.opacity(0.14), .white.opacity(0.45)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )),
-                    lineWidth: isFocused ? 1.5 : 1
-                )
-        }
-        .shadow(color: isFocused ? Theme.primary.opacity(0.55) : .clear, radius: 3)
-        .animation(.easeOut(duration: 0.12), value: isFocused)
-    }
-
-    private func stepOffset(binding: Binding<Int>, direction: Int) {
-        binding.wrappedValue = settings.offsetConfiguration.steppedValue(
-            from: binding.wrappedValue,
-            direction: direction,
-            largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
-        )
-    }
-
     /// Geometry for the windowed waveform lanes. Each lane draws a
     /// 2×-viewport window anchored to a half-viewport grid in *absolute*
-    /// timeline time, and the parent slides it with a plain `offset` as the
-    /// timeline scrolls — so a horizontal scroll (or zoomed playback follow)
-    /// only re-rasterizes the lane Canvases when the viewport crosses a grid
-    /// boundary, not on every scroll event.
+    /// timeline time; a leaf slides it with a plain `offset` as the timeline
+    /// scrolls (`shiftX`, kept out of here) and rasterizes only when the window
+    /// crosses a grid boundary.
+    ///
+    /// Crucially, EVERY field here varies with zoom (the quantum is
+    /// `visibleSpan/2`, and the ticks are mapped through the span). So these
+    /// must NOT be `TrackRowView` equatable inputs — if they were, a zoom step
+    /// would flip every row's `==` and force the non-lazy VStack to re-lay-out
+    /// all rows (the WP-6 bug). Instead the viewport lives in a shared
+    /// `LaneViewportStore` that only the lane leaf observes, so a zoom step
+    /// re-runs the N fixed-frame lane leaves, never the row bodies.
     struct LaneViewport: Equatable {
         var windowStart: TimeInterval
         var windowSpan: TimeInterval
-        /// Drawn width of the window (2× the visible lane width).
-        var wideWidth: CGFloat
-        /// Offset of the visible region into the window, in points.
-        var shiftX: CGFloat
         var majorTickXs: [CGFloat]
         var zeroTickX: CGFloat
+
+        static let empty = LaneViewport(windowStart: 0, windowSpan: 0, majorTickXs: [], zeroTickX: 0)
     }
 
     private func makeLaneViewport(waveformWidth: CGFloat) -> LaneViewport {
-        let span = max(visibleSpan, 0.000_1)
-        let quantum = span / 2
-        let windowStart = (visibleStart / quantum).rounded(.down) * quantum
+        let span = visibleSpan
+        // The grid-quantized window start is STORED on the controller (updated
+        // with an equality guard whenever the visible window moves) rather than
+        // derived from `visibleStart` here: reading raw `visibleStart` in the
+        // container body would register a per-scroll-event Observation
+        // dependency and re-run the whole track list per event.
+        let windowStart = controller.laneWindowStart
         let windowSpan = span * 2
         let windowEnd = windowStart + windowSpan
+        // Ticks are mapped over the drawn window width (2× the visible lane
+        // width) so they line up with the lane frame; `wideWidth` itself is
+        // geometry (fixed on zoom) and travels to the lane as a row input.
         let wideWidth = waveformWidth * 2
         func windowX(_ time: TimeInterval) -> CGFloat {
             CGFloat((time - windowStart) / windowSpan) * wideWidth
@@ -2542,33 +2343,9 @@ struct ContentView: View {
         return LaneViewport(
             windowStart: windowStart,
             windowSpan: windowSpan,
-            wideWidth: wideWidth,
-            shiftX: CGFloat((visibleStart - windowStart) / span) * waveformWidth,
             majorTickXs: ruler.majorTicks.map { windowX($0.time) },
             zeroTickX: windowX(0)
         )
-    }
-
-    private func waveformLane(
-        sessionTrack: SessionTrack,
-        laneViewport: LaneViewport
-    ) -> some View {
-        WaveformLaneView(
-            width: laneViewport.wideWidth,
-            waveform: controller.session.isBlindListeningModeEnabled
-                ? nil
-                : waveformStore.waveform(for: sessionTrack.id),
-            isBlindListening: controller.session.isBlindListeningModeEnabled,
-            isActive: controller.session.activeTrackID == sessionTrack.id,
-            trackStart: sessionTrack.loadedTrack.offsetSeconds,
-            trackDuration: sessionTrack.loadedTrack.duration,
-            visibleStart: laneViewport.windowStart,
-            visibleSpan: laneViewport.windowSpan,
-            majorTickXs: laneViewport.majorTickXs,
-            zeroTickX: laneViewport.zeroTickX,
-            showsDebugLabel: settings.showsComponentDebugLabels
-        )
-        .equatable()
     }
 
     // MARK: - Loop selection
@@ -2578,133 +2355,48 @@ struct ContentView: View {
     /// so an off-screen loop never spills into the track-info column.
     private func loopSelectionOverlay(infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
-            // Drag to select a loop; click to seek (and deselect if outside the loop).
+            // Drag to select a loop; click to seek (and deselect if outside the
+            // loop). The gesture surface carries no per-event body reads — the
+            // closures' visible-window reads aren't observation-tracked.
             Color.clear
                 .contentShape(Rectangle())
                 .gesture(loopSelectionGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
 
-            if let range = activeLoopXRange(waveformWidth: waveformWidth) {
-                // Grip tabs only once the loop is committed/resizable — while
-                // drag-selecting, the edges stay plain lines.
-                let showsGrips = loopDraft == nil && displayedLoopRegion != nil
-                Rectangle()
-                    .fill(Theme.secondary.opacity(0.16))
-                    .overlay(alignment: .leading) { loopEdge(showsGrip: showsGrips).offset(x: -3.5) }
-                    .overlay(alignment: .trailing) { loopEdge(showsGrip: showsGrips).offset(x: 3.5) }
-                    .frame(width: max(1, range.upperBound - range.lowerBound), height: trackTimelineHeight)
-                    .offset(x: range.lowerBound)
-                    .allowsHitTesting(false)
-            }
-
-            // During resize, preview locally so playback is rebound only once on mouse-up.
-            if loopDraft == nil, let loop = displayedLoopRegion {
-                loopResizeHandle(atTime: loop.start, waveformWidth: waveformWidth) { time in
-                    updateLoopResizeDraft(start: time)
-                } onEnded: { time in
-                    commitLoopResize(start: time)
+            // Selection rectangle + resize handles. Their x-positioning depends
+            // on the per-scroll-event visible window, so it lives in a leaf that
+            // alone reads it; the gesture LOGIC stays here in closures.
+            LoopOverlayContentView(
+                controller: controller,
+                waveformWidth: waveformWidth,
+                height: trackTimelineHeight,
+                draftRange: loopDraft.map { min($0.start, $0.current)...max($0.start, $0.current) },
+                displayedLoop: loopDraft == nil ? displayedLoopRegion : nil,
+                onHandleChanged: { isStart, value in
+                    // Don't start resizing on a jitter-sized movement, so a
+                    // plain click stays a click (handled below).
+                    let dx = abs(value.location.x - value.startLocation.x)
+                    guard loopResizeDraft != nil || dx > Self.loopDragThreshold else { return }
+                    let time = globalTime(atX: value.location.x, width: waveformWidth)
+                    isStart ? updateLoopResizeDraft(start: time) : updateLoopResizeDraft(end: time)
+                },
+                onHandleEnded: { isStart, value in
+                    if loopResizeDraft == nil {
+                        // A plain click on the handle strip: the strip sits
+                        // over the lane's own gesture and would otherwise
+                        // swallow it — run the same click-to-seek (and
+                        // deselect-if-outside) behaviour as the lane.
+                        handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth)
+                    } else {
+                        let time = globalTime(atX: value.location.x, width: waveformWidth)
+                        isStart ? commitLoopResize(start: time) : commitLoopResize(end: time)
+                    }
                 }
-                loopResizeHandle(atTime: loop.end, waveformWidth: waveformWidth) { time in
-                    updateLoopResizeDraft(end: time)
-                } onEnded: { time in
-                    commitLoopResize(end: time)
-                }
-            }
+            )
         }
         .frame(width: waveformWidth, height: trackTimelineHeight, alignment: .topLeading)
         .clipped()
         .coordinateSpace(name: Self.loopColumnSpace)
         .offset(x: infoWidth)
-    }
-
-    /// Grab handle drawn at each loop edge: a slim accent rod inside a soft
-    /// accent halo, plus (once the loop is committed) a centered grip tab with
-    /// two engraved notches. Deliberately unlike the flat solid playhead line
-    /// and its ruler grabber, so the edges read as draggable resize handles
-    /// and stay distinguishable when the playhead sits on top of them.
-    private func loopEdge(showsGrip: Bool) -> some View {
-        ZStack {
-            Capsule()
-                .fill(Theme.secondary)
-                .shadow(color: Theme.secondary.opacity(0.85), radius: 3)
-                .frame(width: 2)
-
-            if showsGrip {
-                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                    .fill(Theme.secondary)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                            .stroke(.white.opacity(0.35), lineWidth: 0.75)
-                    )
-                    .overlay(
-                        HStack(spacing: 2) {
-                            Capsule().frame(width: 1, height: 10)
-                            Capsule().frame(width: 1, height: 10)
-                        }
-                        .foregroundStyle(.black.opacity(0.35))
-                    )
-                    .frame(width: 9, height: 24)
-                    .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
-            }
-        }
-        .frame(width: 9)
-    }
-
-    /// x-span (points, within the waveform column) of the loop being drawn:
-    /// a new-selection draft, a resize preview, or the committed loop.
-    private func activeLoopXRange(waveformWidth: CGFloat) -> ClosedRange<CGFloat>? {
-        let start: TimeInterval
-        let end: TimeInterval
-        if let draft = loopDraft {
-            start = min(draft.start, draft.current)
-            end = max(draft.start, draft.current)
-        } else if let loop = displayedLoopRegion {
-            start = loop.start
-            end = loop.end
-        } else {
-            return nil
-        }
-        let x0 = xPosition(for: start, width: waveformWidth)
-        let x1 = xPosition(for: end, width: waveformWidth)
-        return min(x0, x1)...max(x0, x1)
-    }
-
-    private func loopResizeHandle(
-        atTime time: TimeInterval,
-        waveformWidth: CGFloat,
-        onChanged: @escaping (TimeInterval) -> Void,
-        onEnded: @escaping (TimeInterval) -> Void
-    ) -> some View {
-        let x = xPosition(for: time, width: waveformWidth)
-        let hitWidth: CGFloat = 12
-        // Cursor feedback (resizeLeftRight) is handled by the mouse-monitor
-        // cursor manager — SwiftUI hover doesn't fire reliably underneath the
-        // NSView-based timeline scroll overlay.
-        return Rectangle()
-            .fill(Color.white.opacity(0.001))
-            .frame(width: hitWidth, height: trackTimelineHeight)
-            .contentShape(Rectangle())
-            .offset(x: x - hitWidth / 2)
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.loopColumnSpace))
-                    .onChanged { value in
-                        // Don't start resizing on a jitter-sized movement, so
-                        // a plain click stays a click (handled below).
-                        let dx = abs(value.location.x - value.startLocation.x)
-                        guard loopResizeDraft != nil || dx > Self.loopDragThreshold else { return }
-                        onChanged(globalTime(atX: value.location.x, width: waveformWidth))
-                    }
-                    .onEnded { value in
-                        if loopResizeDraft == nil {
-                            // A plain click on the handle strip: the strip sits
-                            // over the lane's own gesture and would otherwise
-                            // swallow it — run the same click-to-seek (and
-                            // deselect-if-outside) behaviour as the lane.
-                            handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth)
-                        } else {
-                            onEnded(globalTime(atX: value.location.x, width: waveformWidth))
-                        }
-                    }
-            )
     }
 
     private var displayedLoopRegion: LoopRegion? {
@@ -3870,6 +3562,710 @@ private func extractDroppedFileURL(from item: NSSecureCoding?) -> URL? {
     return nil
 }
 
+/// One track row (info column + waveform lane) as a standalone, `Equatable`
+/// value view (`.equatable()` at the call site).
+///
+/// The whole point is isolation: a horizontal scroll writes `visibleStart` and
+/// a reorder gap move bumps parent `@State`, both of which re-run the container
+/// body — but the container only reconstructs these cheap values and runs `==`
+/// per row. Unless a *compared* input changed, SwiftUI skips this body and the
+/// entire info-column subtree (index badge, offset field, drag source) is left
+/// untouched. Three things are deliberately kept OUT of the compared surface so
+/// they can update without re-running the body:
+///   - the per-scroll-event lane slide AND the zoom-varying lane window
+///     (window bounds + tick guides), both handled inside the `LaneView` leaf
+///     (which reads `controller.visibleStart` and `viewportStore` itself), so
+///     scroll and zoom re-run only that fixed-frame leaf, not the row;
+///   - the reorder gap `offset(y:)`/`opacity`/animation, applied by the
+///     container around this view.
+/// `controller`, `viewportStore`, and the action closures are stored but
+/// excluded from `==`; the closures only capture the row's own identity /
+/// actions, never per-event state, so a skipped body can't show stale visuals.
+private struct TrackRowView: View, Equatable {
+    var index: Int
+    var sessionTrack: SessionTrack
+    /// Nil while blind listening (so progress can't leak identity) or before
+    /// generation starts. Array `==` short-circuits on shared storage, so the
+    /// common scroll case is O(1).
+    var waveform: Waveform?
+    var isActive: Bool
+    var showsTrash: Bool
+    var isBlind: Bool
+    /// Whether this row's lane may rasterize (it intersects the vertical
+    /// viewport ± overscan). Culled lanes keep showing their last image.
+    var isRenderable: Bool
+    var isOffsetFocused: Bool
+    var infoWidth: CGFloat
+    var rowHeight: CGFloat
+    /// Drawn width of the 2× lane window. Geometry-driven (2× the waveform
+    /// column), so it changes on window/column resize but NOT on zoom — safe
+    /// as an equatable input.
+    var wideWidth: CGFloat
+    var offsetConfiguration: NumericControlConfiguration
+    var indexBadgeAppearance: IndexBadgeAppearance
+    var showsDebugLabel: Bool
+
+    /// References forwarded to the lane leaf; never read in this body. The
+    /// zoom-varying window/ticks live in `viewportStore` (observed only by the
+    /// leaf), so they can't be equatable inputs here — see `LaneViewport`.
+    var controller: PlaybackController
+    var viewportStore: LaneViewportStore
+    var onSelect: () -> Void
+    var onRemove: () -> Void
+    var onSetOffsetMs: (Int) -> Void
+    var onOffsetFocusChange: (Bool) -> Void
+    var onHover: (Bool) -> Void
+    var onDragBegan: () -> Void
+    var onDragEnded: () -> Void
+    var makeDragImage: () -> NSImage?
+
+    nonisolated static func == (lhs: TrackRowView, rhs: TrackRowView) -> Bool {
+        lhs.index == rhs.index
+            && lhs.sessionTrack == rhs.sessionTrack
+            && lhs.waveform == rhs.waveform
+            && lhs.isActive == rhs.isActive
+            && lhs.showsTrash == rhs.showsTrash
+            && lhs.isBlind == rhs.isBlind
+            && lhs.isRenderable == rhs.isRenderable
+            && lhs.isOffsetFocused == rhs.isOffsetFocused
+            && lhs.infoWidth == rhs.infoWidth
+            && lhs.rowHeight == rhs.rowHeight
+            && lhs.wideWidth == rhs.wideWidth
+            && lhs.offsetConfiguration == rhs.offsetConfiguration
+            && lhs.indexBadgeAppearance == rhs.indexBadgeAppearance
+            && lhs.showsDebugLabel == rhs.showsDebugLabel
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            infoArea
+                .frame(width: infoWidth, height: rowHeight, alignment: .leading)
+                // Drag the info column to reorder in place (a move), or out of the
+                // window to copy the track's audio file onto Finder / another app /
+                // another Takes window. An AppKit drag source (behind the column's
+                // content, so its own controls still work) runs the drag with the
+                // right move-inside / copy-outside operation; a plain click selects.
+                .background(
+                    TrackRowDragSource(
+                        fileURL: sessionTrack.loadedTrack.url,
+                        trackID: sessionTrack.id,
+                        tooltip: isBlind
+                            ? "Track \(index + 1)"
+                            : sessionTrack.loadedTrack.displayName,
+                        onSelect: onSelect,
+                        onDragBegan: onDragBegan,
+                        onDragEnded: onDragEnded,
+                        makeDragImage: makeDragImage
+                    )
+                )
+
+            // The lane is a self-observing leaf: it reads the shared viewport
+            // (zoom) and the live scroll position (`shiftX`) itself, so zoom and
+            // scroll re-run only this fixed-frame leaf, never the row body. Its
+            // frame is `wideWidth × rowHeight` (both fixed on zoom), so its
+            // re-runs never propagate layout up into the VStack.
+            LaneView(
+                controller: controller,
+                viewportStore: viewportStore,
+                waveform: waveform,
+                isActive: isActive,
+                isBlind: isBlind,
+                isRenderable: isRenderable,
+                trackStart: sessionTrack.loadedTrack.offsetSeconds,
+                trackDuration: sessionTrack.loadedTrack.duration,
+                wideWidth: wideWidth,
+                rowHeight: rowHeight,
+                showsDebugLabel: showsDebugLabel
+            )
+        }
+        .frame(height: rowHeight)
+        // Active highlight spans the whole row (info + lane) as one continuous
+        // band; a leading accent bar anchors the active track to the left edge.
+        // Drawn at the HStack level so the frozen-column edge (a top-level overlay)
+        // reads as crossing a single tinted band rather than two boxes.
+        .background(isActive ? Theme.activeRowFill : Color.clear)
+        .overlay(alignment: .leading) {
+            if isActive {
+                Rectangle()
+                    .fill(Theme.primary)
+                    .frame(width: 3)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onHover { onHover($0) }
+    }
+
+    private var infoArea: some View {
+        let track = sessionTrack.loadedTrack
+        let title = isBlind ? "Track \(index + 1)" : track.displayName
+        // Badge on the left; filename, metadata, and the Offset row form a single
+        // left-aligned column to its right so all three share the filename's left
+        // edge. Vertically centered so the info column matches the waveform lane.
+        // The badge, filename, and metadata opt out of hit-testing so the drag
+        // source behind the column receives their clicks (a drag anywhere but the
+        // trash button and offset field starts a reorder). The trash button and
+        // offset field keep hit-testing so they still work.
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            TrackIndexBadgeView(index: index, isActive: isActive, appearance: indexBadgeAppearance)
+                // Baseline is technically aligned, but the fixed badge frame makes
+                // the centered number read a touch low; nudge it up 1pt.
+                .offset(y: -1)
+                .allowsHitTesting(false)
+
+            // Outer spacing (12) pushes the Offset row down; the inner group's
+            // spacing (2) keeps the filename and metadata tightly associated.
+            // Tweak these two numbers to taste.
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 2) {
+                        // No `.help` here: hit-testing is off (clicks must reach
+                        // the drag source), which disables SwiftUI tooltips. The
+                        // full-title tooltip lives on the drag source view.
+                        Text(title)
+                            .font(.headline.weight(.medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .allowsHitTesting(false)
+
+                        Spacer(minLength: 0)
+
+                        Button(action: onRemove) {
+                            Image(systemName: "trash")
+                                .accessibilityLabel("Remove Track \(index + 1)")
+                                .frame(width: 16, height: 16)
+                        }
+                        .buttonStyle(.borderless)
+                        .frame(width: 16, height: 16)
+                        // Only surfaces on hover; kept mounted (opacity, not removed) so it
+                        // stays reachable by accessibility/keyboard.
+                        .opacity(showsTrash ? 1 : 0)
+                    }
+
+                    Text(track.metadataSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .opacity(isBlind ? 0 : 1)
+                        .accessibilityHidden(isBlind)
+                        .allowsHitTesting(false)
+                }
+
+                offsetControl
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxHeight: .infinity, alignment: .center)
+        .componentDebugLabel("Track Info", enabled: showsDebugLabel, color: .green)
+    }
+
+    private var offsetControl: some View {
+        let offsetMs = Int((sessionTrack.loadedTrack.offsetSeconds * 1000).rounded())
+        let binding = Binding(
+            get: { offsetMs },
+            set: { onSetOffsetMs($0) }
+        )
+        // firstTextBaseline so the "Offset" caption sits on the same line as the
+        // field's numeric text; both use .caption so their baselines match.
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("Offset")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            offsetField(binding: binding)
+        }
+    }
+
+    /// Composite offset control: a single rounded, bordered box holding the
+    /// borderless numeric field, a static "ms" unit, and an embedded stepper — so
+    /// it reads as one input `[  0  ms  ⌃⌄ ]`. Typed-entry/clamping and the
+    /// Shift-large-step behavior come from `IntegerInputField`; the stepper mirrors
+    /// the same step amounts.
+    private func offsetField(binding: Binding<Int>) -> some View {
+        HStack(spacing: 4) {
+            IntegerInputField(
+                value: binding,
+                configuration: offsetConfiguration,
+                onFocusChange: onOffsetFocusChange
+            )
+            .frame(width: 44)
+
+            Text("ms")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    binding.wrappedValue = 0
+                }
+                .accessibilityLabel("Offset units")
+                .accessibilityHint("Double click to reset offset to zero milliseconds.")
+
+            Stepper(
+                "Offset",
+                onIncrement: { stepOffset(binding, direction: 1) },
+                onDecrement: { stepOffset(binding, direction: -1) }
+            )
+            .labelsHidden()
+            .controlSize(.small)
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 3)
+        .padding(.vertical, 2)
+        .fixedSize(horizontal: true, vertical: false)
+        // Recessed field: a filled surface with a soft top inner shadow, ringed by
+        // an inset bevel (dark top edge fading to a light bottom edge).
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Theme.readoutSurface.shadow(.inner(color: .black.opacity(0.15), radius: 1.5, y: 1)))
+        }
+        // Focused: the bevel gives way to a solid ring in the app's active
+        // indigo, plus a soft matching glow so the live field is unmissable.
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(
+                    isOffsetFocused
+                        ? AnyShapeStyle(Theme.primary)
+                        : AnyShapeStyle(LinearGradient(
+                            colors: [.black.opacity(0.14), .white.opacity(0.45)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )),
+                    lineWidth: isOffsetFocused ? 1.5 : 1
+                )
+        }
+        .shadow(color: isOffsetFocused ? Theme.primary.opacity(0.55) : .clear, radius: 3)
+        .animation(.easeOut(duration: 0.12), value: isOffsetFocused)
+    }
+
+    private func stepOffset(_ binding: Binding<Int>, direction: Int) {
+        binding.wrappedValue = offsetConfiguration.steppedValue(
+            from: binding.wrappedValue,
+            direction: direction,
+            largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
+        )
+    }
+}
+
+/// Shared, self-observing source for the zoom-varying lane window (window
+/// bounds + tick guides). Only the lane leaves read it, so a zoom step (which
+/// changes every field) re-runs those N fixed-frame leaves instead of every
+/// row body — the WP-6 fix. The container writes it via an equality-guarded
+/// `.onChange` on the computed `LaneViewport`.
+@MainActor
+@Observable
+final class LaneViewportStore {
+    var viewport: ContentView.LaneViewport = .empty
+}
+
+/// One lane: the pre-rendered waveform window, positioned for the live scroll
+/// (`shiftX`) and drawn from the shared zoom-varying window (`viewportStore`).
+///
+/// A self-observing leaf. It reads `viewportStore.viewport` (zoom / grid
+/// boundary) and `controller.visibleStart`/`visibleSpan` (per scroll event),
+/// so both zoom and scroll re-run only this body — never the equatable row
+/// around it. Its outer frame is `wideWidth × rowHeight`, both fixed on zoom
+/// AND scroll, so a re-run never propagates layout up into the VStack; the
+/// image moves purely by transforms inside that fixed frame. `WaveformLaneView`
+/// stays `.equatable()`, so its Canvas/image request is touched only when the
+/// window actually changes (boundary or zoom), not on an intra-window scroll.
+private struct LaneView: View {
+    var controller: PlaybackController
+    var viewportStore: LaneViewportStore
+    // Per-row, zoom-invariant inputs (captured when the row body last ran).
+    var waveform: Waveform?
+    var isActive: Bool
+    var isBlind: Bool
+    var isRenderable: Bool
+    var trackStart: TimeInterval
+    var trackDuration: TimeInterval
+    var wideWidth: CGFloat
+    var rowHeight: CGFloat
+    var showsDebugLabel: Bool
+
+    var body: some View {
+        let viewport = viewportStore.viewport
+        // Matches `makeLaneViewport`: `shiftX` maps the live scroll position
+        // into the visible (half-window) width.
+        let span = max(controller.visibleSpan, 0.001)
+        let waveformWidth = wideWidth / 2
+        let shiftX = CGFloat((controller.visibleStart - viewport.windowStart) / span) * waveformWidth
+        Color.clear
+            .frame(height: rowHeight)
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .topLeading) {
+                WaveformLaneView(
+                    width: wideWidth,
+                    waveform: waveform,
+                    isBlindListening: isBlind,
+                    isActive: isActive,
+                    isRenderable: isRenderable,
+                    trackStart: trackStart,
+                    trackDuration: trackDuration,
+                    visibleStart: viewport.windowStart,
+                    visibleSpan: viewport.windowSpan,
+                    majorTickXs: viewport.majorTickXs,
+                    zeroTickX: viewport.zeroTickX,
+                    showsDebugLabel: showsDebugLabel
+                )
+                .equatable()
+                .frame(width: wideWidth, height: rowHeight)
+                .offset(x: -shiftX)
+            }
+            .clipped()
+    }
+}
+
+/// The timeline header ruler — moving time labels and tick notches. It
+/// legitimately redraws on every scroll event (it IS the moving ruler), so it
+/// is a self-observing leaf: only this view's body reads the visible window,
+/// and the header/section around it stays untouched per event.
+private struct TimelineHeaderRulerView: View {
+    var controller: PlaybackController
+    var width: CGFloat
+    var targetMarkerCount: Int
+    /// Minimum on-screen spacing (points) between minor ticks before they are hidden.
+    var minorTickMinSpacing: Double
+    var headerHeight: CGFloat
+
+    // Ruler notches hang downward from below the numbers toward the rows, Fission-style:
+    // major (labeled) ticks are tall — their top edge comes up to just beneath the number so the
+    // label sits against the tick like a baseline — while minor ticks stay short. Both are
+    // bottom-anchored so they hang toward the rows.
+    private var tickColor: Color { .secondary.opacity(0.45) }
+    private var majorTickHeight: CGFloat { 19 }
+    private var minorTickHeight: CGFloat { 8 }
+    /// Vertical inset of the time label from the top of the header.
+    private var labelTopInset: CGFloat { 7 }
+
+    var body: some View {
+        let visibleStart = controller.visibleStart
+        let visibleEnd = controller.visibleEnd
+        let rulerStart = max(visibleStart, controller.session.timelineStart)
+        let rulerEnd = min(visibleEnd, controller.session.timelineEnd)
+        let ruler = TimelineHeaderMarker.ruler(
+            timelineStart: rulerStart,
+            timelineEnd: rulerEnd,
+            targetMarkerCount: targetMarkerCount,
+            // Keep the just-off-screen major tick so its label clips at the left edge while scrolling
+            // rather than blinking out (mirrors the right-edge clipping in TimelineHeaderLabelLayout).
+            leadingMajorTicks: 1
+        )
+
+        // Drop minor ticks once they would pack closer than this; keeps the ruler from turning into
+        // a gray blur at narrow widths or high subdivision counts.
+        let visibleSpan = visibleEnd - visibleStart
+        let minorSpacing = visibleSpan > 0 ? ruler.minorInterval / visibleSpan * Double(width) : 0
+        let showMinorTicks = minorSpacing >= minorTickMinSpacing
+
+        return ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(.background.opacity(0.01))
+
+            if ruler.majorTicks.isEmpty {
+                Text("00:00")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 8)
+                    .frame(maxHeight: .infinity, alignment: .center)
+            } else {
+                if showMinorTicks {
+                    ForEach(ruler.minorTicks, id: \.self) { tickTime in
+                        minorTick(at: tickTime, visibleStart: visibleStart, visibleEnd: visibleEnd)
+                    }
+                }
+                ForEach(ruler.majorTicks, id: \.time) { marker in
+                    majorMarker(marker, visibleStart: visibleStart, visibleEnd: visibleEnd)
+                }
+            }
+        }
+        .clipped()
+        .accessibilityLabel("Timeline")
+    }
+
+    private func xPosition(for time: TimeInterval, visibleStart: TimeInterval, visibleEnd: TimeInterval) -> CGFloat {
+        CGFloat(
+            TransportMapping.normalizedPosition(
+                globalTime: time,
+                timelineStart: visibleStart,
+                timelineEnd: visibleEnd
+            )
+        ) * width
+    }
+
+    private func minorTick(at time: TimeInterval, visibleStart: TimeInterval, visibleEnd: TimeInterval) -> some View {
+        Rectangle()
+            .fill(tickColor)
+            .frame(width: 1, height: minorTickHeight)
+            .offset(x: xPosition(for: time, visibleStart: visibleStart, visibleEnd: visibleEnd))
+            // Anchor to the bottom so the notch hangs down toward the waveforms.
+            .frame(width: width, height: headerHeight, alignment: .bottomLeading)
+            .accessibilityHidden(true)
+    }
+
+    private func majorMarker(_ marker: TimelineHeaderMarker, visibleStart: TimeInterval, visibleEnd: TimeInterval) -> some View {
+        let tickX = xPosition(for: marker.time, visibleStart: visibleStart, visibleEnd: visibleEnd)
+        let labelWidth: CGFloat = 60
+        let labelLayout = TimelineHeaderLabelLayout.leading(
+            tickX: Double(tickX),
+            rulerWidth: Double(width)
+        )
+
+        return ZStack(alignment: .topLeading) {
+            // Number on top.
+            if labelLayout.isVisible {
+                Text(marker.label)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(width: labelWidth, alignment: .leading)
+                    .offset(x: CGFloat(labelLayout.x), y: labelTopInset)
+            }
+
+            // Taller notch hanging below the number, anchored to the header bottom.
+            Rectangle()
+                .fill(tickColor)
+                .frame(width: 1, height: majorTickHeight)
+                .offset(x: tickX)
+                .frame(width: width, height: headerHeight, alignment: .bottomLeading)
+        }
+        .frame(width: width, height: headerHeight, alignment: .topLeading)
+        .accessibilityLabel(marker.label)
+    }
+}
+
+/// Leaf wrapper for the scroll/magnify event overlay: it must be fed the live
+/// scroll position (its event math depends on it), so it alone re-runs per
+/// scroll event — one cheap representable update — instead of the section that
+/// mounts it.
+private struct TimelineScrollOverlayLeaf: View {
+    var controller: PlaybackController
+
+    var body: some View {
+        TimelineScrollOverlay(
+            visibleStart: controller.visibleStart,
+            visibleSpan: max(controller.visibleSpan, 0.001),
+            contentStart: controller.session.timelineStart,
+            contentEnd: controller.session.timelineEnd,
+            onScroll: { controller.scrollTimeline(toVisibleStart: $0) },
+            onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
+        )
+    }
+}
+
+/// Leaf around `TimelinePlayheadVisual` so only this body — a single
+/// representable update re-seating the CALayer tween — re-runs when the
+/// visible window or a transport anchor changes, not the whole section
+/// overlay. The CALayer system itself is untouched: steady playback still
+/// costs zero main-thread work between anchor events.
+private struct TimelinePlayheadOverlayView: View {
+    var controller: PlaybackController
+    /// While a ruler scrub is in flight: the preview x within the column.
+    var playheadDragX: CGFloat?
+    var infoWidth: CGFloat
+    var sectionHeight: CGFloat
+    var waveformWidth: CGFloat
+    var seatBottom: CGFloat
+    var laneAreaHeight: CGFloat
+
+    var body: some View {
+        let position = controller.displayTransportPosition()
+        TimelinePlayheadVisual(
+            currentX: playheadDragX ?? xPosition(for: position),
+            endX: xPosition(for: controller.session.playbackEnd),
+            remaining: max(0, controller.session.playbackEnd - position),
+            isPlaying: controller.session.isPlaying && playheadDragX == nil,
+            infoWidth: infoWidth,
+            sectionHeight: sectionHeight,
+            waveformWidth: waveformWidth,
+            seatBottom: seatBottom,
+            laneAreaHeight: laneAreaHeight
+        )
+        // Purely decorative (the caller disables hit testing too, and the layer
+        // view overrides `hitTest` to nil); kept here so the leaf can never
+        // intercept clicks regardless of how it's mounted.
+        .allowsHitTesting(false)
+    }
+
+    private func xPosition(for globalTime: TimeInterval) -> CGFloat {
+        CGFloat(
+            TransportMapping.normalizedPosition(
+                globalTime: globalTime,
+                timelineStart: controller.visibleStart,
+                timelineEnd: controller.visibleEnd
+            )
+        ) * waveformWidth
+    }
+}
+
+/// The loop selection rectangle and resize handles. A leaf because their
+/// x-positions track the per-scroll-event visible window; the gesture LOGIC
+/// (draft thresholds, commit, click-to-seek fallthrough) stays in
+/// `ContentView` closures, so behavior is unchanged. Mounted inside the
+/// container's `loopColumnSpace` so the handle drags report the same
+/// coordinates as before.
+private struct LoopOverlayContentView: View {
+    var controller: PlaybackController
+    var waveformWidth: CGFloat
+    var height: CGFloat
+    /// In-progress drag selection (absolute seconds); takes priority over the loop.
+    var draftRange: ClosedRange<TimeInterval>?
+    /// The resize preview or committed loop; `nil` while drag-selecting (the
+    /// caller suppresses it so the draft owns the rectangle and no grips show).
+    var displayedLoop: LoopRegion?
+    var onHandleChanged: (_ isStart: Bool, _ value: DragGesture.Value) -> Void
+    var onHandleEnded: (_ isStart: Bool, _ value: DragGesture.Value) -> Void
+
+    var body: some View {
+        // The only per-scroll-event reads: this leaf re-runs, the tree above
+        // it doesn't.
+        let visibleStart = controller.visibleStart
+        let visibleEnd = controller.visibleEnd
+
+        ZStack(alignment: .topLeading) {
+            if let range = loopTimeRange {
+                // Grip tabs only once the loop is committed/resizable — while
+                // drag-selecting, the edges stay plain lines.
+                let showsGrips = displayedLoop != nil
+                let x0 = xPosition(for: range.lowerBound, visibleStart: visibleStart, visibleEnd: visibleEnd)
+                let x1 = xPosition(for: range.upperBound, visibleStart: visibleStart, visibleEnd: visibleEnd)
+                Rectangle()
+                    .fill(Theme.secondary.opacity(0.16))
+                    .overlay(alignment: .leading) { loopEdge(showsGrip: showsGrips).offset(x: -3.5) }
+                    .overlay(alignment: .trailing) { loopEdge(showsGrip: showsGrips).offset(x: 3.5) }
+                    .frame(width: max(1, max(x0, x1) - min(x0, x1)), height: height)
+                    .offset(x: min(x0, x1))
+                    .allowsHitTesting(false)
+            }
+
+            // During resize, the preview loop is passed in as `displayedLoop`
+            // so playback is rebound only once on mouse-up.
+            if let loop = displayedLoop {
+                resizeHandle(
+                    atX: xPosition(for: loop.start, visibleStart: visibleStart, visibleEnd: visibleEnd),
+                    isStart: true
+                )
+                resizeHandle(
+                    atX: xPosition(for: loop.end, visibleStart: visibleStart, visibleEnd: visibleEnd),
+                    isStart: false
+                )
+            }
+        }
+    }
+
+    /// Time span of the rectangle: the drag draft, else the displayed loop.
+    private var loopTimeRange: ClosedRange<TimeInterval>? {
+        if let draftRange { return draftRange }
+        if let displayedLoop { return displayedLoop.start...displayedLoop.end }
+        return nil
+    }
+
+    private func xPosition(for time: TimeInterval, visibleStart: TimeInterval, visibleEnd: TimeInterval) -> CGFloat {
+        CGFloat(
+            TransportMapping.normalizedPosition(
+                globalTime: time,
+                timelineStart: visibleStart,
+                timelineEnd: visibleEnd
+            )
+        ) * waveformWidth
+    }
+
+    private func resizeHandle(atX x: CGFloat, isStart: Bool) -> some View {
+        let hitWidth: CGFloat = 12
+        // Cursor feedback (resizeLeftRight) is handled by the mouse-monitor
+        // cursor manager — SwiftUI hover doesn't fire reliably underneath the
+        // NSView-based timeline scroll overlay.
+        return Rectangle()
+            .fill(Color.white.opacity(0.001))
+            .frame(width: hitWidth, height: height)
+            .contentShape(Rectangle())
+            .offset(x: x - hitWidth / 2)
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(ContentView.loopColumnSpace))
+                    .onChanged { value in
+                        onHandleChanged(isStart, value)
+                    }
+                    .onEnded { value in
+                        onHandleEnded(isStart, value)
+                    }
+            )
+    }
+
+    /// Grab handle drawn at each loop edge: a slim accent rod inside a soft
+    /// accent halo, plus (once the loop is committed) a centered grip tab with
+    /// two engraved notches. Deliberately unlike the flat solid playhead line
+    /// and its ruler grabber, so the edges read as draggable resize handles
+    /// and stay distinguishable when the playhead sits on top of them.
+    private func loopEdge(showsGrip: Bool) -> some View {
+        ZStack {
+            Capsule()
+                .fill(Theme.secondary)
+                .shadow(color: Theme.secondary.opacity(0.85), radius: 3)
+                .frame(width: 2)
+
+            if showsGrip {
+                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                    .fill(Theme.secondary)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                            .stroke(.white.opacity(0.35), lineWidth: 0.75)
+                    )
+                    .overlay(
+                        HStack(spacing: 2) {
+                            Capsule().frame(width: 1, height: 10)
+                            Capsule().frame(width: 1, height: 10)
+                        }
+                        .foregroundStyle(.black.opacity(0.35))
+                    )
+                    .frame(width: 9, height: 24)
+                    .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+            }
+        }
+        .frame(width: 9)
+    }
+}
+
+/// The rounded index badge: filled with the primary color when the row is
+/// active (white number), a neutral fill otherwise (secondary number).
+private struct TrackIndexBadgeView: View {
+    var index: Int
+    var isActive: Bool
+    var appearance: IndexBadgeAppearance
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let badge = appearance
+        return Text("\(index + 1)")
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(isActive ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+            .frame(width: 20, height: 20)
+            .background {
+                shape.fill(isActive ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(Theme.indexBadgeInactiveFill))
+            }
+            // A crisp beveled rim all around: bright along the top edge fading to a
+            // dark bottom edge, so the badge reads as a raised, chiseled button.
+            .overlay {
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(badge.bevelTopOpacity),
+                            .white.opacity(badge.bevelTopOpacity * 0.24),
+                            .black.opacity(badge.bevelBottomOpacity)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: badge.bevelWidth
+                )
+            }
+            .clipShape(shape)
+            .shadow(color: .black.opacity(badge.shadowOpacity), radius: CGFloat(badge.shadowRadius), y: CGFloat(badge.shadowY))
+            .accessibilityHidden(true)
+    }
+}
+
 /// One track's waveform lane: the peak-envelope Canvas (or the blind-listening
 /// placeholder), the major-tick guides, and the 0:00 marker.
 ///
@@ -3887,6 +4283,9 @@ private struct WaveformLaneView: View, Equatable {
     var waveform: Waveform?
     var isBlindListening: Bool
     var isActive: Bool
+    /// Whether the lane intersects the vertical viewport (± overscan) and may
+    /// kick renders; culled lanes keep showing their last image.
+    var isRenderable: Bool
     var trackStart: TimeInterval
     var trackDuration: TimeInterval
     var visibleStart: TimeInterval
@@ -3917,9 +4316,14 @@ private struct WaveformLaneView: View, Equatable {
                     .frame(width: width, height: 58)
                     .foregroundStyle(isActive ? Theme.primary.opacity(0.70) : Theme.waveformInactive.opacity(0.58))
             } else {
-                waveformShape
+                // The peak envelope is drawn SYNCHRONOUSLY every frame straight
+                // from the 5a pyramid (WP-7): the `Canvas` draw closure runs
+                // during the frame's render pass, so the correct waveform for the
+                // CURRENT window is drawn in the same frame the window changes —
+                // no async image pipeline to fall behind, no blank/stale-stretch
+                // gap during zoom or scroll.
+                waveformContent
                     .frame(width: width, height: 58)
-                    .foregroundStyle(isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7))
             }
 
             Rectangle()
@@ -3928,23 +4332,66 @@ private struct WaveformLaneView: View, Equatable {
                 .offset(x: zeroTickX)
         }
         .clipped()
+        // Lane visuals must NEVER hit-test: `.clipped()` clips drawing but NOT
+        // hit testing, and this subtree is 2× the viewport wide and slid left
+        // by up to a viewport width, so it extends invisibly over the
+        // track-info column and would swallow its clicks. All lane interaction
+        // lives on the loop overlay / scroll overlay.
+        .allowsHitTesting(false)
         .componentDebugLabel("Waveform Lane", enabled: showsDebugLabel, color: .purple)
     }
 
-    private var waveformShape: some View {
-        Canvas { [waveform, trackStart, trackDuration, visibleStart, visibleSpan] context, size in
-            guard let waveform, waveform.bucketCount > 0, !waveform.peaks.isEmpty else { return }
-            context.fill(
-                Self.waveformPath(
-                    for: waveform,
-                    in: size,
-                    trackStart: trackStart,
-                    trackDuration: trackDuration,
-                    visibleStart: visibleStart,
-                    visibleSpan: visibleSpan
-                ),
-                with: .foreground
-            )
+    /// Envelope tint. `isActive` is a color-only distinction, so an A/B switch
+    /// only re-tints — the pyramid path build is identical either way.
+    private var tint: Color {
+        isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7)
+    }
+
+    /// The real-waveform branch (never reached while blind). Drawn synchronously
+    /// so the current window is always correct; `WaveformLaneView` is equatable
+    /// and depends on the window (zoom / grid boundary) but not on
+    /// `transportPosition`, so the Canvas redraws exactly when the window or the
+    /// waveform changes — not on playback ticks or an intra-window scroll (that
+    /// stays a free `.offset` translate in `LaneView`).
+    @ViewBuilder
+    private var waveformContent: some View {
+        if let waveform {
+            if !waveform.peaks.isEmpty {
+                Canvas { context, size in
+                    // Vertical visibility culling (5b): a non-renderable lane
+                    // skips the fill entirely. With synchronous drawing, only
+                    // lanes inside the vertical viewport (± overscan) do any
+                    // path work, so cost scales with visible lanes, not track
+                    // count.
+                    guard isRenderable else { return }
+                    LaneWaveformRenderer.fillEnvelope(
+                        in: context,
+                        size: size,
+                        waveform: waveform,
+                        trackStart: trackStart,
+                        trackDuration: trackDuration,
+                        visibleStart: visibleStart,
+                        visibleSpan: visibleSpan,
+                        color: tint
+                    )
+                }
+            } else if !waveform.isComplete {
+                // Registered but not yet generated (peaks empty, not complete):
+                // a static dimmed midline hairline reads as "queued". No
+                // animation — continuous motion is CA-only per project rule.
+                Rectangle()
+                    .fill(tint)
+                    .opacity(0.35)
+                    .frame(height: 1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Completed with no peaks (unreadable file): draw nothing.
+                Color.clear
+            }
+        } else {
+            // No waveform registered yet: stay empty so the envelope appears
+            // with a clean cut, never a flash.
+            Color.clear
         }
     }
 
@@ -3988,10 +4435,60 @@ private struct WaveformLaneView: View, Equatable {
         return path
     }
 
+}
+
+/// Synchronous peak-envelope drawing for a lane. `waveformPath` builds the
+/// O(viewport px) filled path from the 5a pyramid; `fillEnvelope` fills it into
+/// a `Canvas`'s `GraphicsContext` during the frame's render pass (WP-7 — no
+/// async pipeline, no cached `NSImage`).
+enum LaneWaveformRenderer {
+    #if DEBUG
+    private static let renderLog = Logger(subsystem: "com.nigelwarren.Takes", category: "waveform-render")
+    #endif
+
+    /// Synchronously fill one lane's peak envelope for the CURRENT window into a
+    /// `Canvas` graphics context, tinted by `color`. Called inside the Canvas
+    /// draw closure, so the correct waveform is drawn in the same frame the
+    /// window changes; path build is O(viewport px) via the pyramid, cheap
+    /// enough to run every frame across the (culled) visible lanes.
+    static func fillEnvelope(
+        in context: GraphicsContext,
+        size: CGSize,
+        waveform: Waveform,
+        trackStart: TimeInterval,
+        trackDuration: TimeInterval,
+        visibleStart: TimeInterval,
+        visibleSpan: TimeInterval,
+        color: Color
+    ) {
+        #if DEBUG
+        // Perf probe for the WP-5 pyramid + WP-7 synchronous draw: one
+        // debug-level line per lane draw with the wall time of path build +
+        // fill. Watch in Console with subsystem com.nigelwarren.Takes, category
+        // waveform-render.
+        let drawStartedAt = CACurrentMediaTime()
+        defer {
+            let milliseconds = (CACurrentMediaTime() - drawStartedAt) * 1000
+            renderLog.debug("lane draw \(Int(size.width))pt in \(milliseconds, format: .fixed(precision: 2)) ms")
+        }
+        #endif
+
+        let path = waveformPath(
+            for: waveform,
+            in: size,
+            trackStart: trackStart,
+            trackDuration: trackDuration,
+            visibleStart: visibleStart,
+            visibleSpan: visibleSpan
+        )
+        if path.isEmpty { return }
+        context.fill(path, with: .color(color))
+    }
+
     /// Builds a filled, center-mirrored peak envelope across the visible window.
     ///
-    /// The Canvas is always the viewport width, never the (potentially enormous)
-    /// full track width, so the work stays O(viewport px) regardless of zoom and
+    /// The output is always the window width, never the (potentially enormous)
+    /// full track width, so the work stays O(window px) regardless of zoom and
     /// a partially generated waveform still fills in left-to-right.
     ///
     /// Buckets are pooled into fixed `[k·stride, (k+1)·stride)` groups anchored
@@ -4003,7 +4500,7 @@ private struct WaveformLaneView: View, Equatable {
     /// envelope would shimmer. File-anchored groups have fixed peaks, so a
     /// scroll only slides their x — the shape translates cleanly. `stride` is
     /// chosen so a group is ≈ 1 pixel wide (≥ 1 bucket), preserving transients.
-    private static func waveformPath(
+    static func waveformPath(
         for waveform: Waveform,
         in size: CGSize,
         trackStart: TimeInterval,
@@ -4012,8 +4509,7 @@ private struct WaveformLaneView: View, Equatable {
         visibleSpan: TimeInterval
     ) -> Path {
         let bucketCount = waveform.bucketCount
-        let peaks = waveform.peaks
-        guard bucketCount > 0, !peaks.isEmpty, size.width > 0, size.height > 0,
+        guard bucketCount > 0, !waveform.peaks.isEmpty, size.width > 0, size.height > 0,
               trackDuration > 0, visibleSpan > 0 else {
             return Path()
         }
@@ -4022,7 +4518,6 @@ private struct WaveformLaneView: View, Equatable {
         let midline = size.height / 2
         // A visible floor so silent passages still read as a thin line.
         let minHalfHeight: CGFloat = 0.5
-        let available = peaks.count
 
         // Portion of the visible window the track actually covers.
         let trackEnd = trackStart + trackDuration
@@ -4030,21 +4525,45 @@ private struct WaveformLaneView: View, Equatable {
         let overlapEnd = min(visibleStart + visibleSpan, trackEnd)
         guard overlapEnd > overlapStart else { return Path() }
 
-        // x for a (fractional) bucket index, mapped through the visible window.
-        func x(forBucket bucket: Double) -> CGFloat {
+        // Pick the pyramid level whose buckets-per-pixel lands in [1, 2): each
+        // level halves the previous, so walk down until fewer than two of its
+        // buckets cover one pixel (or the pyramid runs out). This keeps the
+        // build O(viewport px) at ANY zoom — a zoomed-out window pools a few
+        // hundred coarse buckets instead of walking every base bucket.
+        let bucketsAcrossViewport = visibleSpan / trackDuration * Double(bucketCount)
+        var bucketsPerPixel = bucketsAcrossViewport / Double(width)
+        var levelIndex = 0
+        while bucketsPerPixel >= 2, levelIndex < waveform.reducedLevels.count {
+            levelIndex += 1
+            bucketsPerPixel /= 2
+        }
+        // Base buckets per bucket of the chosen level.
+        let levelScale = 1 << levelIndex
+        let peaks = levelIndex == 0 ? waveform.peaks : waveform.reducedLevels[levelIndex - 1]
+        guard !peaks.isEmpty else { return Path() }
+        let available = peaks.count
+        // ceil(ceil(n/2)/2)… collapses to ceil(n/2^k), so the full-file bucket
+        // count at this level is a single ceil-division.
+        let levelBucketCount = (bucketCount + levelScale - 1) / levelScale
+
+        // x for a (fractional) BASE bucket index, mapped through the window.
+        func x(forBaseBucket bucket: Double) -> CGFloat {
             CGFloat((trackStart + bucket / Double(bucketCount) * trackDuration - visibleStart) / visibleSpan) * width
         }
 
-        // Buckets per drawn vertex ≈ buckets per on-screen pixel, ≥ 1.
-        let bucketsAcrossViewport = visibleSpan / trackDuration * Double(bucketCount)
-        let bucketStride = max(1, Int((bucketsAcrossViewport / Double(width)).rounded()))
+        // Level buckets per drawn vertex ≈ level buckets per pixel — 1 or 2 by
+        // construction while pyramid levels remain.
+        let bucketStride = max(1, Int(bucketsPerPixel.rounded()))
 
         // File-anchored group range overlapping the visible region, padded one
         // group each side so the envelope crosses the clip edges smoothly.
-        let firstBucket = Int((overlapStart - trackStart) / trackDuration * Double(bucketCount))
-        let lastBucket = Int((overlapEnd - trackStart) / trackDuration * Double(bucketCount))
-        let firstGroup = firstBucket / bucketStride - 1
-        let lastGroup = lastBucket / bucketStride + 1
+        // Level buckets pool fixed base-bucket ranges, so groups of them are
+        // just as file-anchored as base buckets — the anti-shimmer argument
+        // above applies unchanged at any level.
+        let firstBaseBucket = Int((overlapStart - trackStart) / trackDuration * Double(bucketCount))
+        let lastBaseBucket = Int((overlapEnd - trackStart) / trackDuration * Double(bucketCount))
+        let firstGroup = firstBaseBucket / (levelScale * bucketStride) - 1
+        let lastGroup = lastBaseBucket / (levelScale * bucketStride) + 1
 
         // (x, half-height) vertices forming the top edge of the envelope.
         var vertices: [(x: CGFloat, half: CGFloat)] = []
@@ -4053,7 +4572,7 @@ private struct WaveformLaneView: View, Equatable {
             guard group >= 0 else { continue }
             let bucketLow = group * bucketStride
             guard bucketLow < available else { break }
-            let bucketHigh = min(bucketLow + bucketStride, bucketCount)
+            let bucketHigh = min(bucketLow + bucketStride, levelBucketCount)
             let upper = min(bucketHigh, available)
             guard upper > bucketLow else { break }
 
@@ -4061,8 +4580,11 @@ private struct WaveformLaneView: View, Equatable {
             for index in bucketLow..<upper where peaks[index] > peak {
                 peak = peaks[index]
             }
-            let center = Double(bucketLow + bucketHigh) / 2
-            vertices.append((x(forBucket: center), max(CGFloat(peak) * midline, minHalfHeight)))
+            // Vertex at the group's center in base-bucket units; the last
+            // level bucket may cover fewer base buckets, so clamp to the file.
+            let baseLow = Double(bucketLow * levelScale)
+            let baseHigh = min(Double(bucketHigh * levelScale), Double(bucketCount))
+            vertices.append((x(forBaseBucket: (baseLow + baseHigh) / 2), max(CGFloat(peak) * midline, minHalfHeight)))
         }
 
         guard !vertices.isEmpty else { return Path() }
