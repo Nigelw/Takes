@@ -959,7 +959,7 @@ struct ContentView: View {
     @State private var reorderRevealingID: SessionTrack.ID?
     @State private var windowIsDropTargeted = false
     @State private var emptyStateIsHovered = false
-    @State private var hoveredTrackID: SessionTrack.ID?
+    @State private var hoverStore = TrackHoverStore()
     @State private var focusedOffsetTrackID: SessionTrack.ID?
     @FocusState private var streamingURLFieldIsFocused: Bool
     @State private var didConfigureMainWindow = false
@@ -2019,10 +2019,6 @@ struct ContentView: View {
     ) -> TrackRowView {
         let isActive = controller.session.activeTrackID == sessionTrack.id
         let isBlind = controller.session.isBlindListeningModeEnabled
-        // Suppress the hover trash button while a reorder drag is in flight: the
-        // drag drives the pointer across rows, so their hover states would flash
-        // the button on each one in passing.
-        let showsTrash = hoveredTrackID == sessionTrack.id && reorderDraggingID == nil
         return TrackRowView(
             index: index,
             sessionTrack: sessionTrack,
@@ -2030,7 +2026,6 @@ struct ContentView: View {
             // leak identity through redraw timing (an invariant).
             waveform: isBlind ? nil : waveformStore.waveform(for: sessionTrack.id),
             isActive: isActive,
-            showsTrash: showsTrash,
             isBlind: isBlind,
             isRenderable: renderableRows.contains(index),
             isOffsetFocused: focusedOffsetTrackID == sessionTrack.id,
@@ -2042,6 +2037,7 @@ struct ContentView: View {
             showsDebugLabel: settings.showsComponentDebugLabels,
             controller: controller,
             viewportStore: laneViewportStore,
+            hoverStore: hoverStore,
             onSelect: { controller.selectActiveTrack(sessionTrack.id) },
             onRemove: { controller.removeTrack(sessionTrack.id) },
             onSetOffsetMs: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) },
@@ -2053,9 +2049,19 @@ struct ContentView: View {
                 }
             },
             onHover: { inside in
-                hoveredTrackID = inside ? sessionTrack.id : (hoveredTrackID == sessionTrack.id ? nil : hoveredTrackID)
+                // Suppress the hover trash button while a reorder drag is in
+                // flight: the drag drives the pointer across rows, so their
+                // hover states would otherwise flash the button on each one.
+                guard reorderDraggingID == nil else { return }
+                hoverStore.hoveredID = inside
+                    ? sessionTrack.id
+                    : (hoverStore.hoveredID == sessionTrack.id ? nil : hoverStore.hoveredID)
             },
-            onDragBegan: { reorderDraggingID = sessionTrack.id },
+            onDragBegan: {
+                reorderDraggingID = sessionTrack.id
+                // Clear any hover so no row shows its trash button mid-drag.
+                hoverStore.hoveredID = nil
+            },
             onDragEnded: {
                 // A committed reorder has already moved the row into the reveal
                 // phase via the drop delegate; a cancelled or copied-out drag
@@ -2594,6 +2600,11 @@ struct ContentView: View {
             let locationInWindow = event.locationInWindow
 
             if event.type == .mouseMoved {
+                // No timeline cursor feedback is shown while the window isn't
+                // key (interaction requires activating it first), so skip all
+                // per-move cursor work rather than pay it for an inactive window.
+                guard window.isKeyWindow else { return }
+
                 // Timeline cursor feedback (playhead grabber, loop resize
                 // handles) is driven from here, in window coordinates —
                 // SwiftUI hover tracking is unreliable underneath the
@@ -3589,7 +3600,6 @@ private struct TrackRowView: View, Equatable {
     /// common scroll case is O(1).
     var waveform: Waveform?
     var isActive: Bool
-    var showsTrash: Bool
     var isBlind: Bool
     /// Whether this row's lane may rasterize (it intersects the vertical
     /// viewport ± overscan). Culled lanes keep showing their last image.
@@ -3610,6 +3620,9 @@ private struct TrackRowView: View, Equatable {
     /// leaf), so they can't be equatable inputs here — see `LaneViewport`.
     var controller: PlaybackController
     var viewportStore: LaneViewportStore
+    /// Observed only by the trash-button leaf, never by this body, so a hover
+    /// change re-evaluates that one leaf and not the equatable row.
+    var hoverStore: TrackHoverStore
     var onSelect: () -> Void
     var onRemove: () -> Void
     var onSetOffsetMs: (Int) -> Void
@@ -3624,7 +3637,6 @@ private struct TrackRowView: View, Equatable {
             && lhs.sessionTrack == rhs.sessionTrack
             && lhs.waveform == rhs.waveform
             && lhs.isActive == rhs.isActive
-            && lhs.showsTrash == rhs.showsTrash
             && lhs.isBlind == rhs.isBlind
             && lhs.isRenderable == rhs.isRenderable
             && lhs.isOffsetFocused == rhs.isOffsetFocused
@@ -3729,16 +3741,12 @@ private struct TrackRowView: View, Equatable {
 
                         Spacer(minLength: 0)
 
-                        Button(action: onRemove) {
-                            Image(systemName: "trash")
-                                .accessibilityLabel("Remove Track \(index + 1)")
-                                .frame(width: 16, height: 16)
-                        }
-                        .buttonStyle(.borderless)
-                        .frame(width: 16, height: 16)
-                        // Only surfaces on hover; kept mounted (opacity, not removed) so it
-                        // stays reachable by accessibility/keyboard.
-                        .opacity(showsTrash ? 1 : 0)
+                        TrackRowTrashButton(
+                            store: hoverStore,
+                            trackID: sessionTrack.id,
+                            index: index,
+                            onRemove: onRemove
+                        )
                     }
 
                     Text(track.metadataSummary)
@@ -3857,6 +3865,39 @@ private struct TrackRowView: View, Equatable {
 @Observable
 final class LaneViewportStore {
     var viewport: ContentView.LaneViewport = .empty
+}
+
+/// Which track row the pointer is over, isolated so a hover change updates only
+/// the small trash-button leaf that reads it — not the equatable `TrackRowView`.
+/// Writing `hoveredID` here (instead of a `ContentView` `@State`) is what keeps
+/// a hover from re-running the track-list container and re-laying-out the rows.
+@MainActor
+@Observable
+final class TrackHoverStore {
+    var hoveredID: SessionTrack.ID?
+}
+
+/// The hover-revealed trash button, split into its own leaf so it — and nothing
+/// else in the row — re-evaluates when the hovered row changes. Reads the shared
+/// `TrackHoverStore`; the row body never does.
+private struct TrackRowTrashButton: View {
+    var store: TrackHoverStore
+    var trackID: SessionTrack.ID
+    var index: Int
+    var onRemove: () -> Void
+
+    var body: some View {
+        Button(action: onRemove) {
+            Image(systemName: "trash")
+                .accessibilityLabel("Remove Track \(index + 1)")
+                .frame(width: 16, height: 16)
+        }
+        .buttonStyle(.borderless)
+        .frame(width: 16, height: 16)
+        // Only surfaces on hover; kept mounted (opacity, not removed) so it
+        // stays reachable by accessibility/keyboard.
+        .opacity(store.hoveredID == trackID ? 1 : 0)
+    }
 }
 
 /// One lane: the pre-rendered waveform window, positioned for the live scroll
