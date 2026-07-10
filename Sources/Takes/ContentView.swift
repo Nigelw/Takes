@@ -2942,6 +2942,8 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
     let contentEnd: TimeInterval
     /// Native scroll offset mapped back to the visible timeline start.
     let onScroll: (TimeInterval) -> Void
+    /// Whether the native timeline scroll view is still moving.
+    let onScrollActivityChanged: (Bool) -> Void
     /// Pinch: magnification delta, plus the cursor's `0...1` position.
     let onMagnify: (Double, Double) -> Void
 
@@ -2952,6 +2954,7 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
     func makeNSView(context: Context) -> TimelineScrollNSView {
         let view = TimelineScrollNSView()
         view.onMagnify = onMagnify
+        view.onScrollActivityChanged = onScrollActivityChanged
         context.coordinator.attach(to: view)
         configure(view)
         return view
@@ -2959,6 +2962,7 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
 
     func updateNSView(_ nsView: TimelineScrollNSView, context: Context) {
         nsView.onMagnify = onMagnify
+        nsView.onScrollActivityChanged = onScrollActivityChanged
         context.coordinator.onScroll = onScroll
         configure(nsView)
     }
@@ -3042,6 +3046,7 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
                 visibleSpan: scrollView.timelineVisibleSpan,
                 pointsPerSecond: scrollView.timelinePointsPerSecond
             )
+            scrollView.noteNativeHorizontalScrollDidMove()
             scrollView.isReportingNativeScroll = true
             onScroll(visibleStart)
             DispatchQueue.main.async { [weak scrollView] in
@@ -3053,6 +3058,7 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
 
 private final class TimelineScrollNSView: NSScrollView {
     var onMagnify: ((Double, Double) -> Void)?
+    var onScrollActivityChanged: ((Bool) -> Void)?
     var timelineContentStart: TimeInterval = 0
     var timelineContentEnd: TimeInterval = 0
     var timelineVisibleSpan: TimeInterval = 0
@@ -3060,11 +3066,17 @@ private final class TimelineScrollNSView: NSScrollView {
     var isReportingNativeScroll = false
     var isApplyingProgrammaticSync = false
     private var lockedScrollAxis: ScrollAxis?
+    private var nativeScrollSettleWorkItem: DispatchWorkItem?
+    private var isNativeHorizontalScrollActive = false
 
     private enum ScrollAxis {
         case horizontal
         case vertical
     }
+
+    /// Short debounce after the last native movement so inertial scrolling can
+    /// settle before playback auto-follow resumes.
+    private static let nativeScrollSettleDelay: TimeInterval = 0.12
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -3094,6 +3106,15 @@ private final class TimelineScrollNSView: NSScrollView {
         DispatchQueue.main.async { [weak self] in
             self?.isApplyingProgrammaticSync = false
         }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            nativeScrollSettleWorkItem?.cancel()
+            nativeScrollSettleWorkItem = nil
+            setNativeHorizontalScrollActive(false)
+        }
+        super.viewWillMove(toWindow: newWindow)
     }
 
     // Only claim the events we handle. `NSApp.currentEvent` lets `hitTest`
@@ -3184,6 +3205,26 @@ private final class TimelineScrollNSView: NSScrollView {
             || event.phase.contains(.cancelled)
             || event.momentumPhase.contains(.ended)
             || event.momentumPhase.contains(.cancelled)
+    }
+
+    func noteNativeHorizontalScrollDidMove() {
+        nativeScrollSettleWorkItem?.cancel()
+        setNativeHorizontalScrollActive(true)
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.setNativeHorizontalScrollActive(false)
+        }
+        nativeScrollSettleWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.nativeScrollSettleDelay,
+            execute: workItem
+        )
+    }
+
+    private func setNativeHorizontalScrollActive(_ isActive: Bool) {
+        guard isNativeHorizontalScrollActive != isActive else { return }
+        isNativeHorizontalScrollActive = isActive
+        onScrollActivityChanged?(isActive)
     }
 
     /// Multiplier applied to the raw trackpad pinch delta. Higher = zoom
@@ -4091,6 +4132,7 @@ private struct TimelineScrollOverlayLeaf: View {
             contentStart: controller.session.timelineStart,
             contentEnd: controller.session.timelineEnd,
             onScroll: { controller.scrollTimeline(toVisibleStart: $0) },
+            onScrollActivityChanged: { controller.setTimelineScrollActive($0) },
             onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
         )
     }

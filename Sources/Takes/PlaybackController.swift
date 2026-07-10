@@ -123,6 +123,7 @@ final class PlaybackController {
     @ObservationIgnored private var engineConfigurationObserver: NotificationObserverToken?
     @ObservationIgnored private var scrollAnimationTimer: Timer?
     @ObservationIgnored private var scrollAnimation: ScrollAnimation?
+    @ObservationIgnored private var isTimelineScrollActive = false
     @ObservationIgnored private var streamingCacheFilesByTrackID: [SessionTrack.ID: URL] = [:]
 
     /// A short tween of `visibleStart`, used to animate the catch-up scroll when
@@ -1224,6 +1225,21 @@ final class PlaybackController {
         setVisibleWindow(start: newVisibleStart)
     }
 
+    /// Suppress playback-driven viewport follow while the native timeline
+    /// scroll view is still moving, including inertial momentum.
+    func setTimelineScrollActive(_ isActive: Bool) {
+        guard isTimelineScrollActive != isActive else { return }
+        isTimelineScrollActive = isActive
+
+        if isActive {
+            stopScrollAnimation()
+            return
+        }
+
+        guard session.isPlaying else { return }
+        followPlayheadIfZoomed(transport: currentTransportPosition())
+    }
+
     private func applyRezoom(span: TimeInterval, cursorFraction: Double?) {
         guard session.timelineEnd > session.timelineStart else { return }
         let clampedVisibleSpan = max(visibleSpan, 0.001)
@@ -1255,10 +1271,10 @@ final class PlaybackController {
 
     /// While playing and zoomed in, page the window forward when the playhead
     /// runs off the edge (D6). Between pages `visibleStart` is left untouched so
-    /// the timeline holds still. Suppressed while a scroll is animating (the
-    /// tween is already moving the window).
+    /// the timeline holds still. Suppressed while the viewport is already
+    /// moving, whether from a programmatic tween or native user/inertial scroll.
     private func followPlayheadIfZoomed(transport: TimeInterval) {
-        guard scrollAnimation == nil else { return }
+        guard scrollAnimation == nil, !isTimelineScrollActive else { return }
 
         let contentSpan = session.timelineEnd - session.timelineStart
         guard contentSpan > 0,
@@ -1283,6 +1299,7 @@ final class PlaybackController {
     private func animateScrollToPlayheadIfNeeded() {
         let contentSpan = session.timelineEnd - session.timelineStart
         guard contentSpan > 0,
+              !isTimelineScrollActive,
               !TimelineViewport.isFit(visibleSpan: visibleSpan, contentSpan: contentSpan),
               let newStart = TimelineViewport.pagedStart(
                   transport: currentTransportPosition(),
