@@ -1574,6 +1574,7 @@ struct ContentView: View {
             }
         }
         .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: isOn, diameter: 40, glyphSize: 15))
+        .disabled(!controller.session.canToggleBlindListeningMode)
         .help("Blind Listening Mode")
         .accessibilityLabel("Blind Listening Mode")
         .accessibilityValue(isOn ? "On" : "Off")

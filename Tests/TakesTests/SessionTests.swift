@@ -10,6 +10,7 @@ struct SessionTests {
         var session = ComparisonSession()
         #expect(!session.isPlayable)
         #expect(!session.canSwitchPlayback)
+        #expect(!session.canToggleBlindListeningMode)
         #expect(session.activeTrackID == nil)
         #expect(session.activeTrack == nil)
 
@@ -20,6 +21,7 @@ struct SessionTests {
 
         #expect(session.isPlayable)
         #expect(!session.canSwitchPlayback)
+        #expect(session.canToggleBlindListeningMode)
         #expect(session.activeTrackID == first.id)
         #expect(session.activeTrack == first)
 
