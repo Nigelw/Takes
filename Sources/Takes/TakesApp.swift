@@ -839,7 +839,7 @@ private struct FileCommands: Commands {
 
             Divider()
 
-            Button("Show in Finder") {
+            Button("Reveal in Finder") {
                 openFileCommandState?.showActiveTrackInFinder()
             }
             .keyboardShortcut("r", modifiers: [.shift, .command])
