@@ -880,6 +880,7 @@ private struct ViewCommands: Commands {
                 )
             )
             .keyboardShortcut("b", modifiers: [.command])
+            .disabled(!controller.session.canToggleBlindListeningMode)
 
             Divider()
         }
