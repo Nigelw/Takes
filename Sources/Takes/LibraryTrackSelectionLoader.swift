@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import UniformTypeIdentifiers
 
 protocol LibraryTrackSelecting {
     func selectedTracks() throws -> LibraryTrackSelection
@@ -16,22 +15,17 @@ struct LibraryTrackSelection: Equatable {
 }
 
 enum FinderSelectionResolver {
-    static func audioFileURLs(from urls: [URL]) throws -> [URL] {
+    static func audioFileURLs(from urls: [URL], fileManager: FileManager = .default) throws -> [URL] {
         guard !urls.isEmpty else {
             throw PlaybackError.librarySelectionFailed("Finder has no selected files.")
         }
 
-        let audioURLs = urls.filter(isAudioFile(_:))
+        let audioURLs = AppOpenedURLResolver.audioFileURLs(from: urls, fileManager: fileManager)
         guard !audioURLs.isEmpty else {
             throw PlaybackError.librarySelectionFailed("No audio files are selected in the Finder.")
         }
 
         return audioURLs
-    }
-
-    private static func isAudioFile(_ url: URL) -> Bool {
-        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
-        return type.conforms(to: .audio)
     }
 }
 
