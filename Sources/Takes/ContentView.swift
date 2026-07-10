@@ -4823,9 +4823,19 @@ final class PlayheadLayerView: NSView {
 /// Positioning is applied by the caller; `PlayheadLayerView` rasterizes it
 /// into a layer so it never re-renders during playback.
 private struct PlayheadGrabberArt: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Light-mode-only lift for the playhead handle. Tweak this constant here;
+    /// it does not affect the shared theme tokens used elsewhere.
+    private static let lightModeHandleFill = Color(red: 0.90, green: 0.59, blue: 0.14)
+
+    private var handleFill: Color {
+        colorScheme == .light ? Self.lightModeHandleFill : Theme.secondary
+    }
+
     var body: some View {
         PlayheadHandle(tipWidth: 2)
-            .fill(Theme.secondary)
+            .fill(handleFill)
             // Gloss cap over the upper body plus a shadowed taper, the same
             // top-lit treatment as the transport buttons' faces.
             .overlay {
