@@ -534,9 +534,11 @@ struct TakesApp: App {
     @StateObject private var settings = AppSettings()
     @StateObject private var updater = SoftwareUpdater()
     @StateObject private var ytdlpUpdates = YTDLPUpdateState()
+    @StateObject private var experimentalHaptics = ExperimentalHapticsController()
     private let launchOptions = TakesLaunchOptions()
     private let appearanceTunerPanel = AppearanceTunerPanelController()
     private let analysisWindowController = AnalysisWindowController()
+    private let experimentalHapticsPanel = ExperimentalHapticsPanelController()
 
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
@@ -547,6 +549,7 @@ struct TakesApp: App {
             )
                 .environmentObject(settings)
                 .environmentObject(updater)
+                .environmentObject(experimentalHaptics)
                 .onAppear {
                     controller.settings = settings
                     remotePlaybackCommands.connect(to: controller)
@@ -674,6 +677,7 @@ struct TakesApp: App {
                     Toggle("Show Component Names", isOn: $settings.showsComponentDebugLabels)
                     ResetMainWindowSizeButton()
                     OpenAppearanceTunerButton(panel: appearanceTunerPanel, settings: settings)
+                    OpenExperimentalHapticsButton(panel: experimentalHapticsPanel, controller: experimentalHaptics)
                     OpenAnalysisWindowButton(controller: analysisWindowController)
                 }
             }
@@ -699,6 +703,17 @@ private struct OpenAppearanceTunerButton: View {
     var body: some View {
         Button("Appearance Tuner") {
             panel.show(settings: settings)
+        }
+    }
+}
+
+private struct OpenExperimentalHapticsButton: View {
+    let panel: ExperimentalHapticsPanelController
+    let controller: ExperimentalHapticsController
+
+    var body: some View {
+        Button("Experimental Haptics") {
+            panel.show(controller: controller)
         }
     }
 }
