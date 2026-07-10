@@ -764,6 +764,19 @@ final class PlaybackController {
         applyAudibility()
     }
 
+    func nudgeActiveTrackOffset(direction: Int, largeStep: Bool) {
+        guard let activeTrack = session.activeTrack else { return }
+
+        let offsetConfiguration = settings?.offsetConfiguration ?? NumericControlConfiguration.offset
+        let currentOffsetMs = Int((activeTrack.loadedTrack.offsetSeconds * 1000).rounded())
+        let nudgedOffsetMs = offsetConfiguration.steppedValue(
+            from: currentOffsetMs,
+            direction: direction,
+            largeStep: largeStep
+        )
+        setOffset(activeTrack.id, seconds: Double(nudgedOffsetMs) / 1000)
+    }
+
     func setOffset(_ trackID: SessionTrack.ID, seconds: TimeInterval) {
         setOffsets([trackID: seconds])
     }
