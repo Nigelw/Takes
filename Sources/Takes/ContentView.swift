@@ -49,6 +49,15 @@ struct SwitchTrackModifierPolicy {
     }
 }
 
+enum WaveformTrackSelectionPolicy {
+    static func trackIndex(atY y: CGFloat, rowStep: CGFloat, trackCount: Int) -> Int? {
+        guard trackCount > 0, rowStep > 0, y >= 0 else { return nil }
+        let index = Int((y / rowStep).rounded(.down))
+        guard index < trackCount else { return nil }
+        return index
+    }
+}
+
 struct NumericControlEditState {
     private(set) var committedValue: Int
     private(set) var pendingText: String?
@@ -2486,12 +2495,26 @@ struct ContentView: View {
                 }
             } else {
                 // A plain click: seek, deselecting first if it lands outside the loop.
+                if let trackID = waveformTrackID(atY: value.location.y) {
+                    controller.selectActiveTrack(trackID)
+                }
                 if let loop = controller.session.loopRegion, t < loop.start || t > loop.end {
                     controller.deselectLoop()
                 }
                 controller.seek(to: t)
             }
         }
+    }
+
+    private func waveformTrackID(atY y: CGFloat) -> SessionTrack.ID? {
+        guard let index = WaveformTrackSelectionPolicy.trackIndex(
+            atY: y,
+            rowStep: reorderRowStep,
+            trackCount: controller.session.tracks.count
+        ) else {
+            return nil
+        }
+        return controller.session.tracks[index].id
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {

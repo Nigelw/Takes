@@ -1691,6 +1691,22 @@ struct SessionTests {
     }
 
     @Test
+    func waveformTrackSelectionMapsClicksToTrackRows() {
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 0, rowStep: 97, trackCount: 3) == 0)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 96, rowStep: 97, trackCount: 3) == 0)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 97, rowStep: 97, trackCount: 3) == 1)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 289, rowStep: 97, trackCount: 3) == 2)
+    }
+
+    @Test
+    func waveformTrackSelectionRejectsOutOfBoundsClicks() {
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: -1, rowStep: 97, trackCount: 3) == nil)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 291, rowStep: 97, trackCount: 3) == nil)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 0, rowStep: 0, trackCount: 3) == nil)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 0, rowStep: 97, trackCount: 0) == nil)
+    }
+
+    @Test
     func numericControlTreatsEscapeAsCancelEditingCommand() {
         #expect(NumericControlConfiguration.isCancelEditingCommand(#selector(NSResponder.insertNewline(_:))) == false)
         #expect(NumericControlConfiguration.isCancelEditingCommand(#selector(NSResponder.cancelOperation(_:))) == true)
