@@ -1214,7 +1214,6 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
                 guard notification.object as? NSWindow === mainWindow else { return }
                 mainWindowIsKey = false
-                experimentalHaptics.resetHoverStates()
             }
             .onChange(of: controller.session.tracks) { _, tracks in
                 waveformStore.sync(tracks: tracks)
@@ -1361,7 +1360,6 @@ struct ContentView: View {
     private var playButton: some View {
         Button {
             controller.session.isPlaying ? controller.pause() : controller.play()
-            experimentalHaptics.perform(.transportBarButtonPresses)
         } label: {
             Image(systemName: controller.session.isPlaying ? "pause.fill" : "play.fill")
         }
@@ -1384,7 +1382,6 @@ struct ContentView: View {
             } else {
                 controller.selectNextTrack()
             }
-            experimentalHaptics.perform(.transportBarButtonPresses)
         } label: {
             Image(systemName: "arrow.trianglehead.swap")
         }
@@ -1400,9 +1397,9 @@ struct ContentView: View {
         let enabled = controller.canZoomTimeline
         return HStack(spacing: 8) {
             Button {
-                experimentalHaptics.syncZoomProgress(for: .zoomControlThresholds, progress: zoomProgress)
+                experimentalHaptics.syncZoomProgress(zoomProgress)
                 controller.stepZoom(zoomingIn: false)
-                experimentalHaptics.updateZoomProgress(for: .zoomControlThresholds, progress: zoomProgress)
+                experimentalHaptics.updateZoomProgress(zoomProgress)
             } label: {
                 Image(systemName: "minus.magnifyingglass")
             }
@@ -1420,11 +1417,11 @@ struct ContentView: View {
                         )
                     },
                     set: { value in
-                        experimentalHaptics.syncZoomProgress(for: .zoomControlThresholds, progress: zoomProgress)
+                        experimentalHaptics.syncZoomProgress(zoomProgress)
                         controller.zoomVisibleSpan(
                             to: TimelineViewport.visibleSpan(sliderValue: value, contentSpan: contentSpan)
                         )
-                        experimentalHaptics.updateZoomProgress(for: .zoomControlThresholds, progress: zoomProgress)
+                        experimentalHaptics.updateZoomProgress(zoomProgress)
                     }
                 ),
                 in: 0...1
@@ -1435,9 +1432,9 @@ struct ContentView: View {
             .accessibilityLabel("Timeline Zoom")
 
             Button {
-                experimentalHaptics.syncZoomProgress(for: .zoomControlThresholds, progress: zoomProgress)
+                experimentalHaptics.syncZoomProgress(zoomProgress)
                 controller.stepZoom(zoomingIn: true)
-                experimentalHaptics.updateZoomProgress(for: .zoomControlThresholds, progress: zoomProgress)
+                experimentalHaptics.updateZoomProgress(zoomProgress)
             } label: {
                 Image(systemName: "plus.magnifyingglass")
             }
@@ -1453,7 +1450,6 @@ struct ContentView: View {
         let mode = controller.session.repeatMode
         return Button {
             controller.cycleRepeatMode()
-            experimentalHaptics.perform(.transportBarButtonPresses)
         } label: {
             Image(systemName: Self.repeatSymbol(for: mode))
         }
@@ -1576,7 +1572,6 @@ struct ContentView: View {
         let isOn = controller.session.isBlindListeningModeEnabled
         return Button {
             controller.toggleBlindListeningMode()
-            experimentalHaptics.perform(.transportBarButtonPresses)
         } label: {
             if isOn {
                 Image("BlindListening")
@@ -1805,9 +1800,7 @@ struct ContentView: View {
                     TimelineScrollOverlayLeaf(
                         controller: controller,
                         onScroll: handleTimelineScroll,
-                        onScrollGestureEnded: {
-                            experimentalHaptics.resetTimelineEdge(for: .scrollTimelineEdges)
-                        },
+                        onScrollGestureEnded: {},
                         onMagnify: handleTimelineMagnify
                     )
                         .frame(width: waveformWidth, height: proxy.size.height)
@@ -2007,14 +2000,9 @@ struct ContentView: View {
                 }
                 let clampedX = min(max(value.location.x, 0), waveformWidth)
                 playheadDragX = clampedX
-                experimentalHaptics.updateTimelineEdge(
-                    for: .playheadDragTimelineEdges,
-                    edge: timelineEdge(forX: clampedX, width: waveformWidth)
-                )
             }
             .onEnded { value in
                 playheadDragX = nil
-                experimentalHaptics.resetTimelineEdge(for: .playheadDragTimelineEdges)
                 let x = min(max(value.location.x, 0), waveformWidth)
                 let time = globalTime(atX: x, width: waveformWidth)
                 if let loop = controller.session.loopRegion, time < loop.start || time > loop.end {
@@ -2740,8 +2728,6 @@ struct ContentView: View {
     }
 
     private func setTimelineCursor(_ shape: TimelineCursorShape) {
-        experimentalHaptics.updateHover(for: .playheadHover, isActive: shape == .playheadGrab)
-        experimentalHaptics.updateHover(for: .loopSelectionControlHover, isActive: shape == .loopResize)
         switch shape {
         case .standard:
             // Push arrow only on the transition out of a timeline cursor so
@@ -2775,47 +2761,12 @@ struct ContentView: View {
         )
     }
 
-    private func timelineEdge(forX x: CGFloat, width: CGFloat) -> ExperimentalHapticEdge? {
-        guard width > 0 else { return nil }
-        let tolerance: CGFloat = 0.5
-        if x <= tolerance {
-            return .leading
-        }
-        if x >= width - tolerance {
-            return .trailing
-        }
-        return nil
-    }
-
-    private func timelineScrollEdge(for visibleStart: TimeInterval) -> ExperimentalHapticEdge? {
-        let contentSpan = controller.session.timelineEnd - controller.session.timelineStart
-        guard contentSpan - controller.visibleSpan > 0.01 else { return nil }
-
-        let minimumStart = controller.session.timelineStart
-        let maximumStart = controller.session.timelineEnd - controller.visibleSpan
-        let tolerance = max(controller.visibleSpan * 0.001, 0.01)
-
-        if abs(visibleStart - minimumStart) <= tolerance {
-            return .leading
-        }
-        if abs(visibleStart - maximumStart) <= tolerance {
-            return .trailing
-        }
-        return nil
-    }
-
     private func handleTimelineScroll(_ visibleStart: TimeInterval) {
         controller.scrollTimeline(toVisibleStart: visibleStart)
-        experimentalHaptics.updateTimelineEdge(
-            for: .scrollTimelineEdges,
-            edge: timelineScrollEdge(for: controller.visibleStart)
-        )
     }
 
     private func handleTimelineMagnify(_ magnification: Double, atFraction fraction: Double) {
-        experimentalHaptics.syncZoomProgress(for: .pinchZoomThresholds, progress: zoomProgress)
         controller.magnifyTimeline(by: magnification, atFraction: fraction)
-        experimentalHaptics.updateZoomProgress(for: .pinchZoomThresholds, progress: zoomProgress)
     }
 
     private func configureAppOpenRouter() {

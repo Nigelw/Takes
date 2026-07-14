@@ -22,28 +22,7 @@ struct ExperimentalHapticsTests {
     }
 
     @Test
-    func edgeEntryOnlyFiresWhenEnteringANewEdge() {
-        #expect(!ExperimentalHapticTriggerGate.shouldFireOnEntry(previous: nil as ExperimentalHapticEdge?, current: nil))
-        #expect(ExperimentalHapticTriggerGate.shouldFireOnEntry(previous: nil as ExperimentalHapticEdge?, current: .leading))
-        #expect(!ExperimentalHapticTriggerGate.shouldFireOnEntry(
-            previous: ExperimentalHapticEdge.leading,
-            current: ExperimentalHapticEdge.leading
-        ))
-        #expect(ExperimentalHapticTriggerGate.shouldFireOnEntry(
-            previous: ExperimentalHapticEdge.leading,
-            current: ExperimentalHapticEdge.trailing
-        ))
-        #expect(!ExperimentalHapticTriggerGate.shouldFireOnEntry(
-            previous: ExperimentalHapticEdge.trailing,
-            current: nil as ExperimentalHapticEdge?
-        ))
-    }
-
-    @Test
-    func hoverOnlyFiresOnInactiveToActiveTransition() {
-        #expect(!ExperimentalHapticTriggerGate.shouldFireHover(previous: false, current: false))
-        #expect(ExperimentalHapticTriggerGate.shouldFireHover(previous: false, current: true))
-        #expect(!ExperimentalHapticTriggerGate.shouldFireHover(previous: true, current: true))
-        #expect(!ExperimentalHapticTriggerGate.shouldFireHover(previous: true, current: false))
+    func patternOptionMapsLevelChangeToNativeFeedback() {
+        #expect(ExperimentalHapticPatternOption.levelChange.feedbackPattern == .levelChange)
     }
 }
