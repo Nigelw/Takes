@@ -534,7 +534,7 @@ struct TakesApp: App {
     @StateObject private var settings = AppSettings()
     @StateObject private var updater = SoftwareUpdater()
     @StateObject private var ytdlpUpdates = YTDLPUpdateState()
-    @StateObject private var experimentalHaptics = ExperimentalHapticsController()
+    @StateObject private var zoomHaptics = ZoomHapticsController()
     private let launchOptions = TakesLaunchOptions()
     private let appearanceTunerPanel = AppearanceTunerPanelController()
     private let analysisWindowController = AnalysisWindowController()
@@ -548,7 +548,7 @@ struct TakesApp: App {
             )
                 .environmentObject(settings)
                 .environmentObject(updater)
-                .environmentObject(experimentalHaptics)
+                .environmentObject(zoomHaptics)
                 .onAppear {
                     controller.settings = settings
                     remotePlaybackCommands.connect(to: controller)

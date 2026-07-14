@@ -927,7 +927,7 @@ extension FocusedValues {
 struct ContentView: View {
     var controller: PlaybackController
     @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var experimentalHaptics: ExperimentalHapticsController
+    @EnvironmentObject private var zoomHaptics: ZoomHapticsController
     private let appFileOpenRouter: AppFileOpenRouter?
     private let usesTemporaryDefaultWindowLayout: Bool
 
@@ -1397,9 +1397,9 @@ struct ContentView: View {
         let enabled = controller.canZoomTimeline
         return HStack(spacing: 8) {
             Button {
-                experimentalHaptics.syncZoomProgress(zoomProgress)
+                zoomHaptics.syncZoomProgress(zoomProgress)
                 controller.stepZoom(zoomingIn: false)
-                experimentalHaptics.updateZoomProgress(zoomProgress)
+                zoomHaptics.updateZoomProgress(zoomProgress)
             } label: {
                 Image(systemName: "minus.magnifyingglass")
             }
@@ -1417,11 +1417,11 @@ struct ContentView: View {
                         )
                     },
                     set: { value in
-                        experimentalHaptics.syncZoomProgress(zoomProgress)
+                        zoomHaptics.syncZoomProgress(zoomProgress)
                         controller.zoomVisibleSpan(
                             to: TimelineViewport.visibleSpan(sliderValue: value, contentSpan: contentSpan)
                         )
-                        experimentalHaptics.updateZoomProgress(zoomProgress)
+                        zoomHaptics.updateZoomProgress(zoomProgress)
                     }
                 ),
                 in: 0...1
@@ -1432,9 +1432,9 @@ struct ContentView: View {
             .accessibilityLabel("Timeline Zoom")
 
             Button {
-                experimentalHaptics.syncZoomProgress(zoomProgress)
+                zoomHaptics.syncZoomProgress(zoomProgress)
                 controller.stepZoom(zoomingIn: true)
-                experimentalHaptics.updateZoomProgress(zoomProgress)
+                zoomHaptics.updateZoomProgress(zoomProgress)
             } label: {
                 Image(systemName: "plus.magnifyingglass")
             }
