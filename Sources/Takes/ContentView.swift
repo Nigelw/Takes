@@ -1856,25 +1856,23 @@ struct ContentView: View {
                         .offset(x: infoWidth)
                 }
             }
-            .overlay(alignment: .topLeading) {
-                // Frozen-column edge: one continuous hairline at the info/waveform
-                // boundary, running the full height so the header's control|ruler
-                // border and the rows' info|waveform border are the same line.
-                // With no tracks the whole section is the empty state, so there
-                // is no column boundary to draw.
-                if displayedTrackRowCount > 0 {
-                    Rectangle()
-                        .fill(Theme.frozenColumnEdge)
-                        .frame(width: 1, height: proxy.size.height)
-                        .offset(x: infoWidth)
-                        .allowsHitTesting(false)
-                }
-            }
-            // Playhead drawn above the visible frozen-column and header/row
-            // dividers; the transparent resize handle is installed after it so
-            // its cursor and drag region still win at the column boundary.
+            // The playhead stays confined to the waveform column. The frozen
+            // column shadow is layered after it so the playhead reads as sliding
+            // underneath the info area at the boundary.
             .overlay(alignment: .topLeading) {
                 timelinePlayheadOverlay(sectionHeight: proxy.size.height, infoWidth: infoWidth, waveformWidth: waveformWidth)
+            }
+            .overlay(alignment: .topLeading) {
+                if displayedTrackRowCount > 0 {
+                    LinearGradient(
+                        colors: [Theme.frozenColumnShadow, .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 5, height: proxy.size.height)
+                    .offset(x: infoWidth)
+                    .allowsHitTesting(false)
+                }
             }
             .overlay(alignment: .topLeading) {
                 if displayedTrackRowCount > 0 {
@@ -1990,6 +1988,9 @@ struct ContentView: View {
                 .gesture(playheadDragGesture(waveformWidth: waveformWidth, in: Self.rulerSpace))
                 .coordinateSpace(name: Self.rulerSpace)
                 .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
+                // Let the info column visually cover the ruler's first pixel,
+                // hiding a tick exactly at the timeline's leading edge.
+                .mask(TimelineLeadingEdgeMask())
         }
         .componentDebugLabel("Timeline Header", enabled: settings.showsComponentDebugLabels)
     }
@@ -3892,6 +3893,9 @@ private struct TrackRowView: View, Equatable {
                 rowHeight: rowHeight,
                 showsDebugLabel: showsDebugLabel
             )
+            // Reveal the row's own background through the first lane pixel so
+            // a leading timeline guide stays tucked beneath the info column.
+            .mask(TimelineLeadingEdgeMask())
         }
         .frame(height: rowHeight)
         // Active highlight spans the whole row (info + lane) as one continuous
@@ -4106,6 +4110,19 @@ private struct TrackRowTrashButton: View {
         // Only surfaces on hover; kept mounted (opacity, not removed) so it
         // stays reachable by accessibility/keyboard.
         .opacity(store.hoveredID == trackID ? 1 : 0)
+    }
+}
+
+/// Masks the first point of ruler/lane drawing so the frozen info column reads
+/// as extending over the timeline's leading edge. The transparent strip reveals
+/// the real surface below, including the active-row tint.
+private struct TimelineLeadingEdgeMask: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: 1)
+            Color.white
+        }
     }
 }
 

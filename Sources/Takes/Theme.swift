@@ -102,13 +102,12 @@ enum Theme {
     /// Hairline separators between full-bleed regions and rows.
     static let hairline = Color(nsColor: .separatorColor)
 
-    /// Opaque frozen-column edge dividing the info/control column from the
-    /// ruler/waveform column. Opaque (unlike the translucent `hairline`) so ruler
-    /// notches sit behind it cleanly instead of bleeding through.
-    static let frozenColumnEdge = dynamic(
-        light: (0.82, 0.82, 0.84),
-        dark: (0.28, 0.28, 0.30)
-    )
+    /// Subtle shadow cast by the frozen info/control column onto the timeline.
+    /// Slightly stronger in dark mode so the overlap still reads without a hard
+    /// divider line.
+    static let frozenColumnShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.42 : 0.15)
+    })
 
     /// Soft drop shadow cast by the transport bar onto the timeline header, so the
     /// header reads as slightly recessed beneath it. A touch stronger in dark mode.
