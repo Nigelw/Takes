@@ -978,6 +978,7 @@ extension FocusedValues {
 struct ContentView: View {
     var controller: PlaybackController
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var zoomHaptics: ZoomHapticsController
     private let appFileOpenRouter: AppFileOpenRouter?
     private let usesTemporaryDefaultWindowLayout: Bool
 
@@ -1444,7 +1445,9 @@ struct ContentView: View {
         let enabled = controller.canZoomTimeline
         return HStack(spacing: 8) {
             Button {
+                zoomHaptics.syncZoomProgress(zoomProgress)
                 controller.stepZoom(zoomingIn: false)
+                zoomHaptics.updateZoomProgress(zoomProgress)
             } label: {
                 Image(systemName: "minus.magnifyingglass")
             }
@@ -1462,9 +1465,11 @@ struct ContentView: View {
                         )
                     },
                     set: { value in
+                        zoomHaptics.syncZoomProgress(zoomProgress)
                         controller.zoomVisibleSpan(
                             to: TimelineViewport.visibleSpan(sliderValue: value, contentSpan: contentSpan)
                         )
+                        zoomHaptics.updateZoomProgress(zoomProgress)
                     }
                 ),
                 in: 0...1
@@ -1475,7 +1480,9 @@ struct ContentView: View {
             .accessibilityLabel("Timeline Zoom")
 
             Button {
+                zoomHaptics.syncZoomProgress(zoomProgress)
                 controller.stepZoom(zoomingIn: true)
+                zoomHaptics.updateZoomProgress(zoomProgress)
             } label: {
                 Image(systemName: "plus.magnifyingglass")
             }
@@ -1839,7 +1846,12 @@ struct ContentView: View {
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             .overlay(alignment: .topLeading) {
                 if !controller.session.tracks.isEmpty {
-                    TimelineScrollOverlayLeaf(controller: controller)
+                    TimelineScrollOverlayLeaf(
+                        controller: controller,
+                        onScroll: handleTimelineScroll,
+                        onScrollGestureEnded: {},
+                        onMagnify: handleTimelineMagnify
+                    )
                         .frame(width: waveformWidth, height: proxy.size.height)
                         .offset(x: infoWidth)
                 }
@@ -2839,6 +2851,21 @@ struct ContentView: View {
         }
     }
 
+    private var zoomProgress: Double {
+        TimelineViewport.sliderValue(
+            visibleSpan: max(controller.visibleSpan, 0.001),
+            contentSpan: controller.session.duration
+        )
+    }
+
+    private func handleTimelineScroll(_ visibleStart: TimeInterval) {
+        controller.scrollTimeline(toVisibleStart: visibleStart)
+    }
+
+    private func handleTimelineMagnify(_ magnification: Double, atFraction fraction: Double) {
+        controller.magnifyTimeline(by: magnification, atFraction: fraction)
+    }
+
     private func configureAppOpenRouter() {
         appFileOpenRouter?.setHandler { urls in
             Task { await controller.loadImportedFiles(urls) }
@@ -3040,19 +3067,21 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
     let contentEnd: TimeInterval
     /// Native scroll offset mapped back to the visible timeline start.
     let onScroll: (TimeInterval) -> Void
+    let onScrollGestureEnded: () -> Void
     /// Whether the native timeline scroll view is still moving.
     let onScrollActivityChanged: (Bool) -> Void
     /// Pinch: magnification delta, plus the cursor's `0...1` position.
     let onMagnify: (Double, Double) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onScroll: onScroll)
+        Coordinator(onScroll: onScroll, onScrollGestureEnded: onScrollGestureEnded)
     }
 
     func makeNSView(context: Context) -> TimelineScrollNSView {
         let view = TimelineScrollNSView()
         view.onMagnify = onMagnify
         view.onScrollActivityChanged = onScrollActivityChanged
+        view.onScrollGestureEnded = onScrollGestureEnded
         context.coordinator.attach(to: view)
         configure(view)
         return view
@@ -3061,7 +3090,9 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
     func updateNSView(_ nsView: TimelineScrollNSView, context: Context) {
         nsView.onMagnify = onMagnify
         nsView.onScrollActivityChanged = onScrollActivityChanged
+        nsView.onScrollGestureEnded = onScrollGestureEnded
         context.coordinator.onScroll = onScroll
+        context.coordinator.onScrollGestureEnded = onScrollGestureEnded
         configure(nsView)
     }
 
@@ -3077,10 +3108,12 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject {
         var onScroll: (TimeInterval) -> Void
+        var onScrollGestureEnded: () -> Void
         private weak var scrollView: TimelineScrollNSView?
 
-        init(onScroll: @escaping (TimeInterval) -> Void) {
+        init(onScroll: @escaping (TimeInterval) -> Void, onScrollGestureEnded: @escaping () -> Void) {
             self.onScroll = onScroll
+            self.onScrollGestureEnded = onScrollGestureEnded
         }
 
         deinit {
@@ -3119,6 +3152,7 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
 
 final class TimelineScrollNSView: NSScrollView {
     var onMagnify: ((Double, Double) -> Void)?
+    var onScrollGestureEnded: (() -> Void)?
     var timelineVisibleStart: TimeInterval = 0
     var onScrollActivityChanged: ((Bool) -> Void)?
     var timelineContentStart: TimeInterval = 0
@@ -3296,6 +3330,7 @@ final class TimelineScrollNSView: NSScrollView {
         super.scrollWheel(with: event)
         if scrollGestureEnded(event) {
             lockedScrollAxis = nil
+            onScrollGestureEnded?()
         }
     }
 
@@ -4255,6 +4290,9 @@ private struct TimelineHeaderRulerView: View {
 /// mounts it.
 private struct TimelineScrollOverlayLeaf: View {
     var controller: PlaybackController
+    var onScroll: (TimeInterval) -> Void
+    var onScrollGestureEnded: () -> Void
+    var onMagnify: (Double, Double) -> Void
 
     var body: some View {
         TimelineScrollOverlay(
@@ -4262,9 +4300,10 @@ private struct TimelineScrollOverlayLeaf: View {
             visibleSpan: max(controller.visibleSpan, 0.001),
             contentStart: controller.session.timelineStart,
             contentEnd: controller.session.timelineEnd,
-            onScroll: { controller.scrollTimeline(toVisibleStart: $0) },
+            onScroll: onScroll,
+            onScrollGestureEnded: onScrollGestureEnded,
             onScrollActivityChanged: { controller.setTimelineScrollActive($0) },
-            onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
+            onMagnify: onMagnify
         )
     }
 }
