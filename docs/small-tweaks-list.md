@@ -1,5 +1,7 @@
 ## Make info area have the smallest of drop shadows
 
+Ready to merge: No
+
 - Status: done on `codex/tweak-info-shadow` commit `5ef024db948d38503be0dee6befc75d65e52b1ac`.
 
 - Testing notes: targeted Debug build passed in `.codex/worktrees/tweak-info-shadow` with `xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath /private/tmp/takes-debug-derived-data-info-shadow CODE_SIGNING_ALLOWED=NO build`; worker noted the existing `AnalysisWindowView.swift` main-actor warning. Manual UI pass still pending.
@@ -10,6 +12,8 @@ The playhead disappears under it (docs/small-tweaks-images/CleanShot 2026-07-08 
 
 ## Make the progress ring that shows up during "deep tempo analysis" based on theme’s indigo color, not orange/cyan highlight color
 
+Ready to merge: Yes
+
 - Status: done on `codex/tweak-tempo-ring-indigo` commit `04974f3d06aac8560d0fd90d1f2f3d76df013bf4`.
 
 - Testing notes: targeted Debug build passed in `.codex/worktrees/tweak-tempo-ring-indigo` with `xcodebuild -project Takes.xcodeproj -scheme Takes -configuration Debug -derivedDataPath /private/tmp/takes-debug-derived-data CODE_SIGNING_ALLOWED=NO build`; worker noted an existing `AnalysisWindowView.swift` main-actor warning. Styling-only change; no tests added.
@@ -17,6 +21,8 @@ The playhead disappears under it (docs/small-tweaks-images/CleanShot 2026-07-08 
 ---
 
 ## Reduce hit target of empty window state's “click to compare” button
+
+Ready to merge: Yes
 
 - Status: done on `codex/tweak-empty-click-target` commit `fb059db6045336eb827b30e66bc11abce7eafb9a`.
 
@@ -27,6 +33,8 @@ Make it a rectangle around the icon + text with just a little padding. Often cli
 ---
 
 ## Add keyboard shortcuts for changing offset of active track without making input field active
+
+Ready to merge: Yes
 
 - Status: done on `codex/tweak-offset-shortcuts` commit `c5dc97cd94d649c5c3d85ba9ac9b20ca8ee05833`.
 - Testing notes: full `xcodebuild test` passed in `.codex/worktrees/tweak-offset-shortcuts` with `/private/tmp/takes-derived-data-offset-shortcuts` DerivedData. Added focused coverage for active-track offset nudging with custom configured small/large nudge values; worker noted existing compiler warnings around `AnalysisWindowView.swift` actor isolation and `SessionTests` `renderableRowRange`.
@@ -57,6 +65,8 @@ Nudge Track > (new nudge shortcuts in submenu)
 
 ## Quick Open from Finder should accept folders
 
+Ready to merge: Yes
+
 - Status: done on `codex/tweak-finder-folders` commit `65a7276c600b3f29c6780aad0cc55de81b1abe43`.
 
 - Testing notes: targeted `xcodebuild test` passed for `TakesTests/TrackDropHighlightTests` in `.codex/worktrees/tweak-finder-folders` with `/private/tmp/takes-small-tweaks-finder-folders` DerivedData. Added focused tests for Finder folder recursion and folder selections containing no audio; worker noted an unrelated existing `AnalysisWindowView.swift` main-actor warning.
@@ -67,6 +77,8 @@ Currently if you Quick Open from Finder and there’s a folder selected, Takes s
 
 ## Clicking in waveform area should update play position & switch tracks as well as play position
 
+Ready to merge: Yes
+
 - Status: done on `codex/tweak-waveform-click-switch` commit `4c0a39477970f95bf3d0c6e2422cde694acc2541`.
 
 - Testing notes: targeted `xcodebuild test` passed for `TakesTests/SessionTests` in `.codex/worktrees/tweak-waveform-click-switch` with `/private/tmp/takes-small-tweaks/waveform-click-switch` DerivedData. Added focused row-mapping policy tests; timeline ruler and shift-click loop selection are unchanged. Worker noted the existing unrelated `AnalysisWindowView.swift` main-actor warning.
@@ -74,6 +86,8 @@ Currently if you Quick Open from Finder and there’s a folder selected, Takes s
 ---
 
 ## Change File->Show in Finder → File->Reveal in Finder
+
+Ready to merge: Yes
 
 - Status: done on `codex/tweak-reveal-in-finder` commit `5ebb95078575492865d3a92b8c5e7efa3947e6b7`.
 
@@ -83,6 +97,8 @@ Currently if you Quick Open from Finder and there’s a folder selected, Takes s
 
 ## Disable blind mode button when no tracks are loaded
 
+Ready to merge: Yes
+
 - Status: done on `codex/tweak-disable-blind-empty` commit `767bbb2c97185174676bfec8a79324466c5fc78c`.
 
 - Testing notes: targeted `xcodebuild test` passed for `TakesTests/SessionTests/sessionReadinessUsesOrderedTracks` in `.codex/worktrees/tweak-disable-blind-empty`; worker noted the existing `AnalysisWindowView.swift` warning. Change adds shared `ComparisonSession.canToggleBlindListeningMode` used by toolbar and View-menu enablement.
@@ -91,6 +107,8 @@ Currently if you Quick Open from Finder and there’s a folder selected, Takes s
 
 ## Make the vertical playhead indicator line draggable
 
+Ready to merge: Yes
+
 - Status: done on `codex/tweak-draggable-playhead` commit `3a6be2acd5efeb4771b47a9271335f3cb1c66360`.
 
 - Testing notes: full `xcodebuild test` passed in `.codex/worktrees/tweak-draggable-playhead` with `/private/tmp/takes-small-tweaks-draggable-playhead-test` DerivedData. The new drag target routes through existing preview/seek/loop-deselect behavior; worker noted the existing `AnalysisWindowView.swift` main-actor warning during build.
@@ -98,6 +116,8 @@ Currently if you Quick Open from Finder and there’s a folder selected, Takes s
 ---
 
 ## Make the light mode playhead handle a tiny bit lighter
+
+Ready to merge: Yes
 
 - Status: done on `codex/tweak-light-playhead-handle` commit `c7ca0957ed8dc96434f76eec37c96b6351d2a2eb`.
 
@@ -109,9 +129,11 @@ Show where in code the color is defined so I can tweak myself if needed.
 
 ## Add haptic feedback as an experimental setting in the debug window
 
-- Status: done on `codex/tweak-haptics-debug` commit `07ce547dcdcfeb06630f05feb44470e6840783d5`.
+Ready to merge: Yes
 
-- Testing notes: full `xcodebuild test` built the haptics code and passed new haptics tests, but hit the existing flaky `TrackDropHighlightTests/openFileCommandStateCancelsRegisteredStreamingTaskOnDismiss`; isolated rerun of that test passed. Added focused pure-helper coverage for threshold bucketing and double-fire guards. Manual app-side feel pass on physical haptics is still needed.
+- Status: done on `codex/tweak-haptics-debug` commit `4d76708`.
+
+- Testing notes: targeted `xcodebuild test -only-testing:TakesTests/ExperimentalHapticsTests` passed in `.codex/worktrees/tweak-haptics-debug` with `/private/tmp/takes-haptics-release-ready` DerivedData. Release cleanup keeps `levelChange` haptics only for discrete zoom-control thresholds, removes all other haptic triggers, and deletes the Experimental Haptics debug menu/window. Build still shows the existing `AnalysisWindowView.swift` main-actor warning.
 
 macOS supports 3 types of haptic feedback via NSHapticFeedbackManager API in AppKit:
 * .alignment: Indicates two UI elements have snapped into alignment, such as guides in a design app.
@@ -132,6 +154,13 @@ Add a window (opened from the debug menu) that allows you to set the 3 types of 
 
 ## Add setting for displaying filename vs track name
 
+Ready to merge: No
+
+Changes needed:
+- default to showing track name rather than filename
+- FLAC metadata not supported
+- when showing filename, add audio format to metadata (AAC, MP3, FLAC, etc)
+
 - Status: done on `codex/tweak-track-name-setting` commit `e79e0be731a99aa4b6ccbe71e83b5914e3317b8f`.
 
 - Testing notes: targeted `xcodebuild test` passed for `TakesTests/SessionTests`, and targeted Debug build passed in `.codex/worktrees/tweak-track-name-setting`. Added focused coverage for filename default behavior, metadata fallback, stored setting default/readback, and remote playback title behavior while blind mode remains anonymous.
@@ -141,6 +170,8 @@ Track name should fallback to filename if metadata doesn’t exist
 ---
 
 ## Track name tooltip improvements
+
+Ready to merge: Yes
 
 - Status: done on `codex/tweak-track-tooltip` commit `44d821aa72c6be8895c2ba3a165b2f422a2dea31`.
 
@@ -153,6 +184,8 @@ Track name should fallback to filename if metadata doesn’t exist
 
 ## Make the install dmg prettier
 
+Ready to merge: No
+
 - Status: done on `codex/tweak-pretty-dmg` commit `a65eec699a3b011e051e90c1f1ad187720a61f81`.
 
 - Testing notes: `bash -n scripts/build-release.sh` passed, `scripts/make-dmg-background.swift` rendered a valid 1200x800 PNG, and `sips` confirmed the output dimensions. Local `create-dmg` smoke build could not complete because `hdiutil` failed in this environment with `Device not configured`; full signed/notarized release build was not run.
@@ -162,6 +195,8 @@ When we generate the dmg as part of the build process, the icons are vertically 
 ---
 
 ## If you scroll playhead off screen during playback, let inertial scroll come to a stop before scrolling the playhead in view
+
+Ready to merge: Yes
 
 - Status: done on `codex/tweak-playhead-inertial-scroll` commit `30ead8be7cf057ff25e32b2f36c3f8d43973487b`.
 
