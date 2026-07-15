@@ -3018,49 +3018,12 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
     }
 
     private func configure(_ scrollView: TimelineScrollNSView) {
-        let viewportWidth = max(scrollView.bounds.width, 0)
-        let viewportHeight = max(scrollView.bounds.height, 0)
-        let contentSpan = max(contentEnd - contentStart, 0)
-        let pointsPerSecond = TimelineScrollGeometry.pointsPerSecond(
-            viewportWidth: Double(viewportWidth),
-            visibleSpan: visibleSpan
-        )
-        let documentWidth = TimelineScrollGeometry.documentWidth(
-            contentSpan: contentSpan,
+        scrollView.configureTimeline(
+            visibleStart: visibleStart,
             visibleSpan: visibleSpan,
-            viewportWidth: Double(viewportWidth)
+            contentStart: contentStart,
+            contentEnd: contentEnd
         )
-        scrollView.timelineContentStart = contentStart
-        scrollView.timelineContentEnd = contentEnd
-        scrollView.timelineVisibleSpan = visibleSpan
-        scrollView.timelinePointsPerSecond = pointsPerSecond
-        if scrollView.isReportingNativeScroll {
-            scrollView.documentView?.frame = NSRect(
-                x: 0,
-                y: 0,
-                width: CGFloat(max(documentWidth, Double(viewportWidth))),
-                height: viewportHeight
-            )
-            return
-        }
-
-        scrollView.performProgrammaticSync {
-            scrollView.documentView?.frame = NSRect(
-                x: 0,
-                y: 0,
-                width: CGFloat(max(documentWidth, Double(viewportWidth))),
-                height: viewportHeight
-            )
-
-            let x = TimelineScrollGeometry.scrollOffset(
-                visibleStart: visibleStart,
-                contentStart: contentStart,
-                pointsPerSecond: pointsPerSecond
-            )
-            guard abs(scrollView.contentView.bounds.origin.x - CGFloat(x)) > 0.5 else { return }
-            scrollView.contentView.scroll(to: NSPoint(x: CGFloat(x), y: 0))
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
     }
 
     @MainActor
@@ -3106,8 +3069,9 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
     }
 }
 
-private final class TimelineScrollNSView: NSScrollView {
+final class TimelineScrollNSView: NSScrollView {
     var onMagnify: ((Double, Double) -> Void)?
+    var timelineVisibleStart: TimeInterval = 0
     var onScrollActivityChanged: ((Bool) -> Void)?
     var timelineContentStart: TimeInterval = 0
     var timelineContentEnd: TimeInterval = 0
@@ -3148,6 +3112,72 @@ private final class TimelineScrollNSView: NSScrollView {
         autohidesScrollers = true
         borderType = .noBorder
         documentView = NSView(frame: .zero)
+    }
+
+    override func layout() {
+        super.layout()
+        synchronizeTimelineGeometry()
+    }
+
+    func configureTimeline(
+        visibleStart: TimeInterval,
+        visibleSpan: TimeInterval,
+        contentStart: TimeInterval,
+        contentEnd: TimeInterval
+    ) {
+        timelineVisibleStart = visibleStart
+        timelineVisibleSpan = visibleSpan
+        timelineContentStart = contentStart
+        timelineContentEnd = contentEnd
+        synchronizeTimelineGeometry()
+    }
+
+    private func synchronizeTimelineGeometry() {
+        let viewportWidth = max(bounds.width, 0)
+        let viewportHeight = max(bounds.height, 0)
+        let contentSpan = max(timelineContentEnd - timelineContentStart, 0)
+        let pointsPerSecond = TimelineScrollGeometry.pointsPerSecond(
+            viewportWidth: Double(viewportWidth),
+            visibleSpan: timelineVisibleSpan
+        )
+        let documentWidth = TimelineScrollGeometry.documentWidth(
+            contentSpan: contentSpan,
+            visibleSpan: timelineVisibleSpan,
+            viewportWidth: Double(viewportWidth)
+        )
+        timelinePointsPerSecond = pointsPerSecond
+
+        let documentFrame = NSRect(
+            x: 0,
+            y: 0,
+            width: CGFloat(max(documentWidth, Double(viewportWidth))),
+            height: viewportHeight
+        )
+        if isReportingNativeScroll {
+            if documentView?.frame != documentFrame {
+                documentView?.frame = documentFrame
+            }
+            return
+        }
+
+        let x = TimelineScrollGeometry.scrollOffset(
+            visibleStart: timelineVisibleStart,
+            contentStart: timelineContentStart,
+            pointsPerSecond: pointsPerSecond
+        )
+        let needsDocumentFrameUpdate = documentView?.frame != documentFrame
+        let needsScrollUpdate = abs(contentView.bounds.origin.x - CGFloat(x)) > 0.5
+        guard needsDocumentFrameUpdate || needsScrollUpdate else { return }
+
+        performProgrammaticSync {
+            if needsDocumentFrameUpdate {
+                documentView?.frame = documentFrame
+            }
+
+            guard needsScrollUpdate else { return }
+            contentView.scroll(to: NSPoint(x: CGFloat(x), y: 0))
+            reflectScrolledClipView(contentView)
+        }
     }
 
     func performProgrammaticSync(_ update: () -> Void) {
