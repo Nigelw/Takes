@@ -573,6 +573,7 @@ struct TakesApp: App {
             }
 
             FileCommands()
+            PlaybackCommands(controller: controller)
             ViewCommands(controller: controller)
 
             CommandGroup(after: .pasteboard) {
@@ -581,87 +582,6 @@ struct TakesApp: App {
                 }
                 .keyboardShortcut("d", modifiers: [.command])
                 .disabled(controller.session.loopRegion == nil)
-            }
-
-            CommandMenu("Playback") {
-                Button(controller.session.isPlaying ? "Pause" : "Play") {
-                    controller.session.isPlaying ? controller.pause() : controller.play()
-                }
-                .keyboardShortcut(.space, modifiers: [])
-                .disabled(!controller.session.isPlayable)
-
-                Button("Switch Track") {
-                    controller.selectNextTrack()
-                }
-                .keyboardShortcut("x", modifiers: [])
-                .disabled(!controller.session.canSwitchPlayback)
-
-                Button("Switch to Previous Track") {
-                    controller.selectPreviousTrack()
-                }
-                .keyboardShortcut("x", modifiers: [.shift])
-                .disabled(!controller.session.canSwitchPlayback)
-
-                Divider()
-
-                Button("Auto-Align Tracks") {
-                    controller.autoAlignTracks()
-                }
-                .keyboardShortcut("a", modifiers: [.command, .option])
-                .disabled(!controller.session.canSwitchPlayback || controller.isAligning)
-
-                Menu("Repeat") {
-                    Picker("Repeat", selection: Binding(
-                        get: { controller.session.repeatMode },
-                        set: { controller.setRepeatMode($0) }
-                    )) {
-                        Text("Off").tag(RepeatMode.off)
-                        Text("One").tag(RepeatMode.one)
-                        Text("Switch & Repeat").tag(RepeatMode.switchAndRepeat)
-                    }
-                    .pickerStyle(.inline)
-                }
-                .disabled(!controller.session.isPlayable)
-
-                Divider()
-
-                Button("Skip Forward 1s") {
-                    controller.skip(by: 1)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [])
-                .disabled(!controller.session.isPlayable)
-
-                Button("Skip Forward 10s") {
-                    controller.skip(by: 10)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [.shift])
-                .disabled(!controller.session.isPlayable)
-
-                Button("Skip Backward 1s") {
-                    controller.skip(by: -1)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-                .disabled(!controller.session.isPlayable)
-
-                Button("Skip Backward 10s") {
-                    controller.skip(by: -10)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [.shift])
-                .disabled(!controller.session.isPlayable)
-                
-                Divider()
-                
-                Button("Jump to Beginning") {
-                    controller.seek(to: controller.session.timelineStart)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [.command])
-                .disabled(!controller.session.isPlayable)
-
-                Button("Jump to End") {
-                    controller.seek(to: controller.session.timelineEnd)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [.command])
-                .disabled(!controller.session.isPlayable)
             }
 
             CommandGroup(replacing: .help) {
@@ -839,7 +759,7 @@ private struct FileCommands: Commands {
 
             Divider()
 
-            Button("Show in Finder") {
+            Button("Reveal in Finder") {
                 openFileCommandState?.showActiveTrackInFinder()
             }
             .keyboardShortcut("r", modifiers: [.shift, .command])
@@ -866,12 +786,86 @@ private struct FileCommands: Commands {
     }
 }
 
-private struct ViewCommands: Commands {
+private struct PlaybackCommands: Commands {
     var controller: PlaybackController
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
 
     var body: some Commands {
-        CommandGroup(before: .toolbar) {
+        CommandMenu("Playback") {
+            Button(controller.session.isPlaying ? "Pause" : "Play") {
+                controller.session.isPlaying ? controller.pause() : controller.play()
+            }
+            .keyboardShortcut(.space, modifiers: [])
+            .disabled(!controller.session.isPlayable)
+
+            Button("Switch Track") {
+                controller.selectNextTrack()
+            }
+            .keyboardShortcut("x", modifiers: [])
+            .disabled(!controller.session.canSwitchPlayback)
+
+            Button("Switch to Previous Track") {
+                controller.selectPreviousTrack()
+            }
+            .keyboardShortcut("x", modifiers: [.shift])
+            .disabled(!controller.session.canSwitchPlayback)
+
+            Divider()
+
+            Button("Jump to Beginning") {
+                controller.seek(to: controller.session.timelineStart)
+            }
+            .keyboardShortcut(.leftArrow, modifiers: [.command])
+            .disabled(!controller.session.isPlayable)
+
+            Button("Jump to End") {
+                controller.seek(to: controller.session.timelineEnd)
+            }
+            .keyboardShortcut(.rightArrow, modifiers: [.command])
+            .disabled(!controller.session.isPlayable)
+
+            Menu("Skip") {
+                Button("Skip Forward 1s") {
+                    controller.skip(by: 1)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .disabled(!controller.session.isPlayable)
+
+                Button("Skip Forward 10s") {
+                    controller.skip(by: 10)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [.shift])
+                .disabled(!controller.session.isPlayable)
+
+                Button("Skip Backward 1s") {
+                    controller.skip(by: -1)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .disabled(!controller.session.isPlayable)
+
+                Button("Skip Backward 10s") {
+                    controller.skip(by: -10)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.shift])
+                .disabled(!controller.session.isPlayable)
+            }
+            .disabled(!controller.session.isPlayable)
+
+            Divider()
+
+            Menu("Repeat") {
+                Picker("Repeat", selection: Binding(
+                    get: { controller.session.repeatMode },
+                    set: { controller.setRepeatMode($0) }
+                )) {
+                    Text("Off").tag(RepeatMode.off)
+                    Text("One").tag(RepeatMode.one)
+                    Text("Switch & Repeat").tag(RepeatMode.switchAndRepeat)
+                }
+                .pickerStyle(.inline)
+            }
+            .disabled(!controller.session.isPlayable)
+
             Toggle(
                 "Blind Listening Mode",
                 isOn: Binding(
@@ -880,10 +874,47 @@ private struct ViewCommands: Commands {
                 )
             )
             .keyboardShortcut("b", modifiers: [.command])
+            .disabled(!controller.session.canToggleBlindListeningMode)
 
             Divider()
-        }
 
+            Button("Auto-Align Tracks") {
+                controller.autoAlignTracks()
+            }
+            .keyboardShortcut("a", modifiers: [.command, .option])
+            .disabled(!controller.session.canSwitchPlayback || controller.isAligning)
+
+            Menu("Nudge Track") {
+                Button("Nudge Left") {
+                    controller.nudgeActiveTrackOffset(direction: -1, largeStep: false)
+                }
+                .keyboardShortcut("j", modifiers: [.command])
+
+                Button("Large Nudge Left") {
+                    controller.nudgeActiveTrackOffset(direction: -1, largeStep: true)
+                }
+                .keyboardShortcut("j", modifiers: [.command, .shift])
+
+                Button("Nudge Right") {
+                    controller.nudgeActiveTrackOffset(direction: 1, largeStep: false)
+                }
+                .keyboardShortcut("k", modifiers: [.command])
+
+                Button("Large Nudge Right") {
+                    controller.nudgeActiveTrackOffset(direction: 1, largeStep: true)
+                }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+            }
+            .disabled(controller.session.activeTrack == nil || canUseGlobalMenuShortcuts != true)
+        }
+    }
+}
+
+private struct ViewCommands: Commands {
+    var controller: PlaybackController
+    @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
+
+    var body: some Commands {
         CommandGroup(after: .toolbar) {
             Button("Zoom In") {
                 controller.stepZoom(zoomingIn: true)
