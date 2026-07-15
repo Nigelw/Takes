@@ -166,3 +166,15 @@ When we generate the dmg as part of the build process, the icons are vertically 
 - Status: done on `codex/tweak-playhead-inertial-scroll` commit `30ead8be7cf057ff25e32b2f36c3f8d43973487b`.
 
 - Testing notes: targeted `xcodebuild test` passed for `TakesTests/SessionTests` in `.codex/worktrees/tweak-playhead-inertial-scroll` with `/private/tmp/takes-playhead-inertial-scroll-dd` DerivedData. No automated test was added because the behavior depends on AppKit live-scroll/inertial lifecycle and real playback timing; manual verification should confirm auto-follow waits until inertial scrolling fully stops.
+
+---
+
+## Waveform view doesn’t scroll unless you zoom first
+
+Ready to merge: Yes
+
+- Status: done on `codex/tweak-waveform-scroll-without-zoom`.
+
+- Testing notes: targeted `xcodebuild test` passed for `TakesTests/TimelineViewportTests` in `.codex/worktrees/tweak-waveform-scroll-without-zoom` with `/private/tmp/takes-waveform-scroll-final-tests` DerivedData. Added a focused AppKit lifecycle regression test covering zero-size creation followed by first layout. Manual smoke verification with two tracks confirmed a horizontal gesture is accepted before any zoom, zoomed scrolling still reaches the opposite edge, and zooming back out returns to fit. The existing `AnalysisWindowView.swift` main-actor warning remains unrelated.
+
+You can’t scroll left/right in the waveform area unless you first zoom in. If you then zoom back out all the way you can scroll.
