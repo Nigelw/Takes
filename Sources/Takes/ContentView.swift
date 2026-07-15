@@ -1515,10 +1515,10 @@ struct ContentView: View {
                 if let progress = controller.alignmentProgress {
                     ZStack {
                         Circle()
-                            .stroke(Theme.secondary.opacity(0.25), lineWidth: 2)
+                            .stroke(Theme.primary.opacity(0.25), lineWidth: 2)
                         Circle()
                             .trim(from: 0, to: max(0.02, progress))
-                            .stroke(Theme.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .stroke(Theme.primary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                             .rotationEffect(.degrees(-90))
                     }
                     .frame(width: 13, height: 13)
@@ -1527,7 +1527,7 @@ struct ContentView: View {
                     ProgressView()
                         .controlSize(.small)
                         .scaleEffect(0.7)
-                        .tint(Theme.secondary)
+                        .tint(Theme.primary)
                 } else if let outcome = controller.alignmentOutcome {
                     Image(systemName: outcome == .success ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(outcome == .success ? Color.green : Color.red)
