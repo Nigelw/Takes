@@ -2232,38 +2232,44 @@ struct ContentView: View {
     private var trackAreaEmptyState: some View {
         let isTargeted = windowIsDropTargeted
         return VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(badgeFill(isTargeted: isTargeted))
-                Image(systemName: "waveform")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(isTargeted ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(.secondary))
-            }
-            .frame(width: 52, height: 52)
+            Button {
+                performImportAction(.open)
+            } label: {
+                VStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(badgeFill(isTargeted: isTargeted))
+                        Image(systemName: "waveform")
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(isTargeted ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(.secondary))
+                    }
+                    .frame(width: 52, height: 52)
 
-            // Both prompts stay mounted and crossfade so the swap doesn't
-            // reflow the layout.
-            ZStack {
-                Text("Drag Files Here to Compare")
-                    .opacity(emptyStateIsHovered && !isTargeted ? 0 : 1)
-                Text("Click Here to Compare")
-                    .opacity(emptyStateIsHovered && !isTargeted ? 1 : 0)
+                    // Both prompts stay mounted and crossfade so the swap doesn't
+                    // reflow the layout.
+                    ZStack {
+                        Text("Drag Files Here to Compare")
+                            .opacity(emptyStateIsHovered && !isTargeted ? 0 : 1)
+                        Text("Click Here to Compare")
+                            .opacity(emptyStateIsHovered && !isTargeted ? 1 : 0)
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 14)
+                .contentShape(Rectangle())
             }
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .onHover { inside in
+                emptyStateIsHovered = inside
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The area wash and edge glow come from the shared track-area import
         // highlight (drawn at the root); here only the badge and glyph tint.
         .animation(.easeInOut(duration: 0.15), value: emptyStateIsHovered)
         .animation(.easeInOut(duration: 0.15), value: isTargeted)
-        .contentShape(Rectangle())
-        .onHover { inside in
-            emptyStateIsHovered = inside
-        }
-        .onTapGesture {
-            performImportAction(.open)
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Add audio files to compare")
         .accessibilityAddTraits(.isButton)
