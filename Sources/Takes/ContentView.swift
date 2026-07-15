@@ -2035,8 +2035,10 @@ struct ContentView: View {
 
     static let playheadHandleWidth: CGFloat = 14
     static let playheadHandleHeight: CGFloat = 16
-    /// Comfortable grab target a bit wider than the visible grabber.
-    private static let playheadHitWidth: CGFloat = 22
+    /// Comfortable ruler grab target a bit wider than the visible grabber.
+    private static let rulerPlayheadHitWidth: CGFloat = 22
+    /// Match the loop edge resize handles in the waveform lanes.
+    private static let lanePlayheadHitWidth: CGFloat = 12
 
     /// Drag the playhead from an interaction strip already aligned to the
     /// waveform column. The playhead visual follows the pointer as a preview;
@@ -2454,7 +2456,7 @@ struct ContentView: View {
                 playheadDragX: playheadDragX,
                 waveformWidth: waveformWidth,
                 height: trackTimelineHeight,
-                bandWidth: Self.playheadHitWidth
+                bandWidth: Self.lanePlayheadHitWidth
             )
             .gesture(playheadDragGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
 
@@ -2798,7 +2800,7 @@ struct ContentView: View {
 
         // The grabber band along the bottom of the ruler.
         if y >= seatBottom - Self.playheadHandleHeight, y <= seatBottom {
-            if abs(columnX - playheadX) <= Self.playheadHitWidth / 2 {
+            if abs(columnX - playheadX) <= Self.rulerPlayheadHitWidth / 2 {
                 setTimelineCursor(.playheadGrab)
                 return
             }
@@ -2816,7 +2818,7 @@ struct ContentView: View {
             }
         }
 
-        if y > seatBottom, abs(columnX - playheadX) <= Self.playheadHitWidth / 2 {
+        if y > seatBottom, abs(columnX - playheadX) <= Self.lanePlayheadHitWidth / 2 {
             setTimelineCursor(.playheadGrab)
             return
         }
