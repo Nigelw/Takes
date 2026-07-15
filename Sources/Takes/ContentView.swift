@@ -1303,25 +1303,21 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             transportBar
                 .fixedSize(horizontal: false, vertical: true)
-            Divider()
+            // Two half-point edges preserve the divider's 1pt layout height
+            // while reading as a crisp recessed bevel on Retina displays.
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Theme.transportDividerShadow)
+                Rectangle()
+                    .fill(Theme.transportDividerHighlight)
+            }
+            .frame(height: 1)
+            .allowsHitTesting(false)
             trackTimelineSection
                 .frame(maxHeight: .infinity)
                 // Recessed well: a faint dark scrim distinguishes the timeline from
-                // the raised transport bar, giving the bar's drop shadow a lower
-                // surface to land on.
+                // the raised transport bar and gives the beveled divider contrast.
                 .background(Theme.timelineWellShade)
-                // A soft shadow gradient hugging the top edge of the content makes the
-                // timeline header read as recessed beneath the transport bar. Drawn as an
-                // overlay (adaptive color, stronger in dark mode) rather than a hard line.
-                .overlay(alignment: .top) {
-                    LinearGradient(
-                        colors: [Theme.transportShadow, .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 8)
-                    .allowsHitTesting(false)
-                }
         }
     }
 

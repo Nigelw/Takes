@@ -109,11 +109,13 @@ enum Theme {
         NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.42 : 0.15)
     })
 
-    /// Soft drop shadow cast by the transport bar onto the timeline header, so the
-    /// header reads as slightly recessed beneath it. A touch stronger in dark mode.
-    static let transportShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.45 : 0.10)
+    /// Dark upper edge of the recessed groove between the transport bar and timeline.
+    static let transportDividerShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.62 : 0.18)
     })
+
+    /// Reflected lower edge of the groove, completing the two-edge bevel.
+    static let transportDividerHighlight = whiteAlpha(light: 0.68, dark: 0.12)
 
     /// Faint light wash over the transport bar so it sits a step above the
     /// timeline well its shadow falls onto. Carries the split in dark mode
