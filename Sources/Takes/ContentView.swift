@@ -485,10 +485,6 @@ private struct WindowFileImportDropDelegate: DropDelegate {
 struct TrackRowDragSource: NSViewRepresentable {
     let fileURL: URL
     let trackID: SessionTrack.ID
-    /// Full track title, surfaced as the info column's tooltip. The SwiftUI
-    /// texts above opt out of hit-testing (so their clicks reach this view),
-    /// which also disables `.help` — so the tooltip lives here instead.
-    let tooltip: String
     let onSelect: () -> Void
     let onDragBegan: () -> Void
     let onDragEnded: () -> Void
@@ -501,7 +497,6 @@ struct TrackRowDragSource: NSViewRepresentable {
     func updateNSView(_ nsView: DragSourceNSView, context: Context) {
         nsView.fileURL = fileURL
         nsView.trackID = trackID
-        nsView.toolTip = tooltip
         nsView.onSelect = onSelect
         nsView.onDragBegan = onDragBegan
         nsView.onDragEnded = onDragEnded
@@ -627,6 +622,53 @@ final class DragSourceNSView: NSView, NSDraggingSource {
         // already committed via the drop delegate's `performDrop`.
         activeDragImage = nil
         onDragEnded?()
+    }
+}
+
+/// AppKit tooltip sensor that tracks a single-line title label's rendered width.
+/// It registers the standard tooltip only when the untruncated string is wider
+/// than the label's current bounds, and it never steals clicks/drags from the
+/// row because hit-testing passes through to the drag source behind it.
+private struct TruncationAwareTooltip: NSViewRepresentable {
+    let text: String
+    let font: NSFont
+
+    func makeNSView(context: Context) -> TruncationAwareTooltipNSView {
+        TruncationAwareTooltipNSView()
+    }
+
+    func updateNSView(_ nsView: TruncationAwareTooltipNSView, context: Context) {
+        nsView.text = text
+        nsView.font = font
+        nsView.updateTooltipIfNeeded()
+    }
+}
+
+private final class TruncationAwareTooltipNSView: NSView {
+    var text = ""
+    var font = NSFont.preferredFont(forTextStyle: .headline)
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        updateTooltipIfNeeded()
+    }
+
+    func updateTooltipIfNeeded() {
+        guard bounds.width > 0, !text.isEmpty else {
+            toolTip = nil
+            return
+        }
+
+        toolTip = measuredTextWidth > bounds.width + 0.5 ? text : nil
+    }
+
+    private var measuredTextWidth: CGFloat {
+        let attributed = NSAttributedString(string: text, attributes: [.font: font])
+        return ceil(attributed.size().width)
     }
 }
 
@@ -3782,9 +3824,6 @@ private struct TrackRowView: View, Equatable {
                     TrackRowDragSource(
                         fileURL: sessionTrack.loadedTrack.url,
                         trackID: sessionTrack.id,
-                        tooltip: isBlind
-                            ? "Track \(index + 1)"
-                            : sessionTrack.loadedTrack.displayName,
                         onSelect: onSelect,
                         onDragBegan: onDragBegan,
                         onDragEnded: onDragEnded,
@@ -3851,13 +3890,19 @@ private struct TrackRowView: View, Equatable {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 2) {
-                        // No `.help` here: hit-testing is off (clicks must reach
-                        // the drag source), which disables SwiftUI tooltips. The
-                        // full-title tooltip lives on the drag source view.
                         Text(title)
                             .font(.headline.weight(.medium))
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .overlay {
+                                TruncationAwareTooltip(
+                                    text: title,
+                                    font: .systemFont(
+                                        ofSize: NSFont.preferredFont(forTextStyle: .headline).pointSize,
+                                        weight: .medium
+                                    )
+                                )
+                            }
                             .allowsHitTesting(false)
 
                         Spacer(minLength: 0)
