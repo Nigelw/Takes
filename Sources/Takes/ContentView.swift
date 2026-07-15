@@ -49,6 +49,15 @@ struct SwitchTrackModifierPolicy {
     }
 }
 
+enum WaveformTrackSelectionPolicy {
+    static func trackIndex(atY y: CGFloat, rowStep: CGFloat, trackCount: Int) -> Int? {
+        guard trackCount > 0, rowStep > 0, y >= 0 else { return nil }
+        let index = Int((y / rowStep).rounded(.down))
+        guard index < trackCount else { return nil }
+        return index
+    }
+}
+
 struct NumericControlEditState {
     private(set) var committedValue: Int
     private(set) var pendingText: String?
@@ -934,8 +943,8 @@ struct ContentView: View {
     @StateObject private var waveformStore = WaveformStore()
     @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
-    /// While a ruler scrub is in flight: the playhead preview's x within the
-    /// waveform column. `nil` when not scrubbing.
+    /// While a playhead drag is in flight: the preview's x within the waveform
+    /// column. `nil` when not dragging.
     @State private var playheadDragX: CGFloat?
     /// Timeline frame + column split, captured for the mouse-monitor cursor
     /// manager (which works in window coordinates, outside SwiftUI hover).
@@ -1021,9 +1030,6 @@ struct ContentView: View {
         let last = Int(((topVisible + viewportHeight) / rowStep).rounded(.down)) + renderableRowOverscan
         return max(first, 0)...max(last, 0)
     }
-    /// Coordinate space for the section-level playhead overlay (grabber + line),
-    /// so a grabber drag reports x across the whole section.
-    private static let playheadSpace = "timelinePlayhead"
     /// Horizontal travel (points) that turns a click into a loop drag.
     private static let loopDragThreshold: CGFloat = 4
 
@@ -1825,7 +1831,6 @@ struct ContentView: View {
                     )
                 }
             }
-            .coordinateSpace(name: Self.playheadSpace)
             // Keep the mouse-monitor cursor manager's picture of the timeline
             // geometry current (window resize, column resize, scrolling).
             .onChange(
@@ -1924,10 +1929,11 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
                 // Dragging anywhere on the ruler moves the playhead: the
                 // visual follows the pointer and the transport seeks once on
-                // mouse-up (no live scrubbing mid-drag). Loop selection is a
-                // lane-only gesture.
+                // mouse-up (no live scrubbing mid-drag). The same drag logic
+                // also powers the narrow playhead band over the lanes; loop
+                // selection remains lane-only everywhere else.
                 .contentShape(Rectangle())
-                .gesture(playheadScrubGesture(waveformWidth: waveformWidth))
+                .gesture(playheadDragGesture(waveformWidth: waveformWidth, in: Self.rulerSpace))
                 .coordinateSpace(name: Self.rulerSpace)
                 .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
         }
@@ -1942,12 +1948,13 @@ struct ContentView: View {
     /// tween per transport anchor event (play, pause, seek, loop wrap, zoom,
     /// scroll, resize) — see `TimelinePlayheadVisual` — so steady playback
     /// does no per-frame main-thread work at all. Interaction lives on the
-    /// ruler (`playheadScrubGesture`); cursor feedback lives in the central
-    /// mouse-monitor cursor manager.
+    /// ruler and the lane drag strip (`playheadDragGesture`); cursor feedback
+    /// lives in the central mouse-monitor cursor manager.
     ///
-    /// While a ruler scrub is in flight (`playheadDragX != nil`) the playhead
-    /// parks at the pointer as a preview; the transport itself doesn't move
-    /// (and audio keeps playing from the old position) until mouse-up.
+    /// While a playhead drag is in flight (`playheadDragX != nil`) the
+    /// playhead parks at the pointer as a preview; the transport itself
+    /// doesn't move (and audio keeps playing from the old position) until
+    /// mouse-up.
     @ViewBuilder
     private func timelinePlayheadOverlay(sectionHeight: CGFloat, infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
         if controller.session.isPlayable {
@@ -1977,26 +1984,22 @@ struct ContentView: View {
     /// Comfortable grab target a bit wider than the visible grabber.
     private static let playheadHitWidth: CGFloat = 22
 
-    /// Drag anywhere on the ruler to move the playhead. The playhead visual
-    /// follows the pointer as a preview; the seek happens once on mouse-up,
-    /// so nothing scrubs live mid-drag. A plain click behaves like the lane
-    /// click: deselect the loop when the click lands outside it, then seek.
-    private func playheadScrubGesture(waveformWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.rulerSpace))
+    /// Drag the playhead from an interaction strip already aligned to the
+    /// waveform column. The playhead visual follows the pointer as a preview;
+    /// the seek happens once on mouse-up, so nothing scrubs live mid-drag. A
+    /// plain click behaves like the lane click: deselect the loop when the
+    /// click lands outside it, then seek.
+    private func playheadDragGesture(waveformWidth: CGFloat, in space: String) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
             .onChanged { value in
                 if playheadDragX == nil {
                     NSCursor.closedHand.set()
                 }
-                playheadDragX = min(max(value.location.x, 0), waveformWidth)
+                playheadDragX = clampedPlayheadDragX(value.location.x, waveformWidth: waveformWidth)
             }
             .onEnded { value in
                 playheadDragX = nil
-                let x = min(max(value.location.x, 0), waveformWidth)
-                let time = globalTime(atX: x, width: waveformWidth)
-                if let loop = controller.session.loopRegion, time < loop.start || time > loop.end {
-                    controller.deselectLoop()
-                }
-                controller.seek(to: time)
+                commitPlayheadDrag(atX: value.location.x, waveformWidth: waveformWidth)
                 // The playhead now sits under the pointer, so the grab cursor
                 // is the right resting state. Record the shape in the central
                 // cursor manager too, so it knows a non-standard cursor is up
@@ -2005,6 +2008,19 @@ struct ContentView: View {
                 timelineCursorShape = .playheadGrab
                 NSCursor.openHand.set()
             }
+    }
+
+    private func clampedPlayheadDragX(_ x: CGFloat, waveformWidth: CGFloat) -> CGFloat {
+        min(max(x, 0), waveformWidth)
+    }
+
+    private func commitPlayheadDrag(atX x: CGFloat, waveformWidth: CGFloat) {
+        let clampedX = clampedPlayheadDragX(x, waveformWidth: waveformWidth)
+        let time = globalTime(atX: clampedX, width: waveformWidth)
+        if let loop = controller.session.loopRegion, time < loop.start || time > loop.end {
+            controller.deselectLoop()
+        }
+        controller.seek(to: time)
     }
 
     /// Build the value for one equatable track row. All observable reads
@@ -2369,6 +2385,19 @@ struct ContentView: View {
                 .contentShape(Rectangle())
                 .gesture(loopSelectionGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
 
+            // Narrow drag strip that rides with the playhead line so the
+            // indicator itself can be grabbed anywhere in the lanes. The loop
+            // resize handles are mounted above it and keep priority where they
+            // overlap.
+            TimelinePlayheadDragBandView(
+                controller: controller,
+                playheadDragX: playheadDragX,
+                waveformWidth: waveformWidth,
+                height: trackTimelineHeight,
+                bandWidth: Self.playheadHitWidth
+            )
+            .gesture(playheadDragGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
+
             // Selection rectangle + resize handles. Their x-positioning depends
             // on the per-scroll-event visible window, so it lives in a leaf that
             // alone reads it; the gesture LOGIC stays here in closures.
@@ -2487,12 +2516,26 @@ struct ContentView: View {
                 }
             } else {
                 // A plain click: seek, deselecting first if it lands outside the loop.
+                if let trackID = waveformTrackID(atY: value.location.y) {
+                    controller.selectActiveTrack(trackID)
+                }
                 if let loop = controller.session.loopRegion, t < loop.start || t > loop.end {
                     controller.deselectLoop()
                 }
                 controller.seek(to: t)
             }
         }
+    }
+
+    private func waveformTrackID(atY y: CGFloat) -> SessionTrack.ID? {
+        guard let index = WaveformTrackSelectionPolicy.trackIndex(
+            atY: y,
+            rowStep: reorderRowStep,
+            trackCount: controller.session.tracks.count
+        ) else {
+            return nil
+        }
+        return controller.session.tracks[index].id
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
@@ -2662,7 +2705,7 @@ struct ContentView: View {
     /// transitions only. Runs on every mouse-move; the math is a handful of
     /// float compares against the captured section geometry.
     private func updateTimelineCursor(for event: NSEvent) {
-        // A ruler scrub owns the cursor (closed hand) for its duration.
+        // An active playhead drag owns the cursor (closed hand) for its duration.
         guard playheadDragX == nil else { return }
         guard
             let geometry = timelineCursorGeometry,
@@ -2691,17 +2734,18 @@ struct ContentView: View {
         }
 
         let seatBottom = trackHeaderHeight + trackTimelineDividerHeight
+        let playheadX = xPosition(for: controller.displayTransportPosition(), width: geometry.waveformWidth)
 
         // The grabber band along the bottom of the ruler.
         if y >= seatBottom - Self.playheadHandleHeight, y <= seatBottom {
-            let playheadX = xPosition(for: controller.displayTransportPosition(), width: geometry.waveformWidth)
             if abs(columnX - playheadX) <= Self.playheadHitWidth / 2 {
                 setTimelineCursor(.playheadGrab)
                 return
             }
         }
 
-        // The lanes: loop resize handles at the loop edges.
+        // The lanes: loop resize handles at the loop edges, otherwise the
+        // draggable playhead band.
         if y > seatBottom, let loop = displayedLoopRegion {
             let startX = xPosition(for: loop.start, width: geometry.waveformWidth)
             let endX = xPosition(for: loop.end, width: geometry.waveformWidth)
@@ -2710,6 +2754,11 @@ struct ContentView: View {
                 setTimelineCursor(.loopResize)
                 return
             }
+        }
+
+        if y > seatBottom, abs(columnX - playheadX) <= Self.playheadHitWidth / 2 {
+            setTimelineCursor(.playheadGrab)
+            return
         }
 
         setTimelineCursor(.standard)
@@ -2943,6 +2992,8 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
     let contentEnd: TimeInterval
     /// Native scroll offset mapped back to the visible timeline start.
     let onScroll: (TimeInterval) -> Void
+    /// Whether the native timeline scroll view is still moving.
+    let onScrollActivityChanged: (Bool) -> Void
     /// Pinch: magnification delta, plus the cursor's `0...1` position.
     let onMagnify: (Double, Double) -> Void
 
@@ -2953,6 +3004,7 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
     func makeNSView(context: Context) -> TimelineScrollNSView {
         let view = TimelineScrollNSView()
         view.onMagnify = onMagnify
+        view.onScrollActivityChanged = onScrollActivityChanged
         context.coordinator.attach(to: view)
         configure(view)
         return view
@@ -2960,6 +3012,7 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
 
     func updateNSView(_ nsView: TimelineScrollNSView, context: Context) {
         nsView.onMagnify = onMagnify
+        nsView.onScrollActivityChanged = onScrollActivityChanged
         context.coordinator.onScroll = onScroll
         configure(nsView)
     }
@@ -3006,6 +3059,7 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
                 visibleSpan: scrollView.timelineVisibleSpan,
                 pointsPerSecond: scrollView.timelinePointsPerSecond
             )
+            scrollView.noteNativeHorizontalScrollDidMove()
             scrollView.isReportingNativeScroll = true
             onScroll(visibleStart)
             DispatchQueue.main.async { [weak scrollView] in
@@ -3018,6 +3072,7 @@ private struct TimelineScrollOverlay: NSViewRepresentable {
 final class TimelineScrollNSView: NSScrollView {
     var onMagnify: ((Double, Double) -> Void)?
     var timelineVisibleStart: TimeInterval = 0
+    var onScrollActivityChanged: ((Bool) -> Void)?
     var timelineContentStart: TimeInterval = 0
     var timelineContentEnd: TimeInterval = 0
     var timelineVisibleSpan: TimeInterval = 0
@@ -3025,11 +3080,17 @@ final class TimelineScrollNSView: NSScrollView {
     var isReportingNativeScroll = false
     var isApplyingProgrammaticSync = false
     private var lockedScrollAxis: ScrollAxis?
+    private var nativeScrollSettleWorkItem: DispatchWorkItem?
+    private var isNativeHorizontalScrollActive = false
 
     private enum ScrollAxis {
         case horizontal
         case vertical
     }
+
+    /// Short debounce after the last native movement so inertial scrolling can
+    /// settle before playback auto-follow resumes.
+    private static let nativeScrollSettleDelay: TimeInterval = 0.12
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -3127,6 +3188,15 @@ final class TimelineScrollNSView: NSScrollView {
         }
     }
 
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            nativeScrollSettleWorkItem?.cancel()
+            nativeScrollSettleWorkItem = nil
+            setNativeHorizontalScrollActive(false)
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
     // Only claim the events we handle. `NSApp.currentEvent` lets `hitTest`
     // decide per-event: scroll/magnify route to us, everything else (clicks,
     // drags, vertical scroll) falls through to the views below. Scroll gestures
@@ -3215,6 +3285,26 @@ final class TimelineScrollNSView: NSScrollView {
             || event.phase.contains(.cancelled)
             || event.momentumPhase.contains(.ended)
             || event.momentumPhase.contains(.cancelled)
+    }
+
+    func noteNativeHorizontalScrollDidMove() {
+        nativeScrollSettleWorkItem?.cancel()
+        setNativeHorizontalScrollActive(true)
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.setNativeHorizontalScrollActive(false)
+        }
+        nativeScrollSettleWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.nativeScrollSettleDelay,
+            execute: workItem
+        )
+    }
+
+    private func setNativeHorizontalScrollActive(_ isActive: Bool) {
+        guard isNativeHorizontalScrollActive != isActive else { return }
+        isNativeHorizontalScrollActive = isActive
+        onScrollActivityChanged?(isActive)
     }
 
     /// Multiplier applied to the raw trackpad pinch delta. Higher = zoom
@@ -4122,6 +4212,7 @@ private struct TimelineScrollOverlayLeaf: View {
             contentStart: controller.session.timelineStart,
             contentEnd: controller.session.timelineEnd,
             onScroll: { controller.scrollTimeline(toVisibleStart: $0) },
+            onScrollActivityChanged: { controller.setTimelineScrollActive($0) },
             onMagnify: { controller.magnifyTimeline(by: $0, atFraction: $1) }
         )
     }
@@ -4134,7 +4225,7 @@ private struct TimelineScrollOverlayLeaf: View {
 /// costs zero main-thread work between anchor events.
 private struct TimelinePlayheadOverlayView: View {
     var controller: PlaybackController
-    /// While a ruler scrub is in flight: the preview x within the column.
+    /// While a playhead drag is in flight: the preview x within the column.
     var playheadDragX: CGFloat?
     var infoWidth: CGFloat
     var sectionHeight: CGFloat
@@ -4159,6 +4250,39 @@ private struct TimelinePlayheadOverlayView: View {
         // view overrides `hitTest` to nil); kept here so the leaf can never
         // intercept clicks regardless of how it's mounted.
         .allowsHitTesting(false)
+    }
+
+    private func xPosition(for globalTime: TimeInterval) -> CGFloat {
+        CGFloat(
+            TransportMapping.normalizedPosition(
+                globalTime: globalTime,
+                timelineStart: controller.visibleStart,
+                timelineEnd: controller.visibleEnd
+            )
+        ) * waveformWidth
+    }
+}
+
+/// Transparent hit target that rides with the playhead line through the lane
+/// area. A leaf so the x-position re-derives on transport/window changes
+/// without pulling those reads into the surrounding lane container.
+private struct TimelinePlayheadDragBandView: View {
+    var controller: PlaybackController
+    var playheadDragX: CGFloat?
+    var waveformWidth: CGFloat
+    var height: CGFloat
+    var bandWidth: CGFloat
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.001))
+            .frame(width: bandWidth, height: height)
+            .contentShape(Rectangle())
+            .offset(x: currentX - bandWidth / 2)
+    }
+
+    private var currentX: CGFloat {
+        playheadDragX ?? xPosition(for: controller.displayTransportPosition())
     }
 
     private func xPosition(for globalTime: TimeInterval) -> CGFloat {

@@ -1246,6 +1246,33 @@ struct SessionTests {
 
     @MainActor
     @Test
+    func nudgingActiveTrackOffsetUsesConfiguredSettingsSteps() async throws {
+        let url = try makeTemporaryAudioFile(name: "nudged-offset.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let defaults = InMemoryAppSettingsDefaults()
+        defaults.set(37, forKey: AppSettings.offsetStepKey)
+        defaults.set(420, forKey: AppSettings.offsetLargeStepKey)
+
+        let controller = PlaybackController()
+        let settings = AppSettings(defaults: defaults)
+        controller.settings = settings
+        await controller.loadImportedFiles([url])
+        let trackID = try #require(controller.session.activeTrackID)
+
+        controller.nudgeActiveTrackOffset(direction: 1, largeStep: false)
+        #expect(controller.session.activeTrack?.loadedTrack.offsetSeconds == 0.037)
+
+        controller.nudgeActiveTrackOffset(direction: 1, largeStep: true)
+        #expect(controller.session.activeTrack?.loadedTrack.offsetSeconds == 0.457)
+
+        controller.nudgeActiveTrackOffset(direction: -1, largeStep: false)
+        #expect(controller.session.activeTrack?.loadedTrack.offsetSeconds == 0.42)
+        #expect(controller.session.activeTrackID == trackID)
+    }
+
+    @MainActor
+    @Test
     func importedFilesAppendWhilePlayingPreservesPlaybackStateAndPosition() async throws {
         let first = try makeTemporaryAudioFile(name: "playing-first.wav")
         let second = try makeTemporaryAudioFile(name: "playing-second.wav")
@@ -1690,6 +1717,22 @@ struct SessionTests {
         #expect(SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: .shift, fallbackFlags: []) == true)
         #expect(SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: [], fallbackFlags: .shift) == true)
         #expect(SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: [.command, .shift], fallbackFlags: []) == true)
+    }
+
+    @Test
+    func waveformTrackSelectionMapsClicksToTrackRows() {
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 0, rowStep: 97, trackCount: 3) == 0)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 96, rowStep: 97, trackCount: 3) == 0)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 97, rowStep: 97, trackCount: 3) == 1)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 289, rowStep: 97, trackCount: 3) == 2)
+    }
+
+    @Test
+    func waveformTrackSelectionRejectsOutOfBoundsClicks() {
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: -1, rowStep: 97, trackCount: 3) == nil)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 291, rowStep: 97, trackCount: 3) == nil)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 0, rowStep: 0, trackCount: 3) == nil)
+        #expect(WaveformTrackSelectionPolicy.trackIndex(atY: 0, rowStep: 97, trackCount: 0) == nil)
     }
 
     @Test
