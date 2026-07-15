@@ -1,7 +1,7 @@
 .build/
 build/
 .claude/worktrees/
-.codex
+.codex/worktrees/
 DerivedData/
 .derived-data/
 .superpowers/
@@ -10,6 +10,7 @@ DerivedData/
 .swiftpm/
 *.xcuserstate
 xcuserdata/
+
 
 Private/
 .derived-data-ui/

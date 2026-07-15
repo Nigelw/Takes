@@ -277,6 +277,32 @@ struct TrackDropHighlightTests {
     }
 
     @Test
+    func finderSelectionResolverRecursivelyFindsAudioFilesInFolders() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let nested = root.appending(path: "nested", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let directAudio = root.appending(path: "direct.wav")
+        let ignoredText = root.appending(path: "notes.txt")
+        let nestedAudio = nested.appending(path: "nested.m4a")
+        let directInputAudio = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".mp3")
+        try Data().write(to: directAudio)
+        try Data().write(to: ignoredText)
+        try Data().write(to: nestedAudio)
+        try Data().write(to: directInputAudio)
+        defer { try? FileManager.default.removeItem(at: directInputAudio) }
+
+        let resolvedURLs = try FinderSelectionResolver.audioFileURLs(from: [root, directInputAudio])
+
+        #expect(
+            resolvedURLs.map { $0.resolvingSymlinksInPath() }
+                == [directAudio, nestedAudio, directInputAudio].map { $0.resolvingSymlinksInPath() }
+        )
+    }
+
+    @Test
     func finderSelectionResolverRejectsEmptySelection() {
         #expect(throws: PlaybackError.librarySelectionFailed("Finder has no selected files.")) {
             try FinderSelectionResolver.audioFileURLs(from: [])
@@ -289,6 +315,22 @@ struct TrackDropHighlightTests {
 
         #expect(throws: PlaybackError.librarySelectionFailed("No audio files are selected in the Finder.")) {
             try FinderSelectionResolver.audioFileURLs(from: [text])
+        }
+    }
+
+    @Test
+    func finderSelectionResolverRejectsFolderSelectionWithNoAudioFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let nested = root.appending(path: "nested", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try Data().write(to: root.appending(path: "notes.txt"))
+        try Data().write(to: nested.appending(path: "image.png"))
+
+        #expect(throws: PlaybackError.librarySelectionFailed("No audio files are selected in the Finder.")) {
+            try FinderSelectionResolver.audioFileURLs(from: [root])
         }
     }
 

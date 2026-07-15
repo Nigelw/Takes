@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import Testing
 @testable import Takes
 
@@ -473,6 +474,24 @@ struct TimelineViewportTests {
     func scrollGeometryDocumentWidthTracksZoom() {
         #expect(TimelineScrollGeometry.documentWidth(contentSpan: 100, visibleSpan: 100, viewportWidth: 800) == 800)
         #expect(TimelineScrollGeometry.documentWidth(contentSpan: 100, visibleSpan: 20, viewportWidth: 800) == 4000)
+    }
+
+    @Test @MainActor
+    func timelineScrollViewInitialLayoutEstablishesDocumentGeometry() {
+        let scrollView = TimelineScrollNSView(frame: .zero)
+        scrollView.configureTimeline(
+            visibleStart: 0,
+            visibleSpan: 100,
+            contentStart: 0,
+            contentEnd: 100
+        )
+        #expect(scrollView.documentView?.frame.width == 0)
+
+        scrollView.frame = NSRect(x: 0, y: 0, width: 800, height: 200)
+        scrollView.layout()
+
+        #expect(scrollView.timelinePointsPerSecond == 8)
+        #expect(scrollView.documentView?.frame == NSRect(x: 0, y: 0, width: 800, height: 200))
     }
 
     @Test
