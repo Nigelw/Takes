@@ -151,6 +151,10 @@ struct ComparisonSession: Equatable {
         !tracks.isEmpty && timelineEnd > timelineStart
     }
 
+    var canToggleBlindListeningMode: Bool {
+        !tracks.isEmpty
+    }
+
     var canSwitchPlayback: Bool {
         tracks.count >= 2
     }
