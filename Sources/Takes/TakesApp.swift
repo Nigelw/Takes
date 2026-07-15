@@ -884,22 +884,22 @@ private struct PlaybackCommands: Commands {
             .disabled(!controller.session.canSwitchPlayback || controller.isAligning)
 
             Menu("Nudge Track") {
-                Button("Decrease Offset") {
+                Button("Nudge Left") {
                     controller.nudgeActiveTrackOffset(direction: -1, largeStep: false)
                 }
                 .keyboardShortcut("j", modifiers: [.command])
 
-                Button("Increase Offset") {
-                    controller.nudgeActiveTrackOffset(direction: 1, largeStep: false)
-                }
-                .keyboardShortcut("k", modifiers: [.command])
-
-                Button("Decrease Offset by Large Nudge") {
+                Button("Large Nudge Left") {
                     controller.nudgeActiveTrackOffset(direction: -1, largeStep: true)
                 }
                 .keyboardShortcut("j", modifiers: [.command, .shift])
 
-                Button("Increase Offset by Large Nudge") {
+                Button("Nudge Right") {
+                    controller.nudgeActiveTrackOffset(direction: 1, largeStep: false)
+                }
+                .keyboardShortcut("k", modifiers: [.command])
+
+                Button("Large Nudge Right") {
                     controller.nudgeActiveTrackOffset(direction: 1, largeStep: true)
                 }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
