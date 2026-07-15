@@ -10,6 +10,35 @@ The playhead disappears under it (docs/small-tweaks-images/CleanShot 2026-07-08 
 
 ---
 
+## Add setting for displaying filename vs track name
+
+Ready to merge: No
+
+Changes needed:
+- default to showing track name rather than filename
+- FLAC metadata not supported
+- when showing filename, add audio format to metadata (AAC, MP3, FLAC, etc)
+
+- Status: done on `codex/tweak-track-name-setting` commit `e79e0be731a99aa4b6ccbe71e83b5914e3317b8f`.
+
+- Testing notes: targeted `xcodebuild test` passed for `TakesTests/SessionTests`, and targeted Debug build passed in `.codex/worktrees/tweak-track-name-setting`. Added focused coverage for filename default behavior, metadata fallback, stored setting default/readback, and remote playback title behavior while blind mode remains anonymous.
+
+Track name should fallback to filename if metadata doesn’t exist
+
+---
+
+## Make the install dmg prettier
+
+Ready to merge: No
+
+- Status: done on `codex/tweak-pretty-dmg` commit `a65eec699a3b011e051e90c1f1ad187720a61f81`.
+
+- Testing notes: `bash -n scripts/build-release.sh` passed, `scripts/make-dmg-background.swift` rendered a valid 1200x800 PNG, and `sips` confirmed the output dimensions. Local `create-dmg` smoke build could not complete because `hdiutil` failed in this environment with `Device not configured`; full signed/notarized release build was not run.
+
+When we generate the dmg as part of the build process, the icons are vertically centered. Would also be nice to have a subtle background in the window if you can generate something nice.
+
+---
+
 ## Make the progress ring that shows up during "deep tempo analysis" based on theme’s indigo color, not orange/cyan highlight color
 
 Ready to merge: Yes
@@ -152,23 +181,6 @@ Add a window (opened from the debug menu) that allows you to set the 3 types of 
 
 ---
 
-## Add setting for displaying filename vs track name
-
-Ready to merge: No
-
-Changes needed:
-- default to showing track name rather than filename
-- FLAC metadata not supported
-- when showing filename, add audio format to metadata (AAC, MP3, FLAC, etc)
-
-- Status: done on `codex/tweak-track-name-setting` commit `e79e0be731a99aa4b6ccbe71e83b5914e3317b8f`.
-
-- Testing notes: targeted `xcodebuild test` passed for `TakesTests/SessionTests`, and targeted Debug build passed in `.codex/worktrees/tweak-track-name-setting`. Added focused coverage for filename default behavior, metadata fallback, stored setting default/readback, and remote playback title behavior while blind mode remains anonymous.
-
-Track name should fallback to filename if metadata doesn’t exist
-
----
-
 ## Track name tooltip improvements
 
 Ready to merge: Yes
@@ -179,18 +191,6 @@ Ready to merge: Yes
 
 - only show tooltips if names are truncated
 - position pop-up directly over the name if possible
-
----
-
-## Make the install dmg prettier
-
-Ready to merge: No
-
-- Status: done on `codex/tweak-pretty-dmg` commit `a65eec699a3b011e051e90c1f1ad187720a61f81`.
-
-- Testing notes: `bash -n scripts/build-release.sh` passed, `scripts/make-dmg-background.swift` rendered a valid 1200x800 PNG, and `sips` confirmed the output dimensions. Local `create-dmg` smoke build could not complete because `hdiutil` failed in this environment with `Device not configured`; full signed/notarized release build was not run.
-
-When we generate the dmg as part of the build process, the icons are vertically centered. Would also be nice to have a subtle background in the window if you can generate something nice.
 
 ---
 
