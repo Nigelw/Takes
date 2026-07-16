@@ -209,6 +209,14 @@ struct CursorResetPolicy {
     }
 }
 
+struct TimelineCursorHitPolicy {
+    static let columnResizeHitWidth: CGFloat = 12
+
+    static func isColumnResizeTarget(columnX: CGFloat, hasDisplayedTracks: Bool) -> Bool {
+        hasDisplayedTracks && abs(columnX) <= columnResizeHitWidth / 2
+    }
+}
+
 enum TrackDropHighlight: Equatable {
     case normal
     case dropTarget
@@ -1305,9 +1313,22 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             transportBar
                 .fixedSize(horizontal: false, vertical: true)
-            beveledSectionDivider
             trackTimelineSection
                 .frame(maxHeight: .infinity)
+                // Recess the complete timeline section—including its header
+                // and ruler—beneath the lighter transport surface.
+                .background(Theme.timelineWellShade)
+                // Restore the transport shadow using the fixed-column
+                // shadow's exact color and 5pt fade extent.
+                .overlay(alignment: .top) {
+                    LinearGradient(
+                        colors: [Theme.frozenColumnShadow, .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: Self.frozenSurfaceShadowExtent)
+                    .allowsHitTesting(false)
+                }
         }
     }
 
@@ -1329,7 +1350,6 @@ struct ContentView: View {
             Color.clear
                 .frame(
                     height: TakesWindowPolicy.transportBarReservedHeight
-                        + TakesWindowPolicy.rootVerticalSpacing
                         + (controller.displayedTrackRowCount == 0 ? 0 : trackHeaderHeight + trackTimelineDividerHeight)
                 )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
@@ -1733,13 +1753,9 @@ struct ContentView: View {
                     // column split — one centered drop/click target.
                     trackAreaEmptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Theme.timelineWellShade)
                 } else {
                     trackTimelineHeader(infoWidth: infoWidth, waveformWidth: waveformWidth)
                         .frame(width: proxy.size.width, height: trackHeaderHeight)
-                        // The controls and ruler share the transport deck's
-                        // exact surface treatment on both sides of the split.
-                        .background(Theme.transportBarLift)
                     beveledSectionDivider
 
                     ScrollView(.vertical) {
@@ -1848,20 +1864,6 @@ struct ContentView: View {
                     }
                     .coordinateSpace(name: Self.trackScrollSpace)
                     .frame(maxHeight: .infinity)
-                    // The recessed well now begins below the header rather than
-                    // tinting the header underneath its transport-matched fill.
-                    .background(Theme.timelineWellShade)
-                    // Match the frozen info column's shadow exactly, rotated
-                    // vertically beneath the complete header.
-//                    .overlay(alignment: .top) {
-//                        LinearGradient(
-//                            colors: [Theme.frozenColumnShadow, .clear],
-//                            startPoint: .top,
-//                            endPoint: .bottom
-//                        )
-//                        .frame(height: Self.frozenSurfaceShadowExtent)
-//                        .allowsHitTesting(false)
-//                    }
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
@@ -1958,14 +1960,13 @@ struct ContentView: View {
     }
 
     private func trackInfoColumnResizeHandle(sectionWidth: CGFloat, sectionHeight: CGFloat, infoWidth: CGFloat) -> some View {
-        let hitWidth: CGFloat = 12
         return TrackInfoColumnResizeHandleView(
             sectionWidth: sectionWidth,
             columnWidth: trackInfoColumnWidthBinding
         )
-            .frame(width: hitWidth, height: sectionHeight)
+            .frame(width: TimelineCursorHitPolicy.columnResizeHitWidth, height: sectionHeight)
             .contentShape(Rectangle())
-            .offset(x: infoWidth - hitWidth / 2)
+            .offset(x: infoWidth - TimelineCursorHitPolicy.columnResizeHitWidth / 2)
             .accessibilityLabel("Resize track info column")
     }
 
@@ -2777,6 +2778,7 @@ struct ContentView: View {
 
     enum TimelineCursorShape {
         case standard
+        case columnResize
         case playheadGrab
         case loopResize
     }
@@ -2808,6 +2810,19 @@ struct ContentView: View {
 
         let columnX = point.x - geometry.sectionFrame.minX - geometry.infoWidth
         let y = point.y - geometry.sectionFrame.minY
+
+        // The column resize handle is layered above the timeline and owns a
+        // 12pt strip centered on the split. Give its cursor the same priority
+        // as its hit testing before considering playhead or loop targets.
+        if geometry.sectionFrame.contains(point),
+            TimelineCursorHitPolicy.isColumnResizeTarget(
+                columnX: columnX,
+                hasDisplayedTracks: controller.displayedTrackRowCount > 0
+            ) {
+            setTimelineCursor(.columnResize)
+            return
+        }
+
         guard
             geometry.sectionFrame.contains(point),
             columnX >= 0, columnX <= geometry.waveformWidth,
@@ -2857,6 +2872,8 @@ struct ContentView: View {
             guard timelineCursorShape != .standard else { return }
             timelineCursorShape = .standard
             NSCursor.arrow.set()
+        case .columnResize:
+            reassertTimelineCursor(NSCursor.resizeLeftRight, shape: shape)
         case .playheadGrab:
             reassertTimelineCursor(NSCursor.openHand, shape: shape)
         case .loopResize:
