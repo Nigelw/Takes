@@ -333,10 +333,10 @@ enum TakesWindowPolicy {
     static let timelineHeaderSpacing: CGFloat = 1
     // Play button / readout (56) + vertical padding (20 top + 16 bottom,
     // optically shifted 2pt below true center).
-    static let transportBarReservedHeight: CGFloat = 92
+    static let controlBarReservedHeight: CGFloat = 92
     static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
     static let defaultContentHeight = contentHeight(displayingTrackRows: 1)
-    // The root view ignores the top safe area, so the transport bar occupies
+    // The root view ignores the top safe area, so the control bar occupies
     // the hidden-titlebar region and the window adds no extra chrome height.
     static let windowChromeHeight: CGFloat = 0
     // The hidden titlebar still reports a top safe-area inset, and
@@ -370,7 +370,7 @@ enum TakesWindowPolicy {
 
     static func contentHeight(displayingTrackRows rowCount: Int) -> CGFloat {
         contentPadding * 2
-            + transportBarReservedHeight
+            + controlBarReservedHeight
             + trackTimelineHeaderHeight
             + timelineHeaderSpacing
             + trackTimelineHeight(displayingTrackRows: rowCount)
@@ -461,7 +461,7 @@ enum TakesWindowPolicy {
         let hasSavedFrame = hasSavedMainWindowFrame(defaults: defaults)
         window.minSize = minimumWindowSize
 
-        // Unify the titlebar with the transport bar: let content draw up
+        // Unify the titlebar with the control bar: let content draw up
         // behind a transparent titlebar so the top bar reads as one surface,
         // with only the traffic lights floating over it.
         window.styleMask.insert(.fullSizeContentView)

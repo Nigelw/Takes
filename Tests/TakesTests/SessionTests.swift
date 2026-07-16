@@ -190,7 +190,7 @@ struct SessionTests {
 
     @Test
     func windowPolicyAddsNoChromeHeightAboveContent() {
-        // The transport bar occupies the hidden-titlebar region (the root view
+        // The control bar occupies the hidden-titlebar region (the root view
         // ignores the top safe area), so the window is exactly content-sized.
         #expect(TakesWindowPolicy.windowChromeHeight == 0)
         #expect(TakesWindowPolicy.defaultWindowHeight == TakesWindowPolicy.defaultContentHeight)

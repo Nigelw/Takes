@@ -115,7 +115,7 @@ and its suppression during reorder drags.
   scroll offset), which some hover implementations get wrong.
 - **Things to get explicitly right** (these are the actual risk, not resize):
   1. Return "no row hovered" cleanly when the pointer is over the header /
-     transport bar / empty space below the last row, and when the window isn't
+     control bar / empty space below the last row, and when the window isn't
      key (the gate handles this).
   2. Preserve the existing reorder-drag suppression (`reorderDraggingID == nil`)
      so the trash button doesn't flash across rows mid-drag.

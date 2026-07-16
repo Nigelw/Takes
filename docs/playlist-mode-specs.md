@@ -51,7 +51,7 @@ status bar
 - rows are minimized and waveforms replaced by metadata columns
 - no offset field
 - readout gains info: timeline, track name + artist - album (track info should only scroll when it’s key window)
-- change external file drop behavior: insert at drop position (or at end if dropped on transport bar)
+- change external file drop behavior: insert at drop position (or at end if dropped on control bar)
 - disable menu items: switch/switch prev track, auto-align, blind mode
 
 mode transitions:
