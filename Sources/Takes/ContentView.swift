@@ -1059,6 +1059,8 @@ struct ContentView: View {
     /// Rows beyond the visible viewport on each side that still rasterize, so
     /// small scrolls reveal already-rendered lanes.
     private static let renderableRowOverscan = 2
+    /// Shared extent of the shadows cast by frozen timeline surfaces.
+    private static let frozenSurfaceShadowExtent: CGFloat = 5
 
     /// Row indices intersecting the vertical viewport ± overscan. Rows are
     /// fixed-height, so this is pure math on the content offset.
@@ -1303,28 +1305,33 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             transportBar
                 .fixedSize(horizontal: false, vertical: true)
-            // Two half-point edges preserve the divider's 1pt layout height
-            // while reading as a crisp recessed bevel on Retina displays.
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(Theme.transportDividerShadow)
-                Rectangle()
-                    .fill(Theme.transportDividerHighlight)
-            }
-            .frame(height: 1)
-            .allowsHitTesting(false)
+            beveledSectionDivider
             trackTimelineSection
                 .frame(maxHeight: .infinity)
-                // Recessed well: a faint dark scrim distinguishes the timeline from
-                // the raised transport bar and gives the beveled divider contrast.
-                .background(Theme.timelineWellShade)
         }
+    }
+
+    /// Two half-point edges preserve the divider's 1pt layout height while
+    /// reading as a crisp recessed bevel on Retina displays.
+    private var beveledSectionDivider: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Theme.transportDividerShadow)
+            Rectangle()
+                .fill(Theme.transportDividerHighlight)
+        }
+        .frame(height: 1)
+        .allowsHitTesting(false)
     }
 
     private var trackDropHighlightOverlay: some View {
         VStack(spacing: 0) {
             Color.clear
-                .frame(height: TakesWindowPolicy.transportBarReservedHeight + TakesWindowPolicy.rootVerticalSpacing)
+                .frame(
+                    height: TakesWindowPolicy.transportBarReservedHeight
+                        + TakesWindowPolicy.rootVerticalSpacing
+                        + (controller.displayedTrackRowCount == 0 ? 0 : trackHeaderHeight + trackTimelineDividerHeight)
+                )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
         }
         .allowsHitTesting(false)
@@ -1726,10 +1733,14 @@ struct ContentView: View {
                     // column split — one centered drop/click target.
                     trackAreaEmptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Theme.timelineWellShade)
                 } else {
                     trackTimelineHeader(infoWidth: infoWidth, waveformWidth: waveformWidth)
                         .frame(width: proxy.size.width, height: trackHeaderHeight)
-                    Divider()
+                        // The controls and ruler share the transport deck's
+                        // exact surface treatment on both sides of the split.
+                        .background(Theme.transportBarLift)
+                    beveledSectionDivider
 
                     ScrollView(.vertical) {
                         ZStack(alignment: .topLeading) {
@@ -1837,6 +1848,20 @@ struct ContentView: View {
                     }
                     .coordinateSpace(name: Self.trackScrollSpace)
                     .frame(maxHeight: .infinity)
+                    // The recessed well now begins below the header rather than
+                    // tinting the header underneath its transport-matched fill.
+                    .background(Theme.timelineWellShade)
+                    // Match the frozen info column's shadow exactly, rotated
+                    // vertically beneath the complete header.
+//                    .overlay(alignment: .top) {
+//                        LinearGradient(
+//                            colors: [Theme.frozenColumnShadow, .clear],
+//                            startPoint: .top,
+//                            endPoint: .bottom
+//                        )
+//                        .frame(height: Self.frozenSurfaceShadowExtent)
+//                        .allowsHitTesting(false)
+//                    }
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
@@ -1865,7 +1890,7 @@ struct ContentView: View {
                         startPoint: .leading,
                         endPoint: .trailing
                     )
-                    .frame(width: 5, height: proxy.size.height)
+                    .frame(width: Self.frozenSurfaceShadowExtent, height: proxy.size.height)
                     .offset(x: infoWidth)
                     .allowsHitTesting(false)
                 }
@@ -4196,7 +4221,7 @@ private struct TimelineHeaderRulerView: View {
     // major (labeled) ticks are tall — their top edge comes up to just beneath the number so the
     // label sits against the tick like a baseline — while minor ticks stay short. Both are
     // bottom-anchored so they hang toward the rows.
-    private var tickColor: Color { .secondary.opacity(0.45) }
+    private var tickColor: Color { Theme.timelineRulerTick }
     private var majorTickHeight: CGFloat { 19 }
     private var minorTickHeight: CGFloat { 8 }
     /// Vertical inset of the time label from the top of the header.

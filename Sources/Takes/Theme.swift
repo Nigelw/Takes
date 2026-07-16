@@ -102,6 +102,9 @@ enum Theme {
     /// Hairline separators between full-bleed regions and rows.
     static let hairline = Color(nsColor: .separatorColor)
 
+    /// Major and minor timeline ruler ticks.
+    static let timelineRulerTick = Color.secondary.opacity(0.45)
+
     /// Subtle shadow cast by the frozen info/control column onto the timeline.
     /// Slightly stronger in dark mode so the overlap still reads without a hard
     /// divider line.
