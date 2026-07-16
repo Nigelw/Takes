@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-07-16
+
+### New
+
+- Major performance improvements throughout the app
+- Files open quicker
+  - Waveforms render much faster and the UI remains responsive while loading
+- CPU usage is drastically reduced
+  - Playback with 1 track has been reduced from 40% → 2.5% (comparable to QuickTime player)
+  - Playback with 20 tracks has been reduced from 103% → 8% (less than QuickTime Player at 32%)
+  - Idle CPU consumption is now 0%
+  - (All measurements taken with an M1 MacBook Pro)
+- UI responsiveness is vastly improved
+  - Zooming, scrolling, and playhead-following is fluid, even with dozens of files open
+  - Dragging to rearrange tracks animates smoothly
+  - Playhead glides continuously instead of ticking along
+
+### Improved
+
+- Loops are now gapless, wrapping seamlessly to the beginning of the next loop
+- Quickly adjust a track's offset without selecting the input field using new keyboard shortcuts
+- Improved waveform interactivity
+  - The playhead can be dragged in the waveform area (previously dragging was limited to the grabber in the ruler area)
+  - Clicking on a waveform switches playback to that track (previously you had to click in the info column)
+- Quick Open from Finder now supports folder selections
+- Added haptic feedback to the zoom slider
+- Inertial scroll during playback behaves naturally: it settles to a stop before jumping to the playhead, rather than fighting with playhead-follow and causing jerkiness
+- Refined the app's visual design, icons, and hit targets throughout
+
+### Fixed
+
+- Mouse cursor reliably changes state when hovering over overlapping UI elements to show which interaction has priority
+- Tooltips are only shown when text has been truncated
+- Shrunk the hit target of the "Click Here to Compare" button to prevent accidental clicks when there are no tracks loaded
+- Blind Listening Mode is disabled when no tracks are loaded
+
 ## [2.8.2] - 2026-07-06
 
 ### Fixed

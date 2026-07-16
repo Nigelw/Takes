@@ -1,6 +1,6 @@
 ## Make info area have the smallest of drop shadows
 
-Ready to merge: No
+Ready to merge: Yes
 
 - Status: done on `codex/tweak-info-shadow` commit `5ef024db948d38503be0dee6befc75d65e52b1ac`.
 
