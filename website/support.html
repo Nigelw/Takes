@@ -98,38 +98,35 @@
               </ul>
             </article>
 
-            <div class="help-card-grid">
-              <article class="help-card">
-                <h3>Selection looping</h3>
-                <p>Use selection looping to focus on a specific passage. <kbd>Drag</kbd> or <kbd>Shift</kbd><span class="key-sep">+</span><kbd>Click</kbd> in the timeline area to create a loop.</p>
-                <ul>
-                  <li>"Switch &amp; Repeat" mode is automatically enabled when looping. This changes tracks each time playback loops so you can compare the same passage across tracks.</li>
-                  <li>You can also repeat one, to keep looping the same track.</li>
-                  <li>Clearing a loop automatically switches off repeat mode.</li>
-                </ul>
-              </article>
+            <article class="help-card">
+              <h3>Auto-align</h3>
+              <p>Different copies of a track don't always line up perfectly. An extra bit of silence at the start of one can make toggling back and forth jarring, as each switch jumps the music backwards and forwards.</p>
+              <p>Auto-align analyzes the audio to find matching sections, and adjusts offsets so tracks line up perfectly.</p>
+              <ul>
+                <li>If tracks fall out of sync over time due to a difference in recordings, you can auto-align again at any time. It syncs offsets based on the current playhead position.</li>
+                <li>Auto-align only accepts confident matches and is tuned to avoid false positives, so it won't set crazy offsets if file matching is ambiguous.</li>
+                <li>For tracks with larger tempo differences, auto-align offers a deeper analysis option that searches tempo deviations, up to about 6 percent, to find alignment.</li>
+                <li>If auto-align can't sync up your tracks, Takes is specifically designed to make manual alignment as fast as possible. Use <kbd>Command</kbd><span class="key-sep">+</span><kbd>J</kbd><span class="key-sep">/</span><kbd>K</kbd> to nudge the active track backwards or forwards, hit <kbd>X</kbd> to toggle tracks while playing, and repeat as necessary.</li>
+              </ul>
+            </article>
 
-              <article class="help-card">
-                <h3>Blind listening mode</h3>
-                <p>Decide which take sounds best without bias. Blind listening mode hides names and metadata, anonymizes the waveforms, and shuffles the track order. It even hides the track name from the Now Playing widget in Control Center. No cheating! 😜</p>
-                <ul>
-                  <li>Turn off blind listening mode to reveal the name of your favorite version. (Track order only shuffles when turning it on; it remains unchanged when turning it off.)</li>
-                </ul>
-              </article>
+            <article class="help-card">
+              <h3>Selection looping</h3>
+              <p>Use selection looping to focus on a specific passage. <kbd>Drag</kbd> or <kbd>Shift</kbd><span class="key-sep">+</span><kbd>Click</kbd> in the timeline area to create a loop.</p>
+              <ul>
+                <li>"Switch &amp; Repeat" mode is automatically enabled when looping. This changes tracks each time playback loops so you can compare the same passage across tracks.</li>
+                <li>You can also repeat one, to keep looping the same track.</li>
+                <li>Clearing a loop automatically switches off repeat mode.</li>
+              </ul>
+            </article>
 
-              <article class="help-card">
-                <h3>Auto-align</h3>
-                <p>Different copies of a track don't always line up perfectly. An extra bit of silence at the start of one can make toggling back and forth jarring, as each switch jumps the music backwards and forwards.</p>
-                <p>Auto-align analyzes the audio to find matching sections, and adjusts offsets so tracks line up perfectly.</p>
-                <ul>
-                  <li>If tracks fall out of sync over time due to a difference in recordings, you can auto-align again at any time. It syncs offsets based on the current playhead position.</li>
-                  <li>Auto-align only accepts confident matches and is tuned to avoid false positives, so it won't set crazy offsets if file matching is ambiguous.</li>
-                  <li>For tracks with larger tempo differences, auto-align offers a deeper analysis option that searches tempo deviations, up to about 6 percent, to find alignment.</li>
-                  <li>If auto-align can't sync up your tracks, Takes is designed to make manual alignment as fast as possible. My own workflow is to start playback, nudge alignment, then toggle back and forth between tracks while playing and continuing to adjust as necessary.</li>
-                  <li>The Takes UI is specifically designed for quick keyboard navigation to make this easy: <kbd>Tab</kbd> into the offset field, nudge with <kbd>↑/↓</kbd> and hit <kbd>Enter</kbd>, hit <kbd>X</kbd> to toggle tracks.</li>
-                </ul>
-              </article>
-            </div>
+            <article class="help-card">
+              <h3>Blind listening mode</h3>
+              <p>Decide which take sounds best without bias. Blind listening mode hides names and metadata, anonymizes the waveforms, and shuffles the track order. It even hides the track name from the Now Playing widget in Control Center. No cheating! 😜</p>
+              <ul>
+                <li>Turn off blind listening mode to reveal the name of your favorite version. (Track order only shuffles when turning it on; it remains unchanged when turning it off.)</li>
+              </ul>
+            </article>
 
             <article class="help-card" id="shortcuts">
               <h3>Tips &amp; tricks</h3>
