@@ -1753,6 +1753,7 @@ struct ContentView: View {
                     // column split — one centered drop/click target.
                     trackAreaEmptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Theme.timelineWellShade)
                 } else {
                     trackTimelineHeader(infoWidth: infoWidth, waveformWidth: waveformWidth)
                         .frame(width: proxy.size.width, height: trackHeaderHeight)
@@ -1864,6 +1865,20 @@ struct ContentView: View {
                     }
                     .coordinateSpace(name: Self.trackScrollSpace)
                     .frame(maxHeight: .infinity)
+                    // The recessed well now begins below the header rather than
+                    // tinting the header underneath its transport-matched fill.
+                    .background(Theme.timelineWellShade)
+                    // Match the frozen info column's shadow exactly, rotated
+                    // vertically beneath the complete header.
+//                    .overlay(alignment: .top) {
+//                        LinearGradient(
+//                            colors: [Theme.frozenColumnShadow, .clear],
+//                            startPoint: .top,
+//                            endPoint: .bottom
+//                        )
+//                        .frame(height: Self.frozenSurfaceShadowExtent)
+//                        .allowsHitTesting(false)
+//                    }
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
