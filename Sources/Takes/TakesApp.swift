@@ -330,7 +330,6 @@ enum TakesWindowPolicy {
     static let trackTimelineDividerHeight: CGFloat = 1
     static let trackTimelineHeaderHeight: CGFloat = 34
     static let contentPadding: CGFloat = 0
-    static let rootVerticalSpacing: CGFloat = 1
     static let timelineHeaderSpacing: CGFloat = 1
     // Play button / readout (56) + vertical padding (20 top + 16 bottom,
     // optically shifted 2pt below true center).
@@ -372,7 +371,6 @@ enum TakesWindowPolicy {
     static func contentHeight(displayingTrackRows rowCount: Int) -> CGFloat {
         contentPadding * 2
             + transportBarReservedHeight
-            + rootVerticalSpacing
             + trackTimelineHeaderHeight
             + timelineHeaderSpacing
             + trackTimelineHeight(displayingTrackRows: rowCount)

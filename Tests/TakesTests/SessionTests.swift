@@ -1934,6 +1934,16 @@ struct SessionTests {
     }
 
     @Test
+    func timelineCursorPrioritizesTheColumnResizeHitStrip() {
+        #expect(TimelineCursorHitPolicy.isColumnResizeTarget(columnX: -6, hasDisplayedTracks: true))
+        #expect(TimelineCursorHitPolicy.isColumnResizeTarget(columnX: 0, hasDisplayedTracks: true))
+        #expect(TimelineCursorHitPolicy.isColumnResizeTarget(columnX: 6, hasDisplayedTracks: true))
+        #expect(!TimelineCursorHitPolicy.isColumnResizeTarget(columnX: -6.01, hasDisplayedTracks: true))
+        #expect(!TimelineCursorHitPolicy.isColumnResizeTarget(columnX: 6.01, hasDisplayedTracks: true))
+        #expect(!TimelineCursorHitPolicy.isColumnResizeTarget(columnX: 0, hasDisplayedTracks: false))
+    }
+
+    @Test
     @MainActor
     func globalShortcutsAreDisabledWhileTextInputIsFocused() {
         #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: nil) == true)

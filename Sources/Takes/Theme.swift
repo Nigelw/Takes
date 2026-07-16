@@ -102,19 +102,23 @@ enum Theme {
     /// Hairline separators between full-bleed regions and rows.
     static let hairline = Color(nsColor: .separatorColor)
 
-    /// Opaque frozen-column edge dividing the info/control column from the
-    /// ruler/waveform column. Opaque (unlike the translucent `hairline`) so ruler
-    /// notches sit behind it cleanly instead of bleeding through.
-    static let frozenColumnEdge = dynamic(
-        light: (0.82, 0.82, 0.84),
-        dark: (0.28, 0.28, 0.30)
-    )
+    /// Major and minor timeline ruler ticks.
+    static let timelineRulerTick = Color.secondary.opacity(0.45)
 
-    /// Soft drop shadow cast by the transport bar onto the timeline header, so the
-    /// header reads as slightly recessed beneath it. A touch stronger in dark mode.
-    static let transportShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.45 : 0.10)
+    /// Subtle shadow cast by the frozen info/control column onto the timeline.
+    /// Slightly stronger in dark mode so the overlap still reads without a hard
+    /// divider line.
+    static let frozenColumnShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.42 : 0.15)
     })
+
+    /// Dark upper edge of the recessed groove between the transport bar and timeline.
+    static let transportDividerShadow = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.62 : 0.18)
+    })
+
+    /// Reflected lower edge of the groove, completing the two-edge bevel.
+    static let transportDividerHighlight = whiteAlpha(light: 0.68, dark: 0.12)
 
     /// Faint light wash over the transport bar so it sits a step above the
     /// timeline well its shadow falls onto. Carries the split in dark mode

@@ -209,6 +209,14 @@ struct CursorResetPolicy {
     }
 }
 
+struct TimelineCursorHitPolicy {
+    static let columnResizeHitWidth: CGFloat = 12
+
+    static func isColumnResizeTarget(columnX: CGFloat, hasDisplayedTracks: Bool) -> Bool {
+        hasDisplayedTracks && abs(columnX) <= columnResizeHitWidth / 2
+    }
+}
+
 enum TrackDropHighlight: Equatable {
     case normal
     case dropTarget
@@ -1059,6 +1067,8 @@ struct ContentView: View {
     /// Rows beyond the visible viewport on each side that still rasterize, so
     /// small scrolls reveal already-rendered lanes.
     private static let renderableRowOverscan = 2
+    /// Shared extent of the shadows cast by frozen timeline surfaces.
+    private static let frozenSurfaceShadowExtent: CGFloat = 5
 
     /// Row indices intersecting the vertical viewport ± overscan. Rows are
     /// fixed-height, so this is pure math on the content offset.
@@ -1303,32 +1313,45 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             transportBar
                 .fixedSize(horizontal: false, vertical: true)
-            Divider()
             trackTimelineSection
                 .frame(maxHeight: .infinity)
-                // Recessed well: a faint dark scrim distinguishes the timeline from
-                // the raised transport bar, giving the bar's drop shadow a lower
-                // surface to land on.
+                // Recess the complete timeline section—including its header
+                // and ruler—beneath the lighter transport surface.
                 .background(Theme.timelineWellShade)
-                // A soft shadow gradient hugging the top edge of the content makes the
-                // timeline header read as recessed beneath the transport bar. Drawn as an
-                // overlay (adaptive color, stronger in dark mode) rather than a hard line.
+                // Restore the transport shadow using the fixed-column
+                // shadow's exact color and 5pt fade extent.
                 .overlay(alignment: .top) {
                     LinearGradient(
-                        colors: [Theme.transportShadow, .clear],
+                        colors: [Theme.frozenColumnShadow, .clear],
                         startPoint: .top,
                         endPoint: .bottom
                     )
-                    .frame(height: 8)
+                    .frame(height: Self.frozenSurfaceShadowExtent)
                     .allowsHitTesting(false)
                 }
         }
     }
 
+    /// Two half-point edges preserve the divider's 1pt layout height while
+    /// reading as a crisp recessed bevel on Retina displays.
+    private var beveledSectionDivider: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Theme.transportDividerShadow)
+            Rectangle()
+                .fill(Theme.transportDividerHighlight)
+        }
+        .frame(height: 1)
+        .allowsHitTesting(false)
+    }
+
     private var trackDropHighlightOverlay: some View {
         VStack(spacing: 0) {
             Color.clear
-                .frame(height: TakesWindowPolicy.transportBarReservedHeight + TakesWindowPolicy.rootVerticalSpacing)
+                .frame(
+                    height: TakesWindowPolicy.transportBarReservedHeight
+                        + (controller.displayedTrackRowCount == 0 ? 0 : trackHeaderHeight + trackTimelineDividerHeight)
+                )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
         }
         .allowsHitTesting(false)
@@ -1733,7 +1756,7 @@ struct ContentView: View {
                 } else {
                     trackTimelineHeader(infoWidth: infoWidth, waveformWidth: waveformWidth)
                         .frame(width: proxy.size.width, height: trackHeaderHeight)
-                    Divider()
+                    beveledSectionDivider
 
                     ScrollView(.vertical) {
                         ZStack(alignment: .topLeading) {
@@ -1856,25 +1879,23 @@ struct ContentView: View {
                         .offset(x: infoWidth)
                 }
             }
-            .overlay(alignment: .topLeading) {
-                // Frozen-column edge: one continuous hairline at the info/waveform
-                // boundary, running the full height so the header's control|ruler
-                // border and the rows' info|waveform border are the same line.
-                // With no tracks the whole section is the empty state, so there
-                // is no column boundary to draw.
-                if displayedTrackRowCount > 0 {
-                    Rectangle()
-                        .fill(Theme.frozenColumnEdge)
-                        .frame(width: 1, height: proxy.size.height)
-                        .offset(x: infoWidth)
-                        .allowsHitTesting(false)
-                }
-            }
-            // Playhead drawn above the visible frozen-column and header/row
-            // dividers; the transparent resize handle is installed after it so
-            // its cursor and drag region still win at the column boundary.
+            // The playhead stays confined to the waveform column. The frozen
+            // column shadow is layered after it so the playhead reads as sliding
+            // underneath the info area at the boundary.
             .overlay(alignment: .topLeading) {
                 timelinePlayheadOverlay(sectionHeight: proxy.size.height, infoWidth: infoWidth, waveformWidth: waveformWidth)
+            }
+            .overlay(alignment: .topLeading) {
+                if displayedTrackRowCount > 0 {
+                    LinearGradient(
+                        colors: [Theme.frozenColumnShadow, .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: Self.frozenSurfaceShadowExtent, height: proxy.size.height)
+                    .offset(x: infoWidth)
+                    .allowsHitTesting(false)
+                }
             }
             .overlay(alignment: .topLeading) {
                 if displayedTrackRowCount > 0 {
@@ -1939,14 +1960,13 @@ struct ContentView: View {
     }
 
     private func trackInfoColumnResizeHandle(sectionWidth: CGFloat, sectionHeight: CGFloat, infoWidth: CGFloat) -> some View {
-        let hitWidth: CGFloat = 12
         return TrackInfoColumnResizeHandleView(
             sectionWidth: sectionWidth,
             columnWidth: trackInfoColumnWidthBinding
         )
-            .frame(width: hitWidth, height: sectionHeight)
+            .frame(width: TimelineCursorHitPolicy.columnResizeHitWidth, height: sectionHeight)
             .contentShape(Rectangle())
-            .offset(x: infoWidth - hitWidth / 2)
+            .offset(x: infoWidth - TimelineCursorHitPolicy.columnResizeHitWidth / 2)
             .accessibilityLabel("Resize track info column")
     }
 
@@ -1990,6 +2010,9 @@ struct ContentView: View {
                 .gesture(playheadDragGesture(waveformWidth: waveformWidth, in: Self.rulerSpace))
                 .coordinateSpace(name: Self.rulerSpace)
                 .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
+                // Let the info column visually cover the ruler's first pixel,
+                // hiding a tick exactly at the timeline's leading edge.
+                .mask(TimelineLeadingEdgeMask())
         }
         .componentDebugLabel("Timeline Header", enabled: settings.showsComponentDebugLabels)
     }
@@ -2755,6 +2778,7 @@ struct ContentView: View {
 
     enum TimelineCursorShape {
         case standard
+        case columnResize
         case playheadGrab
         case loopResize
     }
@@ -2786,6 +2810,19 @@ struct ContentView: View {
 
         let columnX = point.x - geometry.sectionFrame.minX - geometry.infoWidth
         let y = point.y - geometry.sectionFrame.minY
+
+        // The column resize handle is layered above the timeline and owns a
+        // 12pt strip centered on the split. Give its cursor the same priority
+        // as its hit testing before considering playhead or loop targets.
+        if geometry.sectionFrame.contains(point),
+            TimelineCursorHitPolicy.isColumnResizeTarget(
+                columnX: columnX,
+                hasDisplayedTracks: controller.displayedTrackRowCount > 0
+            ) {
+            setTimelineCursor(.columnResize)
+            return
+        }
+
         guard
             geometry.sectionFrame.contains(point),
             columnX >= 0, columnX <= geometry.waveformWidth,
@@ -2835,6 +2872,8 @@ struct ContentView: View {
             guard timelineCursorShape != .standard else { return }
             timelineCursorShape = .standard
             NSCursor.arrow.set()
+        case .columnResize:
+            reassertTimelineCursor(NSCursor.resizeLeftRight, shape: shape)
         case .playheadGrab:
             reassertTimelineCursor(NSCursor.openHand, shape: shape)
         case .loopResize:
@@ -3892,6 +3931,9 @@ private struct TrackRowView: View, Equatable {
                 rowHeight: rowHeight,
                 showsDebugLabel: showsDebugLabel
             )
+            // Reveal the row's own background through the first lane pixel so
+            // a leading timeline guide stays tucked beneath the info column.
+            .mask(TimelineLeadingEdgeMask())
         }
         .frame(height: rowHeight)
         // Active highlight spans the whole row (info + lane) as one continuous
@@ -4109,6 +4151,19 @@ private struct TrackRowTrashButton: View {
     }
 }
 
+/// Masks the first point of ruler/lane drawing so the frozen info column reads
+/// as extending over the timeline's leading edge. The transparent strip reveals
+/// the real surface below, including the active-row tint.
+private struct TimelineLeadingEdgeMask: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: 1)
+            Color.white
+        }
+    }
+}
+
 /// One lane: the pre-rendered waveform window, positioned for the live scroll
 /// (`shiftX`) and drawn from the shared zoom-varying window (`viewportStore`).
 ///
@@ -4183,7 +4238,7 @@ private struct TimelineHeaderRulerView: View {
     // major (labeled) ticks are tall — their top edge comes up to just beneath the number so the
     // label sits against the tick like a baseline — while minor ticks stay short. Both are
     // bottom-anchored so they hang toward the rows.
-    private var tickColor: Color { .secondary.opacity(0.45) }
+    private var tickColor: Color { Theme.timelineRulerTick }
     private var majorTickHeight: CGFloat { 19 }
     private var minorTickHeight: CGFloat { 8 }
     /// Vertical inset of the time label from the top of the header.
