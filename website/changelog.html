@@ -54,6 +54,18 @@
     </header>
     <section class="release">
       <div class="release-heading">
+        <h2>2.9.0</h2>
+        <p class="meta">16 July, 2026</p>
+      </div>
+      <div class="notes"><h3>New</h3>
+<ul><li>Major performance improvements throughout the app</li><li>Files open quicker<ul><li>Waveforms render much faster and the UI remains responsive while loading</li></ul></li><li>CPU usage is drastically reduced<ul><li>Playback with 1 track has been reduced from 40% → 2.5% (comparable to QuickTime player)</li><li>Playback with 20 tracks has been reduced from 103% → 8% (less than QuickTime Player at 32%)</li><li>Idle CPU consumption is now 0%</li><li>(All measurements taken with an M1 MacBook Pro)</li></ul></li><li>UI responsiveness is vastly improved<ul><li>Zooming, scrolling, and playhead-following is fluid, even with dozens of files open</li><li>Dragging to rearrange tracks animates smoothly</li><li>Playhead glides continuously instead of ticking along</li></ul></li></ul>
+<h3>Improved</h3>
+<ul><li>Loops are now gapless, wrapping seamlessly to the beginning of the next loop</li><li>Quickly adjust a track&#x27;s offset without selecting the input field using new keyboard shortcuts</li><li>Improved waveform interactivity<ul><li>The playhead can be dragged in the waveform area (previously dragging was limited to the grabber in the ruler area)</li><li>Clicking on a waveform switches playback to that track (previously you had to click in the info column)</li></ul></li><li>Quick Open from Finder now supports folder selections</li><li>Added haptic feedback to the zoom slider</li><li>Inertial scroll during playback behaves naturally: it settles to a stop before jumping to the playhead, rather than fighting with playhead-follow and causing jerkiness</li><li>Refined the app&#x27;s visual design, icons, and hit targets throughout</li></ul>
+<h3>Fixed</h3>
+<ul><li>Mouse cursor reliably changes state when hovering over overlapping UI elements to show which interaction has priority</li><li>Tooltips are only shown when text has been truncated</li><li>Shrunk the hit target of the &quot;Click Here to Compare&quot; button to prevent accidental clicks when there are no tracks loaded</li><li>Blind Listening Mode is disabled when no tracks are loaded</li></ul></div>
+    </section>
+    <section class="release">
+      <div class="release-heading">
         <h2>2.8.2</h2>
         <p class="meta">6 July, 2026</p>
       </div>

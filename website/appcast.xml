@@ -3,6 +3,48 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>2.9.0</title>
+            <pubDate>Thu, 16 Jul 2026 15:26:11 -0400</pubDate>
+            <sparkle:version>14</sparkle:version>
+            <sparkle:shortVersionString>2.9.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## New
+
+- Major performance improvements throughout the app
+- Files open quicker
+  - Waveforms render much faster and the UI remains responsive while loading
+- CPU usage is drastically reduced
+  - Playback with 1 track has been reduced from 40% → 2.5% (comparable to QuickTime player)
+  - Playback with 20 tracks has been reduced from 103% → 8% (less than QuickTime Player at 32%)
+  - Idle CPU consumption is now 0%
+  - (All measurements taken with an M1 MacBook Pro)
+- UI responsiveness is vastly improved
+  - Zooming, scrolling, and playhead-following is fluid, even with dozens of files open
+  - Dragging to rearrange tracks animates smoothly
+  - Playhead glides continuously instead of ticking along
+
+## Improved
+
+- Loops are now gapless, wrapping seamlessly to the beginning of the next loop
+- Quickly adjust a track's offset without selecting the input field using new keyboard shortcuts
+- Improved waveform interactivity
+  - The playhead can be dragged in the waveform area (previously dragging was limited to the grabber in the ruler area)
+  - Clicking on a waveform switches playback to that track (previously you had to click in the info column)
+- Quick Open from Finder now supports folder selections
+- Added haptic feedback to the zoom slider
+- Inertial scroll during playback behaves naturally: it settles to a stop before jumping to the playhead, rather than fighting with playhead-follow and causing jerkiness
+- Refined the app's visual design, icons, and hit targets throughout
+
+## Fixed
+
+- Mouse cursor reliably changes state when hovering over overlapping UI elements to show which interaction has priority
+- Tooltips are only shown when text has been truncated
+- Shrunk the hit target of the "Click Here to Compare" button to prevent accidental clicks when there are no tracks loaded
+- Blind Listening Mode is disabled when no tracks are loaded
+]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.9.0/Takes.dmg" length="3806837" type="application/octet-stream" sparkle:edSignature="FJ4jn7GvQ0aRbSVCPJN0m7sVIa1Z64xJ/QdnNrkOG/tYEfeZQDC7pb6G7ovVcYASd+3ksek7omeRvn+1bkZ0Bg=="/>
+        </item>
+        <item>
             <title>2.8.2</title>
             <pubDate>Mon, 06 Jul 2026 00:49:30 -0400</pubDate>
             <sparkle:version>13</sparkle:version>
@@ -26,27 +68,6 @@
 ## Improved
 - Changing the loop range during playback no longer causes audio to stutter]]></description>
             <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.8.1/Takes.dmg" length="3406125" type="application/octet-stream" sparkle:edSignature="3k/NtGr54K36MWajZKrLzejQqO5yn5kZgYvqgIdqXBMijI75/xwqXxw2hrF8jNX1d+CMtPcXz5Td73VIs7LDBQ=="/>
-        </item>
-        <item>
-            <title>2.8</title>
-            <pubDate>Sat, 04 Jul 2026 18:39:48 -0400</pubDate>
-            <sparkle:version>11</sparkle:version>
-            <sparkle:shortVersionString>2.8</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[## New
-- Import streaming audio from Apple Music, Spotify, and YouTube
-
-## Improved
-- Significantly improved drag and drop
-  - Improved visual design and UX of track reordering
-  - Improved visual indicator for external file drops onto Takes window
-  - Support standard Mac conventions: drag track out of the window to copy its file to the Finder or another app, drop on window toolbar or menubar to cancel drag
-- Switch tracks with the up/down arrow keys in addition to other keyboard shortcuts
-- Added a link to the Takes website in the Help menu
-
-## Fixed
-- Many UI copy tweaks]]></description>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.8/Takes.dmg" length="3397228" type="application/octet-stream" sparkle:edSignature="cXBp9Ovh3Z2CoBQ3oTrBo+JBLObWypYBjjRasY/w3ubgAQOLv5va+DfIxvlDc1iTIJmzRGce1r+5nCqJKbpSCg=="/>
         </item>
     </channel>
 </rss>
