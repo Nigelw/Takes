@@ -13,7 +13,7 @@ extension NSAppearance {
 ///
 /// Everything visual draws from here so the primary (indigo) and secondary
 /// (amber in light mode, cyan in dark) hues stay consistent across the
-/// transport bar, timeline, and rows.
+/// control bar, timeline, and rows.
 /// Colors are built from `NSColor` dynamic providers so a single token yields
 /// the right value in light and dark mode.
 enum Theme {
@@ -85,7 +85,7 @@ enum Theme {
     /// Surface fill for the secondary transport buttons (Switch Track, Repeat)
     /// and the readout bezel plate when not engaged. Distinct from the bar
     /// surface so they read as tactile controls rather than blending in.
-    /// These sit on the lifted transport bar, so `transportBarLift`'s white
+    /// These sit on the lifted control bar, so `controlBarLift`'s white
     /// wash (25% light / 5.5% dark) is pre-composited into the values to keep
     /// the control-to-bar contrast that was tuned before the lift existed.
     static let transportButtonFill = dynamic(
@@ -112,7 +112,7 @@ enum Theme {
         NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.42 : 0.15)
     })
 
-    /// Dark upper edge of the recessed groove between the transport bar and timeline.
+    /// Dark upper edge of the recessed groove between the control bar and timeline.
     static let transportDividerShadow = Color(nsColor: NSColor(name: nil) { appearance in
         NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.62 : 0.18)
     })
@@ -120,14 +120,14 @@ enum Theme {
     /// Reflected lower edge of the groove, completing the two-edge bevel.
     static let transportDividerHighlight = whiteAlpha(light: 0.68, dark: 0.12)
 
-    /// Faint light wash over the transport bar so it sits a step above the
+    /// Faint light wash over the control bar so it sits a step above the
     /// timeline well its shadow falls onto. Carries the split in dark mode
     /// (lighter reads as nearer); in light mode `timelineWellShade` does most
     /// of the work and this stays close to invisible.
-    static let transportBarLift = whiteAlpha(light: 0.25, dark: 0.055)
+    static let controlBarLift = whiteAlpha(light: 0.25, dark: 0.055)
 
     /// Faint dark scrim over the tracks/timeline area, recessing it beneath
-    /// the transport bar. Laid over the shared window material rather than
+    /// the control bar. Laid over the shared window material rather than
     /// replacing it, so both regions keep the same desktop-tinted vibrancy.
     static let timelineWellShade = Color(nsColor: NSColor(name: nil) { appearance in
         NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.18 : 0.04)
@@ -193,7 +193,7 @@ enum Theme {
     /// makes the ring read as polished rather than matte.
     static let readoutBezelReflection = whiteAlpha(light: 0.55, dark: 0.10)
 
-    /// Soft drop shadow seating the readout panel on the transport bar.
+    /// Soft drop shadow seating the readout panel on the control bar.
     static let readoutFrameShadow = Color(nsColor: NSColor(name: nil) { appearance in
         NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.5 : 0.14)
     })

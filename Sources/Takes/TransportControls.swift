@@ -18,7 +18,7 @@ struct WindowBackground: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
-/// Invisible AppKit view that makes the transport bar behave like a titlebar:
+/// Invisible AppKit view that makes the control bar behave like a titlebar:
 /// it sits behind the SwiftUI controls, so buttons and sliders above it keep
 /// their clicks, while presses on empty bar space fall through here and drag
 /// the window. Double-clicks honour the system "double-click a window's title

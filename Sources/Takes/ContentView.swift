@@ -460,7 +460,7 @@ private struct TrackListDropDelegate: DropDelegate {
 
 /// The window-wide audio-file import target. Accepts genuine external file drags
 /// (append). A track being reordered also carries a file URL, so it lands here
-/// too when it strays over the window's chrome (transport bar, header); it's
+/// too when it strays over the window's chrome (control bar, header); it's
 /// claimed but proposed as `.cancel`, so it reads as a cancel matching the menu
 /// bar — leaving it target-less instead would make AppKit fall back to the drag
 /// source's copy mask and flash a stray copy badge.
@@ -1197,7 +1197,7 @@ struct ContentView: View {
                 minWidth: TakesWindowPolicy.minimumContentWidth,
                 minHeight: TakesWindowPolicy.rootViewMinimumHeight
             )
-            // The transport bar doubles as the titlebar: lay the root view out
+            // The control bar doubles as the titlebar: lay the root view out
             // under the hidden titlebar so the bar starts at the window's top edge.
             .ignoresSafeArea(.container, edges: .top)
             .environment(\.transportAppearance, settings.transportAppearance)
@@ -1325,7 +1325,7 @@ struct ContentView: View {
 
     private var contentStack: some View {
         VStack(alignment: .leading, spacing: 0) {
-            transportBar
+            controlBar
                 .fixedSize(horizontal: false, vertical: true)
             trackTimelineSection
                 .frame(maxHeight: .infinity)
@@ -1363,7 +1363,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Color.clear
                 .frame(
-                    height: TakesWindowPolicy.transportBarReservedHeight
+                    height: TakesWindowPolicy.controlBarReservedHeight
                         + (controller.displayedTrackRowCount == 0 ? 0 : trackHeaderHeight + trackTimelineDividerHeight)
                 )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
@@ -1371,7 +1371,7 @@ struct ContentView: View {
         .allowsHitTesting(false)
     }
 
-    private var transportBar: some View {
+    private var controlBar: some View {
         GeometryReader { proxy in
             let sideRegionWidth = max((proxy.size.width - transportReadoutWidth) / 2, 0)
 
@@ -1435,11 +1435,11 @@ struct ContentView: View {
         // material, pairing with `timelineWellShade` below the divider.
         // Purely decorative, so it must not intercept clicks — otherwise it
         // swallows the mouseDown before the WindowDragArea behind it can drag.
-        .background(Theme.transportBarLift.allowsHitTesting(false))
-        // The transport bar is the titlebar: any click on empty bar space
+        .background(Theme.controlBarLift.allowsHitTesting(false))
+        // The control bar is the titlebar: any click on empty bar space
         // (not claimed by a control above) drags the window.
         .background(WindowDragArea())
-        .componentDebugLabel("Transport Bar", enabled: settings.showsComponentDebugLabels)
+        .componentDebugLabel("Control Bar", enabled: settings.showsComponentDebugLabels)
     }
 
     private var playButton: some View {

@@ -30,7 +30,7 @@ enum AppearanceTheme: String, CaseIterable, Identifiable {
 enum ReadoutStyle: String, CaseIterable, Identifiable {
     static let allCases: [ReadoutStyle] = [.glass, .retro]
 
-    /// A convex glass tile resting directly on the transport bar: no bezel, a
+    /// A convex glass tile resting directly on the control bar: no bezel, a
     /// domed highlight where the glass catches the light, edges dipping just
     /// below the surrounding surface.
     case glass
