@@ -1944,6 +1944,15 @@ struct SessionTests {
     }
 
     @Test
+    func timelineLaneGestureChoosesPlayheadOnlyWithinItsMouseDownHitStrip() {
+        #expect(TimelineLaneGesturePolicy.dragMode(startX: 94, playheadX: 100, playheadHitWidth: 12) == .playhead)
+        #expect(TimelineLaneGesturePolicy.dragMode(startX: 100, playheadX: 100, playheadHitWidth: 12) == .playhead)
+        #expect(TimelineLaneGesturePolicy.dragMode(startX: 106, playheadX: 100, playheadHitWidth: 12) == .playhead)
+        #expect(TimelineLaneGesturePolicy.dragMode(startX: 93.99, playheadX: 100, playheadHitWidth: 12) == .loopSelection)
+        #expect(TimelineLaneGesturePolicy.dragMode(startX: 106.01, playheadX: 100, playheadHitWidth: 12) == .loopSelection)
+    }
+
+    @Test
     @MainActor
     func globalShortcutsAreDisabledWhileTextInputIsFocused() {
         #expect(GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: nil) == true)

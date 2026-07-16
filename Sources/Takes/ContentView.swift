@@ -217,6 +217,17 @@ struct TimelineCursorHitPolicy {
     }
 }
 
+enum TimelineLaneDragMode: Equatable {
+    case playhead
+    case loopSelection
+}
+
+struct TimelineLaneGesturePolicy {
+    static func dragMode(startX: CGFloat, playheadX: CGFloat, playheadHitWidth: CGFloat) -> TimelineLaneDragMode {
+        abs(startX - playheadX) <= playheadHitWidth / 2 ? .playhead : .loopSelection
+    }
+}
+
 enum TrackDropHighlight: Equatable {
     case normal
     case dropTarget
@@ -997,6 +1008,9 @@ struct ContentView: View {
     /// While a playhead drag is in flight: the preview's x within the waveform
     /// column. `nil` when not dragging.
     @State private var playheadDragX: CGFloat?
+    /// The lane-wide gesture chooses playhead or loop behavior once at
+    /// mouse-down, then keeps that mode for the full drag.
+    @State private var laneDragMode: TimelineLaneDragMode?
     /// Timeline frame + column split, captured for the mouse-monitor cursor
     /// manager (which works in window coordinates, outside SwiftUI hover).
     @State private var timelineCursorGeometry: TimelineCursorGeometry?
@@ -2063,30 +2077,35 @@ struct ContentView: View {
     /// Match the loop edge resize handles in the waveform lanes.
     private static let lanePlayheadHitWidth: CGFloat = 12
 
-    /// Drag the playhead from an interaction strip already aligned to the
-    /// waveform column. The playhead visual follows the pointer as a preview;
-    /// the seek happens once on mouse-up, so nothing scrubs live mid-drag. A
-    /// plain click behaves like the lane click: deselect the loop when the
-    /// click lands outside it, then seek.
+    /// Drag the playhead from a gesture surface in waveform coordinates. The
+    /// visual follows the pointer as a preview; the seek happens once on
+    /// mouse-up, so nothing scrubs live mid-drag. A plain click behaves like
+    /// the lane click: deselect the loop when it lands outside it, then seek.
     private func playheadDragGesture(waveformWidth: CGFloat, in space: String) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
             .onChanged { value in
-                if playheadDragX == nil {
-                    NSCursor.closedHand.set()
-                }
-                playheadDragX = clampedPlayheadDragX(value.location.x, waveformWidth: waveformWidth)
+                handlePlayheadDragChanged(value: value, waveformWidth: waveformWidth)
             }
             .onEnded { value in
-                playheadDragX = nil
-                commitPlayheadDrag(atX: value.location.x, waveformWidth: waveformWidth)
-                // The playhead now sits under the pointer, so the grab cursor
-                // is the right resting state. Record the shape in the central
-                // cursor manager too, so it knows a non-standard cursor is up
-                // and resets it on the next pointer move if the pointer isn't
-                // actually on the grabber (e.g. mouse-up higher on the ruler).
-                timelineCursorShape = .playheadGrab
-                NSCursor.openHand.set()
+                handlePlayheadDragEnded(value: value, waveformWidth: waveformWidth)
             }
+    }
+
+    private func handlePlayheadDragChanged(value: DragGesture.Value, waveformWidth: CGFloat) {
+        if playheadDragX == nil {
+            NSCursor.closedHand.set()
+        }
+        playheadDragX = clampedPlayheadDragX(value.location.x, waveformWidth: waveformWidth)
+    }
+
+    private func handlePlayheadDragEnded(value: DragGesture.Value, waveformWidth: CGFloat) {
+        playheadDragX = nil
+        commitPlayheadDrag(atX: value.location.x, waveformWidth: waveformWidth)
+        // The playhead now sits under the pointer, so the grab cursor is the
+        // right resting state. Record it centrally so the next pointer move
+        // can reset it if the pointer is no longer on the grabber.
+        timelineCursorShape = .playheadGrab
+        NSCursor.openHand.set()
     }
 
     private func clampedPlayheadDragX(_ x: CGFloat, waveformWidth: CGFloat) -> CGFloat {
@@ -2463,25 +2482,12 @@ struct ContentView: View {
     /// so an off-screen loop never spills into the track-info column.
     private func loopSelectionOverlay(infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
-            // Drag to select a loop; click to seek (and deselect if outside the
-            // loop). The gesture surface carries no per-event body reads — the
-            // closures' visible-window reads aren't observation-tracked.
+            // One lane-wide gesture classifies its mouse-down against the live
+            // playhead position, then locks into playhead-drag or loop-selection
+            // mode. The closures' transport/window reads aren't observation-tracked.
             Color.clear
                 .contentShape(Rectangle())
-                .gesture(loopSelectionGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
-
-            // Narrow drag strip that rides with the playhead line so the
-            // indicator itself can be grabbed anywhere in the lanes. The loop
-            // resize handles are mounted above it and keep priority where they
-            // overlap.
-            TimelinePlayheadDragBandView(
-                controller: controller,
-                playheadDragX: playheadDragX,
-                waveformWidth: waveformWidth,
-                height: trackTimelineHeight,
-                bandWidth: Self.lanePlayheadHitWidth
-            )
-            .gesture(playheadDragGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
+                .gesture(laneInteractionGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
 
             // Selection rectangle + resize handles. Their x-positioning depends
             // on the per-scroll-event visible window, so it lives in a leaf that
@@ -2548,20 +2554,52 @@ struct ContentView: View {
         controller.resizeLoop(start: region.start, end: region.end)
     }
 
-    /// Click-to-seek / drag-to-select-loop behaviour, shared by the waveform column and the
-    /// timeline ruler. Both map their local x (0...`waveformWidth`) to time the same way, so the
-    /// same gesture drives both. `space` is the coordinate space the caller attaches it in.
-    private func loopSelectionGesture(
+    /// The lanes use one gesture surface so the live playhead can win at
+    /// mouse-down without requiring a SwiftUI hit target to animate every
+    /// frame. Once chosen, the mode stays fixed until mouse-up.
+    private func laneInteractionGesture(
         waveformWidth: CGFloat,
         in space: String
     ) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
             .onChanged { value in
-                handleLoopSelectionChanged(value: value, waveformWidth: waveformWidth)
+                let mode = laneDragMode ?? resolvedLaneDragMode(
+                    startX: value.startLocation.x,
+                    waveformWidth: waveformWidth
+                )
+                if laneDragMode == nil {
+                    laneDragMode = mode
+                }
+
+                switch mode {
+                case .playhead:
+                    handlePlayheadDragChanged(value: value, waveformWidth: waveformWidth)
+                case .loopSelection:
+                    handleLoopSelectionChanged(value: value, waveformWidth: waveformWidth)
+                }
             }
             .onEnded { value in
-                handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth)
+                let mode = laneDragMode ?? resolvedLaneDragMode(
+                    startX: value.startLocation.x,
+                    waveformWidth: waveformWidth
+                )
+                laneDragMode = nil
+
+                switch mode {
+                case .playhead:
+                    handlePlayheadDragEnded(value: value, waveformWidth: waveformWidth)
+                case .loopSelection:
+                    handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth)
+                }
             }
+    }
+
+    private func resolvedLaneDragMode(startX: CGFloat, waveformWidth: CGFloat) -> TimelineLaneDragMode {
+        TimelineLaneGesturePolicy.dragMode(
+            startX: startX,
+            playheadX: xPosition(for: controller.displayTransportPosition(), width: waveformWidth),
+            playheadHitWidth: Self.lanePlayheadHitWidth
+        )
     }
 
     private func handleLoopSelectionChanged(value: DragGesture.Value, waveformWidth: CGFloat) {
@@ -4397,39 +4435,6 @@ private struct TimelinePlayheadOverlayView: View {
         // view overrides `hitTest` to nil); kept here so the leaf can never
         // intercept clicks regardless of how it's mounted.
         .allowsHitTesting(false)
-    }
-
-    private func xPosition(for globalTime: TimeInterval) -> CGFloat {
-        CGFloat(
-            TransportMapping.normalizedPosition(
-                globalTime: globalTime,
-                timelineStart: controller.visibleStart,
-                timelineEnd: controller.visibleEnd
-            )
-        ) * waveformWidth
-    }
-}
-
-/// Transparent hit target that rides with the playhead line through the lane
-/// area. A leaf so the x-position re-derives on transport/window changes
-/// without pulling those reads into the surrounding lane container.
-private struct TimelinePlayheadDragBandView: View {
-    var controller: PlaybackController
-    var playheadDragX: CGFloat?
-    var waveformWidth: CGFloat
-    var height: CGFloat
-    var bandWidth: CGFloat
-
-    var body: some View {
-        Rectangle()
-            .fill(Color.white.opacity(0.001))
-            .frame(width: bandWidth, height: height)
-            .contentShape(Rectangle())
-            .offset(x: currentX - bandWidth / 2)
-    }
-
-    private var currentX: CGFloat {
-        playheadDragX ?? xPosition(for: controller.displayTransportPosition())
     }
 
     private func xPosition(for globalTime: TimeInterval) -> CGFloat {
