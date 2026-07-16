@@ -42,7 +42,7 @@
 - Shrunk the hit target of the "Click Here to Compare" button to prevent accidental clicks when there are no tracks loaded
 - Blind Listening Mode is disabled when no tracks are loaded
 ]]></description>
-            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.9.0/Takes.dmg" length="3806837" type="application/octet-stream" sparkle:edSignature="FJ4jn7GvQ0aRbSVCPJN0m7sVIa1Z64xJ/QdnNrkOG/tYEfeZQDC7pb6G7ovVcYASd+3ksek7omeRvn+1bkZ0Bg=="/>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v2.9.0/Takes.dmg" length="3834146" type="application/octet-stream" sparkle:edSignature="rwEFowlxxN3/hmW4tYQihnWJoYo2Pfm7eDfOBPZZkZ/x1IsWsQgiVKlNr7Bo54rzFbUEcO8PjUi7MPc88yS/Ag=="/>
         </item>
         <item>
             <title>2.8.2</title>
