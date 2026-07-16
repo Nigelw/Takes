@@ -156,7 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 enum TakesAboutPanel {
     static let creditsText = """
-    Lead designer & developer
+    Designer & developer
     Nigel M. Warren: https://nigelwarren.com
 
     Third-Party Resources

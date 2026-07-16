@@ -441,7 +441,7 @@ struct SessionTests {
         let credits = TakesAboutPanel.credits
 
         #expect(credits.string == """
-        Lead designer & developer
+        Designer & developer
         Nigel M. Warren: https://nigelwarren.com
 
         Third-Party Resources

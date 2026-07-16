@@ -209,7 +209,7 @@ def render(items):
   <main class="page">
     <header class="hero">
       <h1>Release Notes</h1>
-      <p>Everything shipped in Takes for Mac, newest first.</p>
+      <p>Everything shipped in Takes for Mac, newest at the top.</p>
     </header>
 {body}
     <footer class="footer">
