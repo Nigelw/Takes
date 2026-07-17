@@ -60,7 +60,7 @@ git log --no-merges <last-tag>..HEAD --pretty='%s%n%b'
 Move the `CHANGELOG.md` `Unreleased` notes into a new release section for the chosen marketing version:
 
 ```markdown
-## [<MARKETING_VERSION>] - YYYY-MM-DD
+## <MARKETING_VERSION> (YYYY-MM-DD)
 
 ### New
 

@@ -1,8 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## Unreleased
 
-## [2.9.0] - 2026-07-16
+## 2.9.0 (2026-07-16)
 
 ### New
 
@@ -38,13 +38,13 @@
 - Shrunk the hit target of the "Click Here to Compare" button to prevent accidental clicks when there are no tracks loaded
 - Blind Listening Mode is disabled when no tracks are loaded
 
-## [2.8.2] - 2026-07-06
+## 2.8.2 (2026-07-06)
 
 ### Fixed
 
 - Creating a loop no longer moves the playhead if it's already within the loop range
 
-## [2.8.1] - 2026-07-05
+## 2.8.1 (2026-07-05)
 
 ### New
 
@@ -54,7 +54,7 @@
 
 - Changing the loop range during playback no longer causes audio to stutter
 
-## [2.8] - 2026-07-04
+## 2.8 (2026-07-04)
 
 ### New
 
@@ -73,7 +73,7 @@
 
 - Many UI copy tweaks
 
-## [2.7] - 2026-07-03
+## 2.7 (2026-07-03)
 
 ### New
 
@@ -93,7 +93,7 @@
 
 - App window can be moved by dragging anywhere in the control area
 
-## [2.6.1] - 2026-07-02
+## 2.6.1 (2026-07-02)
 
 ### Improved
 
@@ -104,13 +104,13 @@
 - Playback now continues when the system audio device changes, such as when putting in AirPods
 - The mouse cursor now resets correctly after interacting with a text field
 
-## [2.6] - 2026-07-02
+## 2.6 (2026-07-02)
 
 ### New
 
 - Blind listening mode: hide track details and shuffle playback order to compare takes without seeing which is which
 
-## [2.5] - 2026-07-02
+## 2.5 (2026-07-02)
 
 ### New
 
@@ -132,7 +132,7 @@
 - Fixed timeline overscroll getting stuck if an input field is active
 - Various layout, contrast, and window-sizing refinements
 
-## [2.1] - 2026-07-02
+## 2.1 (2026-07-02)
 
 ### New
 
@@ -144,7 +144,7 @@
 
 - Starting playback at the end of a track now restarts playback from the beginning
 
-## [2.0] - 2026-07-01
+## 2.0 (2026-07-01)
 
 ### Improved
 
@@ -160,14 +160,14 @@
 - The playhead position is preserved when opening a new track while paused
 - Adjusted default window position
 
-## [2.0a3] - 2026-06-19
+## 2.0a3 (2026-06-19)
 
 ### New
 
 - Waveform display: each track now renders real waveforms instead of a placeholder mockup
   - Rendering doesn't block the UI
 
-## [2.0a2] - 2026-06-18
+## 2.0a2 (2026-06-18)
 
 ### New
 
@@ -198,14 +198,14 @@
   - More compact
   - Single window only
 
-## [1.0.2] - 2026-06-18
+## 1.0.2 (2026-06-18)
 
 ### Improved
 
 - This is v1.0.0 compiled, signed and notarized initial release for public distribution. Bumped version in order to release properly.
 - No other changes between v1.0.0 and this. (v1.0.1 tag was a project documentation update.)
 
-## [1.0.0] - 2026-04-26
+## 1.0.0 (2026-04-26)
 
 ### New
 

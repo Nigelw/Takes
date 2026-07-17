@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE_HEADING = re.compile(r"^## \[(?P<version>[^\]]+)\](?: - (?P<date>\d{4}-\d{2}-\d{2}))?\s*$")
+RELEASE_HEADING = re.compile(r"^## (?P<version>[^\s(]+)(?: \((?P<date>\d{4}-\d{2}-\d{2})\))?\s*$")
 
 
 @dataclass
@@ -209,7 +209,7 @@ def render(items):
   <main class="page">
     <header class="hero">
       <h1>Release Notes</h1>
-      <p>Everything shipped in Takes for Mac, newest at the top.</p>
+      <p>Everything shipped in Takes for Mac, newest to oldest.</p>
     </header>
 {body}
     <footer class="footer">

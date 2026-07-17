@@ -441,20 +441,20 @@ struct SessionTests {
         let credits = TakesAboutPanel.credits
 
         #expect(credits.string == """
-        Designer & developer
+        Designed & developed by
         Nigel M. Warren: https://nigelwarren.com
 
         Third-Party Resources
         Sparkle: https://sparkle-project.org
         yt-dlp: https://github.com/yt-dlp/yt-dlp
-        Tabler Icons: https://tabler.io
+        Tabler Icons: https://tabler.io/icons
         """)
 
         let expectedLinks: [(label: String, destination: String)] = [
             ("https://nigelwarren.com", "https://nigelwarren.com"),
             ("https://sparkle-project.org", "https://sparkle-project.org"),
             ("https://github.com/yt-dlp/yt-dlp", "https://github.com/yt-dlp/yt-dlp"),
-            ("https://tabler.io", "https://tabler.io")
+            ("https://tabler.io/icons", "https://tabler.io/icons")
         ]
 
         for (label, destination) in expectedLinks {
