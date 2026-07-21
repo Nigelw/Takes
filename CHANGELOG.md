@@ -146,12 +146,15 @@
 
 ## 2.0 (2026-07-01)
 
-### Improved
+### New
 
 - Timeline zooming
   - Pinch to zoom or use the zoom control
   - Waveform area uses native scroll inertia and bounce behavior
   - View smoothly slides to keep playhead in view while zoomed in
+
+### Improved
+
 - Improved timeline ruler tick marks and labeling, including dynamic scale when zoomed
 - Added link to release notes in Help menu
 
