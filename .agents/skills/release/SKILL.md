@@ -57,7 +57,7 @@ Gather the changes:
 git log --no-merges <last-tag>..HEAD --pretty='%s%n%b'
 ```
 
-Move the `CHANGELOG.md` `Unreleased` notes into a new release section for the chosen marketing version:
+Draft a new top release section in `CHANGELOG.md` for the chosen marketing version, placing it directly under `# Changelog`:
 
 ```markdown
 ## <MARKETING_VERSION> (YYYY-MM-DD)
@@ -67,9 +67,9 @@ Move the `CHANGELOG.md` `Unreleased` notes into a new release section for the ch
 - ...
 ```
 
-If `Unreleased` is empty, draft the section from the commits. Author it as short user-facing Markdown, applying these rules:
+Author it as short user-facing Markdown from the commits, applying these rules:
 
-- Draft release notes entries under three Markdown ## headings in this order: **New** (major, headline features), **Improved** (quality-of-life updates, polish), **Fixed** (bug fixes). Omit a bucket if it has no entries.
+- Draft release notes entries under three Markdown `###` headings in this order: **New** (major, headline features), **Improved** (quality-of-life updates, polish), **Fixed** (bug fixes). Omit a bucket if it has no entries.
 - **Rewrite every entry from the user's perspective.** Describe what changed for someone *using* the app.
 - **Drop anything with no user-visible impact** — internal refactors, test/CI changes, dependency bumps, doc edits.
 - **One succinct line per entry, no jargon.** No file names, symbols, or implementation detail.
