@@ -14,14 +14,9 @@
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
 
+  <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f7f6fb">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <script>
-    (() => {
-      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      document.documentElement.dataset.theme = prefersDark ? "dark" : "light";
-    })();
-  </script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="support-page">
@@ -210,15 +205,17 @@ open -a "Takes.app" --args --default-window-layout</code></pre>
         dark: "#0f0d18"
       };
 
-      function runThemeTransition(nextTheme) {
+      function runThemeTransition(nextTheme, manual = false) {
         document.startViewTransition(() => {
-          applyTheme(nextTheme);
+          applyTheme(nextTheme, manual);
         });
       }
 
-      function applyTheme(theme) {
+      function applyTheme(theme, manual = false) {
         const isDark = theme === "dark";
-        root.dataset.theme = theme;
+        if (manual) {
+          root.dataset.theme = theme;
+        }
         themeToggle?.setAttribute("aria-pressed", String(isDark));
         themeToggle?.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
         if (themeToggle) {
@@ -227,11 +224,15 @@ open -a "Takes.app" --args --default-window-layout</code></pre>
         themeColor?.setAttribute("content", themeMetaColors[theme]);
       }
 
-      applyTheme(root.dataset.theme || (mediaQuery.matches ? "dark" : "light"));
+      function currentTheme() {
+        return root.dataset.theme || (mediaQuery.matches ? "dark" : "light");
+      }
+
+      applyTheme(currentTheme());
 
       themeToggle?.addEventListener("click", () => {
         hasManualTheme = true;
-        runThemeTransition(root.dataset.theme === "dark" ? "light" : "dark");
+        runThemeTransition(currentTheme() === "dark" ? "light" : "dark", true);
       });
 
       menuButton?.addEventListener("click", () => {

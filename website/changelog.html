@@ -13,14 +13,9 @@
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
 
+  <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#fbfbfd">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <script>
-    (() => {
-      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      document.documentElement.dataset.theme = prefersDark ? "dark" : "light";
-    })();
-  </script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="changelog-page">
@@ -151,8 +146,10 @@
         <h2>2.0</h2>
         <p class="meta">1 July, 2026</p>
       </div>
-      <div class="notes"><h3>Improved</h3>
-<ul><li>Timeline zooming<ul><li>Pinch to zoom or use the zoom control</li><li>Waveform area uses native scroll inertia and bounce behavior</li><li>View smoothly slides to keep playhead in view while zoomed in</li></ul></li><li>Improved timeline ruler tick marks and labeling, including dynamic scale when zoomed</li><li>Added link to release notes in Help menu</li></ul>
+      <div class="notes"><h3>New</h3>
+<ul><li>Timeline zooming<ul><li>Pinch to zoom or use the zoom control</li><li>Waveform area uses native scroll inertia and bounce behavior</li><li>View smoothly slides to keep playhead in view while zoomed in</li></ul></li></ul>
+<h3>Improved</h3>
+<ul><li>Improved timeline ruler tick marks and labeling, including dynamic scale when zoomed</li><li>Added link to release notes in Help menu</li></ul>
 <h3>Fixed</h3>
 <ul><li>The playhead position is preserved when opening a new track while paused</li><li>Adjusted default window position</li></ul></div>
     </section>
@@ -209,15 +206,17 @@
         dark: "#111114"
       };
 
-      function runThemeTransition(nextTheme) {
+      function runThemeTransition(nextTheme, manual = false) {
         document.startViewTransition(() => {
-          applyTheme(nextTheme);
+          applyTheme(nextTheme, manual);
         });
       }
 
-      function applyTheme(theme) {
+      function applyTheme(theme, manual = false) {
         const isDark = theme === "dark";
-        root.dataset.theme = theme;
+        if (manual) {
+          root.dataset.theme = theme;
+        }
         themeToggle?.setAttribute("aria-pressed", String(isDark));
         themeToggle?.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
         if (themeToggle) {
@@ -226,11 +225,15 @@
         themeColor?.setAttribute("content", themeMetaColors[theme]);
       }
 
-      applyTheme(root.dataset.theme || (mediaQuery.matches ? "dark" : "light"));
+      function currentTheme() {
+        return root.dataset.theme || (mediaQuery.matches ? "dark" : "light");
+      }
+
+      applyTheme(currentTheme());
 
       themeToggle?.addEventListener("click", () => {
         hasManualTheme = true;
-        runThemeTransition(root.dataset.theme === "dark" ? "light" : "dark");
+        runThemeTransition(currentTheme() === "dark" ? "light" : "dark", true);
       });
 
       menuButton?.addEventListener("click", () => {

@@ -53,6 +53,7 @@ status bar
 - readout gains info: timeline, track name + artist - album (track info should only scroll when it’s key window)
 - change external file drop behavior: insert at drop position (or at end if dropped on control bar)
 - disable menu items: switch/switch prev track, auto-align, blind mode
+- review features: neutral (reviewing)/keep/delete buckets. group tracks and send to trash/apps/services
 
 mode transitions:
 - compare → play: if play mode list is empty, populate play mode’s list with compare mode’s tracks. if not empty, don’t modify play mode’s list
