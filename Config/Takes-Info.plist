@@ -66,10 +66,8 @@
 	<string>Copyright © 2026 Nigel M. Warren. All rights reserved.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
 	<key>SUFeedURL</key>
-	<string>https://nigelw.github.io/Takes/appcast.xml</string>
+	<string>https://takes.nigelwarren.com/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>ScIZIKYjEYLihl6SRoq6RNAPtLSyZmOykANUpE6xklg=</string>
 </dict>

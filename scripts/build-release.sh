@@ -226,5 +226,5 @@ else
   git commit -m "Publish $MARKETING_VERSION (build $BUILD_NUMBER): appcast + changelog"
   git push origin "$DEFAULT_BRANCH"
   step "Released $TAG"
-  echo "Feed: https://nigelw.github.io/Takes/appcast.xml (Pages redeploys on push)"
+  echo "Feed: https://takes.nigelwarren.com/appcast.xml (Pages redeploys on push)"
 fi
