@@ -46,21 +46,21 @@ private struct GeneralSettingsView: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Auto-align tracks on open", isOn: $settings.alignTracksOnOpen)
-                    OffsetHint("Align audio files when opening in Takes")
+                    SettingsHint("Align audio files when opening in Takes")
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     LabeledContent("Nudge") {
                         OffsetAmountField(value: $settings.offsetStep, stepperIncrement: 10)
                     }
-                    OffsetHint("Offset adjustment when using the stepper buttons or the up/down arrow keys.")
+                    SettingsHint("Offset adjustment when using the stepper buttons or the up/down arrow keys.")
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     LabeledContent("Large nudge") {
                         OffsetAmountField(value: $settings.offsetLargeStep, stepperIncrement: 50)
                     }
-                    OffsetHint("Hold Shift while using steppers or arrow keys to adjust by a larger amount.")
+                    SettingsHint("Hold Shift while using steppers or arrow keys to adjust by a larger amount.")
                 }
             } header: {
                 Text("Track Alignment")
@@ -82,7 +82,7 @@ private struct GeneralSettingsView: View {
     }
 }
 
-private struct OffsetHint: View {
+private struct SettingsHint: View {
     private let text: String
 
     init(_ text: String) {
@@ -134,6 +134,12 @@ private struct UpdateSettingsView: View {
                     }
                 }
                 .disabled(!updater.automaticallyChecksForUpdates)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Update to beta builds", isOn: $updater.includesBetaBuilds)
+                    SettingsHint("Beta builds have more bugs")
+                }
+
                 HStack {
                     Text(lastCheckedDescription)
                         .font(.callout)

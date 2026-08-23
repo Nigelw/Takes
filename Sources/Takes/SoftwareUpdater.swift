@@ -1,6 +1,47 @@
 import Foundation
 import Sparkle
 
+/// The persisted choice to include beta builds in Sparkle update checks.
+enum BetaUpdatePreference {
+    /// The Sparkle channel beta appcast items are published to.
+    static let betaChannel = "beta"
+
+    static let key = "includeBetaBuilds"
+    static let includesBetaBuildsDefault = false
+
+    static func includesBetaBuilds(in defaults: AppSettingsDefaults = UserDefaults.standard) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? includesBetaBuildsDefault
+    }
+
+    static func allowedSparkleChannels(in defaults: AppSettingsDefaults = UserDefaults.standard) -> Set<String> {
+        includesBetaBuilds(in: defaults) ? [betaChannel] : []
+    }
+}
+
+/// Supplies the user's selected update channel when Sparkle starts a check.
+///
+/// Sparkle retains its updater delegate weakly, so `SoftwareUpdater` owns this
+/// object for the controller's lifetime.
+@MainActor
+final class UpdateChannelUpdaterDelegate: NSObject, SPUUpdaterDelegate {
+    private let defaults: AppSettingsDefaults
+
+    init(defaults: AppSettingsDefaults) {
+        self.defaults = defaults
+    }
+
+    /// Sparkle asks for the allowed channels on every appcast parse, so this
+    /// reads the stored preference each time: toggling it takes effect on the
+    /// next check without restarting the updater.
+    func currentAllowedChannels() -> Set<String> {
+        BetaUpdatePreference.allowedSparkleChannels(in: defaults)
+    }
+
+    func allowedChannels(for updater: SPUUpdater) -> Set<String> {
+        currentAllowedChannels()
+    }
+}
+
 /// How often Takes checks for new versions automatically.
 enum UpdateCheckFrequency: Int, CaseIterable, Identifiable {
     case daily
@@ -33,11 +74,22 @@ enum UpdateCheckFrequency: Int, CaseIterable, Identifiable {
 
 /// Bridges Sparkle's `SPUUpdater` to SwiftUI, exposing the update preferences
 /// and actions the Settings window needs.
+///
+/// Only the beta-channel preference is read from the injected `defaults`;
+/// Sparkle keeps its own settings in the standard user defaults regardless.
 @MainActor
 final class SoftwareUpdater: ObservableObject {
+    private let defaults: AppSettingsDefaults
+    private let updateChannelDelegate: UpdateChannelUpdaterDelegate
     private let controller: SPUStandardUpdaterController
     private var updater: SPUUpdater { controller.updater }
     private var observers: [NSKeyValueObservation] = []
+
+    @Published var includesBetaBuilds: Bool {
+        didSet {
+            defaults.set(includesBetaBuilds, forKey: BetaUpdatePreference.key)
+        }
+    }
 
     @Published var automaticallyChecksForUpdates: Bool {
         didSet {
@@ -67,10 +119,13 @@ final class SoftwareUpdater: ObservableObject {
     @Published private(set) var canCheckForUpdates: Bool
     @Published private(set) var allowsAutomaticUpdates: Bool
 
-    init() {
+    init(defaults: AppSettingsDefaults = UserDefaults.standard) {
+        self.defaults = defaults
+        updateChannelDelegate = UpdateChannelUpdaterDelegate(defaults: defaults)
+        includesBetaBuilds = BetaUpdatePreference.includesBetaBuilds(in: defaults)
         controller = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: updateChannelDelegate,
             userDriverDelegate: nil
         )
 

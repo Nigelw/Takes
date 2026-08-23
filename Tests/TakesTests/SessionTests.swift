@@ -6,6 +6,41 @@ import Testing
 
 struct SessionTests {
     @Test
+    func betaBuildsAreExcludedByDefault() {
+        let defaults = InMemoryAppSettingsDefaults()
+
+        #expect(!BetaUpdatePreference.includesBetaBuilds(in: defaults))
+        #expect(BetaUpdatePreference.allowedSparkleChannels(in: defaults).isEmpty)
+    }
+
+    @Test
+    func includingBetaBuildsAllowsTheBetaChannel() {
+        let defaults = InMemoryAppSettingsDefaults()
+        defaults.set(true, forKey: BetaUpdatePreference.key)
+
+        #expect(BetaUpdatePreference.includesBetaBuilds(in: defaults))
+        #expect(
+            BetaUpdatePreference.allowedSparkleChannels(in: defaults)
+                == [BetaUpdatePreference.betaChannel]
+        )
+    }
+
+    @MainActor
+    @Test
+    func updateChannelDelegateFollowsTheStoredPreference() {
+        let defaults = InMemoryAppSettingsDefaults()
+        let delegate = UpdateChannelUpdaterDelegate(defaults: defaults)
+
+        #expect(delegate.currentAllowedChannels().isEmpty)
+
+        defaults.set(true, forKey: BetaUpdatePreference.key)
+        #expect(delegate.currentAllowedChannels() == [BetaUpdatePreference.betaChannel])
+
+        defaults.set(false, forKey: BetaUpdatePreference.key)
+        #expect(delegate.currentAllowedChannels().isEmpty)
+    }
+
+    @Test
     func sessionReadinessUsesOrderedTracks() {
         var session = ComparisonSession()
         #expect(!session.isPlayable)

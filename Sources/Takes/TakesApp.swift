@@ -162,14 +162,14 @@ enum TakesAboutPanel {
     Third-Party Resources
     Sparkle: https://sparkle-project.org
     yt-dlp: https://github.com/yt-dlp/yt-dlp
-    Tabler Icons: https://tabler.io
+    Tabler Icons: https://tabler.io/icons
     """
 
     private static let creditLinks: [(label: String, destination: String)] = [
         ("https://nigelwarren.com", "https://nigelwarren.com"),
         ("https://sparkle-project.org", "https://sparkle-project.org"),
         ("https://github.com/yt-dlp/yt-dlp", "https://github.com/yt-dlp/yt-dlp"),
-        ("https://tabler.io", "https://tabler.io")
+        ("https://tabler.io/icons", "https://tabler.io/icons")
     ]
 
     static var options: [NSApplication.AboutPanelOptionKey: Any] {
