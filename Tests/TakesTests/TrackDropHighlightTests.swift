@@ -177,7 +177,7 @@ struct TrackDropHighlightTests {
 
     @MainActor
     @Test
-    func openFileCommandStateCancelsRegisteredStreamingTaskOnDismiss() async throws {
+    func openFileCommandStateCancelsRegisteredStreamingTaskOnDismiss() async {
         let recorder = StreamingURLCancellationRecorder()
         let state = OpenFileCommandState(loadStreamingURL: { _, commandState in
             let taskID = UUID()
@@ -200,9 +200,9 @@ struct TrackDropHighlightTests {
         state.submitStreamingURL()
         state.dismissStreamingURLPrompt()
 
-        try await Task.sleep(for: .milliseconds(50))
+        #expect(await recorder.waitForCancellation())
 
-        #expect(await recorder.didCancel)
+        // `dismissStreamingURLPrompt()` clears both of these synchronously.
         #expect(!state.isPromptingForStreamingURL)
         #expect(!state.streamingURLStatus.isWorking)
     }
@@ -565,5 +565,18 @@ private actor StreamingURLCancellationRecorder {
 
     func recordCancellation() {
         didCancel = true
+    }
+
+    /// Waits for the cancelled task to report in instead of assuming it lands
+    /// within a fixed sleep. The cancellation normally arrives in well under a
+    /// millisecond, but the whole suite runs bundles in parallel, and a busy
+    /// machine can push the task's resumption past any deadline short enough
+    /// to be worth waiting on.
+    func waitForCancellation(timeout: Duration = .seconds(5)) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while !didCancel, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return didCancel
     }
 }
