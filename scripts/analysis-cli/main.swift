@@ -5,9 +5,11 @@ import Foundation
 // sources from Sources/Takes/Analysis/, so it exercises exactly the code
 // that ships in the app.
 //
-//   analysis-cli analyze <file...>       print metrics per file
-//   analysis-cli benchmark <corpus-dir>  check the corpus against ground
-//                                        truth from docs/analysis-corpus.md
+//   analysis-cli analyze <file...>            print metrics per file
+//   analysis-cli benchmark <corpus-dir>       check the corpus against ground
+//                                             truth from docs/analysis-corpus.md
+//   analysis-cli compare <file...>            compare files against each other
+//   analysis-cli compare-benchmark <corpus>   check the comparative pairs
 
 // MARK: - Formatting helpers
 
@@ -285,7 +287,12 @@ func check(_ report: AudioAnalysisReport, against expectation: Expectation) -> [
 
 let arguments = CommandLine.arguments.dropFirst()
 guard let mode = arguments.first else {
-    print("usage: analysis-cli analyze <file...> | benchmark <corpus-dir>")
+    print("""
+        usage: analysis-cli analyze <file...>
+               analysis-cli benchmark <corpus-dir>
+               analysis-cli compare <file...>
+               analysis-cli compare-benchmark <corpus-dir>
+        """)
     exit(2)
 }
 
@@ -345,6 +352,21 @@ case "benchmark":
     }
     print("\n\(passCount) passed, \(failCount) failed, \(missing.count) missing")
     exit(failCount == 0 ? 0 : 1)
+
+case "compare":
+    let paths = Array(arguments.dropFirst())
+    guard paths.count >= 2 else {
+        print("usage: analysis-cli compare <fileA> <fileB> [more…]")
+        exit(2)
+    }
+    runComparison(urls: paths.map { URL(fileURLWithPath: $0) })
+
+case "compare-benchmark":
+    guard arguments.count >= 2 else {
+        print("usage: analysis-cli compare-benchmark <corpus-dir>")
+        exit(2)
+    }
+    runComparativeBenchmark(corpusDir: URL(fileURLWithPath: Array(arguments)[1]))
 
 default:
     print("unknown mode “\(mode)”")

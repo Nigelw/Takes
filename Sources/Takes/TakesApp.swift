@@ -318,6 +318,7 @@ final class RemotePlaybackCommandController: ObservableObject {
 enum TakesWindowPolicy {
     static let mainWindowID = "main"
     static let analysisWindowID = "analysis"
+    static let comparisonWindowID = "comparison"
     static let replacesDefaultNewItemCommands = true
     static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
     static let minimumContentWidth: CGFloat = 640
@@ -536,6 +537,7 @@ struct TakesApp: App {
     private let launchOptions = TakesLaunchOptions()
     private let appearanceTunerPanel = AppearanceTunerPanelController()
     private let analysisWindowController = AnalysisWindowController()
+    private let comparisonWindowController = ComparisonWindowController()
 
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
@@ -595,6 +597,10 @@ struct TakesApp: App {
                     ResetMainWindowSizeButton()
                     OpenAppearanceTunerButton(panel: appearanceTunerPanel, settings: settings)
                     OpenAnalysisWindowButton(controller: analysisWindowController)
+                    OpenComparisonWindowButton(
+                        controller: comparisonWindowController,
+                        playbackController: controller
+                    )
                 }
             }
         }
@@ -698,6 +704,48 @@ final class AnalysisWindowController {
         self.window = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+/// Hosts the experimental Compare Quality tool outside SwiftUI's `Window`
+/// scene list, like the Analysis window, so it stays reachable only from
+/// Help > Debug.
+///
+/// The window is rebuilt on every open rather than reused: its input is the
+/// set of tracks loaded right now, and a stale track list would be worse than
+/// no window at all.
+@MainActor
+final class ComparisonWindowController {
+    private var window: NSWindow?
+
+    func show(trackURLs: [URL]) {
+        window?.close()
+        let hosting = NSHostingController(rootView: ComparisonWindowView(trackURLs: trackURLs))
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Compare Quality"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.isExcludedFromWindowsMenu = true
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 820, height: 680))
+        window.setFrameAutosaveName(TakesWindowPolicy.comparisonWindowID)
+        window.center()
+        self.window = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+/// Opens the experimental Compare Quality window over the session's tracks.
+private struct OpenComparisonWindowButton: View {
+    let controller: ComparisonWindowController
+    let playbackController: PlaybackController
+
+    var body: some View {
+        Button("Compare Quality") {
+            controller.show(trackURLs: playbackController.session.tracks.map(\.loadedTrack.url))
+        }
+        .keyboardShortcut("l", modifiers: [.command, .shift])
+        .disabled(playbackController.session.tracks.count < 2)
     }
 }
 
