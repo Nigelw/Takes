@@ -795,9 +795,18 @@ private struct StatCellView: View {
 
 // MARK: - Spectrogram
 
-/// Renders the engine's spectrogram `CGImage` full-width with crisp (non-
-/// interpolated) pixels, a linear frequency axis on the left, and a duration
-/// axis along the bottom.
+/// Renders the engine's spectrogram `CGImage` full-width, with a linear
+/// frequency axis on the left and a duration axis along the bottom.
+///
+/// The image is stretched to the frame on both axes rather than scaled
+/// uniformly: it is a data raster, not a photo, so its pixel aspect carries
+/// no meaning and both axes are labeled independently. Do NOT reintroduce
+/// `.aspectRatio(contentMode: .fill)` here — it scaled the 1100x512 image to
+/// cover the much wider frame and the clip shape then cut the vertical
+/// overflow off the top and bottom, hiding roughly the top and bottom 15% of
+/// the frequency range while `frequencyAxis` still labeled 0 -> Nyquist. That
+/// cropped codec cutoff shelves off the top edge, which is the single cue
+/// this view exists to show.
 private struct SpectrogramView: View {
     let spectrogram: SpectrogramImage
 
@@ -810,9 +819,12 @@ private struct SpectrogramView: View {
             HStack(spacing: 6) {
                 frequencyAxis
                 Image(decorative: spectrogram.image, scale: 1, orientation: .up)
-                    .interpolation(.none)
+                    // 512 image rows into 240 pt is a ~0.47x downscale;
+                    // nearest-neighbor would drop over half the rows and can
+                    // thin or lose narrow horizontal features like a cutoff
+                    // shelf.
+                    .interpolation(.medium)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
                     .frame(height: imageHeight)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))

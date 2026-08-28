@@ -30,7 +30,7 @@ set -euo pipefail
 # ---- Config -----------------------------------------------------------
 FFMPEG="/opt/homebrew/bin/ffmpeg"
 FFPROBE="ffprobe"
-REAL_SOURCE="/Users/Nigel/Developer/Takes/Private/Audio Samples/11 Where to Begin.m4a"
+REAL_SOURCE="/Users/Nigel/Developer/Takes/Private/Audio Samples/Alignment Samples/Non-matching Audio/Where to Begin/11 Where to Begin.m4a"
 DEFAULT_OUT="/Users/Nigel/Developer/Takes/Private/Analysis Corpus"
 
 FORCE=0
@@ -518,6 +518,124 @@ build_transient_variants() {
     "'$FFMPEG' -y -hide_banner -loglevel error -i '${OUT_DIR}/transient_mp3_128.mp3' -ar 44100 -c:a pcm_s24le -f wav - | flac --best --silent --force -o '${OUT_DIR}/transient_fake_lossless_mp3128.flac' -"
 }
 
+# ---- 3c. Phase 3: comparative cases ---------------------------------------
+#
+# Cases for the comparative (multi-file) analysis feature (see
+# docs/comparative-quality-analysis.md). Where phase 1/2 validate what a
+# single-file heuristic can see, phase 3 validates the relationship
+# classifier and ranking policy: pairs/chains whose ancestry, gain offset,
+# time offset, or master-identity is known by construction, so the engine's
+# output can be checked against a ground truth the generator itself defines.
+# Written into a "comparative/" subdirectory of OUT_DIR to keep them visually
+# separate from the single-file corpus.
+
+COMP_DIR="${OUT_DIR}/comparative"
+mkdir -p "$COMP_DIR"
+
+# build_chain: an ordered, SUCCESSIVE degradation chain -- each step decodes
+# the previous step's lossy output and re-encodes it, so quality loss
+# compounds exactly as it would if someone kept re-ripping a re-rip. Ground
+# truth partial order: master > 320 > 192 > 128, with the FLAC rewrap tied to
+# the 128 it was losslessly re-wrapped from (same audio, different
+# container). $1 = source wav (already built by build_reference /
+# build_real_reference), $2 = filename prefix ("chain_" or "real_chain_").
+build_chain() {
+  local src="$1" prefix="$2"
+  local master="${COMP_DIR}/${prefix}master.wav"
+
+  gen "$master" cp "$src" "$master"
+
+  gen "${COMP_DIR}/${prefix}320.mp3" bash -c \
+    "lame --silent -b 320 '$master' '${COMP_DIR}/${prefix}320.mp3'"
+
+  # Each subsequent step decodes the PREVIOUS mp3 (not the master) and
+  # re-encodes at a lower bitrate -- this is what makes it a chain rather
+  # than three independent single-generation encodes of the same master.
+  gen "${COMP_DIR}/${prefix}192.mp3" bash -c "
+    '$FFMPEG' -y -hide_banner -loglevel error -i '${COMP_DIR}/${prefix}320.mp3' -ar 44100 -c:a pcm_s24le -f wav - | lame --silent -b 192 - '${COMP_DIR}/${prefix}192.mp3'
+  "
+
+  gen "${COMP_DIR}/${prefix}128.mp3" bash -c "
+    '$FFMPEG' -y -hide_banner -loglevel error -i '${COMP_DIR}/${prefix}192.mp3' -ar 44100 -c:a pcm_s24le -f wav - | lame --silent -b 128 - '${COMP_DIR}/${prefix}128.mp3'
+  "
+
+  gen "${COMP_DIR}/${prefix}128_rewrap.flac" bash -c "
+    '$FFMPEG' -y -hide_banner -loglevel error -i '${COMP_DIR}/${prefix}128.mp3' -ar 44100 -c:a pcm_s24le -f wav - | flac --best --silent --force -o '${COMP_DIR}/${prefix}128_rewrap.flac' -
+  "
+}
+
+# cross_codec_aac256.m4a / cross_codec_mp3128.mp3: same master (reference.wav),
+# same encoder generation (one step, not a chain), but different codecs at
+# very different target quality. Ground truth: aac256 ranks above mp3128 on
+# fidelity, but the classifier must reach that ranking via the codecs'
+# different artifact signatures (MP3 pre-echo/HF cutoff vs AAC's own
+# transform-coding character), not a shared cutoff frequency.
+build_cross_codec_pair() {
+  local ref="${OUT_DIR}/reference.wav"
+  gen "${COMP_DIR}/cross_codec_aac256.m4a" "$FFMPEG" -y -hide_banner -loglevel error \
+    -i "$ref" -c:a aac_at -b:a 256k -movflags +faststart "${COMP_DIR}/cross_codec_aac256.m4a"
+  gen "${COMP_DIR}/cross_codec_mp3128.mp3" bash -c \
+    "lame --silent -b 128 '$ref' '${COMP_DIR}/cross_codec_mp3128.mp3'"
+}
+
+# Adversarial / must-abstain cases: each pair is constructed so the "obvious"
+# reading (just compare the numbers) is wrong or premature, and the engine
+# must gate on alignment/relationship before ranking anything.
+build_adversarial() {
+  local ref="${OUT_DIR}/reference.wav"
+
+  # gain_only_a/b: literally the same encode (uncompressed PCM, no re-encode
+  # at all) at two different gains. Ground truth: once loudness-matched the
+  # residual is at the quantization floor -- same master, NO quality
+  # difference, must not be ranked.
+  gen "${COMP_DIR}/gain_only_a.wav" cp "$ref" "${COMP_DIR}/gain_only_a.wav"
+  gen "${COMP_DIR}/gain_only_b.wav" "$FFMPEG" -y -hide_banner -loglevel error \
+    -i "$ref" -af "volume=-6dB" -c:a pcm_s24le "${COMP_DIR}/gain_only_b.wav"
+
+  # offset_pair_a/b: the same encode, b delayed by a non-integer number of
+  # milliseconds (137.4ms -> 6059.34 samples at 44.1kHz, not a whole sample).
+  # adelay zero-pads the front and extends the file by the delay amount.
+  # Ground truth: same master, but naive whole-sample or no-alignment
+  # comparison will misread this as a real difference -- sub-sample
+  # refinement must run before anything else works.
+  gen "${COMP_DIR}/offset_pair_a.wav" cp "$ref" "${COMP_DIR}/offset_pair_a.wav"
+  gen "${COMP_DIR}/offset_pair_b.wav" "$FFMPEG" -y -hide_banner -loglevel error \
+    -i "$ref" -af "adelay=137.4|137.4" -c:a pcm_s24le "${COMP_DIR}/offset_pair_b.wav"
+
+  # different_master_a/b: same underlying content, two genuinely different
+  # masterings of it -- (a) heavily limited/loud, (b) left dynamic but with a
+  # different EQ tilt. Ground truth: aligns confidently (it's the same
+  # performance), but the residual is broadband/comparable to the signal
+  # (EQ + dynamics differences, not codec artifacts) -- must classify as
+  # differentMaster and abstain from fidelity ranking, not silently rank by
+  # loudness or brightness.
+  gen "${COMP_DIR}/different_master_a.wav" "$FFMPEG" -y -hide_banner -loglevel error \
+    -i "$ref" -af "volume=8dB,alimiter=limit=0.95:level=disabled:attack=3:release=60" \
+    -c:a pcm_s24le "${COMP_DIR}/different_master_a.wav"
+  gen "${COMP_DIR}/different_master_b.wav" "$FFMPEG" -y -hide_banner -loglevel error \
+    -i "$ref" -af "bass=g=-4:f=100:width_type=q:w=0.7,treble=g=5:f=6000:width_type=q:w=0.7" \
+    -c:a pcm_s24le "${COMP_DIR}/different_master_b.wav"
+
+  # denoised_vinyl.wav: run ffmpeg's afftdn denoiser over the existing
+  # real_vinyl_sim.wav (phase 2). Ground truth: this genuinely removes most
+  # of the analog artifacts (hiss/clicks/crackle/rumble) the vinyl sim added
+  # -- the engine reading it as "clean-ish" relative to real_vinyl_sim.wav is
+  # arguably correct, not a false negative. Documented as a case where the
+  # "right" answer is deliberately debatable, per the v2 notes' own admission
+  # that a surgically de-noised rip reads clean.
+  gen "${COMP_DIR}/denoised_vinyl.wav" "$FFMPEG" -y -hide_banner -loglevel error \
+    -i "${OUT_DIR}/real_vinyl_sim.wav" -af "afftdn=nr=20:nf=-25" \
+    -c:a pcm_s24le "${COMP_DIR}/denoised_vinyl.wav"
+
+  # different_recording_a/b: genuinely unrelated excerpts (a 15s window of
+  # the real-music reference vs a 15s window of the synthetic tone/chirp
+  # reference) -- nothing to align, ground truth is a confident non-match.
+  gen "${COMP_DIR}/different_recording_a.wav" "$FFMPEG" -y -hide_banner -loglevel error \
+    -i "${OUT_DIR}/real_reference.wav" -t 15 -c:a pcm_s24le "${COMP_DIR}/different_recording_a.wav"
+  gen "${COMP_DIR}/different_recording_b.wav" "$FFMPEG" -y -hide_banner -loglevel error \
+    -i "$ref" -t 15 -c:a pcm_s24le "${COMP_DIR}/different_recording_b.wav"
+}
+
 # ---- 4. Verification -------------------------------------------------------
 #
 # For every generated audio file: ffprobe format/rate/depth, integrated LUFS
@@ -686,6 +804,68 @@ verify_phase2() {
   echo "==> Phase-2 verification data written to ${PHASE2_DATA_FILE}"
 }
 
+# ---- 4c. Phase 3 verification: comparative cases --------------------------
+#
+# Per-file LUFS/true-peak/HF-RMS (same measurements as verify_all, applied to
+# comparative/), plus a pair-level table of ground truth: the relationship
+# class and expected ranking, known by construction rather than measured --
+# this is the assertion a future ComparativeAnalysisEngine benchmark checks
+# its output against.
+COMP_DATA_FILE="${OUT_DIR}/_verification_comparative.tsv"
+
+verify_comparative() {
+  echo "==> Verifying phase-3 (comparative) cases..."
+  : > "$COMP_DATA_FILE"
+  printf "file\tintegrated_lufs\ttrue_peak_dbtp\thf_rms_above_17k_db\n" >> "$COMP_DATA_FILE"
+
+  local f
+  for f in "${COMP_DIR}"/*.wav "${COMP_DIR}"/*.flac "${COMP_DIR}"/*.mp3 "${COMP_DIR}"/*.m4a; do
+    [[ -e "$f" ]] || continue
+    local base
+    base="$(basename "$f")"
+    echo "  verify: comparative/$base"
+
+    local loud_line lufs tp
+    loud_line=$("$FFMPEG" -hide_banner -i "$f" -af "loudnorm=print_format=summary" -f null - 2>&1 || true)
+    lufs=$(echo "$loud_line" | grep "Input Integrated" | awk '{print $3}')
+    tp=$(echo "$loud_line" | grep "Input True Peak" | awk '{print $4}')
+    [[ -z "$lufs" ]] && lufs="n/a"
+    [[ -z "$tp" ]] && tp="n/a"
+
+    local hf_line hf_rms
+    hf_line=$("$FFMPEG" -hide_banner -i "$f" -af "highpass=f=17000,astats=measure_overall=RMS_level" -f null - 2>&1 || true)
+    hf_rms=$(echo "$hf_line" | grep -o "RMS level dB: [-0-9.infa]*" | tail -1 | awk '{print $4}')
+    [[ -z "$hf_rms" ]] && hf_rms="n/a"
+
+    printf "%s\t%s\t%s\t%s\n" "$base" "$lufs" "$tp" "$hf_rms" >> "$COMP_DATA_FILE"
+
+    spectrogram "$f"
+  done
+
+  # --- pair-level ground truth (known by construction, not measured) ---
+  printf "\npair\tfile_a\tfile_b\trelationship\texpected_ranking\n" >> "$COMP_DATA_FILE"
+  _pair() { printf "%s\t%s\t%s\t%s\t%s\n" "$1" "$2" "$3" "$4" "$5" >> "$COMP_DATA_FILE"; }
+
+  _pair "chain_master_vs_320"       "chain_master.wav"       "chain_320.mp3"              "sameMaster"         "chain_master.wav > chain_320.mp3"
+  _pair "chain_320_vs_192"          "chain_320.mp3"          "chain_192.mp3"              "sameMaster"         "chain_320.mp3 > chain_192.mp3"
+  _pair "chain_192_vs_128"          "chain_192.mp3"          "chain_128.mp3"              "sameMaster"         "chain_192.mp3 > chain_128.mp3"
+  _pair "chain_128_vs_rewrap"       "chain_128.mp3"          "chain_128_rewrap.flac"      "identical"          "tied (lossless re-wrap of the same bits)"
+
+  _pair "real_chain_master_vs_320"  "real_chain_master.wav"  "real_chain_320.mp3"         "sameMaster"         "real_chain_master.wav > real_chain_320.mp3"
+  _pair "real_chain_320_vs_192"     "real_chain_320.mp3"     "real_chain_192.mp3"         "sameMaster"         "real_chain_320.mp3 > real_chain_192.mp3"
+  _pair "real_chain_192_vs_128"     "real_chain_192.mp3"     "real_chain_128.mp3"         "sameMaster"         "real_chain_192.mp3 > real_chain_128.mp3"
+  _pair "real_chain_128_vs_rewrap"  "real_chain_128.mp3"     "real_chain_128_rewrap.flac" "identical"          "tied (lossless re-wrap of the same bits)"
+
+  _pair "cross_codec"               "cross_codec_aac256.m4a"     "cross_codec_mp3128.mp3"    "sameMaster"         "cross_codec_aac256.m4a > cross_codec_mp3128.mp3"
+  _pair "gain_only"                 "gain_only_a.wav"            "gain_only_b.wav"           "identical"          "tied (gain-only, no quality difference)"
+  _pair "offset_pair"               "offset_pair_a.wav"          "offset_pair_b.wav"         "identical"          "tied once aligned (137.4ms / 6059.34-sample non-integer offset)"
+  _pair "different_master"          "different_master_a.wav"     "different_master_b.wav"    "differentMaster"    "abstain (loudness-war vs dynamic remaster is not a fidelity ranking)"
+  _pair "denoised_vinyl"            "denoised_vinyl.wav"         "real_vinyl_sim.wav"        "sameMaster"         "denoised_vinyl.wav reads cleaner (arguable-but-defensible: afftdn genuinely removed most of the added analog artifacts)"
+  _pair "different_recording"       "different_recording_a.wav"  "different_recording_b.wav" "differentRecording" "no ranking (must fail to align)"
+
+  echo "==> Phase-3 (comparative) verification data written to ${COMP_DATA_FILE}"
+}
+
 # ---- Main -------------------------------------------------------------
 
 build_reference
@@ -702,8 +882,14 @@ build_mp3_192_intensity
 build_transient_reference
 build_transient_variants
 
+build_chain "${OUT_DIR}/reference.wav" "chain_"
+build_chain "${OUT_DIR}/real_reference.wav" "real_chain_"
+build_cross_codec_pair
+build_adversarial
+
 verify_all
 verify_phase2
+verify_comparative
 
 echo "==> Done. Corpus at: ${OUT_DIR}"
-echo "==> $(find "${OUT_DIR}" -maxdepth 1 -type f | wc -l | tr -d ' ') files, $(find "${SPEC_DIR}" -type f | wc -l | tr -d ' ') spectrograms."
+echo "==> $(find "${OUT_DIR}" -maxdepth 1 -type f | wc -l | tr -d ' ') files, $(find "${SPEC_DIR}" -type f | wc -l | tr -d ' ') spectrograms, $(find "${COMP_DIR}" -maxdepth 1 -type f | wc -l | tr -d ' ') comparative files."

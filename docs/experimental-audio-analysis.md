@@ -217,7 +217,9 @@ scripts/analysis-benchmark.sh analyze <files…>   # metrics for any files
 
 ## Later ideas (out of scope for v1)
 
-- Comparative two-file mode (difference spectrum, loudness-matched A/B)
+- ~~Comparative two-file mode (difference spectrum, loudness-matched A/B)~~ —
+  built as a separate multi-track feature; see
+  [comparative-quality-analysis.md](comparative-quality-analysis.md).
 - True peak (4× oversampled) instead of sample peak
 - MP3/AAC frame-grid detection for stronger transcode evidence
 - Wow/flutter + click detection for vinyl sources

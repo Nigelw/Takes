@@ -266,7 +266,15 @@ enum SourceInference {
         var signals = 0
 
         // Bandwidth far below what this bitrate should deliver.
+        //
+        // Gated on cutoff confidence. A low-confidence cutoff means no sharp
+        // shelf was found and the number is the detector's best guess at where
+        // a dark master's top end fades out — on such material it lands several
+        // kHz low, and comparing that guess against the bitrate table condemns
+        // a file for having a bitrate high enough to raise expectations. A
+        // weak measurement must not support a strong conclusion.
         if let cutoff = bandwidth.detectedCutoffHz,
+           bandwidth.confidence != .low,
            let expected = expectedCutoffByBitrate.first(where: { bitrate >= $0.minKbps }),
            cutoff < expected.minCutoffHz {
             signals += 1
@@ -328,13 +336,21 @@ enum SourceInference {
             )
         }
 
-        var cleanEvidence = [
-            String(
+        // Where the cutoff is a guess rather than a measured shelf, say so
+        // instead of quoting it as a fact.
+        var cleanEvidence: [String] = []
+        if let cutoff = bandwidth.detectedCutoffHz, bandwidth.confidence == .low {
+            cleanEvidence.append(String(
+                format: "No clear codec shelf; content fades out around %.1f kHz, which rules nothing out for %@ at ~%.0f kbps.",
+                cutoff / 1_000, fileInfo.codecDescription, bitrate
+            ))
+        } else {
+            cleanEvidence.append(String(
                 format: "Bandwidth %@ is appropriate for %@ at ~%.0f kbps.",
                 bandwidth.detectedCutoffHz.map { String(format: "%.1f kHz", $0 / 1_000) } ?? "to Nyquist",
                 fileInfo.codecDescription, bitrate
-            ),
-        ]
+            ))
+        }
         if lossyArtifacts.attackCount >= preEchoAttackCountMinimum {
             cleanEvidence.append(String(
                 format: "No significant pre-echo (%.1f dB over %d attacks).",
