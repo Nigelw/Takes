@@ -30,7 +30,7 @@ struct LoadedTrack: Equatable {
 
 /// How playback behaves when the end of the playable range (timeline end, or the
 /// loop end when a loop is active) is reached.
-enum RepeatMode: String, CaseIterable, Equatable {
+enum RepeatMode: String, CaseIterable, Equatable, Codable {
     /// Stop at the end.
     case off
     /// Restart the same track from the beginning of the range.
@@ -49,7 +49,7 @@ enum RepeatMode: String, CaseIterable, Equatable {
 }
 
 /// A looped subsection of the timeline, in absolute seconds. Invariant: `start < end`.
-struct LoopRegion: Equatable {
+struct LoopRegion: Equatable, Codable {
     var start: TimeInterval
     var end: TimeInterval
 

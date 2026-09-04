@@ -57,6 +57,13 @@ Key ownership:
   playback scheduling, and audibility.
 - `Models.swift`: `LoadedTrack`, `SessionTrack`, `ComparisonSession`,
   `PlaybackError`, repeat modes, loop regions, and timeline marker helpers.
+- `PlaylistWorkspace.swift`: playlist value model, stable version ownership,
+  organization operations, and snapshot validation (not yet wired into the app).
+- `PlaylistPlaybackBoundary.swift`: value conversion between playlist versions
+  and comparison sessions, file-time mapping, and adjustment capture by ID.
+- `PlaylistContracts.swift`: captured import destinations, runtime activation
+  identities, and the workspace persistence protocol; implementations follow
+  in the playlist upgrade milestones.
 - `TransportMapping.swift`: pure transport math, signed timeline bounds,
   transport-to-file mapping, audibility checks, and gain conversion.
 - `TrackAligner.swift`: audio-derived quick alignment and deeper tempo
@@ -154,6 +161,10 @@ these reintroduces the exact regressions it fixed):
 
 ## Test Map
 
+- `PlaylistWorkspaceTests.swift`: playlist value encoding/validation, stable
+  ownership, canonical duplicates, and atomic organization operations.
+- `PlaylistPlaybackBoundaryTests.swift`: signed position conversion, session
+  identity, loop entry, playlist gain isolation, and blind-order-safe capture.
 - `TransportMappingTests.swift`: transport math and range behavior, plus
   loop-wrap anchor math and gapless pre-queue segment mapping.
 - `SessionTests.swift`: higher-level state, import behavior, Music/Finder
@@ -177,6 +188,11 @@ these reintroduces the exact regressions it fixed):
   subsystems.
 
 ## Ongoing Work
+
+- [docs/playlist-upgrade-implementation.md](docs/playlist-upgrade-implementation.md):
+  staged playlist feature work, agent ownership, and milestone status. The
+  workspace foundation is separate from the current comparison-only app until
+  coordinator and UI integration. Read the linked contracts before extending it.
 
 - [docs/performance-plan-status.md](docs/performance-plan-status.md): status
   of the playback/UI performance improvement effort (what's landed, what's
