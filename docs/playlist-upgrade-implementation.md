@@ -13,7 +13,7 @@ UI handoff: [playlist-upgrade-ui-integration.md](playlist-upgrade-ui-integration
 ## Current status — 2026-09-05
 
 This section supersedes earlier progress notes. Implementation is on
-`codex/playlist-upgrade`. The foundation is committed as `bd72b55`. This work-in-progress checkpoint
+`codex/playlist-upgrade`. The foundation is committed as `bd72b55`. Work-in-progress checkpoint `8d68d00`
 commits the runtime, coordinator, persistence, UI integration, tests, and status
 documentation. The incomplete work and verification limits below still apply.
 Nothing has been merged or released.
@@ -51,12 +51,12 @@ Nothing has been merged or released.
 | Persistence observation test | Primary | Added `workspaceEditsSaveAutomaticallyAndObservationRearms` after the full passing run. It checks automatic saving and a second observed mutation. Not yet run. |
 | Final integration review | Primary | Review agent handoffs, rebuild after fixes, run relevant tests and final canonical verification, then finish manual acceptance and documentation. |
 
-The last Astra attempt stopped at an account usage limit. Its work is saved;
-resume the existing agent when available. No UI work is running in that agent
-as of its last report. Luna has been asked to pause at a safe point and provide
-its status; the live agent listing reports `pending_init`, with no new handoff
-received. Neither subagent is confirmed to be executing work at this checkpoint.
-Inspect live agent status when resuming rather than inferring it from this document.
+Current work slice: resolve playlist selection using Astra as the sole subagent.
+The coordinator agent has been interrupted; its committed edits await primary
+review and tests. Primary will run the existing regression suites and maintain
+this document while Astra fixes and verifies selection. Follow-on work stays
+sequential. The last Astra attempt stopped at an account usage limit; resume
+its existing task rather than recreating its context.
 
 ### Not yet started / not yet verified
 
@@ -108,7 +108,8 @@ Inspect live agent status when resuming rather than inferring it from this docum
 - The primary agent orchestrates work, defines shared interfaces, reviews every handoff, integrates changes, and verifies milestone completion.
 - **All UI design and implementation is assigned to a subagent running `gpt-6-astra` with `high` reasoning effort.** This includes playlist rows, expansion and selection, comparison navigation, mode-specific controls, window behavior, and accessibility.
 - Use subagents running **`gpt-5.6-luna` with `max` reasoning effort** for bounded model, persistence, playback, and test implementation tasks.
-- Run at most three subagents concurrently. Use explicit file ownership; sequence changes that touch shared controller or view files.
+- Run at most **one subagent** at a time (user instruction, 2026-09-05). Keep tasks bounded to conserve remaining usage. Use explicit file ownership; sequence changes that touch shared controller or view files.
+- Keep this status document current before each new work slice. Record changed files, exact verification results, known failures, and the next action. Commit completed slices with their documentation so a usage interruption leaves a recoverable handoff.
 - Supply each subagent with the feature specification, applicable repository instructions, its bounded deliverable, agreed interfaces, and verification requirements. Explicit model overrides require a fresh or limited context fork rather than a full-history fork.
 - Review and correct each handoff before dependent work proceeds. Agents must not independently broaden scope, merge, or release.
 - Preserve the pre-existing uncommitted changes in `docs/playlist-mode-specs.md`. They are exploratory notes, not authorization to add features outside the approved specification.
