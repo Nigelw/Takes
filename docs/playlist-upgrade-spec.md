@@ -1,6 +1,7 @@
 # Playlist tracks with multiple versions
 
-Status: approved feature plan; implementation pending.
+Status: approved feature plan; implementation integrated, with review and acceptance
+validation in progress. See the implementation plan for current status.
 
 Implementation sequence: [playlist-upgrade-implementation.md](playlist-upgrade-implementation.md).
 

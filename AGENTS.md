@@ -48,9 +48,11 @@ Key ownership:
 
 - `TakesApp.swift`: app windows, app/menu commands, files opened from Finder,
   remote media commands, main-window sizing policy, and Debug menu wiring.
-- `ContentView.swift`: SwiftUI interface, file importers, drag-and-drop,
-  local keyboard monitoring, waveform/timeline UI, loop gestures, and offset
-  controls.
+- `WorkspaceView.swift`: playlist/comparison navigation, shared import routing,
+  startup restoration ordering, playlist transport, and keyboard focus handling.
+- `PlaylistView.swift`: playlist rows, selection, organization, and commands.
+- `ContentView.swift`: comparison waveform/timeline UI, drag-and-drop,
+  loop gestures, and offset controls.
 - `AppSettings.swift` and `SettingsView.swift`: persisted user preferences and
   the Settings window.
 - `PlaybackController.swift`: loading files, session state, transport control,
@@ -58,12 +60,18 @@ Key ownership:
 - `Models.swift`: `LoadedTrack`, `SessionTrack`, `ComparisonSession`,
   `PlaybackError`, repeat modes, loop regions, and timeline marker helpers.
 - `PlaylistWorkspace.swift`: playlist value model, stable version ownership,
-  organization operations, and snapshot validation (not yet wired into the app).
+  organization operations, and snapshot validation.
+- `PlaylistCoordinator.swift`: mode transitions, captured-destination imports,
+  playlist traversal, organization/Undo, and active runtime coordination.
+- `PlaylistWorkspaceStore.swift`: versioned atomic snapshots, recovery protection,
+  bookmarks, and retained download storage.
+- `PlaylistPersistenceController.swift`: startup restoration, event saves,
+  playback checkpoints, and quit-time flushing.
+- `PlaylistStreamingImporter.swift`: streaming downloads into workspace storage.
 - `PlaylistPlaybackBoundary.swift`: value conversion between playlist versions
   and comparison sessions, file-time mapping, and adjustment capture by ID.
 - `PlaylistContracts.swift`: captured import destinations, runtime activation
-  identities, and the workspace persistence protocol; implementations follow
-  in the playlist upgrade milestones.
+  identities, and the workspace persistence protocol.
 - `TransportMapping.swift`: pure transport math, signed timeline bounds,
   transport-to-file mapping, audibility checks, and gain conversion.
 - `TrackAligner.swift`: audio-derived quick alignment and deeper tempo
@@ -72,7 +80,8 @@ Key ownership:
   bounded to 2 concurrent decodes in session (top-first) order — plus the
   multi-resolution peak pyramid (`Waveform.reducedLevels`) the lanes draw
   from. No disk caches.
-- `AudioFileLoader.swift`: local file loading through `AVAudioFile`.
+- `AudioFileLoader.swift`: local file metadata through `AVAudioFile`, embedded
+  title/artist/album tags through `AVURLAsset`, and audio-runtime file preparation.
 - `LibraryTrackSelectionLoader.swift`: AppleScript-based Music.app selection
   loading.
 - `StreamingTrackImport.swift`: streaming URL metadata, yt-dlp management, and
@@ -88,12 +97,15 @@ Key ownership:
 
 ## Playback Model
 
-Takes compares up to 32 tracks on a shared signed timeline. Playback uses one
+Takes keeps an ordered playlist with up to 32 versions per item and no global
+32-file cap. Playlist playback loads only the selected version, at original
+gain and file time. Comparison loads only the current item's versions on a
+shared signed timeline. Playback uses one
 `AVAudioEngine`, one `AVAudioPlayerNode` per loaded track, and one per-track
 mixer node per loaded track. All loaded tracks are scheduled against the same
 transport model, and only the active track is audible.
 
-Transport behavior to preserve:
+Comparison transport behavior to preserve:
 
 - Playback is allowed with one loaded track.
 - The timeline is based on the union of loaded track ranges and the global 0:00
@@ -116,6 +128,19 @@ Transport behavior to preserve:
 
 These are here to prevent parallel implementations and subtle regressions:
 
+- Keep one `PlaybackController` and audio engine. Inactive playlist items are
+  persisted values, with no audio nodes or waveform generation. Navigation uses
+  `replaceRuntimeSession(_:context:)`, never the legacy `clearTracks()` path.
+- Capture `PlaylistImportDestination` before asynchronous import work. General
+  imports create items; comparison imports target the captured item ID even if
+  the user navigates. Canonical duplicate detection covers the whole workspace.
+- Save comparison edits by stable version ID; playlist playback ignores their
+  gain, offset, loop, and blind ordering. Mode transitions translate file time.
+- Restore before draining external-open events and always restore paused.
+  Failed recovery blocks automatic saves; successful streaming downloads stay
+  in workspace storage so navigation, quit, and Undo cannot delete them.
+- Keep persistence snapshots side-effect free. Position checkpoints may read
+  transport anchors but must not create periodic observed workspace mutations.
 - Route new import/open entry points through the existing shared loading path
   instead of adding separate import behavior.
 - Preserve canonical duplicate detection by standardized, symlink-resolved file
@@ -161,6 +186,14 @@ these reintroduces the exact regressions it fixed):
 
 ## Test Map
 
+- `PlaylistCoordinatorTests.swift`: traversal, import destinations, organization,
+  Undo, missing-file repair, and workspace/runtime integration.
+- `PlaylistRuntimeTests.swift`: runtime replacement, stable IDs, stale imports,
+  teardown, preparation failure, and natural-end callbacks.
+- `PlaylistWorkspaceStoreTests.swift`: snapshot round trips, recovery protection,
+  schema handling, file references, and retained downloads.
+- `PlaylistPersistenceControllerTests.swift`: restoration/save gating and failures.
+- `PlaylistWaveformContextTests.swift`: stale waveform rejection across activations.
 - `PlaylistWorkspaceTests.swift`: playlist value encoding/validation, stable
   ownership, canonical duplicates, and atomic organization operations.
 - `PlaylistPlaybackBoundaryTests.swift`: signed position conversion, session
@@ -191,8 +224,8 @@ these reintroduces the exact regressions it fixed):
 
 - [docs/playlist-upgrade-implementation.md](docs/playlist-upgrade-implementation.md):
   staged playlist feature work, agent ownership, and milestone status. The
-  workspace foundation is separate from the current comparison-only app until
-  coordinator and UI integration. Read the linked contracts before extending it.
+  playlist and comparison now share one coordinator/runtime; integration
+  validation is in progress. Read the linked contracts before extending it.
 
 - [docs/performance-plan-status.md](docs/performance-plan-status.md): status
   of the playback/UI performance improvement effort (what's landed, what's

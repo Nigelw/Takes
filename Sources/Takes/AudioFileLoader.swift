@@ -16,6 +16,7 @@ struct AudioFileLoader: AudioFileLoading {
                 throw PlaybackError.unsupportedFormat(url)
             }
 
+            let tags = await descriptiveMetadata(for: url)
             return LoadedTrack(
                 url: url,
                 displayName: url.lastPathComponent,
@@ -23,13 +24,31 @@ struct AudioFileLoader: AudioFileLoading {
                 duration: duration,
                 sampleRate: format.sampleRate,
                 channelCount: format.channelCount,
-                bitRate: await estimatedBitRate(for: url)
+                bitRate: await estimatedBitRate(for: url),
+                title: tags.title,
+                artist: tags.artist,
+                album: tags.album
             )
         } catch let error as PlaybackError {
             throw error
         } catch {
             throw PlaybackError.failedToOpenFile(url)
         }
+    }
+
+    private func descriptiveMetadata(for url: URL) async -> (title: String?, artist: String?, album: String?) {
+        let asset = AVURLAsset(url: url)
+        guard let items = try? await asset.load(.commonMetadata) else { return (nil, nil, nil) }
+        func value(_ key: AVMetadataKey) async -> String? {
+            for item in AVMetadataItem.metadataItems(from: items, withKey: key, keySpace: .common) {
+                if let text = try? await item.load(.stringValue) {
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { return trimmed }
+                }
+            }
+            return nil
+        }
+        return await (value(.commonKeyTitle), value(.commonKeyArtist), value(.commonKeyAlbumName))
     }
 
     /// Best-effort estimated data rate (bits/sec) of the file's first audio track.

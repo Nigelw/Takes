@@ -1,7 +1,8 @@
 # Playlist upgrade implementation plan
 
-Status: milestone 1 in progress; workspace model and comparison value boundary implemented,
-runtime/coordinator and UI integration pending.
+Status: implementation integrated; coordinator review and UI acceptance are unfinished.
+The latest full suite passed 388 tests, but subsequent edits are not yet verified.
+See the current status below before resuming work.
 
 Feature contract: [playlist-upgrade-spec.md](playlist-upgrade-spec.md).
 Development branch: `codex/playlist-upgrade`.
@@ -9,42 +10,98 @@ Development branch: `codex/playlist-upgrade`.
 Shared interfaces: [playlist-upgrade-contracts.md](playlist-upgrade-contracts.md).
 UI handoff: [playlist-upgrade-ui-integration.md](playlist-upgrade-ui-integration.md).
 
-## Implementation log
+## Current status — 2026-09-05
 
-- 2026-09-04: Primary started milestone 1 on the existing development branch.
-  Luna owns the workspace value model and organization tests. Astra owns the
-  UI integration design. Primary owns the comparison value bridge, persistence
-  and asynchronous context contracts, Xcode registration, and integration review.
-- Baseline canonical Xcode suite passed using fresh DerivedData at
-  `/private/tmp/takes-playlist-baseline-20260904` (code signing disabled).
-- Runtime/UI integration, persistence implementation, and milestones 2–5 remain
-  pending. The new model is not yet the running app's source of truth.
-- Implemented `PlaylistWorkspace` value types, validation, canonical duplicates,
-  atomic organization operations, per-item limits, and stable file-time listening
-  state. Implemented `PlaylistPlaybackBoundary` for session materialization and
-  adjustment capture without persisting blind-shuffled order. Added 22 focused
-  tests across the model and boundary, including the 100-item model case.
-- Review corrected paused-listening selection, offset translation during moves,
-  successor selection after multiple removals, and snapshot value validation.
-  No UndoManager, disk persistence, runtime activation, or UI behavior is claimed
-  by this foundation. Astra's UI integration handoff is reviewed; implementation
-  starts after the coordinator's callable surface is available.
-- Final canonical Xcode suite passed: 356 reported test cases, including all 22
-  new model/boundary tests. DerivedData was created fresh for this foundation at
-  `/private/tmp/takes-playlist-foundation-20260904`; final log is
-  `/private/tmp/takes-playlist-foundation-final-20260904.log`. The first run found
-  a filename expectation mismatch; a later test fixture compile error was also
-  corrected before the passing run. No manual UI verification was performed
-  because this slice does not change the running interface.
+This section supersedes earlier progress notes. Implementation is on
+`codex/playlist-upgrade`. The foundation is committed as `bd72b55`. This work-in-progress checkpoint
+commits the runtime, coordinator, persistence, UI integration, tests, and status
+documentation. The incomplete work and verification limits below still apply.
+Nothing has been merged or released.
 
-### Next integration step
+### Done and verified
 
-Luna: add a runtime-only replacement API to `PlaybackController`, preserving
-version IDs and invalidating stale async work without deleting downloads, then
-implement `PlaylistCoordinator` against the shared contracts. Sequence this with
-all other controller work. Astra: wire `WorkspaceView` and playlist/comparison
-navigation once that interface is reviewed. Do not mount a second controller or
-route navigation through `clearTracks()`.
+- Workspace value model, stable item/version IDs, atomic organization operations,
+  canonical duplicate checks, 32-version per-item limit, and comparison/file-time
+  conversion are implemented. Foundation validation passed 356 tests, including
+  22 model/boundary tests and a 100-item model case.
+- Runtime replacement, coordinator operations, embedded metadata import,
+  versioned snapshot storage/recovery, persistence event/checkpoint wiring,
+  retained streaming storage, playlist/comparison UI, and mode-aware commands
+  are integrated. These are implemented surfaces, not a claim that every
+  acceptance scenario has passed.
+- The integrated canonical Xcode suite passed **388 reported tests, zero
+  failures**. Fresh DerivedData: `/private/tmp/takes-playlist-final-20260905`.
+  Log: `/private/tmp/takes-playlist-final-20260905.log`. The first sandboxed
+  attempt failed to resolve GitHub for Sparkle; the permitted rerun passed.
+- A separate Debug build succeeded. Manual checks confirmed that four synthetic
+  files import in supplied order, show their 20-second durations, and start
+  playback by double-click. Normal quit wrote both snapshot files. Relaunch
+  restored four items and the saved 00:20 position, paused.
+- `AGENTS.md` now describes the integrated ownership, one-runtime architecture,
+  captured import destinations, restoration protection, and new test suites.
+
+### In flight / incomplete
+
+| Area | Owner | Current state and next action |
+|---|---|---|
+| Playlist row selection | Astra (`ui_integration_design`) | **Known blocking UI defect:** single-click/multiselection fails, so manual grouping cannot proceed. Removing row double-click gestures and using native List primaryAction did not fix it. Next proposed fix is a flat ForEach of directly tagged item/version rows; that flattening is not yet in the file. |
+| UI file references | Astra | Reveal in Finder and missing-file checks now resolve bookmarks. Included in the latest successful Debug build; moved-file behavior still needs manual verification. |
+| Coordinator review | Luna (`coordinator`) | Edits address shuffle anchoring/history, explicit-play traversal, Next/Previous availability, shared comparison entry (bookmarks, blind ordering, viewport), stale natural-end callbacks, missing-item reporting, and resolved-file duplicate detection. Review handoff and focused regression results are still required; do not treat these edits as covered by the 388-test run. |
+| Runtime transition/Undo tests | Luna | Audio-backed selected-version/Compare/Back regression exists. Remaining review requests include Undo refresh cancellation and redo position fidelity, missing-file traversal, shuffle/history mutations, and comparison-entry state restoration. Exact coverage must be checked against the final handoff. |
+| Persistence observation test | Primary | Added `workspaceEditsSaveAutomaticallyAndObservationRearms` after the full passing run. It checks automatic saving and a second observed mutation. Not yet run. |
+| Final integration review | Primary | Review agent handoffs, rebuild after fixes, run relevant tests and final canonical verification, then finish manual acceptance and documentation. |
+
+The last Astra attempt stopped at an account usage limit. Its work is saved;
+resume the existing agent when available. No UI work is running in that agent
+as of its last report. Luna has been asked to pause at a safe point and provide
+its status; the live agent listing reports `pending_init`, with no new handoff
+received. Neither subagent is confirmed to be executing work at this checkpoint.
+Inspect live agent status when resuming rather than inferring it from this document.
+
+### Not yet started / not yet verified
+
+- The complete manual four-files → two groups → separate/regroup → Undo/Redo
+  workflow, blocked by row selection.
+- Manual album playback → Compare → choose another version → Back at the same
+  audible position → next song, including saved offsets/gain/loop/viewport.
+- Manual missing-file repair and corrupt-snapshot recovery. Automated storage
+  recovery tests passed; that does not establish the UI workflow.
+- Manual 100-item playlist and 32-version comparison, scrolling/window sizing,
+  and runtime/waveform resource checks at those sizes. Synthetic fixtures exist;
+  large-list UI and performance checks have not been performed.
+- Manual folder drops, Finder selection, Music selection, streaming imports,
+  media keys, accessibility, numeric-field shortcut isolation, blind listening,
+  comparison loops, and imports during playback. Existing automated subsystem
+  tests passed, but these new integrated routes still need acceptance checks.
+- Playback/idle CPU comparison against the documented performance baseline.
+- Final canonical test run covering all edits after the 388-test checkpoint.
+- Merge and release are separate, not authorized by this implementation task.
+
+### Milestone assessment
+
+| Milestone | Status |
+|---|---|
+| 1. Workspace model and playback boundary | Foundation complete and tested; integrated runtime exists. |
+| 2. Playlist UI and organization | Implemented; selection defect blocks manual acceptance. |
+| 3. Playback and comparison transitions | Implemented; edge-case fixes and end-to-end verification in progress. |
+| 4. Restoration and lifecycle | Implemented; automated storage tests and basic paused relaunch passed; repair/recovery UI acceptance pending. |
+| 5. Integration and release validation | In progress; latest full suite passed, subsequent edits and broad manual/performance checks remain. |
+
+### Resume details
+
+- Debug app: `/private/tmp/takes-playlist-ui-20260905/Build/Products/Debug/Takes.app`.
+  Select this exact path in CUA; selecting by name may target the installed app.
+- Manual workspace: `/private/tmp/takes-playlist-manual-workspace`, selected with
+  `TAKES_PLAYLIST_WORKSPACE_DIRECTORY`. Do not use the user's normal workspace.
+- Fixtures: `/private/tmp/takes-playlist-fixtures` (100 synthetic WAV files;
+  first four are 20 seconds, remaining files one second).
+- Last launch used exec session `45046`; verify whether it is still running.
+  Debug build log: `/private/tmp/takes-playlist-ui-build.log`.
+  App log: `/private/tmp/takes-playlist-manual-app.log`.
+- Last successful Debug build includes the first selection fix, which manual
+  verification showed is insufficient. Rebuild after the replacement fix.
+- Preserve all current changes. Remove only generated `default.profraw` from
+  the repo when the test app has finished; it is a launch artifact.
 
 ## Orchestration and ownership
 

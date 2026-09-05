@@ -143,6 +143,20 @@ final class AppFileOpenRouter {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let fileOpenRouter = AppFileOpenRouter()
+    var flushWorkspaceBeforeTermination: (@MainActor () async -> Bool)?
+    private var terminationInProgress = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let flushWorkspaceBeforeTermination else { return .terminateNow }
+        guard !terminationInProgress else { return .terminateLater }
+        terminationInProgress = true
+        Task { @MainActor in
+            let saved = await flushWorkspaceBeforeTermination()
+            if !saved { terminationInProgress = false }
+            sender.reply(toApplicationShouldTerminate: saved)
+        }
+        return .terminateLater
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -210,94 +224,52 @@ final class RemotePlaybackCommandController: ObservableObject {
         let command: MPRemoteCommand
         let target: Any
     }
-
-    private weak var controller: PlaybackController?
+    private weak var coordinator: PlaylistCoordinator?
     private let commandCenter: MPRemoteCommandCenter
     private let nowPlayingInfoCenter: MPNowPlayingInfoCenter
     private var commandTargets: [CommandTarget] = []
 
-    init(
-        commandCenter: MPRemoteCommandCenter = .shared(),
-        nowPlayingInfoCenter: MPNowPlayingInfoCenter = .default()
-    ) {
+    init(commandCenter: MPRemoteCommandCenter = .shared(), nowPlayingInfoCenter: MPNowPlayingInfoCenter = .default()) {
         self.commandCenter = commandCenter
         self.nowPlayingInfoCenter = nowPlayingInfoCenter
     }
 
-    func connect(to controller: PlaybackController) {
-        guard self.controller == nil else { return }
-        self.controller = controller
+    func connect(to coordinator: PlaylistCoordinator) {
+        guard self.coordinator == nil else { return }
+        self.coordinator = coordinator
         configureCommands()
         refreshRemoteState()
     }
 
-    /// Push the current transport snapshot to the system, re-arming
-    /// observation so the next transport change (play/pause/seek/track
-    /// switch/loop wrap) pushes again. The snapshot deliberately has no
-    /// dependency on per-tick state, so this does not run during steady
-    /// playback — the system extrapolates position from elapsed + rate.
     private func refreshRemoteState() {
-        guard let controller else { return }
-        let snapshot = withObservationTracking {
-            controller.remotePlaybackSnapshot()
+        guard let coordinator else { return }
+        let state = withObservationTracking {
+            var snapshot = coordinator.controller.remotePlaybackSnapshot()
+            let item = coordinator.workspace.items.first { $0.id == coordinator.currentItemID }
+            let version = item?.versions.first { $0.id == coordinator.currentVersionID }
+            if coordinator.mode == .playlist {
+                snapshot.title = item?.title ?? "Takes"
+                snapshot.trackCount = coordinator.workspace.items.count
+                snapshot.trackNumber = coordinator.workspace.items.firstIndex { $0.id == coordinator.currentItemID }.map { $0 + 1 }
+            }
+            return (snapshot, coordinator.canNext, coordinator.canPrevious,
+                    coordinator.mode == .playlist ? version?.metadata.artist : nil,
+                    coordinator.mode == .playlist ? version?.metadata.album : nil)
         } onChange: { [weak self] in
-            Task { @MainActor in
-                self?.refreshRemoteState()
-            }
+            Task { @MainActor in self?.refreshRemoteState() }
         }
-        updateRemoteState(with: snapshot)
-    }
-
-    private func configureCommands() {
-        addHandler(to: commandCenter.playCommand) { [weak self] in
-            guard let controller = self?.controller, controller.session.isPlayable else { return }
-            controller.play()
-        }
-        addHandler(to: commandCenter.pauseCommand) { [weak self] in
-            guard let controller = self?.controller, controller.session.isPlaying else { return }
-            controller.pause()
-        }
-        addHandler(to: commandCenter.togglePlayPauseCommand) { [weak self] in
-            guard let controller = self?.controller, controller.session.isPlayable else { return }
-            controller.session.isPlaying ? controller.pause() : controller.play()
-        }
-        addHandler(to: commandCenter.nextTrackCommand) { [weak self] in
-            guard let controller = self?.controller, controller.session.canSwitchPlayback else { return }
-            controller.selectNextTrack()
-        }
-        addHandler(to: commandCenter.previousTrackCommand) { [weak self] in
-            guard let controller = self?.controller, controller.session.canSwitchPlayback else { return }
-            controller.selectPreviousTrack()
-        }
-    }
-
-    private func addHandler(to command: MPRemoteCommand, perform action: @escaping @MainActor () -> Void) {
-        let target = command.addTarget { _ in
-            Task { @MainActor in
-                action()
-            }
-            return .success
-        }
-        commandTargets.append(CommandTarget(command: command, target: target))
-    }
-
-    private func updateRemoteState(with snapshot: PlaybackController.RemotePlaybackSnapshot) {
-        commandCenter.playCommand.isEnabled = snapshot.isPlayable && !snapshot.isPlaying
+        let snapshot = state.0
+        commandCenter.playCommand.isEnabled = coordinator.canPlay && !snapshot.isPlaying
         commandCenter.pauseCommand.isEnabled = snapshot.isPlayable && snapshot.isPlaying
-        commandCenter.togglePlayPauseCommand.isEnabled = snapshot.isPlayable
-        commandCenter.nextTrackCommand.isEnabled = snapshot.canSwitchPlayback
-        commandCenter.previousTrackCommand.isEnabled = snapshot.canSwitchPlayback
-
-        if snapshot.isPlayable {
-            nowPlayingInfoCenter.nowPlayingInfo = nowPlayingInfo(for: snapshot)
-            nowPlayingInfoCenter.playbackState = snapshot.isPlaying ? .playing : .paused
-        } else {
+        commandCenter.togglePlayPauseCommand.isEnabled = coordinator.canPlay
+        commandCenter.nextTrackCommand.isEnabled = state.1
+        commandCenter.previousTrackCommand.isEnabled = state.2
+        commandCenter.changePlaybackPositionCommand.isEnabled = snapshot.isPlayable
+        guard snapshot.isPlayable else {
             nowPlayingInfoCenter.nowPlayingInfo = nil
             nowPlayingInfoCenter.playbackState = .stopped
+            return
         }
-    }
-
-    private func nowPlayingInfo(for snapshot: PlaybackController.RemotePlaybackSnapshot) -> [String: Any] {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: snapshot.title,
             MPMediaItemPropertyPlaybackDuration: snapshot.duration,
@@ -305,18 +277,48 @@ final class RemotePlaybackCommandController: ObservableObject {
             MPNowPlayingInfoPropertyPlaybackRate: snapshot.isPlaying ? 1.0 : 0.0,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue
         ]
-
-        if let trackNumber = snapshot.trackNumber {
-            info[MPMediaItemPropertyAlbumTrackNumber] = trackNumber
+        if let number = snapshot.trackNumber {
+            info[MPMediaItemPropertyAlbumTrackNumber] = number
             info[MPMediaItemPropertyAlbumTrackCount] = snapshot.trackCount
         }
+        if let artist = state.3 { info[MPMediaItemPropertyArtist] = artist }
+        if let album = state.4 { info[MPMediaItemPropertyAlbumTitle] = album }
+        nowPlayingInfoCenter.nowPlayingInfo = info
+        nowPlayingInfoCenter.playbackState = snapshot.isPlaying ? .playing : .paused
+    }
 
-        return info
+    private func configureCommands() {
+        addHandler(to: commandCenter.playCommand) { [weak self] in self?.coordinator?.play() }
+        addHandler(to: commandCenter.pauseCommand) { [weak self] in self?.coordinator?.pause() }
+        addHandler(to: commandCenter.togglePlayPauseCommand) { [weak self] in self?.coordinator?.togglePlayback() }
+        addHandler(to: commandCenter.nextTrackCommand) { [weak self] in self?.coordinator?.next() }
+        addHandler(to: commandCenter.previousTrackCommand) { [weak self] in self?.coordinator?.previous() }
+        let target = commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            let position = event.positionTime
+            Task { @MainActor in
+                guard let coordinator = self?.coordinator else { return }
+                coordinator.seek(to: coordinator.controller.session.playbackStart + position)
+            }
+            return .success
+        }
+        commandTargets.append(CommandTarget(command: commandCenter.changePlaybackPositionCommand, target: target))
+    }
+
+    private func addHandler(to command: MPRemoteCommand, perform action: @escaping @MainActor () -> Void) {
+        let target = command.addTarget { _ in
+            Task { @MainActor in action() }
+            return .success
+        }
+        commandTargets.append(CommandTarget(command: command, target: target))
     }
 }
 
 enum TakesWindowPolicy {
     static let mainWindowID = "main"
+    static let comparisonNavigationHeight: CGFloat = 32
+    static let resetComparisonLayoutNotification = Notification.Name("TakesResetComparisonLayout")
+    static let playlistDefaultSize = CGSize(width: 760, height: 520)
     static let analysisWindowID = "analysis"
     static let comparisonWindowID = "comparison"
     static let replacesDefaultNewItemCommands = true
@@ -457,7 +459,8 @@ enum TakesWindowPolicy {
     static func configureMainWindow(
         _ window: NSWindow,
         defaults: UserDefaults = .standard,
-        resetsLayoutForLaunch: Bool = false
+        resetsLayoutForLaunch: Bool = false,
+        playlistMode: Bool = false
     ) {
         let hasSavedFrame = hasSavedMainWindowFrame(defaults: defaults)
         window.minSize = minimumWindowSize
@@ -480,19 +483,24 @@ enum TakesWindowPolicy {
         if !hasSavedFrame {
             let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
             window.setFrame(defaultFrame(visibleFrame: visibleFrame), display: true)
-        } else {
+        } else if !playlistMode {
             resetMainWindowHeight(window, animate: false)
         }
     }
 
     @MainActor
-    static func resizeMainWindow(_ window: NSWindow, displayingTrackRows rowCount: Int) {
+    static func resizeMainWindow(_ window: NSWindow, displayingTrackRows rowCount: Int, includesNavigation: Bool = false) {
         let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-        let resizedFrame = frame(
+        var resizedFrame = frame(
             fittingTrackRows: rowCount,
             currentFrame: window.frame,
             visibleFrame: visibleFrame
         )
+        if includesNavigation {
+            let height = min(resizedFrame.height + comparisonNavigationHeight, max(window.frame.maxY - visibleFrame.minY, 0))
+            resizedFrame.origin.y = window.frame.maxY - height
+            resizedFrame.size.height = height
+        }
 
         guard abs(resizedFrame.height - window.frame.height) > 0.5 else { return }
         window.setFrame(resizedFrame, display: true, animate: true)
@@ -528,7 +536,9 @@ struct TakesLaunchOptions {
 @main
 struct TakesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var controller = PlaybackController()
+    @State private var coordinator: PlaylistCoordinator
+    @State private var persistence: PlaylistPersistenceController
+    private var controller: PlaybackController { coordinator.controller }
     @StateObject private var remotePlaybackCommands = RemotePlaybackCommandController()
     @StateObject private var settings = AppSettings()
     @StateObject private var updater = SoftwareUpdater()
@@ -539,10 +549,17 @@ struct TakesApp: App {
     private let analysisWindowController = AnalysisWindowController()
     private let comparisonWindowController = ComparisonWindowController()
 
+    init() {
+        let coordinator = PlaylistCoordinator()
+        _coordinator = State(initialValue: coordinator)
+        _persistence = State(initialValue: PlaylistPersistenceController(coordinator: coordinator, store: PlaylistWorkspaceStore()))
+    }
+
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
-            ContentView(
-                controller: controller,
+            WorkspaceView(
+                coordinator: coordinator,
+                persistence: persistence,
                 appFileOpenRouter: appDelegate.fileOpenRouter,
                 usesTemporaryDefaultWindowLayout: launchOptions.usesDefaultWindowLayout
             )
@@ -551,12 +568,13 @@ struct TakesApp: App {
                 .environmentObject(zoomHaptics)
                 .onAppear {
                     controller.settings = settings
-                    remotePlaybackCommands.connect(to: controller)
+                    remotePlaybackCommands.connect(to: coordinator)
+                    appDelegate.flushWorkspaceBeforeTermination = { await persistence.flush() }
                 }
         }
         .defaultSize(
-            width: TakesWindowPolicy.defaultWindowWidth,
-            height: TakesWindowPolicy.defaultWindowHeight
+            width: TakesWindowPolicy.playlistDefaultSize.width,
+            height: TakesWindowPolicy.playlistDefaultSize.height
         )
         // Declared on the scene (not just patched onto the NSWindow later) so
         // SwiftUI sizes the hosting view full-height from creation, letting
@@ -574,17 +592,11 @@ struct TakesApp: App {
                 }
             }
 
-            FileCommands()
-            PlaybackCommands(controller: controller)
-            ViewCommands(controller: controller)
+            FileCommands(coordinator: coordinator)
+            PlaylistCommands()
+            PlaybackCommands(coordinator: coordinator)
+            ViewCommands(coordinator: coordinator)
 
-            CommandGroup(after: .pasteboard) {
-                Button("Deselect") {
-                    controller.deselectLoop()
-                }
-                .keyboardShortcut("d", modifiers: [.command])
-                .disabled(controller.session.loopRegion == nil)
-            }
 
             CommandGroup(replacing: .help) {
                 Link("Visit Website", destination: URL(string: "https://takes.nigelwarren.com")!)
@@ -601,6 +613,7 @@ struct TakesApp: App {
                         controller: comparisonWindowController,
                         playbackController: controller
                     )
+                    .disabled(coordinator.mode.itemID == nil)
                 }
             }
         }
@@ -773,6 +786,7 @@ private struct ResetMainWindowSizeButton: View {
 }
 
 private struct FileCommands: Commands {
+    let coordinator: PlaylistCoordinator
     @FocusedValue(\.openFileCommandState) private var openFileCommandState
     @FocusedValue(\.canShowActiveTrackInFinder) private var canShowActiveTrackInFinder
     @FocusedValue(\.canRemoveActiveTrack) private var canRemoveActiveTrack
@@ -815,7 +829,7 @@ private struct FileCommands: Commands {
 
             Divider()
 
-            Button("Remove Track") {
+            Button(coordinator.mode.itemID == nil ? "Remove Selected Items" : "Remove Version") {
                 openFileCommandState?.removeActiveTrack()
             }
             .keyboardShortcut(.delete, modifiers: [])
@@ -825,104 +839,125 @@ private struct FileCommands: Commands {
                     || canUseGlobalMenuShortcuts != true
             )
 
-            Button("Remove All Tracks") {
+            Button(coordinator.mode.itemID == nil ? "Clear Playlist" : "Remove All Versions") {
                 openFileCommandState?.clearAllTracks()
             }
             .keyboardShortcut(.delete, modifiers: [.command])
-            .disabled(openFileCommandState == nil || canClearTracks != true)
+            .disabled(openFileCommandState == nil || canClearTracks != true || canUseGlobalMenuShortcuts != true)
         }
     }
 }
 
 private struct PlaybackCommands: Commands {
-    var controller: PlaybackController
+    let coordinator: PlaylistCoordinator
+    private var controller: PlaybackController { coordinator.controller }
+    private var isComparison: Bool { coordinator.mode.itemID != nil }
+    @FocusedValue(\.playlistCommandContext) private var playlistContext
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
 
     var body: some Commands {
         CommandMenu("Playback") {
             Button(controller.session.isPlaying ? "Pause" : "Play") {
-                controller.session.isPlaying ? controller.pause() : controller.play()
+                coordinator.togglePlayback()
             }
             .keyboardShortcut(.space, modifiers: [])
-            .disabled(!controller.session.isPlayable)
+            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
-            Button("Switch Track") {
-                controller.selectNextTrack()
+            Button(isComparison ? "Switch Track" : "Next Item") {
+                coordinator.next()
             }
             .keyboardShortcut("x", modifiers: [])
-            .disabled(!controller.session.canSwitchPlayback)
+            .disabled(!coordinator.canNext || canUseGlobalMenuShortcuts != true)
 
-            Button("Switch to Previous Track") {
-                controller.selectPreviousTrack()
+            Button(isComparison ? "Switch to Previous Track" : "Previous Item") {
+                coordinator.previous()
             }
             .keyboardShortcut("x", modifiers: [.shift])
-            .disabled(!controller.session.canSwitchPlayback)
+            .disabled(!coordinator.canPrevious || canUseGlobalMenuShortcuts != true)
 
             Divider()
 
             Button("Jump to Beginning") {
-                controller.seek(to: controller.session.timelineStart)
+                coordinator.seek(to: controller.session.timelineStart)
             }
             .keyboardShortcut(.leftArrow, modifiers: [.command])
-            .disabled(!controller.session.isPlayable)
+            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
             Button("Jump to End") {
-                controller.seek(to: controller.session.timelineEnd)
+                coordinator.seek(to: controller.session.timelineEnd)
             }
             .keyboardShortcut(.rightArrow, modifiers: [.command])
-            .disabled(!controller.session.isPlayable)
+            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
             Menu("Skip") {
                 Button("Skip Forward 1s") {
-                    controller.skip(by: 1)
+                    coordinator.skip(by: 1)
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [])
-                .disabled(!controller.session.isPlayable)
+                .disabled(playlistContext?.presentation.listHasFocus == true)
+                .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
                 Button("Skip Forward 10s") {
-                    controller.skip(by: 10)
+                    coordinator.skip(by: 10)
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [.shift])
-                .disabled(!controller.session.isPlayable)
+                .disabled(playlistContext?.presentation.listHasFocus == true)
+                .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
                 Button("Skip Backward 1s") {
-                    controller.skip(by: -1)
+                    coordinator.skip(by: -1)
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [])
-                .disabled(!controller.session.isPlayable)
+                .disabled(playlistContext?.presentation.listHasFocus == true)
+                .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
                 Button("Skip Backward 10s") {
-                    controller.skip(by: -10)
+                    coordinator.skip(by: -10)
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [.shift])
-                .disabled(!controller.session.isPlayable)
+                .disabled(playlistContext?.presentation.listHasFocus == true)
+                .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
             }
-            .disabled(!controller.session.isPlayable)
+            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
             Divider()
 
             Menu("Repeat") {
+                if !isComparison {
+                    Picker("Repeat", selection: Binding(
+                        get: { coordinator.workspace.playlistRepeatMode },
+                        set: { coordinator.setPlaylistRepeatMode($0) }
+                    )) {
+                        Text("Off").tag(PlaylistRepeatMode.off)
+                        Text("One").tag(PlaylistRepeatMode.one)
+                        Text("All").tag(PlaylistRepeatMode.all)
+                    }.pickerStyle(.inline)
+                } else {
                 Picker("Repeat", selection: Binding(
                     get: { controller.session.repeatMode },
-                    set: { controller.setRepeatMode($0) }
+                    set: { coordinator.setRepeatMode($0) }
                 )) {
                     Text("Off").tag(RepeatMode.off)
                     Text("One").tag(RepeatMode.one)
                     Text("Switch & Repeat").tag(RepeatMode.switchAndRepeat)
                 }
                 .pickerStyle(.inline)
+                }
             }
-            .disabled(!controller.session.isPlayable)
+            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
+            if !isComparison {
+                Toggle("Shuffle", isOn: Binding(get: { coordinator.workspace.isShuffleEnabled }, set: { coordinator.setShuffleEnabled($0) }))
+            }
             Toggle(
                 "Blind Listening Mode",
                 isOn: Binding(
                     get: { controller.session.isBlindListeningModeEnabled },
-                    set: { controller.setBlindListeningMode($0) }
+                    set: { coordinator.setBlindListeningMode($0) }
                 )
             )
             .keyboardShortcut("b", modifiers: [.command])
-            .disabled(!controller.session.canToggleBlindListeningMode)
+            .disabled(!isComparison || !controller.session.canToggleBlindListeningMode)
 
             Divider()
 
@@ -930,7 +965,7 @@ private struct PlaybackCommands: Commands {
                 controller.autoAlignTracks()
             }
             .keyboardShortcut("a", modifiers: [.command, .option])
-            .disabled(!controller.session.canSwitchPlayback || controller.isAligning)
+            .disabled(!isComparison || !controller.session.canSwitchPlayback || controller.isAligning)
 
             Menu("Nudge Track") {
                 Button("Nudge Left") {
@@ -953,17 +988,29 @@ private struct PlaybackCommands: Commands {
                 }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
             }
-            .disabled(controller.session.activeTrack == nil || canUseGlobalMenuShortcuts != true)
+            .disabled(!isComparison || controller.session.activeTrack == nil || canUseGlobalMenuShortcuts != true)
         }
     }
 }
 
 private struct ViewCommands: Commands {
-    var controller: PlaybackController
+    let coordinator: PlaylistCoordinator
+    private var controller: PlaybackController { coordinator.controller }
+    @FocusedValue(\.playlistCommandContext) private var playlistContext
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
 
     var body: some Commands {
         CommandGroup(after: .toolbar) {
+            Button("Back to Playlist") { Task { await coordinator.backToPlaylist() } }
+                .keyboardShortcut("[", modifiers: [.command])
+                .disabled(coordinator.mode.itemID == nil)
+            Button("Deselect") {
+                if coordinator.mode.itemID != nil { coordinator.deselectLoop() }
+                else { playlistContext?.presentation.selection = [] }
+            }
+            .keyboardShortcut("d", modifiers: [.command])
+            .disabled(coordinator.mode.itemID != nil ? controller.session.loopRegion == nil : playlistContext?.presentation.selection.isEmpty != false)
+            Divider()
             Button("Zoom In") {
                 controller.stepZoom(zoomingIn: true)
             }
@@ -997,6 +1044,6 @@ private struct ViewCommands: Commands {
     }
 
     private var canUseZoomShortcuts: Bool {
-        canUseGlobalMenuShortcuts == true
+        coordinator.mode.itemID != nil && canUseGlobalMenuShortcuts == true
     }
 }

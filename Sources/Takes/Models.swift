@@ -16,6 +16,11 @@ struct LoadedTrack: Equatable {
     var gainDB: Float = 0
     var offsetSeconds: TimeInterval = 0
 
+    /// Embedded descriptive tags, independent of the comparison's file label.
+    var title: String?
+    var artist: String?
+    var album: String?
+
     /// `[duration] • [sample rate] • [bit rate]`, e.g. `03:59 • 44.1 kHz • 256 kbps`.
     /// The bit-rate segment drops out when the source reports no usable rate.
     var metadataSummary: String {

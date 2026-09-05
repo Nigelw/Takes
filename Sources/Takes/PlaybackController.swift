@@ -12,6 +12,15 @@ final class PlaybackController {
 
     private(set) var session = ComparisonSession()
 
+    /// The opaque activation that owns the currently committed runtime. The
+    /// activation identity changes on every replacement, including when the
+    /// same playlist item is entered again.
+    private(set) var runtimeContext: PlaylistRuntimeContext?
+
+    /// Called only when a Repeat Off session reaches its natural end.
+    /// Pausing, stopping, replacement, and playback errors do not call it.
+    @ObservationIgnored var onPlaybackEnded: ((PlaylistRuntimeContext?) -> Void)?
+
     /// The window currently drawn, in absolute seconds — a sub-window of the
     /// content range `[timelineStart, timelineEnd]`; when it equals the content
     /// range the timeline is fully zoomed out ("fit"). See `TimelineViewport`.
@@ -83,6 +92,15 @@ final class PlaybackController {
     }
 
     @ObservationIgnored private var alignmentOutcomeClearTask: Task<Void, Never>?
+
+    /// Every asynchronous import, replacement, and analysis operation captures
+    /// this value before its first suspension. A runtime transition advances it
+    /// so stable track IDs cannot make an old completion look current after a
+    /// same-item reentry.
+    @ObservationIgnored private var runtimeGeneration: UInt64 = 0
+    @ObservationIgnored private var pendingRuntimeContext: PlaylistRuntimeContext?
+    @ObservationIgnored private var alignmentTask: Task<Void, Never>?
+    @ObservationIgnored private var tempoAnalysisTask: Task<Void, Never>?
 
     @ObservationIgnored private let loader: AudioFileLoading
     @ObservationIgnored private let libraryTrackSelector: LibraryTrackSelecting
@@ -196,6 +214,267 @@ final class PlaybackController {
         session.tracks.count
     }
 
+    /// Number of audio runtime tracks currently attached to the controller.
+    /// This deliberately excludes playlist items that are not active.
+    var runtimeTrackCount: Int {
+        runtimeTracksByID.count
+    }
+
+    // MARK: - Runtime boundary
+
+    /// Replace the active comparison runtime with a supplied session. File
+    /// preparation happens before the old nodes are torn down, so preparation
+    /// failures or a superseded replacement leave the previous runtime intact.
+    /// Once commit begins, a scheduling failure leaves the new runtime stopped.
+    /// The supplied session's IDs, gain, offsets, repeat/loop configuration,
+    /// and playing state are preserved.
+    func replaceRuntimeSession(
+        _ newSession: ComparisonSession,
+        context: PlaylistRuntimeContext
+    ) async throws {
+        guard newSession.tracks.count <= Self.maximumTrackCount else {
+            let skippedFileNames = Array(newSession.tracks.dropFirst(Self.maximumTrackCount))
+                .map { $0.loadedTrack.displayName.ifEmpty($0.loadedTrack.url.lastPathComponent) }
+            throw PlaybackError.trackLimitExceeded(
+                limit: Self.maximumTrackCount,
+                skippedFileNames: skippedFileNames
+            )
+        }
+
+        try validateRuntimeSession(newSession)
+
+        let generation = beginRuntimeReplacement(context: context)
+        defer {
+            if runtimeGeneration == generation, pendingRuntimeContext == context {
+                pendingRuntimeContext = nil
+            }
+        }
+
+        var preparedTracks: [(sessionTrack: SessionTrack, file: AVAudioFile)] = []
+        preparedTracks.reserveCapacity(newSession.tracks.count)
+        var didBeginCommit = false
+        var preparingURL: URL?
+        do {
+            for sessionTrack in newSession.tracks {
+                preparingURL = sessionTrack.loadedTrack.url
+                try Task.checkCancellation()
+                let file = try loader.makeAudioFile(from: sessionTrack.loadedTrack.url)
+                try Task.checkCancellation()
+                guard isCurrentReplacement(generation: generation, context: context) else {
+                    throw CancellationError()
+                }
+                preparedTracks.append((sessionTrack: sessionTrack, file: file))
+            }
+
+            guard isCurrentReplacement(generation: generation, context: context) else {
+                throw CancellationError()
+            }
+            try Task.checkCancellation()
+
+            didBeginCommit = true
+            try commitRuntimeSession(
+                newSession,
+                context: context,
+                preparedTracks: preparedTracks
+            )
+            pendingRuntimeContext = nil
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as PlaybackError {
+            if didBeginCommit {
+                abortCommittedRuntimeSession()
+            }
+            throw error
+        } catch {
+            if didBeginCommit {
+                abortCommittedRuntimeSession()
+            }
+            throw PlaybackError.failedToOpenFile(
+                preparingURL
+                    ?? newSession.tracks.first?.loadedTrack.url
+                    ?? URL(fileURLWithPath: "")
+            )
+        }
+    }
+
+    private func validateRuntimeSession(_ candidate: ComparisonSession) throws {
+        guard candidate.timelineStart.isFinite,
+              candidate.timelineEnd.isFinite,
+              candidate.timelineEnd >= candidate.timelineStart,
+              candidate.duration.isFinite,
+              candidate.playbackStart.isFinite,
+              candidate.playbackEnd.isFinite,
+              candidate.transportPosition.isFinite,
+              candidate.transportPosition >= candidate.timelineStart,
+              candidate.transportPosition <= candidate.timelineEnd else {
+            throw PlaybackError.schedulingFailed
+        }
+
+        var seenIDs = Set<SessionTrack.ID>()
+        for track in candidate.tracks {
+            let loadedTrack = track.loadedTrack
+            guard seenIDs.insert(track.id).inserted,
+                  loadedTrack.duration.isFinite,
+                  loadedTrack.duration > 0,
+                  loadedTrack.sampleRate.isFinite,
+                  loadedTrack.sampleRate > 0,
+                  loadedTrack.offsetSeconds.isFinite,
+                  (loadedTrack.offsetSeconds + loadedTrack.duration).isFinite,
+                  loadedTrack.gainDB.isFinite else {
+                throw PlaybackError.schedulingFailed
+            }
+        }
+
+        if let activeTrackID = candidate.activeTrackID,
+           !seenIDs.contains(activeTrackID) {
+            throw PlaybackError.schedulingFailed
+        }
+
+        if candidate.duration > 0,
+           (candidate.transportPosition < candidate.timelineStart
+            || candidate.transportPosition > candidate.timelineEnd) {
+            throw PlaybackError.schedulingFailed
+        }
+
+        if let loop = candidate.loopRegion {
+            guard candidate.duration > 0,
+                  loop.start.isFinite,
+                  loop.end.isFinite,
+                  loop.start < loop.end,
+                  loop.start >= candidate.timelineStart,
+                  loop.end <= candidate.timelineEnd else {
+                throw PlaybackError.schedulingFailed
+            }
+            if candidate.transportPosition < loop.start || candidate.transportPosition > loop.end {
+                throw PlaybackError.schedulingFailed
+            }
+        }
+
+        if candidate.isPlaying,
+           (!candidate.isPlayable || candidate.transportPosition >= candidate.playbackEnd) {
+            throw PlaybackError.schedulingFailed
+        }
+    }
+
+    /// Invalidate the active runtime identity and every pending completion.
+    /// This tears down transient audio state but intentionally leaves
+    /// streaming-download ownership untouched.
+    func invalidateRuntimeContext() {
+        invalidatePendingRuntimeWork()
+        runtimeContext = nil
+        stopScrollAnimation()
+        teardownRuntimeTracks()
+        timer?.invalidate()
+        timer = nil
+        session = ComparisonSession()
+        transportStoppedAtTimelineStart = true
+        playbackStartedAt = nil
+        playbackStartedFromTransport = 0
+        isLoopPreQueued = false
+        playingReadoutText = session.transportPosition.formattedSignedTimestamp
+        setVisibleWindow(start: 0, span: 0)
+        pauseEngine()
+    }
+
+    private func beginRuntimeReplacement(context: PlaylistRuntimeContext) -> UInt64 {
+        invalidatePendingRuntimeWork()
+        pendingRuntimeContext = context
+        return runtimeGeneration
+    }
+
+    private func invalidatePendingRuntimeWork() {
+        runtimeGeneration &+= 1
+        pendingRuntimeContext = nil
+        alignmentTask?.cancel()
+        alignmentTask = nil
+        tempoAnalysisTask?.cancel()
+        tempoAnalysisTask = nil
+        alignmentOutcomeClearTask?.cancel()
+        alignmentOutcomeClearTask = nil
+        isAligning = false
+        alignmentProgress = nil
+        tempoAnalysisOffer = nil
+        alignmentOutcome = nil
+    }
+
+    private func isCurrentReplacement(
+        generation: UInt64,
+        context: PlaylistRuntimeContext
+    ) -> Bool {
+        runtimeGeneration == generation && pendingRuntimeContext == context
+    }
+
+    private func isCurrentRuntimeOperation(
+        generation: UInt64,
+        context: PlaylistRuntimeContext?
+    ) -> Bool {
+        runtimeGeneration == generation
+            && runtimeContext == context
+            && pendingRuntimeContext == nil
+    }
+
+    private func commitRuntimeSession(
+        _ newSession: ComparisonSession,
+        context: PlaylistRuntimeContext,
+        preparedTracks: [(sessionTrack: SessionTrack, file: AVAudioFile)]
+    ) throws {
+        stopScrollAnimation()
+        teardownRuntimeTracks()
+        timer?.invalidate()
+        timer = nil
+        playbackStartedAt = nil
+        playbackStartedFromTransport = newSession.transportPosition
+        transportStoppedAtTimelineStart = newSession.transportPosition == newSession.timelineStart
+        isLoopPreQueued = false
+
+        session = newSession
+        runtimeContext = context
+        playingReadoutText = session.transportPosition.formattedSignedTimestamp
+        setVisibleWindow(start: session.timelineStart, span: session.duration)
+
+        configureEngine()
+        for preparedTrack in preparedTracks {
+            attachRuntimeTrack(
+                for: preparedTrack.sessionTrack.id,
+                file: preparedTrack.file
+            )
+        }
+
+        guard !session.isPlaying else {
+            try ensureEngineRunning()
+            try rescheduleAndStart(from: session.transportPosition)
+            transportStoppedAtTimelineStart = false
+            playbackStartedFromTransport = session.transportPosition
+            playbackStartedAt = CACurrentMediaTime()
+            startTimer()
+            applyAudibility()
+            return
+        }
+
+        for runtime in runtimeTracksInSessionOrder() {
+            runtime.player.stop()
+        }
+        applyAudibility()
+        pauseEngine()
+    }
+
+    /// Leave the controller in a stopped, empty-runtime state when scheduling a
+    /// committed candidate fails after the previous nodes have been torn down.
+    private func abortCommittedRuntimeSession() {
+        stopScrollAnimation()
+        teardownRuntimeTracks()
+        timer?.invalidate()
+        timer = nil
+        session.isPlaying = false
+        playbackStartedAt = nil
+        playbackStartedFromTransport = session.transportPosition
+        transportStoppedAtTimelineStart = session.transportPosition == session.timelineStart
+        isLoopPreQueued = false
+        runtimeContext = nil
+        applyAudibility()
+        pauseEngine()
+    }
+
     func loadImportedFiles(_ urls: [URL]) async {
         await loadImportedFiles(urls, additionalFailures: [], blindShuffle: { $0.shuffled() })
     }
@@ -213,6 +492,10 @@ final class PlaybackController {
         blindShuffle: ([SessionTrack]) -> [SessionTrack]
     ) async {
         guard !urls.isEmpty || !additionalFailures.isEmpty else { return }
+
+        let generation = runtimeGeneration
+        let operationContext = runtimeContext
+        guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else { return }
 
         let wasPlaying = session.isPlaying
         var preparedLoads: [PreparedTrackLoad] = []
@@ -232,13 +515,20 @@ final class PlaybackController {
             }
 
             do {
-                preparedLoads.append(try await prepareTrackLoad(from: url))
+                preparedLoads.append(try await prepareTrackLoad(from: url, generation: generation))
+                guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else {
+                    return
+                }
+            } catch is CancellationError {
+                return
             } catch let error as PlaybackError {
                 failures.append(ImportFailure(url: url, message: error.importFailureMessage))
             } catch {
                 failures.append(ImportFailure(url: url, message: PlaybackError.failedToOpenFile(url).importFailureMessage))
             }
         }
+
+        guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else { return }
 
         var resumePosition: TimeInterval?
         var shouldAutoAlignAfterOpening = false
@@ -376,14 +666,24 @@ final class PlaybackController {
             return false
         }
 
+        let generation = runtimeGeneration
+        let operationContext = runtimeContext
+        guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else { return false }
+
         let loadID = UUID()
         var loadDirectory: URL?
 
         do {
             try Task.checkCancellation()
             await statusHandler(.preparingDownloader)
+            guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else {
+                return false
+            }
             let downloaderURL = try await ytdlpManager.executableURL()
             try Task.checkCancellation()
+            guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else {
+                return false
+            }
 
             let match = try await streamingTrackResolver.resolveYouTubeMatch(
                 for: sourceURL,
@@ -392,12 +692,18 @@ final class PlaybackController {
             )
             let youtubeURL = match.url
             try Task.checkCancellation()
+            guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else {
+                return false
+            }
 
             try streamingDownloadCache.prepare()
             let currentLoadDirectory = try streamingDownloadCache.createLoadDirectory(id: loadID)
             loadDirectory = currentLoadDirectory
 
             await statusHandler(.downloading(progress: nil))
+            guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else {
+                return false
+            }
             let downloadedURL = try await downloadStreamingAudio(
                 from: youtubeURL,
                 into: currentLoadDirectory,
@@ -405,10 +711,19 @@ final class PlaybackController {
                 using: downloaderURL
             )
             try Task.checkCancellation()
+            guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else {
+                return false
+            }
 
             await statusHandler(.openingAudio)
+            guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else {
+                return false
+            }
             let existingTrackIDs = Set(session.tracks.map(\.id))
             await loadImportedFiles([downloadedURL])
+            guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else {
+                return false
+            }
             guard let importedTrack = session.tracks.first(where: {
                 !existingTrackIDs.contains($0.id)
                     && Self.timelineIdentityURL(for: $0.loadedTrack.url) == Self.timelineIdentityURL(for: downloadedURL)
@@ -418,12 +733,12 @@ final class PlaybackController {
             streamingCacheFilesByTrackID[importedTrack.id] = downloadedURL
             return true
         } catch is CancellationError {
-            if let loadDirectory {
+            if generation == runtimeGeneration, let loadDirectory {
                 try? streamingDownloadCache.deleteOwnedItem(at: loadDirectory)
             }
             return false
         } catch {
-            if let loadDirectory {
+            if generation == runtimeGeneration, let loadDirectory {
                 try? streamingDownloadCache.deleteOwnedItem(at: loadDirectory)
             }
             NSLog("Streaming track import failed: \(error)")
@@ -440,9 +755,22 @@ final class PlaybackController {
         playbackError = nil
     }
 
-    private func prepareTrackLoad(from url: URL) async throws -> PreparedTrackLoad {
+    private func prepareTrackLoad(
+        from url: URL,
+        generation: UInt64? = nil
+    ) async throws -> PreparedTrackLoad {
         let metadata = try await loader.loadTrackMetadata(from: url)
+        if let generation {
+            guard generation == runtimeGeneration, pendingRuntimeContext == nil else {
+                throw CancellationError()
+            }
+        }
         let file = try loader.makeAudioFile(from: url)
+        if let generation {
+            guard generation == runtimeGeneration, pendingRuntimeContext == nil else {
+                throw CancellationError()
+            }
+        }
         return PreparedTrackLoad(metadata: metadata, file: file)
     }
 
@@ -640,10 +968,16 @@ final class PlaybackController {
     }
 
     func replaceTrack(_ trackID: SessionTrack.ID, with url: URL) async {
-        guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        guard session.tracks.contains(where: { $0.id == trackID }) else { return }
+
+        let generation = runtimeGeneration
+        let operationContext = runtimeContext
+        guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else { return }
 
         do {
-            let preparedLoad = try await prepareTrackLoad(from: url)
+            let preparedLoad = try await prepareTrackLoad(from: url, generation: generation)
+            guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else { return }
+            guard let index = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
             let wasPlaying = session.isPlaying
             let resumePosition = wasPlaying ? currentTransportPosition() : nil
 
@@ -654,6 +988,8 @@ final class PlaybackController {
 
             guard wasPlaying, let resumePosition else { return }
             restorePlaybackAfterTrackMutation(at: resumePosition)
+        } catch is CancellationError {
+            return
         } catch let error as PlaybackError {
             playbackError = error
         } catch {
@@ -718,14 +1054,13 @@ final class PlaybackController {
     }
 
     func clearTracks() {
+        invalidatePendingRuntimeWork()
+        runtimeContext = nil
         guard !session.tracks.isEmpty else { return }
 
         stopScrollAnimation()
-        for runtime in runtimeTracksInSessionOrder() {
-            runtime.player.stop()
-        }
+        teardownRuntimeTracks()
         deleteAllStreamingCacheFiles()
-        runtimeTracksByID.removeAll()
         session.tracks.removeAll()
         session.activeTrackID = nil
         session.isBlindListeningModeEnabled = false
@@ -822,6 +1157,10 @@ final class PlaybackController {
     func autoAlignTracks() {
         guard !isAligning, session.canSwitchPlayback, let anchor = session.activeTrack else { return }
 
+        let generation = runtimeGeneration
+        let operationContext = runtimeContext
+        guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else { return }
+
         let anchorTrack = anchor.loadedTrack
         let playheadFileTime = min(
             max(currentTransportPosition() - anchorTrack.offsetSeconds, 0),
@@ -851,13 +1190,24 @@ final class PlaybackController {
         alignmentOutcomeClearTask?.cancel()
         // `align` is nonisolated async, so it hops off the main actor on its
         // own; the task only returns here to publish the results.
-        Task { [weak self] in
+        alignmentTask = Task { [weak self] in
             let results = await TrackAligner.align(request)
-            self?.finishAlignment(results)
+            guard !Task.isCancelled else { return }
+            self?.finishAlignment(
+                results,
+                generation: generation,
+                context: operationContext
+            )
         }
     }
 
-    private func finishAlignment(_ results: [TrackAligner.Result]) {
+    private func finishAlignment(
+        _ results: [TrackAligner.Result],
+        generation: UInt64,
+        context: PlaylistRuntimeContext?
+    ) {
+        guard isCurrentRuntimeOperation(generation: generation, context: context) else { return }
+        alignmentTask = nil
         isAligning = false
 
         let resultsByTrackID = Dictionary(
@@ -921,6 +1271,9 @@ final class PlaybackController {
         tempoAnalysisOffer = nil
 
         guard !isAligning, let anchor = session.activeTrack else { return }
+        let generation = runtimeGeneration
+        let operationContext = runtimeContext
+        guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else { return }
         let targets = session.tracks.filter { offer.trackIDs.contains($0.id) && $0.id != anchor.id }
         guard !targets.isEmpty else { return }
 
@@ -951,25 +1304,43 @@ final class PlaybackController {
         alignmentProgress = 0
         alignmentOutcome = nil
         alignmentOutcomeClearTask?.cancel()
-        let publishProgress = makeProgressPublisher()
-        Task { [weak self] in
+        let publishProgress = makeProgressPublisher(
+            generation: generation,
+            context: operationContext
+        )
+        tempoAnalysisTask = Task { [weak self] in
             let results = await TrackAligner.alignTempo(request, onProgress: publishProgress)
-            self?.finishTempoAnalysis(results)
+            guard !Task.isCancelled else { return }
+            self?.finishTempoAnalysis(
+                results,
+                generation: generation,
+                context: operationContext
+            )
         }
     }
 
     /// A background-thread-safe sink that drives `alignmentProgress`, kept
     /// monotonic since align callbacks can hop over independently.
-    private func makeProgressPublisher() -> @Sendable (Double) -> Void {
+    private func makeProgressPublisher(
+        generation: UInt64,
+        context: PlaylistRuntimeContext?
+    ) -> @Sendable (Double) -> Void {
         { [weak self] progress in
             guard let self else { return }
             Task { @MainActor in
+                guard self.isCurrentRuntimeOperation(generation: generation, context: context) else { return }
                 self.alignmentProgress = max(self.alignmentProgress ?? 0, progress)
             }
         }
     }
 
-    private func finishTempoAnalysis(_ results: [TrackAligner.TempoResult]) {
+    private func finishTempoAnalysis(
+        _ results: [TrackAligner.TempoResult],
+        generation: UInt64,
+        context: PlaylistRuntimeContext?
+    ) {
+        guard isCurrentRuntimeOperation(generation: generation, context: context) else { return }
+        tempoAnalysisTask = nil
         isAligning = false
         alignmentProgress = nil
 
@@ -1446,6 +1817,14 @@ final class PlaybackController {
         applyAudibility()
     }
 
+    private func teardownRuntimeTracks() {
+        let trackIDs = Array(runtimeTracksByID.keys)
+        for trackID in trackIDs {
+            detachRuntimeTrack(for: trackID)
+        }
+        isLoopPreQueued = false
+    }
+
     private func detachRuntimeTrack(for trackID: SessionTrack.ID) {
         guard let runtime = runtimeTracksByID.removeValue(forKey: trackID) else { return }
         runtime.player.stop()
@@ -1806,7 +2185,8 @@ final class PlaybackController {
 
         switch Self.advanceAtEnd(mode: session.repeatMode, canSwitch: session.canSwitchPlayback) {
         case .stop:
-            stopAtEnd()
+            let reachedNaturalRepeatOffEnd = session.repeatMode == .off && session.loopRegion == nil
+            stopAtEnd(notifyPlaybackEnded: reachedNaturalRepeatOffEnd)
         case .restart:
             handleLoopWrap(switchTrack: false)
         case .switchThenRestart:
@@ -1877,7 +2257,7 @@ final class PlaybackController {
     /// Stop playback at the end of the playable range (Repeat Off).
     /// Repeat Off: stop at the end of the playable range, leaving the playhead
     /// parked there. The next `play()` rewinds to the start of the range.
-    private func stopAtEnd() {
+    private func stopAtEnd(notifyPlaybackEnded: Bool = false) {
         for runtime in runtimeTracksInSessionOrder() {
             runtime.player.stop()
         }
@@ -1889,6 +2269,10 @@ final class PlaybackController {
         timer?.invalidate()
         applyAudibility()
         pauseEngine()
+
+        if notifyPlaybackEnded {
+            onPlaybackEnded?(runtimeContext)
+        }
     }
 
     /// Jump the playhead back to `start` and keep playing without tearing the

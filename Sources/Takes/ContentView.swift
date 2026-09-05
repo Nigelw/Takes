@@ -358,6 +358,7 @@ private struct TrackListDropDelegate: DropDelegate {
     @Binding var revealingID: SessionTrack.ID?
     @Binding var isImportTargeted: Bool
     let loadDroppedURLs: ([NSItemProvider]) -> Bool
+    let reorderVersion: (UUID, UUID?) -> Void
 
     /// A reorder carries the file URL too (for dragging out of the window), so
     /// the marker type decides the kind, not the presence of a file URL.
@@ -427,10 +428,10 @@ private struct TrackListDropDelegate: DropDelegate {
         case .noChange:
             break
         case .append:
-            controller.reorderTrack(draggingID, before: nil)
+            reorderVersion(draggingID, nil)
         case .before(let destinationIndex):
             let destinationID = tracks.indices.contains(destinationIndex) ? tracks[destinationIndex].id : nil
-            controller.reorderTrack(draggingID, before: destinationID)
+            reorderVersion(draggingID, destinationID)
         }
         return true
     }
@@ -766,6 +767,10 @@ final class OpenFileCommandState: ObservableObject {
     private var streamingURLTask: Task<Void, Never>?
     private var streamingURLTaskID: UUID?
 
+    var captureDestination: () -> PlaylistImportDestination = { .playlist }
+    private(set) var importDestination: PlaylistImportDestination = .playlist
+    private(set) var streamingDestination: PlaylistImportDestination = .playlist
+
     private let loadStreamingURLAction: @MainActor (String, OpenFileCommandState) -> Void
     private let loadAppleMusicSelection: @MainActor () -> Void
     private let loadFinderSelection: @MainActor () -> Void
@@ -790,6 +795,7 @@ final class OpenFileCommandState: ObservableObject {
     }
 
     func presentOpenDialog() {
+        importDestination = captureDestination()
         isImportingTracks = true
     }
 
@@ -798,6 +804,7 @@ final class OpenFileCommandState: ObservableObject {
     }
 
     func presentStreamingURLPrompt() {
+        streamingDestination = captureDestination()
         cancelStreamingURLTask()
         streamingURLText = ""
         streamingURLStatus = .idle
@@ -805,6 +812,7 @@ final class OpenFileCommandState: ObservableObject {
     }
 
     func openStreamingURL(_ urlString: String) {
+        streamingDestination = captureDestination()
         guard !streamingURLStatus.isWorking else { return }
         streamingURLText = urlString
         streamingURLStatus = .idle
@@ -822,6 +830,15 @@ final class OpenFileCommandState: ObservableObject {
     func registerStreamingURLTask(_ task: Task<Void, Never>, id: UUID) {
         streamingURLTask = task
         streamingURLTaskID = id
+    }
+
+    func isCurrentStreamingURLTask(_ id: UUID) -> Bool {
+        streamingURLTaskID == id
+    }
+
+    func updateStreamingURLStatus(_ status: StreamingURLPromptStatus, id: UUID) {
+        guard streamingURLTaskID == id else { return }
+        streamingURLStatus = status
     }
 
     func finishStreamingURLTask(id: UUID) {
@@ -995,15 +1012,15 @@ extension FocusedValues {
 }
 
 struct ContentView: View {
-    var controller: PlaybackController
+    let coordinator: PlaylistCoordinator
+    var controller: PlaybackController { coordinator.controller }
+    @Environment(\.undoManager) private var undoManager
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var zoomHaptics: ZoomHapticsController
-    private let appFileOpenRouter: AppFileOpenRouter?
     private let usesTemporaryDefaultWindowLayout: Bool
 
-    @StateObject private var openFileCommandState = OpenFileCommandState()
+    @ObservedObject private var openFileCommandState: OpenFileCommandState
     @StateObject private var waveformStore = WaveformStore()
-    @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
     /// While a playhead drag is in flight: the preview's x within the waveform
     /// column. `nil` when not dragging.
@@ -1035,8 +1052,6 @@ struct ContentView: View {
     @State private var emptyStateIsHovered = false
     @State private var hoverStore = TrackHoverStore()
     @State private var focusedOffsetTrackID: SessionTrack.ID?
-    @FocusState private var streamingURLFieldIsFocused: Bool
-    @State private var didConfigureMainWindow = false
     @State private var mainWindow: NSWindow?
     @State private var mainWindowIsKey = true
     @State private var loopDraft: LoopDraft?
@@ -1101,70 +1116,16 @@ struct ContentView: View {
     private static let loopDragThreshold: CGFloat = 4
 
     init(
-        controller: PlaybackController,
-        appFileOpenRouter: AppFileOpenRouter? = nil,
+        coordinator: PlaylistCoordinator,
+        openFileCommandState: OpenFileCommandState,
         usesTemporaryDefaultWindowLayout: Bool = false
     ) {
-        self.controller = controller
-        self.appFileOpenRouter = appFileOpenRouter
+        self.coordinator = coordinator
+        self.openFileCommandState = openFileCommandState
         self.usesTemporaryDefaultWindowLayout = usesTemporaryDefaultWindowLayout
-        _trackInfoColumnWidth = State(
-            initialValue: Self.initialTrackInfoColumnWidth(
-                usesTemporaryDefaultWindowLayout: usesTemporaryDefaultWindowLayout
-            )
-        )
-        _openFileCommandState = StateObject(
-            wrappedValue: OpenFileCommandState(
-                loadStreamingURL: { urlString, commandState in
-                    let taskID = UUID()
-                    let task = Task {
-                        let didLoad = await controller.loadStreamingTrack(
-                            from: urlString,
-                            statusHandler: { status in
-                                await MainActor.run {
-                                    commandState.streamingURLStatus = status
-                                }
-                            }
-                        )
-                        await MainActor.run {
-                            commandState.finishStreamingURLTask(id: taskID)
-                        }
-                        if didLoad {
-                            await MainActor.run {
-                                commandState.dismissStreamingURLPrompt()
-                            }
-                        }
-                    }
-                    commandState.registerStreamingURLTask(task, id: taskID)
-                },
-                loadAppleMusicSelection: {
-                    Task { await controller.loadSelectedLibraryTracks() }
-                },
-                loadFinderSelection: {
-                    Task {
-                        do {
-                            let urls = try FinderSelectionLoader().selectedAudioFileURLs()
-                            await controller.loadImportedFiles(urls)
-                        } catch let error as PlaybackError {
-                            controller.setPlaybackError(error)
-                        } catch {
-                            controller.setPlaybackError(.librarySelectionFailed("Could not read the Finder selection."))
-                        }
-                    }
-                },
-                showActiveTrackInFinder: {
-                    guard let url = controller.session.activeTrack?.loadedTrack.url else { return }
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                },
-                removeActiveTrack: {
-                    guard let trackID = controller.session.activeTrackID else { return }
-                    controller.removeTrack(trackID)
-                },
-                clearAllTracks: {
-                    controller.clearTracks()
-                }
-            )
-        )
+        _trackInfoColumnWidth = State(initialValue: Self.initialTrackInfoColumnWidth(
+            usesTemporaryDefaultWindowLayout: usesTemporaryDefaultWindowLayout
+        ))
     }
 
     private static func initialTrackInfoColumnWidth(
@@ -1206,12 +1167,6 @@ struct ContentView: View {
                 MainWindowConfigurationView { window in
                     mainWindow = window
                     mainWindowIsKey = window.isKeyWindow
-                    guard !didConfigureMainWindow else { return }
-                    didConfigureMainWindow = true
-                    TakesWindowPolicy.configureMainWindow(
-                        window,
-                        resetsLayoutForLaunch: usesTemporaryDefaultWindowLayout
-                    )
                 }
             }
             .overlay {
@@ -1220,60 +1175,9 @@ struct ContentView: View {
                         .ignoresSafeArea()
                 }
             }
-            .alert(
-                "Takes Error",
-                isPresented: Binding(
-                    get: { controller.playbackError != nil },
-                    set: { isPresented in
-                        if !isPresented {
-                            controller.clearPlaybackError()
-                        }
-                    }
-                )
-            ) {
-                Button("OK") {
-                    controller.clearPlaybackError()
-                }
-            } message: {
-                Text(controller.playbackError?.localizedDescription ?? "")
-            }
-            .onDrop(
-                of: [UTType.fileURL.identifier],
-                delegate: WindowFileImportDropDelegate(
-                    isTargeted: $windowIsDropTargeted,
-                    loadDroppedURLs: { loadDroppedURLs(from: $0) }
-                )
-            )
-            .fileImporter(
-                isPresented: $openFileCommandState.isImportingTracks,
-                allowedContentTypes: [.audio],
-                allowsMultipleSelection: true
-            ) { result in
-                handleImport(result)
-            }
-            .sheet(isPresented: $openFileCommandState.isPromptingForStreamingURL) {
-                streamingURLPrompt
-            }
-            .focusedSceneValue(\.openFileCommandState, openFileCommandState)
-            .focusedSceneValue(
-                \.mainWindowCommandState,
-                MainWindowCommandState {
-                    trackInfoColumnWidthBinding.wrappedValue = TakesWindowPolicy.defaultTrackInfoColumnWidth
-                    guard let mainWindow else { return }
-                    TakesWindowPolicy.resetMainWindowSize(mainWindow)
-                }
-            )
-            .focusedSceneValue(\.canShowActiveTrackInFinder, controller.session.activeTrack != nil)
-            .focusedSceneValue(\.canRemoveActiveTrack, controller.session.activeTrackID != nil)
-            .focusedSceneValue(
-                \.canUseGlobalMenuShortcuts,
-                focusedOffsetTrackID == nil && !streamingURLFieldIsFocused
-            )
-            .focusedSceneValue(\.canClearTracks, controller.displayedTrackRowCount > 0)
             .onAppear {
-                setupKeyMonitor()
-                configureAppOpenRouter()
-                waveformStore.sync(tracks: controller.session.tracks)
+                setupMouseMonitor()
+                waveformStore.sync(tracks: controller.session.tracks, context: controller.runtimeContext)
                 NSApp.appearance = settings.appearanceTheme.nsAppearance
             }
             .onChange(of: settings.appearanceTheme) { _, theme in
@@ -1288,7 +1192,7 @@ struct ContentView: View {
                 mainWindowIsKey = false
             }
             .onChange(of: controller.session.tracks) { _, tracks in
-                waveformStore.sync(tracks: tracks)
+                waveformStore.sync(tracks: tracks, context: controller.runtimeContext)
             }
             .onChange(of: controller.displayedTrackRowCount) { previousTrackCount, trackCount in
                 guard let mainWindow else { return }
@@ -1302,13 +1206,16 @@ struct ContentView: View {
                     currentWindowHeight: mainWindow.frame.height
                 )
                 guard shouldResize else { return }
-                TakesWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount)
+                TakesWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount, includesNavigation: true)
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                controller.cleanupStreamingDownloads()
+            .onReceive(NotificationCenter.default.publisher(for: TakesWindowPolicy.resetComparisonLayoutNotification)) { _ in
+                trackInfoColumnWidthBinding.wrappedValue = TakesWindowPolicy.defaultTrackInfoColumnWidth
+            }
+            .onChange(of: controller.runtimeContext) { _, _ in
+                waveformStore.sync(tracks: controller.session.tracks, context: controller.runtimeContext)
             }
             .onDisappear {
-                keyMonitor?.stop()
+                waveformStore.sync(tracks: [], context: nil)
                 mouseMonitor?.stop()
             }
     }
@@ -1327,6 +1234,17 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             controlBar
                 .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Button { Task { await coordinator.backToPlaylist() } } label: {
+                    Label("Back to Playlist", systemImage: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                Text(coordinator.workspace.items.first { $0.id == coordinator.mode.itemID }?.title ?? "Comparison")
+                    .font(.headline).lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: TakesWindowPolicy.comparisonNavigationHeight)
             trackTimelineSection
                 .frame(maxHeight: .infinity)
                 // Recess the complete timeline section—including its header
@@ -1444,7 +1362,7 @@ struct ContentView: View {
 
     private var playButton: some View {
         Button {
-            controller.session.isPlaying ? controller.pause() : controller.play()
+            coordinator.togglePlayback()
         } label: {
             Image(systemName: controller.session.isPlaying ? "pause.fill" : "play.fill")
         }
@@ -1463,9 +1381,9 @@ struct ContentView: View {
     private var switchTrackButton: some View {
         Button {
             if SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: NSApp.currentEvent?.modifierFlags) {
-                controller.selectPreviousTrack()
+                coordinator.previous()
             } else {
-                controller.selectNextTrack()
+                coordinator.next()
             }
         } label: {
             Image(systemName: "arrow.trianglehead.swap")
@@ -1534,7 +1452,7 @@ struct ContentView: View {
     private var repeatButton: some View {
         let mode = controller.session.repeatMode
         return Button {
-            controller.cycleRepeatMode()
+            coordinator.cycleRepeatMode()
         } label: {
             Image(systemName: Self.repeatSymbol(for: mode))
         }
@@ -1872,7 +1790,8 @@ struct ContentView: View {
                                 gapGeneration: $reorderGapGeneration,
                                 revealingID: $reorderRevealingID,
                                 isImportTargeted: $windowIsDropTargeted,
-                                loadDroppedURLs: { loadDroppedURLs(from: $0) }
+                                loadDroppedURLs: { loadDroppedURLs(from: $0) },
+                                reorderVersion: { coordinator.reorderVersion($0, before: $1, undoManager: undoManager) }
                             )
                         )
                     }
@@ -1999,7 +1918,7 @@ struct ContentView: View {
             .frame(width: infoWidth, height: trackHeaderHeight, alignment: .leading)
             .overlay(alignment: .trailing) {
                 Button("Remove All") {
-                    controller.clearTracks()
+                    clearComparisonVersions()
                 }
                 .controlSize(.regular)
                 .disabled(controller.displayedTrackRowCount == 0)
@@ -2154,7 +2073,7 @@ struct ContentView: View {
             viewportStore: laneViewportStore,
             hoverStore: hoverStore,
             onSelect: { controller.selectActiveTrack(sessionTrack.id) },
-            onRemove: { controller.removeTrack(sessionTrack.id) },
+            onRemove: { coordinator.removeVersion(sessionTrack.id, undoManager: undoManager) },
             onSetOffsetMs: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) },
             onOffsetFocusChange: { focused in
                 if focused {
@@ -2339,76 +2258,6 @@ struct ContentView: View {
             return AnyShapeStyle(.tertiary.opacity(0.55))
         }
         return AnyShapeStyle(.quaternary.opacity(0.6))
-    }
-
-    private var streamingURLPrompt: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Open Streaming URL")
-                .font(.headline)
-
-            TextField("https://...", text: $openFileCommandState.streamingURLText)
-                .textFieldStyle(.roundedBorder)
-                .focused($streamingURLFieldIsFocused)
-                .disabled(openFileCommandState.streamingURLStatus.isWorking)
-                .onSubmit {
-                    openFileCommandState.submitStreamingURL()
-                }
-
-            if let message = openFileCommandState.streamingURLStatus.message {
-                if openFileCommandState.streamingURLStatus.isFailed {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                        streamingURLPromptStatusText(message)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(width: 16, height: 16)
-                            .alignmentGuide(.firstTextBaseline) { dimensions in
-                                dimensions[VerticalAlignment.center] + 4
-                            }
-                        streamingURLPromptStatusText(message)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else {
-                Text("Supports Apple Music, Spotify, YouTube, and YouTube Music URLs.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    openFileCommandState.dismissStreamingURLPrompt()
-                }
-                Button("Open") {
-                    openFileCommandState.submitStreamingURL()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(
-                    openFileCommandState.streamingURLStatus.isWorking
-                        || openFileCommandState.streamingURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
-            }
-        }
-        .padding(20)
-        .frame(width: 420)
-        .onAppear {
-            streamingURLFieldIsFocused = true
-        }
-    }
-
-    private func streamingURLPromptStatusText(_ message: String) -> some View {
-        Text(message)
-            .font(.caption)
-            .foregroundStyle(openFileCommandState.streamingURLStatus.isFailed ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-            .lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Geometry for the windowed waveform lanes. Each lane draws a
@@ -2661,19 +2510,6 @@ struct ContentView: View {
         return controller.session.tracks[index].id
     }
 
-    private func handleImport(_ result: Result<[URL], Error>) {
-        openFileCommandState.dismissOpenDialog()
-
-        switch result {
-        case let .success(urls):
-            Task {
-                await controller.loadImportedFiles(urls)
-            }
-        case .failure:
-            break
-        }
-    }
-
     private func performImportAction(_ item: ImportActionMenuItem) {
         switch item {
         case .open:
@@ -2694,74 +2530,7 @@ struct ContentView: View {
         return AnyShapeStyle(Color.clear)
     }
 
-    private func setupKeyMonitor() {
-        let monitor = KeyMonitor { event in
-            if !GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSApp.keyWindow?.firstResponder) {
-                return false
-            }
-
-            if let hotkey = TrackNumberHotkey.hotkey(forKeyCode: event.keyCode, modifierFlags: event.modifierFlags),
-               controller.canSelectTrackForHotkey(hotkey) {
-                controller.selectTrackForHotkey(hotkey)
-                return true
-            }
-
-            if let direction = TrackSwitchArrowHotkey.direction(forKeyCode: event.keyCode, modifierFlags: event.modifierFlags),
-               controller.session.canSwitchPlayback {
-                switch direction {
-                case .previous:
-                    controller.selectPreviousTrack()
-                case .next:
-                    controller.selectNextTrack()
-                }
-                return true
-            }
-
-            switch event.keyCode {
-            case 49:
-                guard !event.modifierFlags.contains(.command),
-                      !event.modifierFlags.contains(.control),
-                      !event.modifierFlags.contains(.option),
-                      controller.session.isPlayable
-                else {
-                    return false
-                }
-                controller.session.isPlaying ? controller.pause() : controller.play()
-                return true
-            case 123:
-                if event.modifierFlags.contains(.command) {
-                    controller.seek(to: controller.session.timelineStart)
-                    return true
-                }
-                controller.skip(by: event.modifierFlags.contains(.shift) ? -10 : -1)
-                return true
-            case 124:
-                if event.modifierFlags.contains(.command) {
-                    controller.seek(to: controller.session.timelineEnd)
-                    return true
-                }
-                controller.skip(by: event.modifierFlags.contains(.shift) ? 10 : 1)
-                return true
-            case 7:
-                guard !event.modifierFlags.contains(.command),
-                      !event.modifierFlags.contains(.control),
-                      !event.modifierFlags.contains(.option)
-                else {
-                    return false
-                }
-                if event.modifierFlags.contains(.shift) {
-                    controller.selectPreviousTrack()
-                } else {
-                    controller.selectNextTrack()
-                }
-                return true
-            default:
-                return false
-            }
-        }
-        monitor.start()
-        keyMonitor = monitor
-
+    private func setupMouseMonitor() {
         let clickMonitor = MouseMonitor { event in
             guard let window = event.window else { return }
             let locationInWindow = event.locationInWindow
@@ -2945,21 +2714,16 @@ struct ContentView: View {
         controller.magnifyTimeline(by: magnification, atFraction: fraction)
     }
 
-    private func configureAppOpenRouter() {
-        appFileOpenRouter?.setHandler { urls in
-            Task { await controller.loadImportedFiles(urls) }
-        }
-        appFileOpenRouter?.setStreamingURLHandler { urlStrings in
-            for urlString in urlStrings {
-                openFileCommandState.openStreamingURL(urlString)
-            }
-        }
+    private func clearComparisonVersions() {
+        guard let itemID = coordinator.mode.itemID else { return }
+        coordinator.removeItem(itemID, undoManager: undoManager)
     }
 
     private func loadDroppedURLs(from providers: [NSItemProvider]) -> Bool {
         let fileProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
         guard !fileProviders.isEmpty else { return false }
 
+        let destination = coordinator.captureImportDestination()
         var urlsByProvider = Array<URL?>(repeating: nil, count: fileProviders.count)
         let group = DispatchGroup()
 
@@ -2980,7 +2744,7 @@ struct ContentView: View {
             Task { @MainActor in
                 switch DroppedFileImportAction.action(targetTrackID: nil) {
                 case .append:
-                    await controller.loadImportedFiles(urls)
+                    await coordinator.importFiles(urls, destination: destination)
                 }
             }
         }
@@ -3029,7 +2793,7 @@ private struct PlayheadHandle: Shape {
     }
 }
 
-private struct ImportActionSplitButton: NSViewRepresentable {
+struct ImportActionSplitButton: NSViewRepresentable {
     let dropdownItems: [ImportActionMenuItem]
     let performAction: @MainActor (ImportActionMenuItem) -> Void
 
@@ -3104,7 +2868,7 @@ private struct ImportActionSplitButton: NSViewRepresentable {
     }
 }
 
-private final class ImmediateMenuSegmentedControl: NSSegmentedControl {
+final class ImmediateMenuSegmentedControl: NSSegmentedControl {
     var immediateMenu: NSMenu?
     var primarySegmentWidth: CGFloat = 0
     var menuSegmentWidth: CGFloat = 0
@@ -3488,7 +3252,7 @@ final class TimelineScrollNSView: NSScrollView {
     }
 }
 
-private struct MainWindowConfigurationView: NSViewRepresentable {
+struct MainWindowConfigurationView: NSViewRepresentable {
     let configure: @MainActor (NSWindow) -> Void
 
     func makeNSView(context: Context) -> NSView {
@@ -3509,7 +3273,7 @@ private struct MainWindowConfigurationView: NSViewRepresentable {
     }
 }
 
-private struct InactiveWindowInteractionShield: NSViewRepresentable {
+struct InactiveWindowInteractionShield: NSViewRepresentable {
     weak var window: NSWindow?
 
     func makeNSView(context: Context) -> ShieldView {

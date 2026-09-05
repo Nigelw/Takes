@@ -62,6 +62,17 @@
 		A1000000000000000000F103 /* PlaylistPlaybackBoundary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F003 /* PlaylistPlaybackBoundary.swift */; };
 		A1000000000000000000F104 /* PlaylistWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F004 /* PlaylistWorkspaceTests.swift */; };
 		A1000000000000000000F105 /* PlaylistPlaybackBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F005 /* PlaylistPlaybackBoundaryTests.swift */; };
+		4E8CCD59B5C85D59883E5A13 /* PlaylistStreamingImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E6AAD54BBCF19CDBC359A6D /* PlaylistStreamingImporter.swift */; };
+		D80516E9333BE816B70FF3D7 /* PlaylistWaveformContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ED4FF819E25EBF1390DB5CE /* PlaylistWaveformContextTests.swift */; };
+		1F45D9B60B4B5A5C78C14489 /* PlaylistWorkspaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 044B06CCB4071362167BC418 /* PlaylistWorkspaceStore.swift */; };
+		145FC514A6B3181E2EB7A444 /* PlaylistWorkspaceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6826E26B4A5F3B5A59D4A7DE /* PlaylistWorkspaceStoreTests.swift */; };
+		78465013553FC0207C42154B /* PlaylistCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FB6A7CE880D12C04793CC3E /* PlaylistCoordinator.swift */; };
+		C0EDCA4566E7A46B450E7478 /* PlaylistPersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48B82EC71957914A1B97BB4A /* PlaylistPersistenceController.swift */; };
+		A1BA02131E051A45E665EB21 /* PlaylistRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61818930844FA6987111A113 /* PlaylistRuntimeTests.swift */; };
+		E1B3209CCB7ACB384ECF9872 /* PlaylistPersistenceControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CEDFCAC4D19F6230FFE51D /* PlaylistPersistenceControllerTests.swift */; };
+		2B45F2A16B679D96BD1280D0 /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4065BE4E81E950A1D19A37D /* WorkspaceView.swift */; };
+		764ED4269557EB95D0B7D549 /* PlaylistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3920D5746FAFFCAF9DD06602 /* PlaylistView.swift */; };
+		6956B52FADE542E2987BA48B /* PlaylistCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FE6C1B4B522316E028735D4 /* PlaylistCoordinatorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -133,6 +144,17 @@
 		A1000000000000000000F003 /* PlaylistPlaybackBoundary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPlaybackBoundary.swift; sourceTree = "<group>"; };
 		A1000000000000000000F004 /* PlaylistWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistWorkspaceTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000F005 /* PlaylistPlaybackBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPlaybackBoundaryTests.swift; sourceTree = "<group>"; };
+		1E6AAD54BBCF19CDBC359A6D /* PlaylistStreamingImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistStreamingImporter.swift; sourceTree = "<group>"; };
+		7ED4FF819E25EBF1390DB5CE /* PlaylistWaveformContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistWaveformContextTests.swift; sourceTree = "<group>"; };
+		044B06CCB4071362167BC418 /* PlaylistWorkspaceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistWorkspaceStore.swift; sourceTree = "<group>"; };
+		6826E26B4A5F3B5A59D4A7DE /* PlaylistWorkspaceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistWorkspaceStoreTests.swift; sourceTree = "<group>"; };
+		9FB6A7CE880D12C04793CC3E /* PlaylistCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistCoordinator.swift; sourceTree = "<group>"; };
+		48B82EC71957914A1B97BB4A /* PlaylistPersistenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPersistenceController.swift; sourceTree = "<group>"; };
+		61818930844FA6987111A113 /* PlaylistRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistRuntimeTests.swift; sourceTree = "<group>"; };
+		39CEDFCAC4D19F6230FFE51D /* PlaylistPersistenceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPersistenceControllerTests.swift; sourceTree = "<group>"; };
+		A4065BE4E81E950A1D19A37D /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
+		3920D5746FAFFCAF9DD06602 /* PlaylistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistView.swift; sourceTree = "<group>"; };
+		5FE6C1B4B522316E028735D4 /* PlaylistCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistCoordinatorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -236,6 +258,12 @@
 				A10000000000000000000013 /* KeyMonitor.swift */,
 				A1000000000000000000001B /* LibraryTrackSelectionLoader.swift */,
 				A10000000000000000000014 /* Models.swift */,
+				3920D5746FAFFCAF9DD06602 /* PlaylistView.swift */,
+				A4065BE4E81E950A1D19A37D /* WorkspaceView.swift */,
+				48B82EC71957914A1B97BB4A /* PlaylistPersistenceController.swift */,
+				9FB6A7CE880D12C04793CC3E /* PlaylistCoordinator.swift */,
+				044B06CCB4071362167BC418 /* PlaylistWorkspaceStore.swift */,
+				1E6AAD54BBCF19CDBC359A6D /* PlaylistStreamingImporter.swift */,
 				A1000000000000000000F003 /* PlaylistPlaybackBoundary.swift */,
 				A1000000000000000000F002 /* PlaylistContracts.swift */,
 				A1000000000000000000F001 /* PlaylistWorkspace.swift */,
@@ -263,6 +291,11 @@
 				A1000000000000000000E008 /* ComparativeInferenceTests.swift */,
 				A1000000000000000000E003 /* PairAlignmentTests.swift */,
 				A10000000000000000000018 /* SessionTests.swift */,
+				5FE6C1B4B522316E028735D4 /* PlaylistCoordinatorTests.swift */,
+				39CEDFCAC4D19F6230FFE51D /* PlaylistPersistenceControllerTests.swift */,
+				61818930844FA6987111A113 /* PlaylistRuntimeTests.swift */,
+				6826E26B4A5F3B5A59D4A7DE /* PlaylistWorkspaceStoreTests.swift */,
+				7ED4FF819E25EBF1390DB5CE /* PlaylistWaveformContextTests.swift */,
 				A1000000000000000000F005 /* PlaylistPlaybackBoundaryTests.swift */,
 				A1000000000000000000F004 /* PlaylistWorkspaceTests.swift */,
 				A1000000000000000000C00B /* StreamingTrackImportTests.swift */,
@@ -405,6 +438,12 @@
 				A10000000000000000000023 /* KeyMonitor.swift in Sources */,
 				A10000000000000000000028 /* LibraryTrackSelectionLoader.swift in Sources */,
 				A10000000000000000000024 /* Models.swift in Sources */,
+				764ED4269557EB95D0B7D549 /* PlaylistView.swift in Sources */,
+				2B45F2A16B679D96BD1280D0 /* WorkspaceView.swift in Sources */,
+				C0EDCA4566E7A46B450E7478 /* PlaylistPersistenceController.swift in Sources */,
+				78465013553FC0207C42154B /* PlaylistCoordinator.swift in Sources */,
+				1F45D9B60B4B5A5C78C14489 /* PlaylistWorkspaceStore.swift in Sources */,
+				4E8CCD59B5C85D59883E5A13 /* PlaylistStreamingImporter.swift in Sources */,
 				A1000000000000000000F103 /* PlaylistPlaybackBoundary.swift in Sources */,
 				A1000000000000000000F102 /* PlaylistContracts.swift in Sources */,
 				A1000000000000000000F101 /* PlaylistWorkspace.swift in Sources */,
@@ -430,6 +469,11 @@
 				A1000000000000000000E018 /* ComparativeInferenceTests.swift in Sources */,
 				A1000000000000000000E013 /* PairAlignmentTests.swift in Sources */,
 				A10000000000000000000031 /* SessionTests.swift in Sources */,
+				6956B52FADE542E2987BA48B /* PlaylistCoordinatorTests.swift in Sources */,
+				E1B3209CCB7ACB384ECF9872 /* PlaylistPersistenceControllerTests.swift in Sources */,
+				A1BA02131E051A45E665EB21 /* PlaylistRuntimeTests.swift in Sources */,
+				145FC514A6B3181E2EB7A444 /* PlaylistWorkspaceStoreTests.swift in Sources */,
+				D80516E9333BE816B70FF3D7 /* PlaylistWaveformContextTests.swift in Sources */,
 				A1000000000000000000F105 /* PlaylistPlaybackBoundaryTests.swift in Sources */,
 				A1000000000000000000F104 /* PlaylistWorkspaceTests.swift in Sources */,
 				A1000000000000000000C01B /* StreamingTrackImportTests.swift in Sources */,

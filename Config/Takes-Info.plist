@@ -49,6 +49,16 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
+			<string>com.nigelwarren.takes.playlist-item</string>
+			<key>UTTypeDescription</key>
+			<string>Takes Playlist Item Reorder Drag</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
 			<string>com.nigelwarren.takes.track-reorder</string>
 			<key>UTTypeDescription</key>
 			<string>Takes Track Reorder Drag</string>

@@ -75,6 +75,19 @@ enum WaveformPyramid {
     }
 }
 
+protocol WaveformGenerating: Sendable {
+    func generate(
+        url: URL,
+        onProgress: @escaping @Sendable ([Float], Int, Bool) async -> Void
+    ) async
+}
+
+struct FileWaveformGenerator: WaveformGenerating {
+    func generate(url: URL, onProgress: @escaping @Sendable ([Float], Int, Bool) async -> Void) async {
+        await WaveformSource.generate(url: url, onProgress: onProgress)
+    }
+}
+
 /// Owns waveform generation for the loaded session tracks.
 ///
 /// Generation runs on a detached background task per track so the main thread
@@ -92,6 +105,13 @@ final class WaveformStore: ObservableObject {
     private static let maxConcurrentGenerations = 2
 
     private var tasks: [SessionTrack.ID: Task<Void, Never>] = [:]
+    private var generationIDs: [SessionTrack.ID: UUID] = [:]
+    private var runtimeContext: PlaylistRuntimeContext?
+    private let generator: any WaveformGenerating
+
+    init(generator: any WaveformGenerating = FileWaveformGenerator()) {
+        self.generator = generator
+    }
     /// Identity (url + size + mod date) the in-flight/finished waveform was built
     /// from, so we can detect when a track's file changes and regenerate.
     private var sourceIdentities: [SessionTrack.ID: WaveformSource.Identity] = [:]
@@ -104,7 +124,11 @@ final class WaveformStore: ObservableObject {
     /// newly added tracks, cancel and drop waveforms for removed ones,
     /// regenerate if a track's underlying file changed, and re-prioritize the
     /// waiting queue to match the (possibly reordered) session order.
-    func sync(tracks: [SessionTrack]) {
+    func sync(tracks: [SessionTrack], context: PlaylistRuntimeContext? = nil) {
+        if runtimeContext != context {
+            for id in Array(sourceIdentities.keys) { cancel(id) }
+            runtimeContext = context
+        }
         let liveIDs = Set(tracks.map(\.id))
 
         for id in Array(sourceIdentities.keys) where !liveIDs.contains(id) {
@@ -137,6 +161,7 @@ final class WaveformStore: ObservableObject {
     private func cancel(id: SessionTrack.ID) {
         tasks[id]?.cancel()
         tasks[id] = nil
+        generationIDs[id] = nil
         pendingQueue.removeAll { $0 == id }
         pendingSources[id] = nil
         sourceIdentities[id] = nil
@@ -162,11 +187,14 @@ final class WaveformStore: ObservableObject {
     }
 
     private func start(trackID: SessionTrack.ID, url: URL, identity: WaveformSource.Identity) {
+        let generationID = UUID()
+        generationIDs[trackID] = generationID
+        let generator = self.generator
         // User-initiated, not utility: the progressive fill is the visible
         // feedback for a just-imported track, and utility QoS gets throttled
         // onto efficiency cores.
         tasks[trackID] = Task.detached(priority: .userInitiated) {
-            await WaveformSource.generate(url: url) { peaks, bucketCount, isComplete in
+            await generator.generate(url: url) { peaks, bucketCount, isComplete in
                 // Build the pyramid here, on the generation task, so the main
                 // actor only ever receives finished derived data.
                 let reducedLevels = WaveformPyramid.reducedLevels(from: peaks)
@@ -177,7 +205,8 @@ final class WaveformStore: ObservableObject {
                         isComplete: isComplete,
                         reducedLevels: reducedLevels,
                         to: trackID,
-                        identity: identity
+                        identity: identity,
+                        generationID: generationID
                     )
                 }
             }
@@ -190,11 +219,13 @@ final class WaveformStore: ObservableObject {
         isComplete: Bool,
         reducedLevels: [[Float]],
         to trackID: SessionTrack.ID,
-        identity: WaveformSource.Identity
+        identity: WaveformSource.Identity,
+        generationID: UUID
     ) {
         // Ignore updates from a task that has since been superseded (track
         // removed, or its file changed and a new task started).
-        guard sourceIdentities[trackID] == identity else { return }
+        guard sourceIdentities[trackID] == identity,
+              generationIDs[trackID] == generationID else { return }
 
         waveforms[trackID] = Waveform(
             peaks: peaks,
