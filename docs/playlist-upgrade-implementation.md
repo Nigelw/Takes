@@ -40,6 +40,17 @@ Nothing has been merged or released.
 - `AGENTS.md` now describes the integrated ownership, one-runtime architecture,
   captured import destinations, restoration protection, and new test suites.
 
+Focused checkpoint verification after `8d68d00`: **22 unique tests passed**,
+zero failures, across coordinator, persistence, and runtime suites. Xcode
+reported 42 passes because some cases were reported more than once. Log:
+`/private/tmp/takes-playlist-checkpoint-tests.log`.
+
+Primary review then found two traversal defects: unchanged organization reset
+shuffle progress, and deleting an item could jump to the first occurrence of a
+repeated history entry. Both fixes and regression tests passed: **12 unique coordinator tests**, zero
+failures. Log: `/private/tmp/takes-playlist-traversal-tests.log`. The fixes are
+checkpointed separately from the ongoing UI selection work.
+
 ### In flight / incomplete
 
 | Area | Owner | Current state and next action |
@@ -48,7 +59,7 @@ Nothing has been merged or released.
 | UI file references | Astra | Reveal in Finder and missing-file checks now resolve bookmarks. Included in the latest successful Debug build; moved-file behavior still needs manual verification. |
 | Coordinator review | Luna (`coordinator`) | Edits address shuffle anchoring/history, explicit-play traversal, Next/Previous availability, shared comparison entry (bookmarks, blind ordering, viewport), stale natural-end callbacks, missing-item reporting, and resolved-file duplicate detection. Review handoff and focused regression results are still required; do not treat these edits as covered by the 388-test run. |
 | Runtime transition/Undo tests | Luna | Audio-backed selected-version/Compare/Back regression exists. Remaining review requests include Undo refresh cancellation and redo position fidelity, missing-file traversal, shuffle/history mutations, and comparison-entry state restoration. Exact coverage must be checked against the final handoff. |
-| Persistence observation test | Primary | Added `workspaceEditsSaveAutomaticallyAndObservationRearms` after the full passing run. It checks automatic saving and a second observed mutation. Not yet run. |
+| Persistence observation test | Primary | `workspaceEditsSaveAutomaticallyAndObservationRearms` passed in the focused checkpoint run, confirming automatic saves rearm after a second mutation. |
 | Final integration review | Primary | Review agent handoffs, rebuild after fixes, run relevant tests and final canonical verification, then finish manual acceptance and documentation. |
 
 Current work slice: resolve playlist selection using Astra as the sole subagent.

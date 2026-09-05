@@ -36,19 +36,14 @@ struct PlaylistTraversal {
     /// Keep the history that still belongs to the workspace while removing
     /// IDs deleted by an organization operation.
     mutating func updateItemIDs(_ itemIDs: [ID]) {
+        guard self.itemIDs != itemIDs else { return }
         self.itemIDs = itemIDs
         let valid = Set(itemIDs)
         let previousHistoryIndex = historyIndex
-        let previousCurrentID = history.indices.contains(historyIndex)
-            ? history[historyIndex]
-            : nil
+        let retainedThroughCursor = history.prefix(max(0, previousHistoryIndex + 1))
+            .filter(valid.contains).count
         history = history.filter(valid.contains)
-        if let previousCurrentID,
-           let recoveredIndex = history.firstIndex(of: previousCurrentID) {
-            historyIndex = recoveredIndex
-        } else {
-            historyIndex = min(max(previousHistoryIndex, -1), history.count - 1)
-        }
+        historyIndex = min(retainedThroughCursor - 1, history.count - 1)
         let currentID = history.indices.contains(historyIndex)
             ? history[historyIndex]
             : nil

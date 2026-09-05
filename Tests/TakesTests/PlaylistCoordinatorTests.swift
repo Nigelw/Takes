@@ -4,6 +4,28 @@ import Testing
 @testable import Takes
 
 struct PlaylistCoordinatorTests {
+    @Test func unchangedOrganizationPreservesShuffleProgress() {
+        let ids = [UUID(), UUID(), UUID()]
+        var traversal = PlaylistTraversal(itemIDs: ids, shuffleEnabled: true, shuffleProvider: { $0 })
+        traversal.reset(currentID: ids[0])
+        #expect(traversal.next(from: ids[0]) == ids[1])
+        // Renaming an item must not rotate the cycle and replay earlier items.
+        traversal.updateItemIDs(ids)
+        #expect(traversal.next(from: ids[1]) == ids[2])
+        #expect(traversal.next(from: ids[2]) == nil)
+    }
+
+    @Test func removingItemPreservesRepeatedHistoryOccurrence() {
+        let ids = [UUID(), UUID(), UUID()]
+        var traversal = PlaylistTraversal(itemIDs: ids, repeatMode: .all)
+        traversal.reset(currentID: ids[0])
+        #expect(traversal.next(from: ids[0]) == ids[1])
+        #expect(traversal.next(from: ids[1]) == ids[2])
+        #expect(traversal.next(from: ids[2]) == ids[0])
+        traversal.updateItemIDs([ids[0], ids[2]])
+        #expect(traversal.previous(from: ids[0]) == ids[2])
+    }
+
     @Test
     func traversalSupportsSequentialHistoryRepeatAndManualNext() {
         let first = UUID()
