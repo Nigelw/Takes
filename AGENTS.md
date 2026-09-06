@@ -192,7 +192,8 @@ these reintroduces the exact regressions it fixed):
   teardown, preparation failure, and natural-end callbacks.
 - `PlaylistWorkspaceStoreTests.swift`: snapshot round trips, recovery protection,
   schema handling, file references, and retained downloads.
-- `PlaylistPersistenceControllerTests.swift`: restoration/save gating and failures.
+- `PlaylistPersistenceControllerTests.swift`: restoration/save gating, failures,
+  and automatic event-save observation rearming.
 - `PlaylistWaveformContextTests.swift`: stale waveform rejection across activations.
 - `PlaylistWorkspaceTests.swift`: playlist value encoding/validation, stable
   ownership, canonical duplicates, and atomic organization operations.

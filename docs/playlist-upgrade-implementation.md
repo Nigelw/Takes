@@ -1,7 +1,8 @@
 # Playlist upgrade implementation plan
 
 Status: implementation integrated; coordinator review and UI acceptance are unfinished.
-The latest full suite passed 388 tests, but subsequent edits are not yet verified.
+The latest full suite passed 388 reported tests. Later focused tests passed;
+the latest UI selection change builds but remains manually unverified.
 See the current status below before resuming work.
 
 Feature contract: [playlist-upgrade-spec.md](playlist-upgrade-spec.md).
@@ -10,12 +11,15 @@ Development branch: `codex/playlist-upgrade`.
 Shared interfaces: [playlist-upgrade-contracts.md](playlist-upgrade-contracts.md).
 UI handoff: [playlist-upgrade-ui-integration.md](playlist-upgrade-ui-integration.md).
 
-## Current status — 2026-09-05
+## Current status — 2026-09-06
 
 This section supersedes earlier progress notes. Implementation is on
 `codex/playlist-upgrade`. The foundation is committed as `bd72b55`. Work-in-progress checkpoint `8d68d00`
 commits the runtime, coordinator, persistence, UI integration, tests, and status
 documentation. The incomplete work and verification limits below still apply.
+Subsequent checkpoints: `7771bab` records the one-subagent workflow; `a7f6a07`
+contains verified traversal fixes and regression tests. This checkpoint saves
+the unfinished UI selection changes and current handoff notes.
 Nothing has been merged or released.
 
 ### Done and verified
@@ -55,19 +59,25 @@ checkpointed separately from the ongoing UI selection work.
 
 | Area | Owner | Current state and next action |
 |---|---|---|
-| Playlist row selection | Astra (`ui_integration_design`) | **Known blocking UI defect:** single-click/multiselection fails, so manual grouping cannot proceed. Removing row double-click gestures and using native List primaryAction did not fix it. Next proposed fix is a flat ForEach of directly tagged item/version rows; that flattening is not yet in the file. |
+| Playlist row selection | Astra (`ui_integration_design`) | **Known blocking UI defect:** single-click/multiselection fails, so manual grouping cannot proceed. Removing row double-click gestures and using native List primaryAction did not fix it. A flat ForEach of directly tagged rows compiled but did not fix pointer selection. Astra has now restricted the drag source to the row icon to test whether row-wide onDrag consumes selection; that change built successfully (`/private/tmp/takes-playlist-selection-build.log`), but no manual result was received before the usage limit. Do not mark selection fixed. |
 | UI file references | Astra | Reveal in Finder and missing-file checks now resolve bookmarks. Included in the latest successful Debug build; moved-file behavior still needs manual verification. |
-| Coordinator review | Luna (`coordinator`) | Edits address shuffle anchoring/history, explicit-play traversal, Next/Previous availability, shared comparison entry (bookmarks, blind ordering, viewport), stale natural-end callbacks, missing-item reporting, and resolved-file duplicate detection. Review handoff and focused regression results are still required; do not treat these edits as covered by the 388-test run. |
+| Coordinator review | Luna (`coordinator`) | Edits address shuffle anchoring/history, explicit-play traversal, Next/Previous availability, shared comparison entry (bookmarks, blind ordering, viewport), stale natural-end callbacks, missing-item reporting, and resolved-file duplicate detection. Existing coordinator regressions passed in the later focused runs. Review handoff and additional edge-case coverage remain pending; the 388-test run alone does not cover these edits. |
 | Runtime transition/Undo tests | Luna | Audio-backed selected-version/Compare/Back regression exists. Remaining review requests include Undo refresh cancellation and redo position fidelity, missing-file traversal, shuffle/history mutations, and comparison-entry state restoration. Exact coverage must be checked against the final handoff. |
 | Persistence observation test | Primary | `workspaceEditsSaveAutomaticallyAndObservationRearms` passed in the focused checkpoint run, confirming automatic saves rearm after a second mutation. |
 | Final integration review | Primary | Review agent handoffs, rebuild after fixes, run relevant tests and final canonical verification, then finish manual acceptance and documentation. |
 
-Current work slice: resolve playlist selection using Astra as the sole subagent.
-The coordinator agent has been interrupted; its committed edits await primary
-review and tests. Primary will run the existing regression suites and maintain
-this document while Astra fixes and verifies selection. Follow-on work stays
-sequential. The last Astra attempt stopped at an account usage limit; resume
-its existing task rather than recreating its context.
+Work is interrupted, not running to completion in the background. The sole UI
+subagent hit an account usage limit after writing the selection changes. The
+coordinator agent was interrupted earlier. Resume at most one subagent, as the
+user requested. No new implementation or UI verification was performed while
+preparing this documentation checkpoint.
+
+Next action: resume Astra, launch the exact isolated Debug app, and test the
+icon-only drag change with single-click, Shift/Command multiselection, keyboard
+navigation, and double-click playback. If selection works, verify Group →
+Compare → Back → Undo and commit the verified result. If it still fails, inspect
+root window hit-testing/focus before another list restructuring. Keep the known
+selection defect open until there is observed evidence that it is fixed.
 
 ### Not yet started / not yet verified
 
@@ -106,11 +116,12 @@ its existing task rather than recreating its context.
   `TAKES_PLAYLIST_WORKSPACE_DIRECTORY`. Do not use the user's normal workspace.
 - Fixtures: `/private/tmp/takes-playlist-fixtures` (100 synthetic WAV files;
   first four are 20 seconds, remaining files one second).
-- Last launch used exec session `45046`; verify whether it is still running.
-  Debug build log: `/private/tmp/takes-playlist-ui-build.log`.
+- Earlier primary launch used exec session `45046`; the UI agent subsequently
+  rebuilt/relaunched. Inspect the current app state rather than trusting that
+  session ID. Latest build log: `/private/tmp/takes-playlist-selection-build.log`.
   App log: `/private/tmp/takes-playlist-manual-app.log`.
-- Last successful Debug build includes the first selection fix, which manual
-  verification showed is insufficient. Rebuild after the replacement fix.
+- The latest Debug build includes flat tagged rows and icon-only drag sources
+  in `PlaylistView.swift`. Build passed; manual selection verification is pending.
 - Preserve all current changes. Remove only generated `default.profraw` from
   the repo when the test app has finished; it is a launch artifact.
 

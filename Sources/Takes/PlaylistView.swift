@@ -178,22 +178,8 @@ struct PlaylistView: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
             Divider()
             List(selection: $presentation.selection) {
-                ForEach(coordinator.workspace.items) { item in
-                    itemRow(item)
-                        .tag(PlaylistRowID.item(item.id))
-                        .onDrag {
-                            if !presentation.selection.contains(.item(item.id)) {
-                                presentation.selection = [.item(item.id)]
-                            }
-                            presentation.draggingItemIDs = presentation.itemIDs(in: coordinator.workspace)
-                            return NSItemProvider(item: item.id.uuidString as NSString, typeIdentifier: PlaylistItemDrag.type.identifier)
-                        }
-                        .onDrop(of: [PlaylistItemDrag.type], isTargeted: nil) { _ in reorder(before: item.id) }
-                    if presentation.expanded.contains(item.id) {
-                        ForEach(item.versions) { version in
-                            versionRow(version, item: item).tag(PlaylistRowID.version(version.id))
-                        }
-                    }
+                ForEach(visibleRows, id: \.self) { rowID in
+                    playlistRow(rowID).tag(rowID)
                 }
                 if !coordinator.workspace.items.isEmpty {
                     Color.clear.frame(height: 12).listRowSeparator(.hidden)
@@ -242,6 +228,28 @@ struct PlaylistView: View {
         )) { renameSheet }
     }
 
+    private var visibleRows: [PlaylistRowID] {
+        coordinator.workspace.items.flatMap { item in
+            [.item(item.id)] + (presentation.expanded.contains(item.id)
+                ? item.versions.map { .version($0.id) } : [])
+        }
+    }
+
+    @ViewBuilder private func playlistRow(_ rowID: PlaylistRowID) -> some View {
+        switch rowID {
+        case let .item(id):
+            if let item = coordinator.workspace.items.first(where: { $0.id == id }) {
+                itemRow(item)
+                    .onDrop(of: [PlaylistItemDrag.type], isTargeted: nil) { _ in reorder(before: item.id) }
+            }
+        case let .version(id):
+            if let item = coordinator.workspace.items.first(where: { $0.versions.contains { $0.id == id } }),
+               let version = item.versions.first(where: { $0.id == id }) {
+                versionRow(version, item: item)
+            }
+        }
+    }
+
     private func itemRow(_ item: PlaylistItem) -> some View {
         let metadata = item.selectedVersion?.metadata
         return HStack(spacing: 10) {
@@ -259,6 +267,13 @@ struct PlaylistView: View {
                 .foregroundStyle(coordinator.currentItemID == item.id ? Theme.primary : .secondary)
                 .frame(width: 20)
                 .accessibilityLabel(coordinator.currentItemID == item.id && coordinator.isPlaying ? "Playing" : "")
+                .onDrag {
+                        if !presentation.selection.contains(.item(item.id)) {
+                            presentation.selection = [.item(item.id)]
+                        }
+                        presentation.draggingItemIDs = presentation.itemIDs(in: coordinator.workspace)
+                        return NSItemProvider(item: item.id.uuidString as NSString, typeIdentifier: PlaylistItemDrag.type.identifier)
+                    }
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.headline).lineLimit(1).help(item.title)
                 Text(metadata?.artist ?? "—").font(.caption).foregroundStyle(.secondary).lineLimit(1)
