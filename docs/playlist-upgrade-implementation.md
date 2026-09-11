@@ -1,8 +1,9 @@
 # Playlist upgrade implementation plan
 
 Status: implementation integrated; coordinator review and UI acceptance are unfinished.
-The latest full suite passed 388 reported tests. Later focused tests passed;
-the UI selection fix passed the main manual grouping/navigation workflow.
+The latest canonical suite passed 382 unique tests with zero failures on
+2026-09-11. The UI selection fix passed the main manual grouping/navigation
+workflow; broader manual validation is in progress.
 See the current status below before resuming work.
 
 Feature contract: [playlist-upgrade-spec.md](playlist-upgrade-spec.md).
@@ -67,6 +68,15 @@ entered at 00:08; Pause, Switch Track, and Back returned paused at 00:13 with
 the alternate version selected. This verifies the tested workflow, not all
 remaining acceptance cases.
 
+Validation found and reproduced an organization/runtime race: removing the
+active item and synchronously renaming a successor canceled the pending audio
+refresh. The added regression initially failed (13 of 14 coordinator tests
+passed). Primary moved navigation invalidation into the runtime-changing branch;
+metadata-only edits now preserve queued refresh work. All 14 coordinator tests
+passed after the fix. The fresh canonical suite also passed: 382 unique tests,
+zero failures (394 executions including parameterized cases). Detailed result
+bundles and commands are in the validation report.
+
 ### In flight / incomplete
 
 | Area | Owner | Current state and next action |
@@ -106,7 +116,8 @@ observed passes, failures, and checks that tools or external dependencies block.
   comparison loops, and imports during playback. Existing automated subsystem
   tests passed, but these new integrated routes still need acceptance checks.
 - Playback/idle CPU comparison against the documented performance baseline.
-- Final canonical test run covering all edits after the 388-test checkpoint.
+- Canonical verification is current through the organization/runtime race fix;
+  rerun affected checks if later validation requires production changes.
 - Merge and release are separate, not authorized by this implementation task.
 
 ### Milestone assessment

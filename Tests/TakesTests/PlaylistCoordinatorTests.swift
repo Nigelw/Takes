@@ -5,6 +5,42 @@ import Testing
 
 struct PlaylistCoordinatorTests {
     @MainActor
+    @Test func synchronousFollowUpEditDoesNotCancelRequiredRuntimeRefresh() async throws {
+        let firstURL = try makeTemporaryAudioFile(name: "removed-runtime.wav")
+        let secondURL = try makeTemporaryAudioFile(name: "successor-runtime.wav")
+        defer {
+            try? FileManager.default.removeItem(at: firstURL.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: secondURL.deletingLastPathComponent())
+        }
+        let loader = CoordinatorTestAudioLoader(tracks: [
+            firstURL: makeLoadedTrack(for: firstURL),
+            secondURL: makeLoadedTrack(for: secondURL)
+        ])
+        let coordinator = PlaylistCoordinator(loader: loader)
+        let imported = await coordinator.importFiles([firstURL, secondURL], destination: .playlist)
+        let firstItemID = try #require(imported.first)
+        let secondItemID = try #require(imported.last)
+        let firstVersionID = try #require(coordinator.workspace.items.first?.selectedVersionID)
+        let secondVersionID = try #require(coordinator.workspace.items.last?.selectedVersionID)
+        await coordinator.playItem(id: firstItemID)
+
+        #expect(coordinator.removeItem(firstItemID))
+        #expect(coordinator.renameItem(secondItemID, to: "Renamed successor"))
+        for _ in 0..<100 {
+            if coordinator.controller.session.activeTrackID == secondVersionID { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(coordinator.workspace.items.map(\.id) == [secondItemID])
+        #expect(coordinator.currentItemID == secondItemID)
+        #expect(coordinator.currentVersionID == secondVersionID)
+        #expect(coordinator.controller.session.activeTrackID == secondVersionID)
+        #expect(coordinator.controller.session.activeTrackID != firstVersionID)
+        #expect(coordinator.controller.runtimeTrackCount == 1)
+        #expect(!coordinator.isPlaying)
+    }
+
+    @MainActor
     @Test func clearUndoRedoRestoresPausedRuntimeAndFilePosition() async throws {
         let url = try makeTemporaryAudioFile(name: "undo-runtime.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

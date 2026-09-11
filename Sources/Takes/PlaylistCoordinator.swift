@@ -1442,8 +1442,10 @@ final class PlaylistCoordinator {
             synchronizeModeWithWorkspaceView()
             registerUndo(before: before, undoManager: undoManager, actionName: actionName)
             rebuildTraversal()
-            let organizationGeneration = beginNavigation()
             if runtimeRequiresRefresh(before: before, after: workspace, mode: modeBeforeMutation) {
+                // Metadata-only edits must not cancel a runtime refresh queued
+                // by an earlier organization action in this same event.
+                let organizationGeneration = beginNavigation()
                 pendingRuntimeRefreshTask?.cancel()
                 pendingRuntimeRefreshTask = Task { [weak self] in
                     guard let self,
