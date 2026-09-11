@@ -1,7 +1,8 @@
 # Playlist tracks with multiple versions
 
-Status: approved feature plan; implementation integrated, with review and acceptance
-validation in progress. See the implementation plan for current status.
+Status: approved feature plan; implementation integrated and automated validation
+passed. Manual/external/performance acceptance remains incomplete; see the
+implementation plan and validation report for evidence and remaining checks.
 
 Implementation sequence: [playlist-upgrade-implementation.md](playlist-upgrade-implementation.md).
 

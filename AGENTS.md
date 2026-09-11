@@ -187,7 +187,8 @@ these reintroduces the exact regressions it fixed):
 ## Test Map
 
 - `PlaylistCoordinatorTests.swift`: traversal, import destinations, organization,
-  Undo, missing-file repair, and workspace/runtime integration.
+  Undo, missing-file repair/advancement, 100-item/32-version runtime isolation,
+  and workspace/runtime integration.
 - `PlaylistRuntimeTests.swift`: runtime replacement, stable IDs, stale imports,
   teardown, preparation failure, and natural-end callbacks.
 - `PlaylistWorkspaceStoreTests.swift`: snapshot round trips, recovery protection,
@@ -225,8 +226,10 @@ these reintroduces the exact regressions it fixed):
 
 - [docs/playlist-upgrade-implementation.md](docs/playlist-upgrade-implementation.md):
   staged playlist feature work, agent ownership, and milestone status. The
-  playlist and comparison now share one coordinator/runtime; integration
-  validation is in progress. Read the linked contracts before extending it.
+  playlist and comparison now share one coordinator/runtime. Automated validation
+  passes; blocked manual/external/performance checks are recorded in
+  [docs/playlist-upgrade-validation.md](docs/playlist-upgrade-validation.md).
+  Read the linked contracts before extending it.
 
 - [docs/performance-plan-status.md](docs/performance-plan-status.md): status
   of the playback/UI performance improvement effort (what's landed, what's

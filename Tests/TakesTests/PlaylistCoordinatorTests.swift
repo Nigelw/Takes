@@ -200,6 +200,118 @@ struct PlaylistCoordinatorTests {
 
     @MainActor
     @Test
+    func hundredItemWorkspaceLoadsOnlyCurrentItemAndThirtyTwoVersionComparison() async throws {
+        let urls = try (0...PlaylistWorkspace.maximumVersionsPerItem).map { index in
+            try makeTemporaryAudioFile(name: "scale-\(index).wav", duration: 0.05)
+        }
+        defer {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+        let tracks = Dictionary(uniqueKeysWithValues: urls.map { url in
+            (url, makeLoadedTrack(for: url, duration: 0.05))
+        })
+        let versions = urls.map { url in
+            PlaylistVersion(
+                file: PlaylistWorkspaceStore.makeFileReference(for: url),
+                metadata: PlaylistMetadata(
+                    title: url.deletingPathExtension().lastPathComponent,
+                    duration: 0.05,
+                    sampleRate: 44_100,
+                    channelCount: 1,
+                    fileFormatDescription: "WAV",
+                    displayName: url.lastPathComponent
+                )
+            )
+        }
+        let comparisonItem = PlaylistItem(
+            title: "32 versions",
+            versions: Array(versions.prefix(PlaylistWorkspace.maximumVersionsPerItem))
+        )
+        let comparisonVersionID = try #require(comparisonItem.selectedVersionID)
+        let playlistVersion = try #require(versions.last)
+        let playlistItem = PlaylistItem(title: "Playlist item", versions: [playlistVersion])
+        let missingItems = (0..<98).map { index in
+            PlaylistItem(title: "Inactive \(index)", versions: [makeVersion("inactive-\(index).wav")])
+        }
+        let workspace = PlaylistWorkspace(items: [comparisonItem, playlistItem] + missingItems)
+        let coordinator = PlaylistCoordinator(
+            workspace: workspace,
+            loader: CoordinatorTestAudioLoader(tracks: tracks)
+        )
+
+        await coordinator.playItem(id: playlistItem.id)
+        coordinator.pause()
+        #expect(coordinator.workspace.items.count == 100)
+        #expect(coordinator.controller.runtimeTrackCount == 1)
+        #expect(coordinator.controller.session.tracks.map(\.id) == [playlistVersion.id])
+
+        await coordinator.enterComparison(itemID: comparisonItem.id)
+        #expect(coordinator.controller.runtimeTrackCount == PlaylistWorkspace.maximumVersionsPerItem)
+        #expect(Set(coordinator.controller.session.tracks.map(\.id)) == Set(comparisonItem.versions.map(\.id)))
+        #expect(coordinator.runtimeContext?.itemID == comparisonItem.id)
+
+        await coordinator.backToPlaylist()
+        #expect(coordinator.controller.runtimeTrackCount == 1)
+        #expect(coordinator.controller.session.tracks.map(\.id) == [comparisonVersionID])
+        #expect(!coordinator.isPlaying)
+    }
+
+    @MainActor
+    @Test
+    func naturalEndSkipsMissingItemAndContinuesWithNextPlayableItem() async throws {
+        let firstURL = try makeTemporaryAudioFile(name: "natural-first.wav", duration: 0.05)
+        let thirdURL = try makeTemporaryAudioFile(name: "natural-third.wav", duration: 2)
+        defer {
+            try? FileManager.default.removeItem(at: firstURL.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: thirdURL.deletingLastPathComponent())
+        }
+        let firstVersion = PlaylistVersion(
+            file: PlaylistWorkspaceStore.makeFileReference(for: firstURL),
+            metadata: PlaylistMetadata(
+                title: "First", duration: 0.05, sampleRate: 44_100, channelCount: 1,
+                fileFormatDescription: "WAV", displayName: firstURL.lastPathComponent
+            )
+        )
+        let missingVersion = makeVersion("missing-middle.wav")
+        let thirdVersion = PlaylistVersion(
+            file: PlaylistWorkspaceStore.makeFileReference(for: thirdURL),
+            metadata: PlaylistMetadata(
+                title: "Third", duration: 2, sampleRate: 44_100, channelCount: 1,
+                fileFormatDescription: "WAV", displayName: thirdURL.lastPathComponent
+            )
+        )
+        let first = PlaylistItem(title: "First", versions: [firstVersion])
+        let missing = PlaylistItem(title: "Missing", versions: [missingVersion])
+        let third = PlaylistItem(title: "Third", versions: [thirdVersion])
+        let loader = CoordinatorTestAudioLoader(tracks: [
+            firstURL: makeLoadedTrack(for: firstURL, duration: 0.05),
+            thirdURL: makeLoadedTrack(for: thirdURL)
+        ])
+        let coordinator = PlaylistCoordinator(
+            workspace: PlaylistWorkspace(items: [first, missing, third]),
+            loader: loader
+        )
+        defer { coordinator.pause() }
+
+        await coordinator.playItem(id: first.id)
+        for _ in 0..<200 {
+            if coordinator.currentItemID == third.id { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(coordinator.workspace.items.map(\.id) == [first.id, missing.id, third.id])
+        #expect(coordinator.currentItemID == third.id)
+        #expect(coordinator.currentVersionID == thirdVersion.id)
+        #expect(coordinator.controller.session.activeTrackID == thirdVersion.id)
+        #expect(coordinator.controller.runtimeTrackCount == 1)
+        #expect(coordinator.isPlaying)
+        #expect(coordinator.errorMessage != nil)
+    }
+
+    @MainActor
+    @Test
     func capturedItemDestinationDoesNotRerouteAfterDeletion() async {
         let destinationID = UUID()
         let destination = PlaylistItem(
@@ -457,20 +569,21 @@ struct PlaylistCoordinatorTests {
 
     private func makeLoadedTrack(
         for url: URL,
-        title: String? = nil
+        title: String? = nil,
+        duration: TimeInterval = 2
     ) -> LoadedTrack {
         LoadedTrack(
             url: url,
             displayName: url.lastPathComponent,
             fileFormatDescription: "WAV",
-            duration: 2,
+            duration: duration,
             sampleRate: 44_100,
             channelCount: 1,
             title: title
         )
     }
 
-    private func makeTemporaryAudioFile(name: String) throws -> URL {
+    private func makeTemporaryAudioFile(name: String, duration: TimeInterval = 2) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(
@@ -484,7 +597,7 @@ struct PlaylistCoordinatorTests {
         ) else {
             throw CoordinatorTestError.audioFormat
         }
-        let frameCount = AVAudioFrameCount(44_100 * 2)
+        let frameCount = AVAudioFrameCount(max(1, Int((44_100 * duration).rounded())))
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: format,
             frameCapacity: frameCount
