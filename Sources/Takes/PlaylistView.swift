@@ -268,12 +268,12 @@ struct PlaylistView: View {
                 .frame(width: 20)
                 .accessibilityLabel(coordinator.currentItemID == item.id && coordinator.isPlaying ? "Playing" : "")
                 .onDrag {
-                        if !presentation.selection.contains(.item(item.id)) {
-                            presentation.selection = [.item(item.id)]
-                        }
-                        presentation.draggingItemIDs = presentation.itemIDs(in: coordinator.workspace)
-                        return NSItemProvider(item: item.id.uuidString as NSString, typeIdentifier: PlaylistItemDrag.type.identifier)
+                    if !presentation.selection.contains(.item(item.id)) {
+                        presentation.selection = [.item(item.id)]
                     }
+                    presentation.draggingItemIDs = presentation.itemIDs(in: coordinator.workspace)
+                    return NSItemProvider(item: item.id.uuidString as NSString, typeIdentifier: PlaylistItemDrag.type.identifier)
+                }
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.headline).lineLimit(1).help(item.title)
                 Text(metadata?.artist ?? "—").font(.caption).foregroundStyle(.secondary).lineLimit(1)

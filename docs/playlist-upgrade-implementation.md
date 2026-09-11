@@ -2,7 +2,7 @@
 
 Status: implementation integrated; coordinator review and UI acceptance are unfinished.
 The latest full suite passed 388 reported tests. Later focused tests passed;
-the latest UI selection change builds but remains manually unverified.
+the UI selection fix passed the main manual grouping/navigation workflow.
 See the current status below before resuming work.
 
 Feature contract: [playlist-upgrade-spec.md](playlist-upgrade-spec.md).
@@ -11,7 +11,7 @@ Development branch: `codex/playlist-upgrade`.
 Shared interfaces: [playlist-upgrade-contracts.md](playlist-upgrade-contracts.md).
 UI handoff: [playlist-upgrade-ui-integration.md](playlist-upgrade-ui-integration.md).
 
-## Current status — 2026-09-06
+## Current status — 2026-09-11
 
 This section supersedes earlier progress notes. Implementation is on
 `codex/playlist-upgrade`. The foundation is committed as `bd72b55`. Work-in-progress checkpoint `8d68d00`
@@ -55,34 +55,45 @@ repeated history entry. Both fixes and regression tests passed: **12 unique coor
 failures. Log: `/private/tmp/takes-playlist-traversal-tests.log`. The fixes are
 checkpointed separately from the ongoing UI selection work.
 
+Latest coordinator verification: **13 unique tests passed**, zero failures,
+including audio-backed Clear → Undo → Redo restoring the stable version ID,
+paused position, and runtime count while preserving the original file. Log:
+`/private/tmp/takes-playlist-undo-tests.log`.
+
+Manual selection/navigation evidence: four files grouped into a two-version
+comparison; Back retained group selection/expansion; Undo restored four items
+and Redo restored the three-item grouped workspace. Compare while playing
+entered at 00:08; Pause, Switch Track, and Back returned paused at 00:13 with
+the alternate version selected. This verifies the tested workflow, not all
+remaining acceptance cases.
+
 ### In flight / incomplete
 
 | Area | Owner | Current state and next action |
 |---|---|---|
-| Playlist row selection | Astra (`ui_integration_design`) | **Known blocking UI defect:** single-click/multiselection fails, so manual grouping cannot proceed. Removing row double-click gestures and using native List primaryAction did not fix it. A flat ForEach of directly tagged rows compiled but did not fix pointer selection. Astra has now restricted the drag source to the row icon to test whether row-wide onDrag consumes selection; that change built successfully (`/private/tmp/takes-playlist-selection-build.log`), but no manual result was received before the usage limit. Do not mark selection fixed. |
+| Playlist row selection | Astra (`ui_integration_design`) | Icon-only drag source fixed pointer selection. Verified single-click without playback, Shift+Down multiselection, keyboard movement, Group and Compare, Back, Undo/Redo, and double-click playback. Command-toggle selection remains pending. |
 | UI file references | Astra | Reveal in Finder and missing-file checks now resolve bookmarks. Included in the latest successful Debug build; moved-file behavior still needs manual verification. |
 | Coordinator review | Luna (`coordinator`) | Edits address shuffle anchoring/history, explicit-play traversal, Next/Previous availability, shared comparison entry (bookmarks, blind ordering, viewport), stale natural-end callbacks, missing-item reporting, and resolved-file duplicate detection. Existing coordinator regressions passed in the later focused runs. Review handoff and additional edge-case coverage remain pending; the 388-test run alone does not cover these edits. |
 | Runtime transition/Undo tests | Luna | Audio-backed selected-version/Compare/Back regression exists. Remaining review requests include Undo refresh cancellation and redo position fidelity, missing-file traversal, shuffle/history mutations, and comparison-entry state restoration. Exact coverage must be checked against the final handoff. |
 | Persistence observation test | Primary | `workspaceEditsSaveAutomaticallyAndObservationRearms` passed in the focused checkpoint run, confirming automatic saves rearm after a second mutation. |
 | Final integration review | Primary | Review agent handoffs, rebuild after fixes, run relevant tests and final canonical verification, then finish manual acceptance and documentation. |
 
-Work is interrupted, not running to completion in the background. The sole UI
-subagent hit an account usage limit after writing the selection changes. The
-coordinator agent was interrupted earlier. Resume at most one subagent, as the
-user requested. No new implementation or UI verification was performed while
-preparing this documentation checkpoint.
+Current validation pass: GPT-5.6 Sol (`final_validation`) is the sole assigned
+subagent, at the user's explicit request. It owns the remaining automated/manual
+validation and a progressive evidence report in
+[playlist-upgrade-validation.md](playlist-upgrade-validation.md). Primary owns
+review, production fixes if needed, this status document, and checkpoint commits.
+Earlier Astra and Luna tasks are not assigned work in this pass.
 
-Next action: resume Astra, launch the exact isolated Debug app, and test the
-icon-only drag change with single-click, Shift/Command multiselection, keyboard
-navigation, and double-click playback. If selection works, verify Group →
-Compare → Back → Undo and commit the verified result. If it still fails, inspect
-root window hit-testing/focus before another list restructuring. Keep the known
-selection defect open until there is observed evidence that it is fixed.
+Use a fresh isolated workspace for this pass. The old manual workspace now has
+user-changed music items; do not clear or reuse it for synthetic acceptance tests.
+No pass is implied by an assigned checklist item. The validation report records
+observed passes, failures, and checks that tools or external dependencies block.
 
 ### Not yet started / not yet verified
 
 - The complete manual four-files → two groups → separate/regroup → Undo/Redo
-  workflow, blocked by row selection.
+  workflow: initial grouping and Undo/Redo passed; full two-group separation/regrouping remains.
 - Manual album playback → Compare → choose another version → Back at the same
   audible position → next song, including saved offsets/gain/loop/viewport.
 - Manual missing-file repair and corrupt-snapshot recovery. Automated storage
@@ -103,7 +114,7 @@ selection defect open until there is observed evidence that it is fixed.
 | Milestone | Status |
 |---|---|
 | 1. Workspace model and playback boundary | Foundation complete and tested; integrated runtime exists. |
-| 2. Playlist UI and organization | Implemented; selection defect blocks manual acceptance. |
+| 2. Playlist UI and organization | Selection/grouping/Undo workflow passed; broader organization acceptance remains. |
 | 3. Playback and comparison transitions | Implemented; edge-case fixes and end-to-end verification in progress. |
 | 4. Restoration and lifecycle | Implemented; automated storage tests and basic paused relaunch passed; repair/recovery UI acceptance pending. |
 | 5. Integration and release validation | In progress; latest full suite passed, subsequent edits and broad manual/performance checks remain. |
@@ -121,14 +132,14 @@ selection defect open until there is observed evidence that it is fixed.
   session ID. Latest build log: `/private/tmp/takes-playlist-selection-build.log`.
   App log: `/private/tmp/takes-playlist-manual-app.log`.
 - The latest Debug build includes flat tagged rows and icon-only drag sources
-  in `PlaylistView.swift`. Build passed; manual selection verification is pending.
+  in `PlaylistView.swift`. Build and the main manual selection/grouping/navigation checks passed.
 - Preserve all current changes. Remove only generated `default.profraw` from
   the repo when the test app has finished; it is a launch artifact.
 
 ## Orchestration and ownership
 
 - The primary agent orchestrates work, defines shared interfaces, reviews every handoff, integrates changes, and verifies milestone completion.
-- **All UI design and implementation is assigned to a subagent running `gpt-6-astra` with `high` reasoning effort.** This includes playlist rows, expansion and selection, comparison navigation, mode-specific controls, window behavior, and accessibility.
+- **UI design and implementation is assigned to a subagent running `gpt-6-astra` with `high` reasoning effort.** The 2026-09-11 user instruction assigns remaining validation to GPT-5.6; Sol is selected for that validation pass. This includes playlist rows, expansion and selection, comparison navigation, mode-specific controls, window behavior, and accessibility.
 - Use subagents running **`gpt-5.6-luna` with `max` reasoning effort** for bounded model, persistence, playback, and test implementation tasks.
 - Run at most **one subagent** at a time (user instruction, 2026-09-05). Keep tasks bounded to conserve remaining usage. Use explicit file ownership; sequence changes that touch shared controller or view files.
 - Keep this status document current before each new work slice. Record changed files, exact verification results, known failures, and the next action. Commit completed slices with their documentation so a usage interruption leaves a recoverable handoff.

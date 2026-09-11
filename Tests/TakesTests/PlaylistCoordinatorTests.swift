@@ -4,6 +4,42 @@ import Testing
 @testable import Takes
 
 struct PlaylistCoordinatorTests {
+    @MainActor
+    @Test func clearUndoRedoRestoresPausedRuntimeAndFilePosition() async throws {
+        let url = try makeTemporaryAudioFile(name: "undo-runtime.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let loader = CoordinatorTestAudioLoader(tracks: [url: makeLoadedTrack(for: url)])
+        let coordinator = PlaylistCoordinator(loader: loader)
+        let imported = await coordinator.importFiles([url], destination: .playlist)
+        let itemID = try #require(imported.first)
+        await coordinator.playItem(id: itemID)
+        coordinator.pause()
+        coordinator.seek(to: 1)
+        let versionID = coordinator.currentVersionID
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        undo.beginUndoGrouping()
+        #expect(coordinator.clearPlaylist(undoManager: undo))
+        undo.endUndoGrouping()
+        #expect(coordinator.controller.runtimeTrackCount == 0)
+
+        undo.undo()
+        for _ in 0..<100 {
+            if coordinator.controller.runtimeTrackCount == 1 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(coordinator.controller.runtimeTrackCount == 1)
+        #expect(coordinator.controller.session.activeTrackID == versionID)
+        #expect(coordinator.controller.session.transportPosition == 1)
+        #expect(!coordinator.isPlaying)
+        #expect(coordinator.errorMessage == nil)
+
+        undo.redo()
+        #expect(coordinator.workspace.items.isEmpty)
+        #expect(coordinator.controller.runtimeTrackCount == 0)
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
     @Test func unchangedOrganizationPreservesShuffleProgress() {
         let ids = [UUID(), UUID(), UUID()]
         var traversal = PlaylistTraversal(itemIDs: ids, shuffleEnabled: true, shuffleProvider: { $0 })
