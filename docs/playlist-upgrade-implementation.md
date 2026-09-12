@@ -13,6 +13,14 @@ UI handoff: [playlist-upgrade-ui-integration.md](playlist-upgrade-ui-integration
 
 ## Current status — 2026-09-11
 
+Automatic track grouping is implemented on top of the playlist import path.
+It includes the audio analyzer, deterministic clustering, conservative
+existing-item attachment, Settings preference, progress/cancel UI, selection,
+comparison entry, one-step Undo, focused tests, and a corpus benchmark tool.
+See [automatic-track-grouping.md](automatic-track-grouping.md). Automatic
+grouping ships off by default because neither accuracy gate has sufficient
+ground-truth coverage; **Same Performance** is also Debug-only.
+
 The validation pass is finished for this environment. **Automated checks pass;
 manual acceptance and performance validation remain incomplete because UI
 control hung twice.** No validation agent or test process remains running.

@@ -73,6 +73,10 @@
 		2B45F2A16B679D96BD1280D0 /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4065BE4E81E950A1D19A37D /* WorkspaceView.swift */; };
 		764ED4269557EB95D0B7D549 /* PlaylistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3920D5746FAFFCAF9DD06602 /* PlaylistView.swift */; };
 		6956B52FADE542E2987BA48B /* PlaylistCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FE6C1B4B522316E028735D4 /* PlaylistCoordinatorTests.swift */; };
+		F20000000000000000000011 /* TrackSimilarityAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* TrackSimilarityAnalyzer.swift */; };
+		F20000000000000000000012 /* TrackSimilarityClustering.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* TrackSimilarityClustering.swift */; };
+		F20000000000000000000013 /* TrackSimilarityAnalyzerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000003 /* TrackSimilarityAnalyzerTests.swift */; };
+		F20000000000000000000014 /* TrackSimilarityClusteringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* TrackSimilarityClusteringTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -155,6 +159,10 @@
 		A4065BE4E81E950A1D19A37D /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
 		3920D5746FAFFCAF9DD06602 /* PlaylistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistView.swift; sourceTree = "<group>"; };
 		5FE6C1B4B522316E028735D4 /* PlaylistCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistCoordinatorTests.swift; sourceTree = "<group>"; };
+		F20000000000000000000001 /* TrackSimilarityAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackSimilarityAnalyzer.swift; sourceTree = "<group>"; };
+		F20000000000000000000002 /* TrackSimilarityClustering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackSimilarityClustering.swift; sourceTree = "<group>"; };
+		F20000000000000000000003 /* TrackSimilarityAnalyzerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackSimilarityAnalyzerTests.swift; sourceTree = "<group>"; };
+		F20000000000000000000004 /* TrackSimilarityClusteringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackSimilarityClusteringTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -269,6 +277,8 @@
 				A1000000000000000000F001 /* PlaylistWorkspace.swift */,
 				A1000000000000000000C006 /* Theme.swift */,
 				A1000000000000000000C008 /* TrackAligner.swift */,
+				F20000000000000000000001 /* TrackSimilarityAnalyzer.swift */,
+				F20000000000000000000002 /* TrackSimilarityClustering.swift */,
 				A1000000000000000000C007 /* TransportControls.swift */,
 				A10000000000000000000015 /* PlaybackController.swift */,
 				A10000000000000000000016 /* TakesApp.swift */,
@@ -300,6 +310,8 @@
 				A1000000000000000000F004 /* PlaylistWorkspaceTests.swift */,
 				A1000000000000000000C00B /* StreamingTrackImportTests.swift */,
 				A1000000000000000000C009 /* TrackAlignerTests.swift */,
+				F20000000000000000000003 /* TrackSimilarityAnalyzerTests.swift */,
+				F20000000000000000000004 /* TrackSimilarityClusteringTests.swift */,
 				A1000000000000000000001D /* TrackDropHighlightTests.swift */,
 				A10000000000000000000019 /* TransportMappingTests.swift */,
 				A1000000000000000000001F /* WaveformSourceTests.swift */,
@@ -453,6 +465,8 @@
 				A1000000000000000000C01A /* StreamingTrackImport.swift in Sources */,
 				A10000000000000000000026 /* TakesApp.swift in Sources */,
 				A1000000000000000000C018 /* TrackAligner.swift in Sources */,
+				F20000000000000000000011 /* TrackSimilarityAnalyzer.swift in Sources */,
+				F20000000000000000000012 /* TrackSimilarityClustering.swift in Sources */,
 				A10000000000000000000027 /* TransportMapping.swift in Sources */,
 				A1000000000000000000C014 /* WaveformStore.swift in Sources */,
 			);
@@ -478,6 +492,8 @@
 				A1000000000000000000F104 /* PlaylistWorkspaceTests.swift in Sources */,
 				A1000000000000000000C01B /* StreamingTrackImportTests.swift in Sources */,
 				A1000000000000000000C019 /* TrackAlignerTests.swift in Sources */,
+				F20000000000000000000013 /* TrackSimilarityAnalyzerTests.swift in Sources */,
+				F20000000000000000000014 /* TrackSimilarityClusteringTests.swift in Sources */,
 				A10000000000000000000033 /* TrackDropHighlightTests.swift in Sources */,
 				A10000000000000000000034 /* WaveformSourceTests.swift in Sources */,
 				A10000000000000000000032 /* TransportMappingTests.swift in Sources */,

@@ -50,7 +50,12 @@ struct WorkspaceView: View {
                             await MainActor.run { state.updateStreamingURLStatus(status, id: operationID) }
                         }
                         try Task.checkCancellation()
-                        await coordinator.importFiles([url], destination: destination, isWorkspaceOwned: true)
+                        let importedIDs = await coordinator.importFiles(
+                            [url], destination: destination, isWorkspaceOwned: true,
+                            automaticGroupingMode: AppSettings.shared.automaticGroupingMode,
+                            undoManager: NSApp.mainWindow?.undoManager
+                        )
+                        Self.revealImportedItems(importedIDs, presentation: presentation)
                         guard state.isCurrentStreamingURLTask(operationID) else { return }
                         state.finishStreamingURLTask(id: operationID)
                         if let error = coordinator.errorMessage { state.streamingURLStatus = .failed(error) }
@@ -69,7 +74,12 @@ struct WorkspaceView: View {
                 Task { @MainActor in
                     do {
                         let selection = try LibraryTrackSelectionLoader().selectedTracks()
-                        await coordinator.importFiles(selection.urls, destination: destination)
+                        let importedIDs = await coordinator.importFiles(
+                            selection.urls, destination: destination,
+                            automaticGroupingMode: AppSettings.shared.automaticGroupingMode,
+                            undoManager: NSApp.mainWindow?.undoManager
+                        )
+                        Self.revealImportedItems(importedIDs, presentation: presentation)
                         if !selection.failures.isEmpty {
                             coordinator.reportError("\(selection.failures.count) selected Music tracks could not be imported.")
                         }
@@ -81,7 +91,12 @@ struct WorkspaceView: View {
                 Task { @MainActor in
                     do {
                         let urls = try FinderSelectionLoader().selectedAudioFileURLs()
-                        await coordinator.importFiles(urls, destination: destination)
+                        let importedIDs = await coordinator.importFiles(
+                            urls, destination: destination,
+                            automaticGroupingMode: AppSettings.shared.automaticGroupingMode,
+                            undoManager: NSApp.mainWindow?.undoManager
+                        )
+                        Self.revealImportedItems(importedIDs, presentation: presentation)
                     } catch { coordinator.reportError(error.localizedDescription) }
                 }
             },
@@ -167,7 +182,14 @@ struct WorkspaceView: View {
                 let destination = openFiles.importDestination
                 openFiles.dismissOpenDialog()
                 if case let .success(urls) = result {
-                    Task { await coordinator.importFiles(urls, destination: destination) }
+                    Task {
+                        let importedIDs = await coordinator.importFiles(
+                            urls, destination: destination,
+                            automaticGroupingMode: settings.automaticGroupingMode,
+                            undoManager: undoManager
+                        )
+                        Self.revealImportedItems(importedIDs, presentation: presentation)
+                    }
                 }
             }
             .sheet(isPresented: $openFiles.isPromptingForStreamingURL) { streamingSheet }
@@ -247,7 +269,16 @@ struct WorkspaceView: View {
                 }
             }
             .overlay {
-                if !persistence.restorationComplete { ProgressView("Restoring Playlist…").padding(24).background(.regularMaterial) }
+                if !persistence.restorationComplete {
+                    ProgressView("Restoring Playlist…").padding(24).background(.regularMaterial)
+                } else if coordinator.isLoading {
+                    VStack(spacing: 12) {
+                        ProgressView("Importing and grouping tracks…")
+                        Button("Cancel Import") { coordinator.cancelCurrentImports() }
+                    }
+                    .padding(24)
+                    .background(.regularMaterial)
+                }
             }
             .disabled(!persistence.restorationComplete)
         }
@@ -256,6 +287,19 @@ struct WorkspaceView: View {
     private var playlistSurface: some View {
         VStack(spacing: 0) {
             PlaylistTransportView(coordinator: coordinator)
+            if let summary = coordinator.importSummaryMessage {
+                HStack(spacing: 8) {
+                    Text(summary).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                    Button { coordinator.clearImportSummary() } label: {
+                        Image(systemName: "xmark").imageScale(.small)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss Import Summary")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(.thinMaterial)
+            }
             PlaylistView(coordinator: coordinator, presentation: presentation, openFiles: openFiles)
         }
     }
@@ -292,24 +336,45 @@ struct WorkspaceView: View {
         return coordinator.workspace.allVersions.first { $0.id == coordinator.currentVersionID }
     }
 
+    @MainActor
+    private static func revealImportedItems(
+        _ itemIDs: [PlaylistItem.ID],
+        presentation: PlaylistPresentationState
+    ) {
+        guard !itemIDs.isEmpty else { return }
+        presentation.selection = Set(itemIDs.map(PlaylistRowID.item))
+        presentation.expanded.formUnion(itemIDs)
+    }
+
     private func configureOpenRouter() {
         appFileOpenRouter.setHandler { urls in
             let previous = externalOpenTask
             externalOpenTask = Task { @MainActor in
                 await previous?.value
-                await coordinator.importFiles(urls, destination: .playlist)
+                let importedIDs = await coordinator.importFiles(
+                    urls, destination: .playlist,
+                    automaticGroupingMode: settings.automaticGroupingMode,
+                    undoManager: undoManager
+                )
+                Self.revealImportedItems(importedIDs, presentation: presentation)
             }
         }
         appFileOpenRouter.setStreamingURLHandler { urls in
             let previous = externalOpenTask
             externalOpenTask = Task { @MainActor in
                 await previous?.value
+                var importedIDs: [PlaylistItem.ID] = []
                 for rawURL in urls {
                     do {
                         let url = try await PlaylistStreamingImporter().download(from: rawURL)
-                        await coordinator.importFiles([url], destination: .playlist, isWorkspaceOwned: true)
+                        importedIDs.append(contentsOf: await coordinator.importFiles(
+                            [url], destination: .playlist, isWorkspaceOwned: true,
+                            automaticGroupingMode: settings.automaticGroupingMode,
+                            undoManager: undoManager
+                        ))
                     } catch { coordinator.reportError(error.localizedDescription) }
                 }
+                Self.revealImportedItems(importedIDs, presentation: presentation)
             }
         }
     }
@@ -336,7 +401,12 @@ struct WorkspaceView: View {
                 }
                 if let url { urls.append(url) }
             }
-            await coordinator.importFiles(AppOpenedURLResolver.audioFileURLs(from: urls), destination: destination)
+            let importedIDs = await coordinator.importFiles(
+                AppOpenedURLResolver.audioFileURLs(from: urls), destination: destination,
+                automaticGroupingMode: settings.automaticGroupingMode,
+                undoManager: undoManager
+            )
+            Self.revealImportedItems(importedIDs, presentation: presentation)
         }
         return true
     }

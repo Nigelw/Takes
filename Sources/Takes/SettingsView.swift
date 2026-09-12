@@ -45,6 +45,19 @@ private struct GeneralSettingsView: View {
 
             Section {
                 VStack(alignment: .leading, spacing: 4) {
+                    Picker("Group similar tracks", selection: $settings.automaticGroupingMode) {
+                        ForEach(AutomaticGroupingMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    SettingsHint(settings.automaticGroupingMode.explanation)
+                }
+            } header: {
+                Text("Playlist Import")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
                     Toggle("Auto-align tracks on open", isOn: $settings.alignTracksOnOpen)
                     SettingsHint("Align audio files when opening in Takes")
                 }
