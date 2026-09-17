@@ -10,7 +10,8 @@ Implementation sequence: [playlist-upgrade-implementation.md](playlist-upgrade-i
 
 Add a playlist above Takes’ existing comparison workflow. Each playlist item contains one or more versions of a song.
 
-Imports can group alternate versions automatically using audio evidence. Manual
+Imports can group alternate versions automatically using normalized title,
+artist, filename, and duration metadata. Manual
 **Group and Compare** remains available to correct abstentions or organize files
 when automatic grouping is off. See
 [automatic-track-grouping.md](automatic-track-grouping.md).

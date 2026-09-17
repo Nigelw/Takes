@@ -38,9 +38,16 @@ struct AudioFileLoader: AudioFileLoading {
 
     private func descriptiveMetadata(for url: URL) async -> (title: String?, artist: String?, album: String?) {
         let asset = AVURLAsset(url: url)
-        guard let items = try? await asset.load(.commonMetadata) else { return (nil, nil, nil) }
+        var items = (try? await asset.load(.commonMetadata)) ?? []
+        if let formats = try? await asset.load(.availableMetadataFormats) {
+            for format in formats {
+                if let formatItems = try? await asset.loadMetadata(for: format) {
+                    items.append(contentsOf: formatItems)
+                }
+            }
+        }
         func value(_ key: AVMetadataKey) async -> String? {
-            for item in AVMetadataItem.metadataItems(from: items, withKey: key, keySpace: .common) {
+            for item in items where item.commonKey == key {
                 if let text = try? await item.load(.stringValue) {
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty { return trimmed }

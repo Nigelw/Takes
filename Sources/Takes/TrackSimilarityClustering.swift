@@ -1,8 +1,7 @@
 import Foundation
 
-/// The reduced outcome needed by playlist grouping. The analyzer may have
-/// richer verdicts; it should map matches to ``match``, confident negatives to
-/// ``mismatch``, and all missing or inconclusive results to ``unknown``.
+/// The reduced outcome needed by playlist grouping. Missing or inconclusive
+/// metadata maps to ``unknown`` and cannot create a group.
 enum TrackSimilarityClusterDecision: Equatable, Sendable {
     case match
     case mismatch
@@ -33,7 +32,7 @@ struct TrackSimilarityClusterPair<TrackID: Hashable & Sendable>: Hashable, Senda
     }
 }
 
-/// Pair evidence supplied by the similarity analyzer or a deterministic test
+/// Pair evidence supplied by the metadata matcher or a deterministic test
 /// double. Evidence for a pair may be repeated; the clusterer resolves
 /// conflicting records conservatively, with mismatch taking precedence.
 struct TrackSimilarityClusterEvidence<TrackID: Hashable & Sendable>: Sendable {

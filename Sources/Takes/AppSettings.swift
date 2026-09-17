@@ -49,27 +49,17 @@ enum ReadoutStyle: String, CaseIterable, Identifiable {
     }
 }
 
-/// The amount of similarity recognition applied to files added to a playlist.
+/// Whether playlist imports group tracks using title, artist, filename, and duration.
 enum AutomaticGroupingMode: String, CaseIterable, Identifiable {
     case off
-    case sameRecording
-    case samePerformance
-
-    static var allCases: [AutomaticGroupingMode] {
-        #if DEBUG
-        [.off, .sameRecording, .samePerformance]
-        #else
-        [.off, .sameRecording]
-        #endif
-    }
+    case automatic
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .off: return "Off"
-        case .sameRecording: return "Same Recording"
-        case .samePerformance: return "Same Performance"
+        case .automatic: return "Automatic"
         }
     }
 
@@ -77,10 +67,8 @@ enum AutomaticGroupingMode: String, CaseIterable, Identifiable {
         switch self {
         case .off:
             return "Add every file as a separate playlist item."
-        case .sameRecording:
-            return "Group alternate encodes and transfers of the same recording."
-        case .samePerformance:
-            return "Also group mixes and edits that share the same performance."
+        case .automatic:
+            return "Group tracks with matching title and artist tags, falling back to filenames."
         }
     }
 }
@@ -108,7 +96,7 @@ final class AppSettings: ObservableObject {
     nonisolated static let alignTracksOnOpenDefault = false
     nonisolated static let appearanceThemeDefault: AppearanceTheme = .system
     nonisolated static let readoutStyleDefault: ReadoutStyle = .glass
-    nonisolated static let automaticGroupingModeDefault: AutomaticGroupingMode = .off
+    nonisolated static let automaticGroupingModeDefault: AutomaticGroupingMode = .automatic
 
     nonisolated static let offsetStepKey = "offsetNudgeStep"
     nonisolated static let offsetLargeStepKey = "offsetLargeNudgeStep"
@@ -157,7 +145,7 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(readoutStyle.rawValue, forKey: Self.readoutStyleKey) }
     }
 
-    /// How aggressively playlist imports group similar audio files.
+    /// Whether playlist imports group tracks from descriptive metadata.
     @Published var automaticGroupingMode: AutomaticGroupingMode {
         didSet { defaults.set(automaticGroupingMode.rawValue, forKey: Self.automaticGroupingModeKey) }
     }
@@ -246,14 +234,13 @@ final class AppSettings: ObservableObject {
     }
 
     nonisolated static func storedAutomaticGroupingMode(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> AutomaticGroupingMode {
-        let stored = defaults.string(forKey: automaticGroupingModeKey)
-            .flatMap(AutomaticGroupingMode.init(rawValue:))
-            ?? automaticGroupingModeDefault
-        #if DEBUG
-        return stored
-        #else
-        return stored == .samePerformance ? automaticGroupingModeDefault : stored
-        #endif
+        guard let stored = defaults.string(forKey: automaticGroupingModeKey) else {
+            return automaticGroupingModeDefault
+        }
+        if let mode = AutomaticGroupingMode(rawValue: stored) { return mode }
+        // Migrate preferences written by the retired audio-analysis modes.
+        if stored == "sameRecording" || stored == "samePerformance" { return .automatic }
+        return automaticGroupingModeDefault
     }
 
     nonisolated static func appearanceThemeOverride(arguments: [String]) -> AppearanceTheme? {

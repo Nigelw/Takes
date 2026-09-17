@@ -11,15 +11,16 @@ Development branch: `codex/playlist-upgrade`.
 Shared interfaces: [playlist-upgrade-contracts.md](playlist-upgrade-contracts.md).
 UI handoff: [playlist-upgrade-ui-integration.md](playlist-upgrade-ui-integration.md).
 
-## Current status — 2026-09-11
+## Current status — 2026-09-13
 
 Automatic track grouping is implemented on top of the playlist import path.
-It includes the audio analyzer, deterministic clustering, conservative
-existing-item attachment, Settings preference, progress/cancel UI, selection,
-comparison entry, one-step Undo, focused tests, and a corpus benchmark tool.
-See [automatic-track-grouping.md](automatic-track-grouping.md). Automatic
-grouping ships off by default because neither accuracy gate has sufficient
-ground-truth coverage; **Same Performance** is also Debug-only.
+It uses normalized title and artist tags, falls back to filenames, and rejects
+duration conflicts. The same policy applies to tracks imported together and to
+existing playlist items. It includes deterministic clustering, conservative
+existing-item attachment, a Settings preference, selection, comparison entry,
+one-step Undo, and focused tests. See
+[automatic-track-grouping.md](automatic-track-grouping.md). Automatic grouping
+is the default; users can turn it off in Settings.
 
 The validation pass is finished for this environment. **Automated checks pass;
 manual acceptance and performance validation remain incomplete because UI

@@ -555,15 +555,11 @@ struct PlaylistCoordinatorTests {
     func automaticImportGroupsTwoPairsAndUndoesAsOneTransaction() async {
         let urls = ["song-a-master.wav", "song-a-mp3.wav", "song-b-master.wav", "song-b-mp3.wav"]
             .map { URL(fileURLWithPath: "/tmp/\(UUID().uuidString)-\($0)") }
-        let tracks = Dictionary(uniqueKeysWithValues: urls.map { ($0, makeLoadedTrack(for: $0)) })
-        let analyzer = CoordinatorSimilarityAnalyzer(matches: [
-            (urls[0].lastPathComponent, urls[1].lastPathComponent),
-            (urls[2].lastPathComponent, urls[3].lastPathComponent)
-        ])
-        let coordinator = PlaylistCoordinator(
-            loader: CoordinatorTestAudioLoader(tracks: tracks),
-            similarityAnalyzer: analyzer
-        )
+        let titles = ["Song A", "Song A (Remastered 2020)", "Song B", "Song B (Stereo Mix)"]
+        let tracks = Dictionary(uniqueKeysWithValues: urls.enumerated().map { index, url in
+            (url, makeLoadedTrack(for: url, title: titles[index], artist: "Artist"))
+        })
+        let coordinator = PlaylistCoordinator(loader: CoordinatorTestAudioLoader(tracks: tracks))
         let undoManager = UndoManager()
         undoManager.groupsByEvent = false
         undoManager.beginUndoGrouping()
@@ -571,7 +567,7 @@ struct PlaylistCoordinatorTests {
         let imported = await coordinator.importFiles(
             urls,
             destination: .playlist,
-            automaticGroupingMode: .sameRecording,
+            automaticGroupingMode: .automatic,
             undoManager: undoManager
         )
         undoManager.endUndoGrouping()
@@ -585,66 +581,76 @@ struct PlaylistCoordinatorTests {
 
     @MainActor
     @Test
-    func automaticImportUsesTheSelectedSimilarityLevel() async {
-        let firstURL = URL(fileURLWithPath: "/tmp/\(UUID().uuidString)-mix.wav")
-        let secondURL = URL(fileURLWithPath: "/tmp/\(UUID().uuidString)-edit.wav")
-        let tracks = [
-            firstURL: makeLoadedTrack(for: firstURL),
-            secondURL: makeLoadedTrack(for: secondURL)
-        ]
-        let analyzer = CoordinatorSimilarityAnalyzer(
-            evidence: [
-                CoordinatorSimilarityAnalyzer.key(firstURL.lastPathComponent, secondURL.lastPathComponent):
-                    TrackSimilarityEvidence(
-                        sameRecording: .mismatch,
-                        samePerformance: .match,
-                        diagnostic: "Same performance, different edit."
-                    )
-            ]
+    func separateAlbumImportsUseTheSameGroupingRules() async {
+        let urls = ["album-one-a.wav", "album-one-b.wav", "album-two-b.wav", "album-two-a.wav"]
+            .map { URL(fileURLWithPath: "/tmp/\(UUID().uuidString)-\($0)") }
+        let titles = ["Song A", "Song B", "Song B (Remastered)", "Song A (Stereo Mix)"]
+        let tracks = Dictionary(uniqueKeysWithValues: urls.enumerated().map { index, url in
+            (url, makeLoadedTrack(for: url, title: titles[index], artist: "Artist"))
+        })
+        let coordinator = PlaylistCoordinator(loader: CoordinatorTestAudioLoader(tracks: tracks))
+
+        _ = await coordinator.importFiles(
+            Array(urls[0...1]), destination: .playlist,
+            automaticGroupingMode: .automatic
         )
-        let conservative = PlaylistCoordinator(
-            loader: CoordinatorTestAudioLoader(tracks: tracks),
-            similarityAnalyzer: analyzer
-        )
-        let broad = PlaylistCoordinator(
-            loader: CoordinatorTestAudioLoader(tracks: tracks),
-            similarityAnalyzer: analyzer
+        _ = await coordinator.importFiles(
+            Array(urls[2...3]), destination: .playlist,
+            automaticGroupingMode: .automatic
         )
 
-        await conservative.importFiles(
-            [firstURL, secondURL], destination: .playlist,
-            automaticGroupingMode: .sameRecording
-        )
-        await broad.importFiles(
-            [firstURL, secondURL], destination: .playlist,
-            automaticGroupingMode: .samePerformance
-        )
-
-        #expect(conservative.workspace.items.map(\.versions.count) == [1, 1])
-        #expect(broad.workspace.items.map(\.versions.count) == [2])
+        #expect(coordinator.workspace.items.count == 2)
+        #expect(coordinator.workspace.items.map(\.versions.count) == [2, 2])
+        #expect(coordinator.workspace.items[0].versions.map(\.metadata.title) == ["Song A", "Song A (Stereo Mix)"])
+        #expect(coordinator.workspace.items[1].versions.map(\.metadata.title) == ["Song B", "Song B (Remastered)"])
     }
 
     @MainActor
     @Test
-    func analysisTimeoutFallsBackToSeparateItemsAndReportsIt() async {
-        let urls = ["timeout-a.wav", "timeout-b.wav"].map {
-            URL(fileURLWithPath: "/tmp/\(UUID().uuidString)-\($0)")
-        }
+    func automaticImportCanBeDisabled() async {
+        let firstURL = URL(fileURLWithPath: "/tmp/\(UUID().uuidString)-mix.wav")
+        let secondURL = URL(fileURLWithPath: "/tmp/\(UUID().uuidString)-edit.wav")
+        let tracks = [
+            firstURL: makeLoadedTrack(for: firstURL, title: "Example Song", artist: "Artist"),
+            secondURL: makeLoadedTrack(for: secondURL, title: "Example Song", artist: "Artist")
+        ]
+        let disabled = PlaylistCoordinator(loader: CoordinatorTestAudioLoader(tracks: tracks))
+        let automatic = PlaylistCoordinator(loader: CoordinatorTestAudioLoader(tracks: tracks))
+
+        await disabled.importFiles(
+            [firstURL, secondURL], destination: .playlist,
+            automaticGroupingMode: .off
+        )
+        await automatic.importFiles(
+            [firstURL, secondURL], destination: .playlist,
+            automaticGroupingMode: .automatic
+        )
+
+        #expect(disabled.workspace.items.map(\.versions.count) == [1, 1])
+        #expect(automatic.workspace.items.map(\.versions.count) == [2])
+    }
+
+    @MainActor
+    @Test
+    func filenameFallbackGroupsUntaggedTracks() async {
+        let directory = "/tmp/\(UUID().uuidString)"
+        let urls = [
+            URL(fileURLWithPath: "\(directory)/01 - Artist - Example Song (Remastered 2020).wav"),
+            URL(fileURLWithPath: "\(directory)/Artist - Example Song.mp3")
+        ]
         let coordinator = PlaylistCoordinator(
             loader: CoordinatorTestAudioLoader(
                 tracks: Dictionary(uniqueKeysWithValues: urls.map { ($0, makeLoadedTrack(for: $0)) })
-            ),
-            similarityAnalyzer: CoordinatorSimilarityAnalyzer(evidence: [:], timedOut: true)
+            )
         )
 
         let imported = await coordinator.importFiles(
             urls, destination: .playlist,
-            automaticGroupingMode: .sameRecording
+            automaticGroupingMode: .automatic
         )
 
-        #expect(imported.count == 2)
-        #expect(coordinator.workspace.items.map(\.versions.count) == [1, 1])
-        #expect(coordinator.importSummaryMessage?.contains("could not be analyzed") == true)
+        #expect(imported.count == 1)
+        #expect(coordinator.workspace.items.map(\.versions.count) == [2])
     }
 
     @MainActor
@@ -658,26 +664,24 @@ struct PlaylistCoordinatorTests {
             try? FileManager.default.removeItem(at: unrelatedURL.deletingLastPathComponent())
             try? FileManager.default.removeItem(at: incomingURL.deletingLastPathComponent())
         }
-        let existingVersion = makePlaylistVersion(url: existingURL, title: "Existing")
-        let unrelatedVersion = makePlaylistVersion(url: unrelatedURL, title: "Unrelated")
+        let existingVersion = makePlaylistVersion(url: existingURL, title: "Existing", artist: "Artist")
+        let unrelatedVersion = makePlaylistVersion(url: unrelatedURL, title: "Unrelated", artist: "Artist")
         let target = PlaylistItem(title: "Existing", versions: [existingVersion])
         let unrelated = PlaylistItem(title: "Unrelated", versions: [unrelatedVersion])
-        let analyzer = CoordinatorSimilarityAnalyzer(matches: [
-            (existingURL.lastPathComponent, incomingURL.lastPathComponent)
-        ])
-        let tracks = [existingURL, unrelatedURL, incomingURL].reduce(into: [URL: LoadedTrack]()) {
-            $0[$1] = makeLoadedTrack(for: $1)
-        }
+        let tracks = [
+            existingURL: makeLoadedTrack(for: existingURL, title: "Existing", artist: "Artist"),
+            unrelatedURL: makeLoadedTrack(for: unrelatedURL, title: "Unrelated", artist: "Artist"),
+            incomingURL: makeLoadedTrack(for: incomingURL, title: "Existing (Remastered)", artist: "Artist")
+        ]
         let coordinator = PlaylistCoordinator(
             workspace: PlaylistWorkspace(items: [target, unrelated]),
-            loader: CoordinatorTestAudioLoader(tracks: tracks),
-            similarityAnalyzer: analyzer
+            loader: CoordinatorTestAudioLoader(tracks: tracks)
         )
         defer { coordinator.pause() }
 
         let imported = await coordinator.importFiles(
             [incomingURL], destination: .playlist,
-            automaticGroupingMode: .sameRecording
+            automaticGroupingMode: .automatic
         )
 
         #expect(imported == [target.id])
@@ -697,20 +701,15 @@ struct PlaylistCoordinatorTests {
             try? FileManager.default.removeItem(at: secondURL.deletingLastPathComponent())
         }
         let loader = CoordinatorTestAudioLoader(tracks: [
-            firstURL: makeLoadedTrack(for: firstURL),
-            secondURL: makeLoadedTrack(for: secondURL)
+            firstURL: makeLoadedTrack(for: firstURL, title: "Single Group", artist: "Artist"),
+            secondURL: makeLoadedTrack(for: secondURL, title: "Single Group (Stereo Mix)", artist: "Artist")
         ])
-        let coordinator = PlaylistCoordinator(
-            loader: loader,
-            similarityAnalyzer: CoordinatorSimilarityAnalyzer(matches: [
-                (firstURL.lastPathComponent, secondURL.lastPathComponent)
-            ])
-        )
+        let coordinator = PlaylistCoordinator(loader: loader)
         defer { coordinator.pause() }
 
         let imported = await coordinator.importFiles(
             [firstURL, secondURL], destination: .playlist,
-            automaticGroupingMode: .sameRecording
+            automaticGroupingMode: .automatic
         )
 
         let itemID = try #require(imported.first)
@@ -721,21 +720,21 @@ struct PlaylistCoordinatorTests {
 
     @MainActor
     @Test
-    func cancellingDuringSimilarityAnalysisPreventsTheAtomicCommit() async {
+    func cancellingDuringMetadataLoadingPreventsTheAtomicCommit() async {
         let urls = ["cancel-a.wav", "cancel-b.wav"].map {
             URL(fileURLWithPath: "/tmp/\(UUID().uuidString)-\($0)")
         }
-        let gate = CoordinatorSimilarityGate()
+        let gate = CoordinatorLoadGate()
         let coordinator = PlaylistCoordinator(
             loader: CoordinatorTestAudioLoader(
-                tracks: Dictionary(uniqueKeysWithValues: urls.map { ($0, makeLoadedTrack(for: $0)) })
-            ),
-            similarityAnalyzer: GatedCoordinatorSimilarityAnalyzer(gate: gate)
+                tracks: Dictionary(uniqueKeysWithValues: urls.map { ($0, makeLoadedTrack(for: $0)) }),
+                gate: gate
+            )
         )
         let task = Task { @MainActor in
             await coordinator.importFiles(
                 urls, destination: .playlist,
-                automaticGroupingMode: .sameRecording
+                automaticGroupingMode: .automatic
             )
         }
 
@@ -751,79 +750,6 @@ struct PlaylistCoordinatorTests {
 
     @MainActor
     @Test
-    func workspaceMembershipChangeRefusesAStaleExistingAssignment() async throws {
-        let existingURL = try makeTemporaryAudioFile(name: "stale-existing.wav")
-        let incomingURL = try makeTemporaryAudioFile(name: "stale-incoming.wav")
-        defer {
-            try? FileManager.default.removeItem(at: existingURL.deletingLastPathComponent())
-            try? FileManager.default.removeItem(at: incomingURL.deletingLastPathComponent())
-        }
-        let existing = PlaylistItem(
-            title: "Existing",
-            versions: [makePlaylistVersion(url: existingURL, title: "Existing")]
-        )
-        let gate = CoordinatorSimilarityGate()
-        let coordinator = PlaylistCoordinator(
-            workspace: PlaylistWorkspace(items: [existing]),
-            loader: CoordinatorTestAudioLoader(tracks: [incomingURL: makeLoadedTrack(for: incomingURL)]),
-            similarityAnalyzer: GatedCoordinatorSimilarityAnalyzer(gate: gate, matchesEveryPair: true)
-        )
-        let task = Task { @MainActor in
-            await coordinator.importFiles(
-                [incomingURL], destination: .playlist,
-                automaticGroupingMode: .sameRecording
-            )
-        }
-
-        await gate.waitUntilStarted()
-        #expect(coordinator.removeItem(existing.id))
-        await gate.release()
-        let imported = await task.value
-
-        #expect(imported.count == 1)
-        #expect(imported.first != existing.id)
-        #expect(coordinator.workspace.items.count == 1)
-        #expect(coordinator.workspace.items[0].versions.map(\.file.canonicalURL) == [incomingURL])
-    }
-
-    @MainActor
-    @Test
-    func changedFileIdentityInvalidatesSimilarityEvidenceBeforeCommit() async throws {
-        let firstURL = try makeTemporaryAudioFile(name: "identity-first.wav")
-        let secondURL = try makeTemporaryAudioFile(name: "identity-second.wav")
-        defer {
-            try? FileManager.default.removeItem(at: firstURL.deletingLastPathComponent())
-            try? FileManager.default.removeItem(at: secondURL.deletingLastPathComponent())
-        }
-        let gate = CoordinatorSimilarityGate()
-        let coordinator = PlaylistCoordinator(
-            loader: CoordinatorTestAudioLoader(tracks: [
-                firstURL: makeLoadedTrack(for: firstURL),
-                secondURL: makeLoadedTrack(for: secondURL)
-            ]),
-            similarityAnalyzer: GatedCoordinatorSimilarityAnalyzer(gate: gate, matchesEveryPair: true)
-        )
-        let task = Task { @MainActor in
-            await coordinator.importFiles(
-                [firstURL, secondURL], destination: .playlist,
-                automaticGroupingMode: .sameRecording
-            )
-        }
-
-        await gate.waitUntilStarted()
-        try FileManager.default.setAttributes(
-            [.modificationDate: Date().addingTimeInterval(120)],
-            ofItemAtPath: secondURL.path
-        )
-        await gate.release()
-        _ = await task.value
-
-        #expect(coordinator.workspace.items.map(\.versions.count) == [1, 1])
-        #expect(coordinator.importSummaryMessage?.contains("could not be analyzed") == true)
-    }
-
-    @MainActor
-    @Test
     func playlistImportJoiningActiveComparisonRefreshesItsRuntime() async throws {
         let firstURL = try makeTemporaryAudioFile(name: "active-first.wav")
         let secondURL = try makeTemporaryAudioFile(name: "active-second.wav")
@@ -833,22 +759,19 @@ struct PlaylistCoordinatorTests {
             try? FileManager.default.removeItem(at: secondURL.deletingLastPathComponent())
             try? FileManager.default.removeItem(at: incomingURL.deletingLastPathComponent())
         }
-        let first = makePlaylistVersion(url: firstURL, title: "Active")
-        let second = makePlaylistVersion(url: secondURL, title: "Active")
+        let first = makePlaylistVersion(url: firstURL, title: "Active", artist: "Artist")
+        let second = makePlaylistVersion(url: secondURL, title: "Active", artist: "Artist")
         let item = PlaylistItem(title: "Active", versions: [first, second])
-        let tracks = [firstURL, secondURL, incomingURL].reduce(into: [URL: LoadedTrack]()) {
-            $0[$1] = makeLoadedTrack(for: $1)
-        }
-        let analyzer = CoordinatorSimilarityAnalyzer(matches: [
-            (incomingURL.lastPathComponent, firstURL.lastPathComponent),
-            (incomingURL.lastPathComponent, secondURL.lastPathComponent)
-        ])
+        let tracks = [
+            firstURL: makeLoadedTrack(for: firstURL, title: "Active", artist: "Artist"),
+            secondURL: makeLoadedTrack(for: secondURL, title: "Active (Remastered)", artist: "Artist"),
+            incomingURL: makeLoadedTrack(for: incomingURL, title: "Active (Stereo Mix)", artist: "Artist")
+        ]
         let loader = CoordinatorTestAudioLoader(tracks: tracks)
         let coordinator = PlaylistCoordinator(
             workspace: PlaylistWorkspace(items: [item]),
             controller: PlaybackController(loader: loader),
-            loader: loader,
-            similarityAnalyzer: analyzer
+            loader: loader
         )
         defer { coordinator.pause() }
         await coordinator.enterComparison(itemID: item.id)
@@ -856,7 +779,7 @@ struct PlaylistCoordinatorTests {
 
         await coordinator.importFiles(
             [incomingURL], destination: .playlist,
-            automaticGroupingMode: .sameRecording
+            automaticGroupingMode: .automatic
         )
         for _ in 0..<100 {
             if coordinator.controller.runtimeTrackCount == 3 { break }
@@ -885,11 +808,12 @@ struct PlaylistCoordinatorTests {
         )
     }
 
-    private func makePlaylistVersion(url: URL, title: String) -> PlaylistVersion {
+    private func makePlaylistVersion(url: URL, title: String, artist: String? = nil) -> PlaylistVersion {
         PlaylistVersion(
             file: PlaylistWorkspaceStore.makeFileReference(for: url),
             metadata: PlaylistMetadata(
                 title: title,
+                artist: artist,
                 duration: 2,
                 sampleRate: 44_100,
                 channelCount: 1,
@@ -902,6 +826,7 @@ struct PlaylistCoordinatorTests {
     private func makeLoadedTrack(
         for url: URL,
         title: String? = nil,
+        artist: String? = nil,
         duration: TimeInterval = 2
     ) -> LoadedTrack {
         LoadedTrack(
@@ -911,7 +836,8 @@ struct PlaylistCoordinatorTests {
             duration: duration,
             sampleRate: 44_100,
             channelCount: 1,
-            title: title
+            title: title,
+            artist: artist
         )
     }
 
@@ -985,86 +911,6 @@ private struct CoordinatorTestAudioLoader: AudioFileLoading {
 
     func makeAudioFile(from url: URL) throws -> AVAudioFile {
         try AVAudioFile(forReading: url)
-    }
-}
-
-private struct CoordinatorSimilarityAnalyzer: TrackSimilarityAnalyzing {
-    let evidence: [String: TrackSimilarityEvidence]
-    var timedOut = false
-
-    init(evidence: [String: TrackSimilarityEvidence], timedOut: Bool = false) {
-        self.evidence = evidence
-        self.timedOut = timedOut
-    }
-
-    init(matches: [(String, String)]) {
-        evidence = Dictionary(uniqueKeysWithValues: matches.map { first, second in
-            (
-                Self.key(first, second),
-                TrackSimilarityEvidence(
-                    sameRecording: .match,
-                    samePerformance: .match,
-                    diagnostic: "Test match."
-                )
-            )
-        })
-    }
-
-    func analyze(_ request: TrackSimilarityRequest) async -> TrackSimilarityAnalysis {
-        let names = Dictionary(uniqueKeysWithValues: request.sources.map { ($0.id, $0.url.lastPathComponent) })
-        var result = TrackSimilarityAnalysis(timedOut: timedOut)
-        for pair in request.pairs {
-            guard let first = names[pair.firstID], let second = names[pair.secondID] else { continue }
-            result.evidence[pair] = evidence[Self.key(first, second)]
-                ?? TrackSimilarityEvidence(
-                    sameRecording: .mismatch,
-                    samePerformance: .mismatch,
-                    diagnostic: "Test mismatch."
-                )
-        }
-        return result
-    }
-
-    static func key(_ first: String, _ second: String) -> String {
-        [first, second].sorted().joined(separator: "|")
-    }
-}
-
-private actor CoordinatorSimilarityGate {
-    private var started = false
-    private var released = false
-
-    func markStarted() { started = true }
-
-    func waitUntilStarted() async {
-        while !started { await Task.yield() }
-    }
-
-    func waitUntilReleased() async {
-        while !released { await Task.yield() }
-    }
-
-    func release() { released = true }
-}
-
-private struct GatedCoordinatorSimilarityAnalyzer: TrackSimilarityAnalyzing {
-    let gate: CoordinatorSimilarityGate
-    var matchesEveryPair = false
-
-    func analyze(_ request: TrackSimilarityRequest) async -> TrackSimilarityAnalysis {
-        await gate.markStarted()
-        await gate.waitUntilReleased()
-        guard matchesEveryPair else { return TrackSimilarityAnalysis() }
-        return TrackSimilarityAnalysis(evidence: Dictionary(uniqueKeysWithValues: request.pairs.map {
-            (
-                $0,
-                TrackSimilarityEvidence(
-                    sameRecording: .match,
-                    samePerformance: .match,
-                    diagnostic: "Gated test match."
-                )
-            )
-        }))
     }
 }
 

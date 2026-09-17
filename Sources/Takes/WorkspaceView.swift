@@ -273,7 +273,7 @@ struct WorkspaceView: View {
                     ProgressView("Restoring Playlist…").padding(24).background(.regularMaterial)
                 } else if coordinator.isLoading {
                     VStack(spacing: 12) {
-                        ProgressView("Importing and grouping tracks…")
+                        ProgressView("Importing tracks…")
                         Button("Cancel Import") { coordinator.cancelCurrentImports() }
                     }
                     .padding(24)

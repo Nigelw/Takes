@@ -76,10 +76,10 @@ Key ownership:
   transport-to-file mapping, audibility checks, and gain conversion.
 - `TrackAligner.swift`: audio-derived quick alignment and deeper tempo
   analysis.
-- `TrackSimilarityAnalyzer.swift`: bounded, deadline-aware audio similarity
-  evidence for same-recording and same-performance import grouping.
+- `TrackMetadataMatcher.swift`: normalized title/artist/filename matching and
+  duration safeguards for automatic playlist grouping.
 - `TrackSimilarityClustering.swift`: deterministic conservative grouping and
-  existing-item admission from pairwise similarity evidence.
+  existing-item admission from pairwise metadata evidence.
 - `WaveformStore.swift`: in-memory (process-lifetime) waveform generation —
   bounded to 2 concurrent decodes in session (top-first) order — plus the
   multi-resolution peak pyramid (`Waveform.reducedLevels`) the lanes draw
@@ -147,9 +147,10 @@ These are here to prevent parallel implementations and subtle regressions:
   transport anchors but must not create periodic observed workspace mutations.
 - Route new import/open entry points through the existing shared loading path
   instead of adding separate import behavior.
-- Keep automatic grouping conservative: unknown or failed analysis must not
-  create a match; existing items require an unambiguous all-member witness and
-  are never merged by an import.
+- Keep automatic grouping conservative: missing metadata or incompatible
+  duration must not create a match; incoming and existing tracks use the same
+  rules, existing items require an unambiguous all-member witness, and imports
+  never merge existing items.
 - Preserve canonical duplicate detection by standardized, symlink-resolved file
   URL.
 - Keep removal behavior state-safe: removing one track preserves remaining
@@ -228,10 +229,10 @@ these reintroduces the exact regressions it fixed):
 - `LoopingTests.swift`, `TimelineHeaderMarkerTests.swift`,
   `TrackAlignerTests.swift`, and `TrackDropHighlightTests.swift`: their named
   subsystems.
-- `TrackSimilarityAnalyzerTests.swift` and
-  `TrackSimilarityClusteringTests.swift`: audio-evidence abstention/matching and
-  deterministic conservative grouping. Coordinator integration coverage lives
-  in `PlaylistCoordinatorTests.swift`.
+- `TrackMetadataMatcherTests.swift` and
+  `TrackSimilarityClusteringTests.swift`: metadata normalization, duration
+  safeguards, and deterministic conservative grouping. Coordinator integration
+  coverage lives in `PlaylistCoordinatorTests.swift`.
 
 ## Ongoing Work
 

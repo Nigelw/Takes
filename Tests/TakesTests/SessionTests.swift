@@ -11,15 +11,18 @@ struct SessionTests {
         let defaults = InMemoryAppSettingsDefaults()
         let settings = AppSettings(defaults: defaults)
 
-        #expect(settings.automaticGroupingMode == .off)
-        settings.automaticGroupingMode = .samePerformance
-        #expect(defaults.string(forKey: AppSettings.automaticGroupingModeKey) == "samePerformance")
-        #expect(AppSettings.storedAutomaticGroupingMode(defaults) == .samePerformance)
+        #expect(settings.automaticGroupingMode == .automatic)
+        settings.automaticGroupingMode = .off
+        #expect(defaults.string(forKey: AppSettings.automaticGroupingModeKey) == "off")
+        #expect(AppSettings.storedAutomaticGroupingMode(defaults) == .off)
+
+        defaults.set("samePerformance", forKey: AppSettings.automaticGroupingModeKey)
+        #expect(AppSettings.storedAutomaticGroupingMode(defaults) == .automatic)
 
         defaults.set("unsupported", forKey: AppSettings.automaticGroupingModeKey)
-        #expect(AppSettings.storedAutomaticGroupingMode(defaults) == .off)
+        #expect(AppSettings.storedAutomaticGroupingMode(defaults) == .automatic)
         settings.restoreDefaults()
-        #expect(settings.automaticGroupingMode == .off)
+        #expect(settings.automaticGroupingMode == .automatic)
     }
 
     @Test

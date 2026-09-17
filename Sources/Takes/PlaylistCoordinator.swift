@@ -255,15 +255,12 @@ final class PlaylistCoordinator {
     private(set) var runtimeTrackCount = 0
 
     @ObservationIgnored private let loader: AudioFileLoading
-    @ObservationIgnored private let similarityAnalyzer: any TrackSimilarityAnalyzing
-    @ObservationIgnored private let similarityDeadlineSeconds: TimeInterval
     @ObservationIgnored private var navigationGeneration = 0
     @ObservationIgnored private var importGeneration = 0
     @ObservationIgnored private var importCancellationGeneration = 0
     @ObservationIgnored private var loadingOperationCount = 0
     @ObservationIgnored private var traversal: PlaylistTraversal
     @ObservationIgnored private var pendingRuntimeRefreshTask: Task<Void, Never>?
-    @ObservationIgnored private var activeSimilarityTasks: [Int: Task<TrackSimilarityAnalysis, Never>] = [:]
 
     private struct PlaybackSnapshot {
         var itemID: PlaylistItem.ID?
@@ -274,26 +271,7 @@ final class PlaylistCoordinator {
 
     private struct AutomaticImportPlan {
         let decisions: [TrackSimilarityClusterEvidence<UUID>]
-        let sourceIdentities: [UUID: AutomaticImportFileIdentity]
         let hadFallback: Bool
-    }
-
-    private struct AutomaticImportFileIdentity: Equatable {
-        let canonicalPath: String
-        let resourceID: String?
-        let fileSize: Int?
-        let modified: Date?
-
-        init(url: URL) {
-            let canonical = url.standardizedFileURL.resolvingSymlinksInPath()
-            let values = try? canonical.resourceValues(forKeys: [
-                .fileResourceIdentifierKey, .fileSizeKey, .contentModificationDateKey
-            ])
-            canonicalPath = canonical.path
-            resourceID = values?.fileResourceIdentifier.map { String(describing: $0) }
-            fileSize = values?.fileSize
-            modified = values?.contentModificationDate
-        }
     }
 
     private struct AutomaticGroupingApplication {
@@ -304,14 +282,10 @@ final class PlaylistCoordinator {
     init(
         workspace: PlaylistWorkspace = PlaylistWorkspace(),
         controller: PlaybackController? = nil,
-        loader: AudioFileLoading = AudioFileLoader(),
-        similarityAnalyzer: any TrackSimilarityAnalyzing = TrackSimilarityAnalyzer(),
-        similarityDeadlineSeconds: TimeInterval = 5
+        loader: AudioFileLoading = AudioFileLoader()
     ) {
         self.workspace = workspace
         self.loader = loader
-        self.similarityAnalyzer = similarityAnalyzer
-        self.similarityDeadlineSeconds = max(0, similarityDeadlineSeconds)
         self.controller = controller ?? PlaybackController(loader: loader)
         self.mode = workspace.activeView.itemID.map { .comparison(itemID: $0) } ?? .playlist
         self.currentItemID = workspace.listeningState?.itemID ?? workspace.activeItemID
@@ -331,7 +305,6 @@ final class PlaylistCoordinator {
 
     deinit {
         pendingRuntimeRefreshTask?.cancel()
-        for task in activeSimilarityTasks.values { task.cancel() }
     }
 
     var isPlaying: Bool { controller.session.isPlaying }
@@ -378,7 +351,7 @@ final class PlaylistCoordinator {
         _ urls: [URL],
         destination: PlaylistImportDestination,
         isWorkspaceOwned: Bool = false,
-        automaticGroupingMode: AutomaticGroupingMode = .off,
+        automaticGroupingMode: AutomaticGroupingMode = .automatic,
         undoManager: UndoManager? = nil
     ) async -> [PlaylistItem.ID] {
         guard !urls.isEmpty else { return [] }
@@ -435,16 +408,11 @@ final class PlaylistCoordinator {
         guard !Task.isCancelled,
               cancellationGenerationAtStart == importCancellationGeneration else { return [] }
 
-        // Analyze against a value snapshot. The commit phase validates the
-        // membership used here before it permits an existing-item assignment.
-        let analyzedWorkspace = workspace
         let automaticPlan: AutomaticImportPlan?
         if destination == .playlist, automaticGroupingMode != .off {
-            automaticPlan = await makeAutomaticImportPlan(
+            automaticPlan = makeAutomaticImportPlan(
                 versions: versions,
-                workspace: analyzedWorkspace,
-                mode: automaticGroupingMode,
-                operationGeneration: operationGeneration
+                workspace: workspace
             )
         } else {
             automaticPlan = nil
@@ -455,7 +423,7 @@ final class PlaylistCoordinator {
               cancellationGenerationAtStart == importCancellationGeneration else { return [] }
 
         // The user may have changed gain, blind-listening state, or playback
-        // while metadata or similarity analysis was running. Capture those
+        // while metadata loading was running. Capture those
         // edits and the transport state at the commit boundary.
         captureRuntimeEdits()
         let activeComparisonItemID = mode.itemID
@@ -482,29 +450,14 @@ final class PlaylistCoordinator {
             }
 
             let newItemIDs: [PlaylistItem.ID]
-            var groupingHadFallback = automaticPlan?.hadFallback == true
+            let groupingHadFallback = automaticPlan?.hadFallback == true
             var didOverflowCapacity = false
             switch destination {
             case .playlist:
                 if let automaticPlan {
-                    let evidenceIsCurrent = automaticPlan.sourceIdentities.allSatisfy { id, identity in
-                        if let incoming = acceptedVersions.first(where: { $0.id == id }) {
-                            return AutomaticImportFileIdentity(url: incoming.file.storedURL) == identity
-                        }
-                        guard let existing = workspace.allVersions.first(where: { $0.id == id }),
-                              case let .available(url) = PlaylistWorkspaceStore.resolveFileReference(existing.file) else {
-                            return false
-                        }
-                        return AutomaticImportFileIdentity(url: url) == identity
-                    }
-                    groupingHadFallback = groupingHadFallback || !evidenceIsCurrent
-                    let mayUseExistingAssignments = evidenceIsCurrent
-                        && workspaceMembership(workspace) == workspaceMembership(analyzedWorkspace)
                     let application = try applyAutomaticImportPlan(
                         automaticPlan,
-                        versions: acceptedVersions,
-                        evidenceIsCurrent: evidenceIsCurrent,
-                        mayUseExistingAssignments: mayUseExistingAssignments
+                        versions: acceptedVersions
                     )
                     newItemIDs = application.itemIDs
                     didOverflowCapacity = application.didOverflowCapacity
@@ -542,7 +495,7 @@ final class PlaylistCoordinator {
             let summary = "\(acceptedVersions.count) \(acceptedVersions.count == 1 ? "file" : "files") added as \(groupedCount) playlist \(groupedCount == 1 ? "item" : "items")."
             var summaryDetails: [String] = []
             if groupingHadFallback {
-                summaryDetails.append("Some tracks could not be analyzed and were left separate.")
+                summaryDetails.append("Some tracks lacked enough metadata to group confidently and were left separate.")
             }
             if didOverflowCapacity {
                 summaryDetails.append("A 32-version limit created an additional playlist item.")
@@ -574,7 +527,7 @@ final class PlaylistCoordinator {
     func importFiles(
         _ urls: [URL],
         isWorkspaceOwned: Bool = false,
-        automaticGroupingMode: AutomaticGroupingMode = .off,
+        automaticGroupingMode: AutomaticGroupingMode = .automatic,
         undoManager: UndoManager? = nil
     ) async -> [PlaylistItem.ID] {
         let destination = captureImportDestination()
@@ -1177,11 +1130,10 @@ final class PlaylistCoordinator {
     }
 
     /// Cancels all playlist imports currently between metadata loading and
-    /// their atomic commit. The analyzer observes its own short deadline; this
-    /// generation check guarantees that no result commits after cancellation.
+    /// their atomic commit. The generation check guarantees that no result
+    /// commits after cancellation.
     func cancelCurrentImports() {
         importCancellationGeneration &+= 1
-        for task in activeSimilarityTasks.values { task.cancel() }
         importSummaryMessage = nil
     }
 
@@ -1563,102 +1515,47 @@ final class PlaylistCoordinator {
 
     private func makeAutomaticImportPlan(
         versions: [PlaylistVersion],
-        workspace: PlaylistWorkspace,
-        mode: AutomaticGroupingMode,
-        operationGeneration: Int
-    ) async -> AutomaticImportPlan {
-        let incomingSources = versions.map { TrackSimilaritySource(id: $0.id, url: $0.file.storedURL) }
-        let existingSources: [TrackSimilaritySource] = workspace.items.flatMap { item in
-            item.versions.compactMap { version in
-                guard case let .available(url) = PlaylistWorkspaceStore.resolveFileReference(version.file) else {
-                    return nil
-                }
-                return TrackSimilaritySource(id: version.id, url: url)
-            }
-        }
-        let incomingPairs: [TrackSimilarityPair] = versions.indices.flatMap { left in
+        workspace: PlaylistWorkspace
+    ) -> AutomaticImportPlan {
+        let existingVersions = workspace.allVersions
+        let incomingPairs: [(PlaylistVersion, PlaylistVersion)] = versions.indices.flatMap { left in
             versions.indices.compactMap { right in
                 guard right > left else { return nil }
-                return TrackSimilarityPair(firstID: versions[left].id, secondID: versions[right].id)
+                return (versions[left], versions[right])
             }
         }
         let existingPairs = versions.flatMap { incoming in
-            existingSources.map { existing in
-                TrackSimilarityPair(firstID: incoming.id, secondID: existing.id)
-            }
+            existingVersions.map { (incoming, $0) }
         }
         let pairs = incomingPairs + existingPairs
-        let sources = incomingSources + existingSources
-        let sourceIdentities = Dictionary(uniqueKeysWithValues: sources.map {
-            ($0.id, AutomaticImportFileIdentity(url: $0.url))
-        })
-        guard !pairs.isEmpty else {
-            return AutomaticImportPlan(
-                decisions: [],
-                sourceIdentities: sourceIdentities,
-                hadFallback: false
-            )
-        }
-
-        let request = TrackSimilarityRequest(
-                sources: sources,
-                pairs: pairs,
-                deadline: Date().addingTimeInterval(similarityDeadlineSeconds)
-            )
-        let analyzer = similarityAnalyzer
-        let analysisTask = Task { await analyzer.analyze(request) }
-        activeSimilarityTasks[operationGeneration] = analysisTask
-        let analysis = await analysisTask.value
-        activeSimilarityTasks[operationGeneration] = nil
-        let decisions = pairs.map { pair -> TrackSimilarityClusterEvidence<UUID> in
-            let verdict: TrackSimilarityVerdict
-            if let evidence = analysis.evidence[pair] {
-                verdict = mode == .sameRecording ? evidence.sameRecording : evidence.samePerformance
-            } else {
-                verdict = .insufficientEvidence
-            }
-            let decision: TrackSimilarityClusterDecision
-            switch verdict {
-            case .match: decision = .match
-            case .mismatch: decision = .mismatch
-            case .insufficientEvidence, .analysisFailure: decision = .unknown
-            }
+        let decisions = pairs.map { first, second in
             return TrackSimilarityClusterEvidence(
-                first: pair.firstID,
-                second: pair.secondID,
-                decision: decision
+                first: first.id,
+                second: second.id,
+                decision: TrackMetadataMatcher.decision(between: first, and: second)
             )
-        }
-        let hadFailure = analysis.evidence.values.contains {
-            let verdict = mode == .sameRecording ? $0.sameRecording : $0.samePerformance
-            return verdict == .analysisFailure
         }
         return AutomaticImportPlan(
             decisions: decisions,
-            sourceIdentities: sourceIdentities,
-            hadFallback: analysis.timedOut || hadFailure
+            hadFallback: versions.contains { !TrackMetadataMatcher.canAttemptMatch($0) }
         )
     }
 
     private func applyAutomaticImportPlan(
         _ plan: AutomaticImportPlan,
-        versions: [PlaylistVersion],
-        evidenceIsCurrent: Bool,
-        mayUseExistingAssignments: Bool
+        versions: [PlaylistVersion]
     ) throws -> AutomaticGroupingApplication {
         let incomingIDs = versions.map(\.id)
-        let existingGroups: [TrackSimilarityExistingGroup<UUID, UUID>] = mayUseExistingAssignments
-            ? workspace.items.map { item in
-                TrackSimilarityExistingGroup(
-                    id: item.id,
-                    versionIDs: item.versions.map(\.id),
-                    availableCapacity: PlaylistWorkspace.maximumVersionsPerItem - item.versions.count
-                )
-            }
-            : []
+        let existingGroups: [TrackSimilarityExistingGroup<UUID, UUID>] = workspace.items.map { item in
+            TrackSimilarityExistingGroup(
+                id: item.id,
+                versionIDs: item.versions.map(\.id),
+                availableCapacity: PlaylistWorkspace.maximumVersionsPerItem - item.versions.count
+            )
+        }
         let result = TrackSimilarityClusterer<UUID, UUID>().cluster(
             incoming: incomingIDs,
-            evidence: evidenceIsCurrent ? plan.decisions : [],
+            evidence: plan.decisions,
             existingGroups: existingGroups
         )
         let versionsByID = Dictionary(uniqueKeysWithValues: versions.map { ($0.id, $0) })
@@ -1713,14 +1610,6 @@ final class PlaylistCoordinator {
         return title.isEmpty
             ? version.file.storedURL.deletingPathExtension().lastPathComponent
             : title
-    }
-
-    private func workspaceMembership(_ workspace: PlaylistWorkspace) -> [[String]] {
-        workspace.items.map { item in
-            [item.id.uuidString] + item.versions.flatMap { version in
-                [version.id.uuidString, canonicalFileKey(version)]
-            }
-        }
     }
 
     private func mutateWorkspace(
