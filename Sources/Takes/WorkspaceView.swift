@@ -484,116 +484,106 @@ struct WorkspaceView: View {
 private struct PlaylistTransportView: View {
     let coordinator: PlaylistCoordinator
     @EnvironmentObject private var settings: AppSettings
+    /// Process-lifetime artwork cache; loads only the version on display.
+    @State private var artworkStore = PlaylistArtworkStore()
     private var controller: PlaybackController { coordinator.controller }
 
+    // MARK: Layout constants
+
+    private static let secondaryButtonDiameter: CGFloat = 32
+    private static let primaryButtonDiameter: CGFloat = 48
+    private static let clusterSpacing: CGFloat = 8
+    /// Previous, Play, Next.
+    private static let leftClusterWidth: CGFloat =
+        secondaryButtonDiameter + clusterSpacing + primaryButtonDiameter + clusterSpacing + secondaryButtonDiameter
+    /// Shuffle, Repeat.
+    private static let rightClusterWidth: CGFloat = secondaryButtonDiameter + clusterSpacing + secondaryButtonDiameter
+    /// Breathing room on each side of a cluster within its region.
+    private static let sideClusterMargin: CGFloat = 24
+    /// Both side regions share one width, so the wider cluster sets it. Fixed
+    /// regardless of window size: this is the space the button clusters need,
+    /// not a function of how wide the readout ends up.
+    private static let requiredSideRegionWidth: CGFloat = max(leftClusterWidth, rightClusterWidth) + sideClusterMargin * 2
+    /// The readout's width at the window's minimum size — a floor, not a cap.
+    private static let minimumReadoutWidth: CGFloat = TakesWindowPolicy.minimumContentWidth - requiredSideRegionWidth * 2
+
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 8) {
-                Spacer(minLength: 64)
-                Button { coordinator.previous() } label: { Image(systemName: "backward.end.fill") }
-                    .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: 32, glyphSize: 13))
-                    .disabled(!coordinator.canPrevious).accessibilityLabel("Previous Item")
-                Button { coordinator.togglePlayback() } label: { Image(systemName: coordinator.isPlaying ? "pause.fill" : "play.fill") }
-                    .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: 48, glyphSize: 20))
-                    .disabled(!coordinator.canPlay).accessibilityLabel(coordinator.isPlaying ? "Pause" : "Play")
-                Button { coordinator.next() } label: { Image(systemName: "forward.end.fill") }
-                    .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: 32, glyphSize: 13))
-                    .disabled(!coordinator.canNext).accessibilityLabel("Next Item")
-                Spacer(minLength: 8)
-                DigitalTimeReadout(style: settings.readoutStyle, elapsed: coordinator.isPlaying ? controller.playingReadoutText : controller.session.transportPosition.formattedSignedTimestamp)
-                    .allowsHitTesting(false)
-                Spacer(minLength: 8)
-                Button { coordinator.toggleShuffle() } label: { Image(systemName: "shuffle") }
-                    .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.isShuffleEnabled, diameter: 32, glyphSize: 13))
-                    .accessibilityLabel("Shuffle").accessibilityValue(coordinator.workspace.isShuffleEnabled ? "On" : "Off")
-                Button { coordinator.cyclePlaylistRepeatMode() } label: {
-                    Image(systemName: coordinator.workspace.playlistRepeatMode == .one ? "repeat.1" : "repeat")
+        GeometryReader { proxy in
+            // The side regions never grow past what the clusters need, so all
+            // extra window width goes to the readout — it widens with the
+            // window but can never encroach on either cluster.
+            let readoutWidth = max(proxy.size.width - Self.requiredSideRegionWidth * 2, Self.minimumReadoutWidth)
+
+            ZStack {
+                HStack(spacing: Self.clusterSpacing) {
+                    Button { coordinator.previous() } label: { Image(systemName: "backward.end.fill") }
+                        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: Self.secondaryButtonDiameter, glyphSize: 13))
+                        .disabled(!coordinator.canPrevious).accessibilityLabel("Previous Item")
+                    Button { coordinator.togglePlayback() } label: { Image(systemName: coordinator.isPlaying ? "pause.fill" : "play.fill") }
+                        .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: Self.primaryButtonDiameter, glyphSize: 20))
+                        .disabled(!coordinator.canPlay).accessibilityLabel(coordinator.isPlaying ? "Pause" : "Play")
+                    Button { coordinator.next() } label: { Image(systemName: "forward.end.fill") }
+                        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: Self.secondaryButtonDiameter, glyphSize: 13))
+                        .disabled(!coordinator.canNext).accessibilityLabel("Next Item")
                 }
-                .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.playlistRepeatMode != .off, diameter: 32, glyphSize: 13))
-                .accessibilityLabel("Repeat").accessibilityValue(coordinator.workspace.playlistRepeatMode.rawValue.capitalized)
-                Spacer(minLength: 8)
+                .frame(width: Self.requiredSideRegionWidth, alignment: .center)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Pinned to the true window center, independent of the side clusters.
+                PlaylistNowPlayingReadout(
+                    style: settings.readoutStyle,
+                    nowPlaying: nowPlaying,
+                    artwork: artworkStore.artwork(for: currentVersion?.id),
+                    elapsed: elapsedText,
+                    controller: controller,
+                    seek: coordinator.seek
+                )
+                .frame(width: readoutWidth)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+                HStack(spacing: Self.clusterSpacing) {
+                    Button { coordinator.toggleShuffle() } label: { Image(systemName: "shuffle") }
+                        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.isShuffleEnabled, diameter: Self.secondaryButtonDiameter, glyphSize: 13))
+                        .accessibilityLabel("Shuffle").accessibilityValue(coordinator.workspace.isShuffleEnabled ? "On" : "Off")
+                    Button { coordinator.cyclePlaylistRepeatMode() } label: {
+                        Image(systemName: coordinator.workspace.playlistRepeatMode == .one ? "repeat.1" : "repeat")
+                    }
+                    .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.playlistRepeatMode != .off, diameter: Self.secondaryButtonDiameter, glyphSize: 13))
+                    .accessibilityLabel("Repeat").accessibilityValue(coordinator.workspace.playlistRepeatMode.rawValue.capitalized)
+                }
+                .frame(width: Self.requiredSideRegionWidth, alignment: .center)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            PlaylistSeekControl(controller: controller, seek: coordinator.seek)
-                .frame(height: 18).padding(.horizontal, 20)
         }
+        .frame(height: PlaylistNowPlayingReadout.panelHeight)
         .padding(.top, 20).padding(.bottom, 10)
         .background(Theme.controlBarLift.allowsHitTesting(false))
         .background(WindowDragArea())
-    }
-}
-
-/// Only transport anchor events update this leaf. Core Animation moves the thumb
-/// between anchors; native input and accessibility write seeks back to transport.
-private struct PlaylistSeekControl: NSViewRepresentable {
-    let controller: PlaybackController
-    let seek: (TimeInterval) -> Void
-
-    func makeNSView(context: Context) -> PlaylistSeekView { PlaylistSeekView() }
-    func updateNSView(_ view: PlaylistSeekView, context: Context) {
-        _ = controller.session.transportPosition
-        view.configure(position: controller.displayTransportPosition(), duration: controller.session.duration,
-                       playing: controller.session.isPlaying, seek: seek)
-    }
-}
-
-private final class PlaylistSeekView: NSView {
-    private let rail = CALayer()
-    private let thumb = CALayer()
-    private var duration: TimeInterval = 0
-    private var position: TimeInterval = 0
-    private var playing = false
-    private var anchorTime: TimeInterval = 0
-    private var seek: (TimeInterval) -> Void = { _ in }
-    override var acceptsFirstResponder: Bool { true }
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-        layer?.addSublayer(rail); layer?.addSublayer(thumb)
-        setAccessibilityElement(true)
-        setAccessibilityRole(.slider)
-        setAccessibilityLabel("Playback Position")
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    func configure(position: TimeInterval, duration: TimeInterval, playing: Bool, seek: @escaping (TimeInterval) -> Void) {
-        self.position = position; self.duration = duration; self.playing = playing
-        self.anchorTime = CACurrentMediaTime(); self.seek = seek
-        setAccessibilityEnabled(duration > 0)
-        redraw()
-    }
-    override func layout() { super.layout(); redraw() }
-    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); redraw() }
-    private var currentPosition: TimeInterval {
-        min(max(position + (playing ? CACurrentMediaTime() - anchorTime : 0), 0), duration)
-    }
-    private func redraw() {
-        let current = currentPosition
-        let x = duration > 0 ? 6 + (bounds.width - 12) * current / duration : 6
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        rail.frame = CGRect(x: 6, y: bounds.midY - 2, width: max(bounds.width - 12, 0), height: 4)
-        rail.cornerRadius = 2; rail.backgroundColor = NSColor.separatorColor.cgColor
-        thumb.bounds = CGRect(x: 0, y: 0, width: 12, height: 12)
-        thumb.cornerRadius = 6; thumb.backgroundColor = NSColor.controlAccentColor.cgColor
-        thumb.removeAnimation(forKey: "position")
-        thumb.position = CGPoint(x: x, y: bounds.midY)
-        if playing && duration > current {
-            let animation = CABasicAnimation(keyPath: "position.x")
-            animation.fromValue = x; animation.toValue = bounds.width - 6
-            animation.duration = duration - current; animation.timingFunction = CAMediaTimingFunction(name: .linear)
-            animation.fillMode = .forwards; animation.isRemovedOnCompletion = false
-            thumb.add(animation, forKey: "position")
+        .task(id: currentVersion?.id) {
+            if let currentVersion { artworkStore.load(for: currentVersion) }
         }
-        CATransaction.commit()
     }
-    override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(self); scrub(event) }
-    override func mouseDragged(with event: NSEvent) { scrub(event) }
-    private func scrub(_ event: NSEvent) {
-        guard duration > 0 else { return }
-        let point = convert(event.locationInWindow, from: nil)
-        seek(min(max((point.x - 6) / max(bounds.width - 12, 1), 0), 1) * duration)
+
+    /// The version the transport is showing: the current one, else the
+    /// item's selected version (same fallback the coordinator uses).
+    private var currentVersion: PlaylistVersion? {
+        guard let item = coordinator.workspace.items.first(where: { $0.id == coordinator.currentItemID }) else { return nil }
+        return item.versions.first { $0.id == coordinator.currentVersionID } ?? item.selectedVersion
     }
-    override func accessibilityValue() -> Any? { currentPosition.formattedSignedTimestamp }
-    override func accessibilityPerformIncrement() -> Bool { seek(min(currentPosition + 1, duration)); return duration > 0 }
-    override func accessibilityPerformDecrement() -> Bool { seek(max(currentPosition - 1, 0)); return duration > 0 }
+
+    /// Same fallbacks as the playlist rows: the item title (already derived
+    /// from tags or the filename), tag artist/album when present.
+    private var nowPlaying: PlaylistNowPlayingReadout.NowPlaying {
+        guard let item = coordinator.workspace.items.first(where: { $0.id == coordinator.currentItemID }) else {
+            return PlaylistNowPlayingReadout.NowPlaying()
+        }
+        let metadata = currentVersion?.metadata
+        return PlaylistNowPlayingReadout.NowPlaying(title: item.title, artist: metadata?.artist, album: metadata?.album)
+    }
+
+    /// While playing, `playingReadoutText` changes once per displayed second
+    /// and is the only thing that re-renders the readout's text lines.
+    private var elapsedText: String {
+        coordinator.isPlaying ? controller.playingReadoutText : controller.session.transportPosition.formattedSignedTimestamp
+    }
 }
