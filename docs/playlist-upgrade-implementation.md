@@ -1,9 +1,8 @@
 # Playlist upgrade implementation plan
 
-Status: implementation integrated; coordinator review and UI acceptance are unfinished.
-The latest canonical suite passed 382 unique tests with zero failures on
-2026-09-11. The UI selection fix passed the main manual grouping/navigation
-workflow; broader manual validation is in progress.
+Status: implementation integrated; automated validation passed. Remaining manual,
+external-integration, and performance acceptance is blocked/unverified.
+The current status and validation report below define the handoff.
 See the current status below before resuming work.
 
 Feature contract: [playlist-upgrade-spec.md](playlist-upgrade-spec.md).
@@ -14,138 +13,95 @@ UI handoff: [playlist-upgrade-ui-integration.md](playlist-upgrade-ui-integration
 
 ## Current status — 2026-09-11
 
-This section supersedes earlier progress notes. Implementation is on
-`codex/playlist-upgrade`. The foundation is committed as `bd72b55`. Work-in-progress checkpoint `8d68d00`
-commits the runtime, coordinator, persistence, UI integration, tests, and status
-documentation. The incomplete work and verification limits below still apply.
-Subsequent checkpoints: `7771bab` records the one-subagent workflow; `a7f6a07`
-contains verified traversal fixes and regression tests. This checkpoint saves
-the unfinished UI selection changes and current handoff notes.
-Nothing has been merged or released.
+Automatic track grouping is implemented on top of the playlist import path.
+It includes the audio analyzer, deterministic clustering, conservative
+existing-item attachment, Settings preference, progress/cancel UI, selection,
+comparison entry, one-step Undo, focused tests, and a corpus benchmark tool.
+See [automatic-track-grouping.md](automatic-track-grouping.md). Automatic
+grouping ships off by default because neither accuracy gate has sufficient
+ground-truth coverage; **Same Performance** is also Debug-only.
 
-### Done and verified
+The validation pass is finished for this environment. **Automated checks pass;
+manual acceptance and performance validation remain incomplete because UI
+control hung twice.** No validation agent or test process remains running.
+Do not treat the feature as release-validated.
 
-- Workspace value model, stable item/version IDs, atomic organization operations,
-  canonical duplicate checks, 32-version per-item limit, and comparison/file-time
-  conversion are implemented. Foundation validation passed 356 tests, including
-  22 model/boundary tests and a 100-item model case.
-- Runtime replacement, coordinator operations, embedded metadata import,
-  versioned snapshot storage/recovery, persistence event/checkpoint wiring,
-  retained streaming storage, playlist/comparison UI, and mode-aware commands
-  are integrated. These are implemented surfaces, not a claim that every
-  acceptance scenario has passed.
-- The integrated canonical Xcode suite passed **388 reported tests, zero
-  failures**. Fresh DerivedData: `/private/tmp/takes-playlist-final-20260905`.
-  Log: `/private/tmp/takes-playlist-final-20260905.log`. The first sandboxed
-  attempt failed to resolve GitHub for Sparkle; the permitted rerun passed.
-- A separate Debug build succeeded. Manual checks confirmed that four synthetic
-  files import in supplied order, show their 20-second durations, and start
-  playback by double-click. Normal quit wrote both snapshot files. Relaunch
-  restored four items and the saved 00:20 position, paused.
-- `AGENTS.md` now describes the integrated ownership, one-runtime architecture,
-  captured import destinations, restoration protection, and new test suites.
+The detailed evidence, result bundles, limitations, and reproducible remaining
+checklist are in [playlist-upgrade-validation.md](playlist-upgrade-validation.md).
+That report distinguishes automated coverage from observed UI behavior.
 
-Focused checkpoint verification after `8d68d00`: **22 unique tests passed**,
-zero failures, across coordinator, persistence, and runtime suites. Xcode
-reported 42 passes because some cases were reported more than once. Log:
-`/private/tmp/takes-playlist-checkpoint-tests.log`.
+### Implemented and checkpointed
 
-Primary review then found two traversal defects: unchanged organization reset
-shuffle progress, and deleting an item could jump to the first occurrence of a
-repeated history entry. Both fixes and regression tests passed: **12 unique coordinator tests**, zero
-failures. Log: `/private/tmp/takes-playlist-traversal-tests.log`. The fixes are
-checkpointed separately from the ongoing UI selection work.
+- `bd72b55`: workspace foundation and comparison value boundary.
+- `8d68d00`: integrated coordinator, runtime, persistence, imports, and UI.
+- `7771bab`: one-subagent workflow and interruption-safe handoff policy.
+- `a7f6a07`: verified shuffle-progress and repeated-history fixes.
+- `da3f339`: native row-selection changes and handoff checkpoint.
+- `6703eb7`: passing Clear/Undo/Redo runtime regression and selection handoff.
+- `9397091`: verified organization/runtime race fix. Removing the active item
+  followed by a synchronous rename no longer cancels the required audio refresh.
+- This final validation checkpoint adds runtime-scale and missing-item advancement
+  regressions, finalizes the evidence report, and updates these status notes.
 
-Latest coordinator verification: **13 unique tests passed**, zero failures,
-including audio-backed Clear → Undo → Redo restoring the stable version ID,
-paused position, and runtime count while preserving the original file. Log:
-`/private/tmp/takes-playlist-undo-tests.log`.
+All work remains on `codex/playlist-upgrade`. Nothing has been merged or released.
 
-Manual selection/navigation evidence: four files grouped into a two-version
-comparison; Back retained group selection/expansion; Undo restored four items
-and Redo restored the three-item grouped workspace. Compare while playing
-entered at 00:08; Pause, Switch Track, and Back returned paused at 00:13 with
-the alternate version selected. This verifies the tested workflow, not all
-remaining acceptance cases.
+### Verification results
 
-Validation found and reproduced an organization/runtime race: removing the
-active item and synchronously renaming a successor canceled the pending audio
-refresh. The added regression initially failed (13 of 14 coordinator tests
-passed). Primary moved navigation invalidation into the runtime-changing branch;
-metadata-only edits now preserve queued refresh work. All 14 coordinator tests
-passed after the fix. The fresh canonical suite also passed: 382 unique tests,
-zero failures (394 executions including parameterized cases). Detailed result
-bundles and commands are in the validation report.
+| Check | Result |
+|---|---|
+| Fresh canonical Xcode suite covering all production changes through `9397091` | 382 unique tests passed, zero failures; 394 executions including parameterized cases. |
+| Coordinator suite after the two final test additions | 16 unique tests passed, zero failures. |
+| Recovery and persistence suites | 16 unique tests passed, zero failures. |
+| Separate Debug build | Passed. |
+| 100-item workspace / 32-version comparison runtime isolation | Passed: one playlist runtime track, 32 comparison tracks, one paused track after Back. Uses 98 inactive unavailable references; does not measure UI or waveform performance. |
+| Natural-end advancement past a missing item | Passed: missing item retained/reported; next playable item starts with one runtime track. |
+| Earlier observed UI workflow | Import, single/Shift selection, keyboard movement, grouping, Compare/Back, Undo/Redo, double-click playback, alternate-version position transfer, and basic paused relaunch passed. |
+| New isolated manual pass | Blocked: CUA attachment hung for 463 seconds, then 178.8 seconds after explicit launch despite a requested 30-second timeout. No new UI pass is claimed. |
 
-### In flight / incomplete
+The new tests are the only code changes after the canonical run; their focused
+suite compiled and passed. The production race was reproduced by a failing test
+before the fix and verified afterward. No unresolved production failure was
+observed in the completed tests; untested behavior is not implied to pass.
 
-| Area | Owner | Current state and next action |
-|---|---|---|
-| Playlist row selection | Astra (`ui_integration_design`) | Icon-only drag source fixed pointer selection. Verified single-click without playback, Shift+Down multiselection, keyboard movement, Group and Compare, Back, Undo/Redo, and double-click playback. Command-toggle selection remains pending. |
-| UI file references | Astra | Reveal in Finder and missing-file checks now resolve bookmarks. Included in the latest successful Debug build; moved-file behavior still needs manual verification. |
-| Coordinator review | Luna (`coordinator`) | Edits address shuffle anchoring/history, explicit-play traversal, Next/Previous availability, shared comparison entry (bookmarks, blind ordering, viewport), stale natural-end callbacks, missing-item reporting, and resolved-file duplicate detection. Existing coordinator regressions passed in the later focused runs. Review handoff and additional edge-case coverage remain pending; the 388-test run alone does not cover these edits. |
-| Runtime transition/Undo tests | Luna | Audio-backed selected-version/Compare/Back regression exists. Remaining review requests include Undo refresh cancellation and redo position fidelity, missing-file traversal, shuffle/history mutations, and comparison-entry state restoration. Exact coverage must be checked against the final handoff. |
-| Persistence observation test | Primary | `workspaceEditsSaveAutomaticallyAndObservationRearms` passed in the focused checkpoint run, confirming automatic saves rearm after a second mutation. |
-| Final integration review | Primary | Review agent handoffs, rebuild after fixes, run relevant tests and final canonical verification, then finish manual acceptance and documentation. |
+### Remaining acceptance work
 
-Current validation pass: GPT-5.6 Sol (`final_validation`) is the sole assigned
-subagent, at the user's explicit request. It owns the remaining automated/manual
-validation and a progressive evidence report in
-[playlist-upgrade-validation.md](playlist-upgrade-validation.md). Primary owns
-review, production fixes if needed, this status document, and checkpoint commits.
-Earlier Astra and Luna tasks are not assigned work in this pass.
+These are handoff tasks, not background work:
 
-Use a fresh isolated workspace for this pass. The old manual workspace now has
-user-changed music items; do not clear or reuse it for synthetic acceptance tests.
-No pass is implied by an assigned checklist item. The validation report records
-observed passes, failures, and checks that tools or external dependencies block.
+1. In a working UI-control environment, finish the two-group → separate/regroup
+   flow, Command-toggle selection, and the continuous album → Compare → alternate
+   version → Back → next-song flow with offsets, gain, loops, and viewport changes.
+2. Observe Locate File and corrupt-snapshot recovery UI, including preservation
+   of the corrupt primary. Automated storage/repair behavior passes.
+3. Observe a 100-file playlist and 32-version comparison: resizing, scrolling,
+   waveform generation, reorder, and loop interactions. Measure idle/playback CPU
+   against the documented performance baseline.
+4. With controlled external state, check Finder/folder/Music/streaming import
+   routes, media keys/Now Playing, numeric field focus, blind listening, and
+   VoiceOver behavior. Existing subsystem tests do not replace these checks.
 
-### Not yet started / not yet verified
-
-- The complete manual four-files → two groups → separate/regroup → Undo/Redo
-  workflow: initial grouping and Undo/Redo passed; full two-group separation/regrouping remains.
-- Manual album playback → Compare → choose another version → Back at the same
-  audible position → next song, including saved offsets/gain/loop/viewport.
-- Manual missing-file repair and corrupt-snapshot recovery. Automated storage
-  recovery tests passed; that does not establish the UI workflow.
-- Manual 100-item playlist and 32-version comparison, scrolling/window sizing,
-  and runtime/waveform resource checks at those sizes. Synthetic fixtures exist;
-  large-list UI and performance checks have not been performed.
-- Manual folder drops, Finder selection, Music selection, streaming imports,
-  media keys, accessibility, numeric-field shortcut isolation, blind listening,
-  comparison loops, and imports during playback. Existing automated subsystem
-  tests passed, but these new integrated routes still need acceptance checks.
-- Playback/idle CPU comparison against the documented performance baseline.
-- Canonical verification is current through the organization/runtime race fix;
-  rerun affected checks if later validation requires production changes.
-- Merge and release are separate, not authorized by this implementation task.
+Do not retry the same hanging CUA path indefinitely. Keep at most one subagent;
+GPT-5.6 Sol performed this validation pass. Future fixes need affected tests and
+updated evidence before another checkpoint.
 
 ### Milestone assessment
 
 | Milestone | Status |
 |---|---|
-| 1. Workspace model and playback boundary | Foundation complete and tested; integrated runtime exists. |
-| 2. Playlist UI and organization | Selection/grouping/Undo workflow passed; broader organization acceptance remains. |
-| 3. Playback and comparison transitions | Implemented; edge-case fixes and end-to-end verification in progress. |
-| 4. Restoration and lifecycle | Implemented; automated storage tests and basic paused relaunch passed; repair/recovery UI acceptance pending. |
-| 5. Integration and release validation | In progress; latest full suite passed, subsequent edits and broad manual/performance checks remain. |
+| 1. Workspace model and playback boundary | Implemented and tested. |
+| 2. Playlist UI and organization | Implemented; main UI workflow passed, broader UI acceptance blocked. |
+| 3. Playback and comparison transitions | Implemented; transition, traversal, runtime, and missing-item tests pass; full UI flow remains. |
+| 4. Restoration and lifecycle | Implemented; automated checks and basic paused relaunch pass; repair/recovery UI remains. |
+| 5. Integration and release validation | Automated pass complete; manual/external/performance checks remain. |
 
-### Resume details
+### Resume safely
 
-- Debug app: `/private/tmp/takes-playlist-ui-20260905/Build/Products/Debug/Takes.app`.
-  Select this exact path in CUA; selecting by name may target the installed app.
-- Manual workspace: `/private/tmp/takes-playlist-manual-workspace`, selected with
-  `TAKES_PLAYLIST_WORKSPACE_DIRECTORY`. Do not use the user's normal workspace.
-- Fixtures: `/private/tmp/takes-playlist-fixtures` (100 synthetic WAV files;
-  first four are 20 seconds, remaining files one second).
-- Earlier primary launch used exec session `45046`; the UI agent subsequently
-  rebuilt/relaunched. Inspect the current app state rather than trusting that
-  session ID. Latest build log: `/private/tmp/takes-playlist-selection-build.log`.
-  App log: `/private/tmp/takes-playlist-manual-app.log`.
-- The latest Debug build includes flat tagged rows and icon-only drag sources
-  in `PlaylistView.swift`. Build and the main manual selection/grouping/navigation checks passed.
-- Preserve all current changes. Remove only generated `default.profraw` from
-  the repo when the test app has finished; it is a launch artifact.
+Use the exact Debug app and commands in the validation report with a **fresh
+isolated workspace**. The older `/private/tmp/takes-playlist-manual-workspace`
+contains user-changed music items; do not clear or reuse it for synthetic tests.
+The current fixtures are 100 WAV files under `/private/tmp/takes-playlist-fixtures`
+(`001-acceptance.wav` through `004-acceptance.wav`, then `005-scale.wav` onward).
+Temporary result bundles and fixtures may disappear; the report includes commands
+and test names so a new agent can reproduce the automated evidence.
 
 ## Orchestration and ownership
 

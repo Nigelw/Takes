@@ -49,6 +49,42 @@ enum ReadoutStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// The amount of similarity recognition applied to files added to a playlist.
+enum AutomaticGroupingMode: String, CaseIterable, Identifiable {
+    case off
+    case sameRecording
+    case samePerformance
+
+    static var allCases: [AutomaticGroupingMode] {
+        #if DEBUG
+        [.off, .sameRecording, .samePerformance]
+        #else
+        [.off, .sameRecording]
+        #endif
+    }
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off: return "Off"
+        case .sameRecording: return "Same Recording"
+        case .samePerformance: return "Same Performance"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .off:
+            return "Add every file as a separate playlist item."
+        case .sameRecording:
+            return "Group alternate encodes and transfers of the same recording."
+        case .samePerformance:
+            return "Also group mixes and edits that share the same performance."
+        }
+    }
+}
+
 /// User-facing preferences that persist across launches.
 ///
 /// The offset nudge amounts are stored here so they can be adjusted from the
@@ -72,12 +108,14 @@ final class AppSettings: ObservableObject {
     nonisolated static let alignTracksOnOpenDefault = false
     nonisolated static let appearanceThemeDefault: AppearanceTheme = .system
     nonisolated static let readoutStyleDefault: ReadoutStyle = .glass
+    nonisolated static let automaticGroupingModeDefault: AutomaticGroupingMode = .off
 
     nonisolated static let offsetStepKey = "offsetNudgeStep"
     nonisolated static let offsetLargeStepKey = "offsetLargeNudgeStep"
     nonisolated static let alignTracksOnOpenKey = "alignTracksOnOpen"
     nonisolated static let appearanceThemeKey = "appearanceTheme"
     nonisolated static let readoutStyleKey = "readoutStyle"
+    nonisolated static let automaticGroupingModeKey = "automaticGroupingMode"
     nonisolated static let appearanceThemeOverrideArgument = "--appearance-theme"
 
     private let defaults: AppSettingsDefaults
@@ -119,6 +157,11 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(readoutStyle.rawValue, forKey: Self.readoutStyleKey) }
     }
 
+    /// How aggressively playlist imports group similar audio files.
+    @Published var automaticGroupingMode: AutomaticGroupingMode {
+        didSet { defaults.set(automaticGroupingMode.rawValue, forKey: Self.automaticGroupingModeKey) }
+    }
+
     /// When enabled, the main window overlays each major UI component with a
     /// labelled badge naming its region. A developer aid for discussing the
     /// layout during redesign work; toggled from the Help menu. Intentionally
@@ -143,6 +186,7 @@ final class AppSettings: ObservableObject {
         alignTracksOnOpen = Self.storedAlignTracksOnOpen(defaults)
         appearanceTheme = Self.appearanceThemeOverride(arguments: arguments) ?? Self.storedAppearanceTheme(defaults)
         readoutStyle = Self.storedReadoutStyle(defaults)
+        automaticGroupingMode = Self.storedAutomaticGroupingMode(defaults)
     }
 
     /// The offset control configuration reflecting the user's chosen nudge amounts.
@@ -161,6 +205,7 @@ final class AppSettings: ObservableObject {
         alignTracksOnOpen = Self.alignTracksOnOpenDefault
         appearanceTheme = Self.appearanceThemeDefault
         readoutStyle = Self.readoutStyleDefault
+        automaticGroupingMode = Self.automaticGroupingModeDefault
         transportAppearance = TransportAppearance()
         indexBadgeAppearance = IndexBadgeAppearance()
     }
@@ -171,6 +216,7 @@ final class AppSettings: ObservableObject {
             && alignTracksOnOpen == Self.alignTracksOnOpenDefault
             && appearanceTheme == Self.appearanceThemeDefault
             && readoutStyle == Self.readoutStyleDefault
+            && automaticGroupingMode == Self.automaticGroupingModeDefault
             && transportAppearance == TransportAppearance()
             && indexBadgeAppearance == IndexBadgeAppearance()
     }
@@ -197,6 +243,17 @@ final class AppSettings: ObservableObject {
 
     nonisolated static func storedReadoutStyle(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> ReadoutStyle {
         defaults.string(forKey: readoutStyleKey).flatMap(ReadoutStyle.init(rawValue:)) ?? readoutStyleDefault
+    }
+
+    nonisolated static func storedAutomaticGroupingMode(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> AutomaticGroupingMode {
+        let stored = defaults.string(forKey: automaticGroupingModeKey)
+            .flatMap(AutomaticGroupingMode.init(rawValue:))
+            ?? automaticGroupingModeDefault
+        #if DEBUG
+        return stored
+        #else
+        return stored == .samePerformance ? automaticGroupingModeDefault : stored
+        #endif
     }
 
     nonisolated static func appearanceThemeOverride(arguments: [String]) -> AppearanceTheme? {

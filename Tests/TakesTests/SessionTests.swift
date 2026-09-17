@@ -5,6 +5,23 @@ import Testing
 @testable import Takes
 
 struct SessionTests {
+    @MainActor
+    @Test
+    func automaticGroupingModeDefaultsPersistsAndRecoversFromInvalidStorage() {
+        let defaults = InMemoryAppSettingsDefaults()
+        let settings = AppSettings(defaults: defaults)
+
+        #expect(settings.automaticGroupingMode == .off)
+        settings.automaticGroupingMode = .samePerformance
+        #expect(defaults.string(forKey: AppSettings.automaticGroupingModeKey) == "samePerformance")
+        #expect(AppSettings.storedAutomaticGroupingMode(defaults) == .samePerformance)
+
+        defaults.set("unsupported", forKey: AppSettings.automaticGroupingModeKey)
+        #expect(AppSettings.storedAutomaticGroupingMode(defaults) == .off)
+        settings.restoreDefaults()
+        #expect(settings.automaticGroupingMode == .off)
+    }
+
     @Test
     func betaBuildsAreExcludedByDefault() {
         let defaults = InMemoryAppSettingsDefaults()
