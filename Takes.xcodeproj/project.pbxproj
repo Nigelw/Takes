@@ -27,6 +27,7 @@
 		A1000000000000000000C015 /* ComponentDebugLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C005 /* ComponentDebugLabel.swift */; };
 		A1000000000000000000C016 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C006 /* Theme.swift */; };
 		A1000000000000000000C017 /* TransportControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C007 /* TransportControls.swift */; };
+		A1000000000000000000B101 /* DotMatrixReadout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000B001 /* DotMatrixReadout.swift */; };
 		A1000000000000000000C018 /* TrackAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C008 /* TrackAligner.swift */; };
 		A1000000000000000000C019 /* TrackAlignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C009 /* TrackAlignerTests.swift */; };
 		A1000000000000000000D011 /* AnalysisModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000D001 /* AnalysisModels.swift */; };
@@ -110,6 +111,7 @@
 		A1000000000000000000C005 /* ComponentDebugLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentDebugLabel.swift; sourceTree = "<group>"; };
 		A1000000000000000000C006 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		A1000000000000000000C007 /* TransportControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportControls.swift; sourceTree = "<group>"; };
+		A1000000000000000000B001 /* DotMatrixReadout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DotMatrixReadout.swift; sourceTree = "<group>"; };
 		A1000000000000000000C008 /* TrackAligner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackAligner.swift; sourceTree = "<group>"; };
 		A1000000000000000000C009 /* TrackAlignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackAlignerTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000D001 /* AnalysisModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisModels.swift; sourceTree = "<group>"; };
@@ -270,6 +272,7 @@
 				A1000000000000000000C006 /* Theme.swift */,
 				A1000000000000000000C008 /* TrackAligner.swift */,
 				A1000000000000000000C007 /* TransportControls.swift */,
+				A1000000000000000000B001 /* DotMatrixReadout.swift */,
 				A10000000000000000000015 /* PlaybackController.swift */,
 				A10000000000000000000016 /* TakesApp.swift */,
 				A1000000000000000000C003 /* SettingsView.swift */,
@@ -435,6 +438,7 @@
 				A1000000000000000000C01C /* ZoomHaptics.swift in Sources */,
 				A1000000000000000000C016 /* Theme.swift in Sources */,
 				A1000000000000000000C017 /* TransportControls.swift in Sources */,
+				A1000000000000000000B101 /* DotMatrixReadout.swift in Sources */,
 				A10000000000000000000023 /* KeyMonitor.swift in Sources */,
 				A10000000000000000000028 /* LibraryTrackSelectionLoader.swift in Sources */,
 				A10000000000000000000024 /* Models.swift in Sources */,
