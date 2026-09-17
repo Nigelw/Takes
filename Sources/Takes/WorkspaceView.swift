@@ -430,16 +430,19 @@ private struct PlaylistTransportView: View {
     private static let rightClusterWidth: CGFloat = secondaryButtonDiameter + clusterSpacing + secondaryButtonDiameter
     /// Breathing room on each side of a cluster within its region.
     private static let sideClusterMargin: CGFloat = 24
-    /// Both side regions share one width, so the wider cluster sets it.
+    /// Both side regions share one width, so the wider cluster sets it. Fixed
+    /// regardless of window size: this is the space the button clusters need,
+    /// not a function of how wide the readout ends up.
     private static let requiredSideRegionWidth: CGFloat = max(leftClusterWidth, rightClusterWidth) + sideClusterMargin * 2
-    /// The readout is a fixed width: whatever the bar has left between the
-    /// two side regions when the window is at its minimum width. It does not
-    /// grow with the window; the side regions do.
-    private static let readoutFixedWidth: CGFloat = TakesWindowPolicy.minimumContentWidth - requiredSideRegionWidth * 2
+    /// The readout's width at the window's minimum size — a floor, not a cap.
+    private static let minimumReadoutWidth: CGFloat = TakesWindowPolicy.minimumContentWidth - requiredSideRegionWidth * 2
 
     var body: some View {
         GeometryReader { proxy in
-            let sideRegionWidth = max((proxy.size.width - Self.readoutFixedWidth) / 2, 0)
+            // The side regions never grow past what the clusters need, so all
+            // extra window width goes to the readout — it widens with the
+            // window but can never encroach on either cluster.
+            let readoutWidth = max(proxy.size.width - Self.requiredSideRegionWidth * 2, Self.minimumReadoutWidth)
 
             ZStack {
                 HStack(spacing: Self.clusterSpacing) {
@@ -453,7 +456,7 @@ private struct PlaylistTransportView: View {
                         .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: Self.secondaryButtonDiameter, glyphSize: 13))
                         .disabled(!coordinator.canNext).accessibilityLabel("Next Item")
                 }
-                .frame(width: sideRegionWidth, alignment: .center)
+                .frame(width: Self.requiredSideRegionWidth, alignment: .center)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Pinned to the true window center, independent of the side clusters.
@@ -465,7 +468,7 @@ private struct PlaylistTransportView: View {
                     controller: controller,
                     seek: coordinator.seek
                 )
-                .frame(width: Self.readoutFixedWidth)
+                .frame(width: readoutWidth)
                 .frame(maxWidth: .infinity, alignment: .center)
 
                 HStack(spacing: Self.clusterSpacing) {
@@ -478,7 +481,7 @@ private struct PlaylistTransportView: View {
                     .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.playlistRepeatMode != .off, diameter: Self.secondaryButtonDiameter, glyphSize: 13))
                     .accessibilityLabel("Repeat").accessibilityValue(coordinator.workspace.playlistRepeatMode.rawValue.capitalized)
                 }
-                .frame(width: sideRegionWidth, alignment: .center)
+                .frame(width: Self.requiredSideRegionWidth, alignment: .center)
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
