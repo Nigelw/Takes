@@ -490,8 +490,8 @@ private struct PlaylistTransportView: View {
 
     // MARK: Layout constants
 
-    private static let secondaryButtonDiameter: CGFloat = 32
-    private static let primaryButtonDiameter: CGFloat = 48
+    private static let secondaryButtonDiameter: CGFloat = 40
+    private static let primaryButtonDiameter: CGFloat = DigitalTimeReadout.panelHeight
     private static let clusterSpacing: CGFloat = 8
     /// Previous, Play, Next.
     private static let leftClusterWidth: CGFloat =
@@ -517,13 +517,13 @@ private struct PlaylistTransportView: View {
             ZStack {
                 HStack(spacing: Self.clusterSpacing) {
                     Button { coordinator.previous() } label: { Image(systemName: "backward.end.fill") }
-                        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: Self.secondaryButtonDiameter, glyphSize: 13))
+                        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: Self.secondaryButtonDiameter, glyphSize: 15))
                         .disabled(!coordinator.canPrevious).accessibilityLabel("Previous Item")
                     Button { coordinator.togglePlayback() } label: { Image(systemName: coordinator.isPlaying ? "pause.fill" : "play.fill") }
-                        .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: Self.primaryButtonDiameter, glyphSize: 20))
+                        .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: Self.primaryButtonDiameter, glyphSize: 22, pressedGlyphOffset: 1.5))
                         .disabled(!coordinator.canPlay).accessibilityLabel(coordinator.isPlaying ? "Pause" : "Play")
                     Button { coordinator.next() } label: { Image(systemName: "forward.end.fill") }
-                        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: Self.secondaryButtonDiameter, glyphSize: 13))
+                        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: Self.secondaryButtonDiameter, glyphSize: 15))
                         .disabled(!coordinator.canNext).accessibilityLabel("Next Item")
                 }
                 .frame(width: Self.requiredSideRegionWidth, alignment: .center)
@@ -543,12 +543,12 @@ private struct PlaylistTransportView: View {
 
                 HStack(spacing: Self.clusterSpacing) {
                     Button { coordinator.toggleShuffle() } label: { Image(systemName: "shuffle") }
-                        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.isShuffleEnabled, diameter: Self.secondaryButtonDiameter, glyphSize: 13))
+                        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.isShuffleEnabled, diameter: Self.secondaryButtonDiameter, glyphSize: 15))
                         .accessibilityLabel("Shuffle").accessibilityValue(coordinator.workspace.isShuffleEnabled ? "On" : "Off")
                     Button { coordinator.cyclePlaylistRepeatMode() } label: {
                         Image(systemName: coordinator.workspace.playlistRepeatMode == .one ? "repeat.1" : "repeat")
                     }
-                    .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.playlistRepeatMode != .off, diameter: Self.secondaryButtonDiameter, glyphSize: 13))
+                    .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.playlistRepeatMode != .off, diameter: Self.secondaryButtonDiameter, glyphSize: 15))
                     .accessibilityLabel("Repeat").accessibilityValue(coordinator.workspace.playlistRepeatMode.rawValue.capitalized)
                 }
                 .frame(width: Self.requiredSideRegionWidth, alignment: .center)
