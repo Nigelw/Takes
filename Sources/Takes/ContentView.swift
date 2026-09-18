@@ -4408,6 +4408,9 @@ private struct WaveformLaneView: View, Equatable {
     var zeroTickX: CGFloat
     var showsDebugLabel: Bool
 
+    /// Height of the drawn lane band (the waveform envelope's height).
+    private static let laneHeight: CGFloat = 58
+
     var body: some View {
         ZStack(alignment: .leading) {
             Rectangle()
@@ -4424,9 +4427,8 @@ private struct WaveformLaneView: View, Equatable {
             }
 
             if isBlindListening {
-                blindPlaceholderWaveform
-                    .frame(width: width, height: 58)
-                    .foregroundStyle(isActive ? Theme.primary.opacity(0.70) : Theme.waveformInactive.opacity(0.58))
+                blindHatch
+                    .frame(width: width, height: Self.laneHeight)
             } else {
                 // The peak envelope is drawn SYNCHRONOUSLY every frame straight
                 // from the 5a pyramid (WP-7): the `Canvas` draw closure runs
@@ -4507,43 +4509,45 @@ private struct WaveformLaneView: View, Equatable {
         }
     }
 
-    private var blindPlaceholderWaveform: some View {
+    /// Base tint for the masked-lane treatments: the same active/inactive
+    /// distinction as the real envelope, muted further so the lane reads as a
+    /// placeholder rather than data.
+    private var blindTint: Color {
+        isActive ? Theme.primary : Theme.waveformInactive
+    }
+
+    /// The blind branch: a redaction-bar diagonal hatch, static Canvas
+    /// drawing (no animation, no async/cached image — same rule as the
+    /// real-waveform branch).
+    private var blindHatch: some View {
         Canvas { context, size in
-            context.fill(Self.blindPlaceholderWaveformPath(in: size), with: .foreground)
+            guard size.width > 0, size.height > 0 else { return }
+            let rect = CGRect(origin: .zero, size: size)
+            let band = Path(roundedRect: rect, cornerRadius: 4)
+            context.fill(band, with: .color(blindTint.opacity(0.08)))
+
+            context.clip(to: band)
+            context.fill(Self.hatchPath(in: size), with: .color(blindTint.opacity(0.30)))
         }
         .accessibilityLabel("Masked waveform")
     }
 
-    private static func blindPlaceholderWaveformPath(in size: CGSize) -> Path {
-        guard size.width > 0, size.height > 0 else { return Path() }
-
-        let sampleCount = max(Int(size.width / 6), 12)
-        let midline = size.height / 2
-        let minHalfHeight: CGFloat = 1.2
-        var top: [CGPoint] = []
-        top.reserveCapacity(sampleCount + 1)
-
-        for index in 0...sampleCount {
-            let t = CGFloat(index) / CGFloat(sampleCount)
-            let wave = 0.48
-                + 0.24 * sin(t * .pi * 6.0)
-                + 0.16 * sin(t * .pi * 17.0 + 0.8)
-                + 0.08 * sin(t * .pi * 31.0 + 1.7)
-            let envelope = 0.55 + 0.45 * sin(t * .pi)
-            let halfHeight = max(minHalfHeight, min(0.92, wave * envelope) * midline)
-            top.append(CGPoint(x: t * size.width, y: midline - halfHeight))
-        }
-
+    private static func hatchPath(in size: CGSize) -> Path {
+        let period: CGFloat = 12
+        let stripeWidth: CGFloat = 4
+        let h = size.height
         var path = Path()
-        guard let first = top.first else { return path }
-        path.move(to: first)
-        for point in top.dropFirst() {
-            path.addLine(to: point)
+        // Each stripe runs bottom-left to top-right, offset by `h` so it
+        // covers the band edge to edge.
+        var x = -h
+        while x < size.width + period {
+            path.move(to: CGPoint(x: x, y: h))
+            path.addLine(to: CGPoint(x: x + h, y: 0))
+            path.addLine(to: CGPoint(x: x + h + stripeWidth, y: 0))
+            path.addLine(to: CGPoint(x: x + stripeWidth, y: h))
+            path.closeSubpath()
+            x += period
         }
-        for point in top.reversed() {
-            path.addLine(to: CGPoint(x: point.x, y: midline + (midline - point.y)))
-        }
-        path.closeSubpath()
         return path
     }
 
