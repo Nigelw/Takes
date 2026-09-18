@@ -556,7 +556,9 @@ private struct PlaylistTransportView: View {
             }
         }
         .frame(height: PlaylistNowPlayingReadout.panelHeight)
-        .padding(.top, 20).padding(.bottom, 10)
+        // Same insets as the comparison control bar, so the bar doesn't
+        // change height or shift its controls when switching modes.
+        .padding(.top, 20).padding(.bottom, 16)
         .background(Theme.controlBarLift.allowsHitTesting(false))
         .background(WindowDragArea())
         .task(id: currentVersion?.id) {
