@@ -252,46 +252,68 @@ struct PlaylistView: View {
 
     private func itemRow(_ item: PlaylistItem) -> some View {
         let metadata = item.selectedVersion?.metadata
-        return HStack(spacing: 10) {
+        let isCurrent = coordinator.currentItemID == item.id
+        return HStack(spacing: PlaylistRowMetrics.spacing) {
             Button {
                 if presentation.expanded.contains(item.id) { presentation.expanded.remove(item.id) }
                 else { presentation.expanded.insert(item.id) }
             } label: {
                 Image(systemName: presentation.expanded.contains(item.id) ? "chevron.down" : "chevron.right")
-                    .font(.caption).frame(width: 12)
+                    .font(.caption2.weight(.semibold))
+                    .frame(width: PlaylistRowMetrics.disclosureWidth)
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("Versions for \(item.title)")
             .accessibilityValue(presentation.expanded.contains(item.id) ? "Expanded" : "Collapsed")
-            Image(systemName: coordinator.currentItemID == item.id && coordinator.isPlaying ? "speaker.wave.2.fill" : "music.note")
-                .foregroundStyle(coordinator.currentItemID == item.id ? Theme.primary : .secondary)
-                .frame(width: 20)
-                .accessibilityLabel(coordinator.currentItemID == item.id && coordinator.isPlaying ? "Playing" : "")
-                .onDrag {
-                    if !presentation.selection.contains(.item(item.id)) {
-                        presentation.selection = [.item(item.id)]
-                    }
-                    presentation.draggingItemIDs = presentation.itemIDs(in: coordinator.workspace)
-                    return NSItemProvider(item: item.id.uuidString as NSString, typeIdentifier: PlaylistItemDrag.type.identifier)
+            ZStack(alignment: .leading) {
+                Color.clear
+                if item.versions.count > 1 {
+                    Text("\(item.versions.count)")
+                        .font(.caption2.weight(.semibold)).monospacedDigit()
+                        .padding(.horizontal, 5)
+                        .background(.quaternary, in: Capsule())
+                        .accessibilityLabel("\(item.versions.count) versions")
                 }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.title).font(.headline).lineLimit(1).help(item.title)
-                Text(metadata?.artist ?? "—").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            Text(metadata?.album ?? "—").font(.caption).foregroundStyle(.secondary)
-                .lineLimit(1).frame(width: 110, alignment: .leading)
-            Text((metadata?.duration ?? 0).formattedSignedTimestamp).monospacedDigit().font(.caption)
-                .frame(width: 48, alignment: .trailing)
-            Text("\(item.versions.count)").font(.caption).foregroundStyle(.secondary)
-                .frame(width: 20).accessibilityLabel("\(item.versions.count) versions")
+            }
+            .frame(width: PlaylistRowMetrics.countWidth, alignment: .leading)
+            ZStack {
+                Color.clear
+                if isCurrent {
+                    Image(systemName: coordinator.isPlaying ? "speaker.wave.2.fill" : "speaker.fill")
+                        .font(.caption)
+                        .foregroundStyle(Theme.primary)
+                        .accessibilityLabel(coordinator.isPlaying ? "Playing" : "Current")
+                }
+            }
+            .frame(width: PlaylistRowMetrics.indicatorWidth)
+            HStack(spacing: PlaylistRowMetrics.spacing) {
+                Text(item.title).lineLimit(1).help(item.title)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(metadata?.artist ?? "—").foregroundStyle(.secondary).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(metadata?.album ?? "—").foregroundStyle(.secondary).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text((metadata?.duration ?? 0).formattedSignedTimestamp).monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: 48, alignment: .trailing)
+            }
+            .contentShape(Rectangle())
+            .onDrag {
+                if !presentation.selection.contains(.item(item.id)) {
+                    presentation.selection = [.item(item.id)]
+                }
+                presentation.draggingItemIDs = presentation.itemIDs(in: coordinator.workspace)
+                return NSItemProvider(item: item.id.uuidString as NSString, typeIdentifier: PlaylistItemDrag.type.identifier)
+            }
             if item.versions.count > 1 {
                 Button("Compare") { compare(item) }
-                    .buttonStyle(.borderless).frame(width: 65)
+                    .buttonStyle(.borderless).controlSize(.small)
+                    .frame(width: PlaylistRowMetrics.trailingWidth)
             } else {
-                Color.clear.frame(width: 65, height: 1).accessibilityHidden(true)
+                Color.clear.frame(width: PlaylistRowMetrics.trailingWidth, height: 1).accessibilityHidden(true)
             }
         }
-        .padding(.vertical, 7)
+        .padding(.vertical, 1)
         .contentShape(Rectangle())
         .contextMenu {
             Button("Play") { play(item) }
@@ -309,45 +331,51 @@ struct PlaylistView: View {
 
     private func versionRow(_ version: PlaylistVersion, item: PlaylistItem) -> some View {
         let available = availableURL(for: version) != nil
-        return HStack(spacing: 10) {
+        return HStack(spacing: PlaylistRowMetrics.spacing) {
             Button { Task { await coordinator.selectPlaybackVersion(version.id, in: item.id) } } label: {
                 Image(systemName: item.selectedVersionID == version.id ? "checkmark.circle.fill" : "circle")
+                    .font(.caption)
             }
             .buttonStyle(.borderless)
+            .frame(width: PlaylistRowMetrics.indicatorWidth)
             .accessibilityLabel("Use \(version.metadata.displayName) for playback")
             .accessibilityValue(item.selectedVersionID == version.id ? "Selected" : "Not selected")
-            VStack(alignment: .leading, spacing: 2) {
-                Text(version.metadata.displayName.isEmpty ? version.file.storedURL.lastPathComponent : version.metadata.displayName)
-                    .lineLimit(1).help(version.file.storedURL.path)
-                Text(available ? version.metadata.fileFormatDescription : "File unavailable")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text(version.metadata.duration.formattedSignedTimestamp).font(.caption).monospacedDigit()
-            if !available {
-                Button("Locate File…") { presentation.locateVersionID = version.id }.buttonStyle(.borderless)
-            }
-            Menu {
-                Button("Play This Version") { play(item, version: version) }
-                Menu("Move To") {
-                    ForEach(coordinator.workspace.items.filter { $0.id != item.id }) { destination in
-                        Button(destination.title) {
-                            coordinator.moveVersion(version.id, to: destination.id, undoManager: undoManager)
-                        }.disabled(destination.versions.count >= PlaylistWorkspace.maximumVersionsPerItem)
-                    }
+            Text(version.metadata.displayName.isEmpty ? version.file.storedURL.lastPathComponent : version.metadata.displayName)
+                .lineLimit(1).help(version.file.storedURL.path)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(available ? version.metadata.fileFormatDescription : "File unavailable")
+                .foregroundStyle(.secondary).lineLimit(1)
+            Text(version.metadata.duration.formattedSignedTimestamp).monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 48, alignment: .trailing)
+            HStack(spacing: 4) {
+                if !available {
+                    Button("Locate…") { presentation.locateVersionID = version.id }
+                        .buttonStyle(.borderless).controlSize(.small)
                 }
-                Button("Separate into Playlist Item") { _ = coordinator.separateVersion(version.id, undoManager: undoManager) }
-                    .disabled(item.versions.count < 2)
-                Button("Reveal in Finder") {
-                    if let url = availableURL(for: version) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                }.disabled(!available)
-                Button("Locate File…") { presentation.locateVersionID = version.id }
-                Divider()
-                Button("Remove Version") { coordinator.removeVersion(version.id, undoManager: undoManager) }
-            } label: { Image(systemName: "ellipsis") }
-            .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Version Actions")
+                Menu {
+                    Button("Play This Version") { play(item, version: version) }
+                    Menu("Move To") {
+                        ForEach(coordinator.workspace.items.filter { $0.id != item.id }) { destination in
+                            Button(destination.title) {
+                                coordinator.moveVersion(version.id, to: destination.id, undoManager: undoManager)
+                            }.disabled(destination.versions.count >= PlaylistWorkspace.maximumVersionsPerItem)
+                        }
+                    }
+                    Button("Separate into Playlist Item") { _ = coordinator.separateVersion(version.id, undoManager: undoManager) }
+                        .disabled(item.versions.count < 2)
+                    Button("Reveal in Finder") {
+                        if let url = availableURL(for: version) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                    }.disabled(!available)
+                    Button("Locate File…") { presentation.locateVersionID = version.id }
+                    Divider()
+                    Button("Remove Version") { coordinator.removeVersion(version.id, undoManager: undoManager) }
+                } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Version Actions")
+            }
+            .frame(minWidth: PlaylistRowMetrics.trailingWidth, alignment: .trailing)
         }
-        .padding(.leading, 32).padding(.vertical, 4)
+        .padding(.leading, PlaylistRowMetrics.versionLeadingInset).padding(.vertical, 1)
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
     }
@@ -427,4 +455,17 @@ struct PlaylistView: View {
         order.insert(contentsOf: ids, at: index)
         return coordinator.reorderItems(order, undoManager: undoManager)
     }
+}
+
+/// Column widths shared by playlist item and version rows so a version's
+/// title lines up under its item's title.
+private enum PlaylistRowMetrics {
+    static let spacing: CGFloat = 6
+    static let disclosureWidth: CGFloat = 12
+    static let countWidth: CGFloat = 24
+    static let indicatorWidth: CGFloat = 16
+    static let trailingWidth: CGFloat = 70
+    /// Places a version row's selection circle in the item row's indicator
+    /// column, so version titles align with item titles.
+    static let versionLeadingInset = disclosureWidth + spacing + countWidth + spacing
 }
