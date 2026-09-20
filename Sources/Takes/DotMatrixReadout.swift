@@ -7,7 +7,8 @@ import SwiftUI
 /// The playlist transport's readout: a dot-matrix LCD in the manner of a 90s
 /// car-stereo head unit. Album artwork on the left when the file carries any,
 /// then two text lines (title; artist — album) and a third row with the
-/// elapsed time and a segmented progress bar, all behind the same glass/bezel
+/// elapsed time as small seven-segment digits (the comparison readout's
+/// numerals) and a segmented progress bar, all behind the same glass/bezel
 /// the comparison readout uses and at the same panel height. The panel fills
 /// whatever width it is given — the transport bar hands it a fixed width — and
 /// fits as many character cells per line as that width allows.
@@ -32,16 +33,23 @@ struct PlaylistNowPlayingReadout: View {
     let elapsed: String
     let controller: PlaybackController
     let seek: (TimeInterval) -> Void
+    /// Workspace/version state the Teenage Engineering theme's dashboard
+    /// column mirrors as indicator tiles. Ignored by the classic theme.
+    var status: TeenageEngineeringDisplayStatus? = nil
+
+    @Environment(\.controlBarTheme) private var controlBarTheme
 
     private let metrics = DotMatrixMetrics()
-    /// The clock digits are a smaller typeface than the text lines, the way
-    /// a head unit's time field is secondary to the track readout.
-    private let timeMetrics = DotMatrixMetrics().scaled(by: 0.75)
-    private let lineSpacing: CGFloat = 2.5
+    /// Whole points, so the second and third rows start on the pixel grid.
+    private let lineSpacing: CGFloat = 2
+    /// Height of the third row: the elapsed-time digits and the progress
+    /// bar. The clock is a seven-segment display, not dot-matrix text —
+    /// a 5×7 cell at these metrics is 20pt tall, too much for a secondary
+    /// field, and the segment renderer scales freely without any pixel
+    /// snapping to keep.
+    private let clockHeight: CGFloat = 10
     /// Gap between the artwork square and the text block.
     private let artworkSpacing: CGFloat = 9
-    /// Character cells reserved for the time field: enough for `-1:00:00`.
-    private let timeColumns = 7
     /// Gap between the elapsed-time digits and the progress bar.
     private let timeBarGap: CGFloat = 4
     /// A small rounding on the artwork tile — not the panel's own bezel
@@ -51,24 +59,23 @@ struct PlaylistNowPlayingReadout: View {
     private var artworkShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: artworkCornerRadius, style: .continuous)
     }
-    /// Progress bar/endcap height: matching the elapsed digits' full height
-    /// read as too tall; the old `dotSize*3 + dotGap*2` "thin bar-graph" look
-    /// read as too short. Halfway between the two.
-    private var barHeight: CGFloat { (timeMetrics.lineHeight + metrics.dotSize * 3 + metrics.dotGap * 2) / 2 }
+    /// Progress bar/endcap height: a touch under the clock digits, so the
+    /// bar reads as sitting beside them rather than framing them. Whole
+    /// points, like everything else on the grid.
+    private var barHeight: CGFloat { clockHeight - 2 }
 
     /// Height of the title/artist—album lines plus the elapsed-time/progress
-    /// row (sized to the elapsed digits' height, not the text lines' — the
-    /// bar and its endcaps match that height too); the artwork square matches
-    /// this total, so with top-aligned children of equal height, the artwork
-    /// and the text block start and end at exactly the same points.
-    private var contentHeight: CGFloat { metrics.lineHeight * 2 + lineSpacing * 2 + timeMetrics.lineHeight }
+    /// row (the bar and its endcaps fit inside that row's height); the
+    /// artwork square matches this total, so with top-aligned children of
+    /// equal height, the artwork and the text block start and end at exactly
+    /// the same points.
+    private var contentHeight: CGFloat { metrics.lineHeight * 2 + lineSpacing * 2 + clockHeight }
 
-    /// Padding used uniformly on all four sides of the readout's content, so
-    /// the left/right inset always equals the top/bottom inset by
-    /// construction, and the content is vertically centered in the panel
-    /// simply because equal padding on both edges leaves no space unaccounted
-    /// for (`panelHeight - 2 × padding == contentHeight`, exactly).
-    private var padding: CGFloat { (Self.panelHeight - contentHeight) / 2 }
+    /// Inset from the panel edge to the content, on the left/right and on
+    /// the top. Rounded down to a whole point so the first dot row sits on
+    /// the pixel grid at 1x; the spare point (when the panel's leftover space
+    /// is odd) goes below the content, where it is invisible.
+    private var padding: CGFloat { ((Self.panelHeight - contentHeight) / 2).rounded(.down) }
 
     /// Cells per text line that fit in `panelWidth` after the glass insets
     /// and, when present, the artwork square and its gap. `DotMatrixDisplay.fit`
@@ -76,13 +83,29 @@ struct PlaylistNowPlayingReadout: View {
     private func columns(forPanelWidth panelWidth: CGFloat) -> Int {
         var available = panelWidth - padding * 2
         if artwork != nil { available -= contentHeight + artworkSpacing }
+        // The TE plate's nameplate/grille strip sits beside the display
+        // window; the text lines stop before it, and before the dashboard
+        // column when the panel is wide enough to carry one.
+        if controlBarTheme == .teenageEngineering { available -= TeenageEngineeringReadoutLayout.stripWidth }
+        if showsDashboard(forPanelWidth: panelWidth) {
+            available -= TeenageEngineeringNowPlayingDashboard.width + TeenageEngineeringNowPlayingDashboard.gap
+        }
         // A line of n cells is n advances minus the trailing cell gap.
         return max(Int(((available + metrics.cellGap) / metrics.cellAdvance).rounded(.down)), 1)
+    }
+
+    /// The TE dashboard column (time digits, file marks, mode tags) takes
+    /// the trailing end of the window; it also carries the elapsed time, so
+    /// the bottom text row is then the progress bar alone.
+    private func showsDashboard(forPanelWidth panelWidth: CGFloat) -> Bool {
+        controlBarTheme == .teenageEngineering && status != nil
+            && panelWidth >= TeenageEngineeringNowPlayingDashboard.minimumPanelWidth
     }
 
     var body: some View {
         GeometryReader { proxy in
             let columns = columns(forPanelWidth: proxy.size.width)
+            let showsDashboard = showsDashboard(forPanelWidth: proxy.size.width)
             // The time row is pinned to the text lines' width so the progress
             // bar ends flush with them.
             let lineWidth = metrics.lineWidth(columns: columns)
@@ -118,19 +141,25 @@ struct PlaylistNowPlayingReadout: View {
                     DotMatrixMarqueeText(text: nowPlaying.title, columns: columns, metrics: metrics, sharedPeriod: sharedPeriod)
                     DotMatrixMarqueeText(text: secondLine, columns: columns, metrics: metrics, sharedPeriod: sharedPeriod)
                     HStack(spacing: timeBarGap) {
-                        DotMatrixDisplay(text: elapsed, columns: timeColumns, metrics: timeMetrics)
+                        if !showsDashboard {
+                            SevenSegmentDisplay(text: elapsed, digitHeight: clockHeight)
+                        }
                         DotMatrixProgressBar(controller: controller, seek: seek, metrics: metrics, barHeight: barHeight)
                     }
-                    .frame(width: lineWidth, height: timeMetrics.lineHeight)
+                    .frame(width: lineWidth, height: clockHeight)
+                }
+                if showsDashboard, let status {
+                    Spacer(minLength: 0)
+                    TeenageEngineeringNowPlayingDashboard(elapsed: elapsed, status: status)
+                        .padding(.trailing, TeenageEngineeringReadoutLayout.stripWidth)
                 }
             }
-            // Horizontal inset only; the HStack's own natural height is
-            // exactly `contentHeight`, so centering it (the vertical half of
-            // `.leading`) within the full `proxy.size.height` (== panelHeight)
-            // leaves exactly `padding` above and below — matching the
-            // horizontal `padding` here without saying so twice.
+            // Pinned to the top-leading corner by a whole-point inset rather
+            // than centered, so the first dot row can never land half a
+            // pixel off the grid at 1x when the panel's leftover space is odd.
+            .padding(.top, padding)
             .padding(.horizontal, padding)
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
         .frame(height: Self.panelHeight)
         .readoutPanelChrome(style: style)
@@ -171,13 +200,21 @@ struct PlaylistNowPlayingReadout: View {
 /// Geometry shared by the text lines and the progress bar so their pixel
 /// pitches match, the way one LCD controller drives the whole panel. Sized so
 /// three lines fit inside the comparison readout's 56pt panel.
+///
+/// Every value is a whole number of points. A 2pt dot is a 2×2 block of
+/// device pixels at 1x and 4×4 at 2x, the 1pt gap one pixel and two, so the
+/// dots, the gaps between them and every derived length (cell advance, line
+/// height, bleed) land on the pixel grid at any backing scale without
+/// per-scale snapping — and the layout is identical on every display.
+/// Fractional values here reintroduce the anti-aliased smear this display
+/// had before (a 1.3pt dot with a 0.4pt gap cannot be drawn at 1x at all).
 struct DotMatrixMetrics: Equatable {
     /// Side of one square pixel.
-    var dotSize: CGFloat = 1.3
+    var dotSize: CGFloat = 2
     /// Gap between pixels within a character cell.
-    var dotGap: CGFloat = 0.4
-    /// Gap between character cells (one blank pixel column, slightly wider).
-    var cellGap: CGFloat = 1.4
+    var dotGap: CGFloat = 1
+    /// Gap between character cells: one blank pixel column (dot plus gap).
+    var cellGap: CGFloat = 3
 
     var dotPitch: CGFloat { dotSize + dotGap }
     var cellWidth: CGFloat { dotSize * 5 + dotGap * 4 }
@@ -187,11 +224,6 @@ struct DotMatrixMetrics: Equatable {
     /// Width of a line of `columns` cells, with no trailing cell gap.
     func lineWidth(columns: Int) -> CGFloat {
         cellWidth * CGFloat(columns) + cellGap * CGFloat(max(columns - 1, 0))
-    }
-
-    /// The same pixel geometry at a different size.
-    func scaled(by factor: CGFloat) -> DotMatrixMetrics {
-        DotMatrixMetrics(dotSize: dotSize * factor, dotGap: dotGap * factor, cellGap: cellGap * factor)
     }
 }
 
@@ -208,6 +240,9 @@ struct DotMatrixDisplay: View {
     /// Light mode renders as an LCD (dark ink pixels that cast a soft shadow
     /// onto the pale glass), dark mode as an LED matrix (glowing pixels).
     @Environment(\.colorScheme) private var colorScheme
+    /// The Teenage Engineering theme prints the pixels flat in the panel's
+    /// ink (no glow, no shadow); the cell layout is shared.
+    @Environment(\.controlBarTheme) private var controlBarTheme
 
     /// Extra canvas margin so the glow blur can trail off instead of being
     /// clipped at the layout edge; trimmed back out with negative padding.
@@ -218,7 +253,8 @@ struct DotMatrixDisplay: View {
     var body: some View {
         let glyphs = Array(Self.fit(text, columns: columns))
         Canvas { context, _ in
-            Self.draw(glyphs: glyphs, columns: columns, metrics: metrics, colorScheme: colorScheme, bleed: bleed, into: context)
+            Self.draw(glyphs: glyphs, columns: columns, metrics: metrics, colorScheme: colorScheme,
+                      theme: controlBarTheme, bleed: bleed, into: context)
         }
         .frame(width: intrinsicWidth + bleed * 2, height: metrics.lineHeight + bleed * 2)
         .padding(-bleed)
@@ -231,13 +267,14 @@ struct DotMatrixDisplay: View {
     /// static `Canvas` above and the marquee's offscreen bitmap rendering, so
     /// both paths draw pixels identically.
     static func draw(glyphs: [Character], columns: Int, metrics: DotMatrixMetrics, colorScheme: ColorScheme,
-                      bleed: CGFloat, into context: GraphicsContext) {
+                      theme: ControlBarTheme = .classic, bleed: CGFloat, into context: GraphicsContext) {
         var context = context
         context.translateBy(x: bleed, y: bleed)
 
+        // Square dots: with whole-point metrics every dot edge is on the
+        // pixel grid, and a corner radius would only anti-alias it off again.
         var lit = Path()
         let dotRect = CGRect(x: 0, y: 0, width: metrics.dotSize, height: metrics.dotSize)
-        let dotRadius = metrics.dotSize * 0.2
         for column in 0..<columns {
             let cellX = CGFloat(column) * metrics.cellAdvance
             let rows = column < glyphs.count ? Self.rows(for: glyphs[column]) : Self.blankRows
@@ -245,7 +282,7 @@ struct DotMatrixDisplay: View {
                 let bits = rows[row]
                 for pixel in 0..<5 where bits & (0x10 >> pixel) != 0 {
                     let origin = CGPoint(x: cellX + CGFloat(pixel) * metrics.dotPitch, y: CGFloat(row) * metrics.dotPitch)
-                    lit.addPath(Path(roundedRect: dotRect.offsetBy(dx: origin.x, dy: origin.y), cornerRadius: dotRadius))
+                    lit.addRect(dotRect.offsetBy(dx: origin.x, dy: origin.y))
                 }
             }
         }
@@ -262,18 +299,22 @@ struct DotMatrixDisplay: View {
         // light-mode brown/orange even when rendering for dark mode. Forcing
         // resolution through `performAsCurrentDrawingAppearance` here makes
         // both call sites correct explicitly, not by accident of context.
-        let glowColor = resolvedGlowColor(for: colorScheme)
+        let glowColor = resolvedGlowColor(for: colorScheme, theme: theme)
 
-        if colorScheme == .dark {
+        if theme == .teenageEngineering {
+            // Flat print: the ink alone, no bloom and no shadow.
+        } else if colorScheme == .dark {
             // LED: a soft halo of the pixel color under the crisp fill.
             var glow = context
             glow.addFilter(.blur(radius: metrics.dotSize * 1.1))
             glow.fill(lit, with: .color(glowColor.opacity(0.9)))
         } else {
             // LCD: the ink layer floats just above the backlight, dropping
-            // a tight shadow down-right onto the glass.
+            // a tight shadow down-right onto the glass. Half a point: one
+            // device pixel at 2x, and a faint tint of the gap pixel at 1x
+            // (the ink itself stays crisp; the shade is a separate fill).
             var shade = context
-            shade.translateBy(x: 0.5, y: 0.8)
+            shade.translateBy(x: 0.5, y: 0.5)
             shade.addFilter(.blur(radius: metrics.dotSize * 0.3))
             shade.fill(lit, with: .color(.black.opacity(0.30)))
         }
@@ -294,7 +335,9 @@ struct DotMatrixDisplay: View {
     /// (light-mode) color intermittently. `usingColorSpace(_:)` forces
     /// immediate resolution against the appearance active *right now* and
     /// returns a plain concrete color that can no longer re-resolve later.
-    private static func resolvedGlowColor(for colorScheme: ColorScheme) -> Color {
+    private static func resolvedGlowColor(for colorScheme: ColorScheme, theme: ControlBarTheme) -> Color {
+        // The TE palette is already concrete per scheme; nothing to resolve.
+        if theme == .teenageEngineering { return TeenageEngineeringPalette.displayInk(for: colorScheme) }
         let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua) ?? NSAppearance(named: .aqua)!
         var resolved = NSColor.controlAccentColor
         appearance.performAsCurrentDrawingAppearance {
@@ -310,29 +353,26 @@ struct DotMatrixDisplay: View {
     /// fails (e.g. off-main-thread misuse); callers should skip animating
     /// rather than crash.
     static func renderedBitmap(text: String, metrics: DotMatrixMetrics, colorScheme: ColorScheme,
+                                theme: ControlBarTheme = .classic,
                                 bleed: CGFloat, scale: CGFloat) -> (image: CGImage, width: CGFloat, height: CGFloat)? {
         let glyphs = Array(text)
         let columns = glyphs.count
         let width = metrics.lineWidth(columns: columns) + bleed * 2
         let height = metrics.lineHeight + bleed * 2
         let content = Canvas { context, _ in
-            Self.draw(glyphs: glyphs, columns: columns, metrics: metrics, colorScheme: colorScheme, bleed: bleed, into: context)
+            Self.draw(glyphs: glyphs, columns: columns, metrics: metrics, colorScheme: colorScheme,
+                      theme: theme, bleed: bleed, into: context)
         }
         .frame(width: width, height: height)
         let renderer = ImageRenderer(content: content)
         renderer.scale = scale
         guard let image = renderer.cgImage else { return nil }
-        // `width`/`height` above are the *requested* point size handed to
-        // `ImageRenderer`, but its `cgImage` is necessarily an integer number
-        // of pixels — with this font's fractional metrics (`dotSize`,
-        // `dotGap`, `cellGap`), `width * scale` / `height * scale` are almost
-        // never whole numbers, so the renderer's actual pixel dimensions can
-        // differ from `width * scale` / `height * scale` by a fraction of a
-        // pixel. Returning the *actual* rasterized size (derived from the
-        // image itself) rather than the pre-rasterization point value lets
-        // the caller size the layer to exactly what was produced, so Core
-        // Animation never has to resample/stretch the bitmap to fit a
-        // slightly-mismatched `bounds`.
+        // With whole-point metrics and a whole-point `bleed`, `width * scale`
+        // and `height * scale` are whole pixel counts at 1x and 2x, so the
+        // rasterized size matches the request. Still return the *actual*
+        // size from the image so the caller's layer `bounds` can never
+        // disagree with the bitmap (which would make Core Animation resample
+        // it), e.g. on a non-integral backing scale.
         let actualWidth = CGFloat(image.width) / scale
         let actualHeight = CGFloat(image.height) / scale
         return (image, actualWidth, actualHeight)
@@ -533,7 +573,8 @@ struct DotMatrixMarqueeDisplay: NSViewRepresentable {
     func makeNSView(context: Context) -> DotMatrixMarqueeView { DotMatrixMarqueeView() }
     func updateNSView(_ view: DotMatrixMarqueeView, context: Context) {
         view.configure(text: text, columns: columns, metrics: metrics, sharedPeriod: sharedPeriod,
-                       reduceMotion: context.environment.accessibilityReduceMotion)
+                       reduceMotion: context.environment.accessibilityReduceMotion,
+                       theme: context.environment.controlBarTheme)
     }
 }
 
@@ -544,6 +585,7 @@ final class DotMatrixMarqueeView: NSView {
     private var metrics = DotMatrixMetrics()
     private var sharedPeriod: CFTimeInterval?
     private var reduceMotion = false
+    private var theme: ControlBarTheme = .classic
 
     /// Pixels/second the text travels. Slow, legible, LCD-marquee pace.
     private static let scrollSpeed: CGFloat = 32
@@ -564,11 +606,12 @@ final class DotMatrixMarqueeView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(text: String, columns: Int, metrics: DotMatrixMetrics, sharedPeriod: CFTimeInterval?, reduceMotion: Bool) {
+    func configure(text: String, columns: Int, metrics: DotMatrixMetrics, sharedPeriod: CFTimeInterval?,
+                   reduceMotion: Bool, theme: ControlBarTheme = .classic) {
         let unchanged = text == self.text && columns == self.columns && metrics == self.metrics
-            && sharedPeriod == self.sharedPeriod && reduceMotion == self.reduceMotion
+            && sharedPeriod == self.sharedPeriod && reduceMotion == self.reduceMotion && theme == self.theme
         self.text = text; self.columns = columns; self.metrics = metrics
-        self.sharedPeriod = sharedPeriod; self.reduceMotion = reduceMotion
+        self.sharedPeriod = sharedPeriod; self.reduceMotion = reduceMotion; self.theme = theme
         guard !unchanged else { return }
         redraw()
     }
@@ -651,10 +694,10 @@ final class DotMatrixMarqueeView: NSView {
     /// the bitmap's rasterized height is a whole pixel count that can differ
     /// from the requested point height, so centering would shift the glyph
     /// by half that difference and clip its bottom row against the view's
-    /// `masksToBounds`. With the bleed itself pixel-aligned (see `redraw()`),
-    /// at 2x: bleed 2.5pt, bitmap 11.5 + 5 = 16.5pt = 33px exactly, position
-    /// `11.5 + 2.5 − 16.5 = −2.5`, glyph top at `−2.5 + 16.5 − 2.5 = 11.5`
-    /// (the view's top) and glyph bottom at `0` — nothing clipped.
+    /// `masksToBounds`. With whole-point metrics: bleed 4pt, bitmap
+    /// 20 + 8 = 28pt, position `20 + 4 − 28 = −4`, glyph top at
+    /// `−4 + 28 − 4 = 20` (the view's top) and glyph bottom at `0` —
+    /// nothing clipped.
     private func restingPosition(bleed: CGFloat, scale: CGFloat) -> CGPoint {
         CGPoint(x: Self.snapped(-bleed, scale: scale),
                 y: Self.snapped(bounds.height + bleed - content.bounds.height, scale: scale))
@@ -665,10 +708,10 @@ final class DotMatrixMarqueeView: NSView {
         content.removeAnimation(forKey: "marquee")
 
         let scale = window?.backingScaleFactor ?? 2
-        // A whole-device-pixel bleed keeps the glyph at an integer pixel row
-        // and column inside the bitmap, so `restingPosition` can align it to
-        // the view edge exactly. (`dotSize × 2` = 2.6pt is 5.2px at 2x — a
-        // fractional offset no whole-pixel layer position could cancel.)
+        // The bleed is a whole number of points (`dotSize` is), so the glyph
+        // sits at an integer pixel row and column inside the bitmap and
+        // `restingPosition` can align it to the view edge exactly. Snapped
+        // anyway for non-integral backing scales.
         let bleed = Self.snapped(metrics.dotSize * 2, scale: scale)
 
         guard !reduceMotion, let timing = Self.naturalTiming(text: text, columns: columns, metrics: metrics) else {
@@ -676,7 +719,7 @@ final class DotMatrixMarqueeView: NSView {
             // shrank) — render the plain fitted text with no animation.
             let displayText = DotMatrixDisplay.fit(text, columns: columns)
             guard let (image, bitmapWidth, bitmapHeight) = DotMatrixDisplay.renderedBitmap(
-                text: displayText, metrics: metrics, colorScheme: colorScheme, bleed: bleed, scale: scale
+                text: displayText, metrics: metrics, colorScheme: colorScheme, theme: theme, bleed: bleed, scale: scale
             ) else { return }
             CATransaction.begin(); CATransaction.setDisableActions(true)
             content.contentsScale = scale
@@ -698,7 +741,7 @@ final class DotMatrixMarqueeView: NSView {
         let baseText = DotMatrixDisplay.fold(text)
         let doubledText = baseText + Self.separator + baseText
         guard let (image, bitmapWidth, bitmapHeight) = DotMatrixDisplay.renderedBitmap(
-            text: doubledText, metrics: metrics, colorScheme: colorScheme, bleed: bleed, scale: scale
+            text: doubledText, metrics: metrics, colorScheme: colorScheme, theme: theme, bleed: bleed, scale: scale
         ) else { return }
 
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -712,11 +755,10 @@ final class DotMatrixMarqueeView: NSView {
         content.position = restingPosition(bleed: bleed, scale: scale)
 
         let startX = content.position.x
-        // The end-of-cycle hold is also snapped to the device grid: the
-        // cycle width is a multiple of the fractional `cellAdvance`, so an
-        // exact `startX - cycleWidth` would park the second copy at a
-        // sub-pixel offset (resampled blurry) for the whole hold. Snapping
-        // moves the wrap by at most half a device pixel.
+        // The end-of-cycle hold is also snapped to the device grid so the
+        // second copy never parks at a sub-pixel offset (resampled blurry)
+        // for the whole hold. With whole-point `cellAdvance` this is a no-op
+        // at 1x and 2x; it matters only on non-integral backing scales.
         let endX = Self.snapped(startX - timing.cycleWidth, scale: scale)
         // Use the caller-supplied shared period when it's longer than this
         // line's own natural period, so a shorter line pauses at its
@@ -759,7 +801,8 @@ struct DotMatrixProgressBar: NSViewRepresentable {
     func updateNSView(_ view: DotMatrixProgressView, context: Context) {
         _ = controller.session.transportPosition
         view.configure(position: controller.displayTransportPosition(), duration: controller.session.duration,
-                       playing: controller.session.isPlaying, metrics: metrics, barHeight: barHeight, seek: seek)
+                       playing: controller.session.isPlaying, metrics: metrics, barHeight: barHeight,
+                       theme: context.environment.controlBarTheme, seek: seek)
     }
 }
 
@@ -776,6 +819,7 @@ final class DotMatrixProgressView: NSView {
     private let blocks = CAShapeLayer()
     private var metrics = DotMatrixMetrics()
     private var barHeight: CGFloat = 0
+    private var theme: ControlBarTheme = .classic
     private var duration: TimeInterval = 0
     private var position: TimeInterval = 0
     private var playing = false
@@ -801,9 +845,10 @@ final class DotMatrixProgressView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func configure(position: TimeInterval, duration: TimeInterval, playing: Bool,
-                   metrics: DotMatrixMetrics, barHeight: CGFloat, seek: @escaping (TimeInterval) -> Void) {
+                   metrics: DotMatrixMetrics, barHeight: CGFloat, theme: ControlBarTheme = .classic,
+                   seek: @escaping (TimeInterval) -> Void) {
         self.position = position; self.duration = duration; self.playing = playing
-        self.metrics = metrics; self.barHeight = barHeight
+        self.metrics = metrics; self.barHeight = barHeight; self.theme = theme
         self.anchorTime = CACurrentMediaTime(); self.seek = seek
         setAccessibilityEnabled(duration > 0)
         redraw()
@@ -815,12 +860,20 @@ final class DotMatrixProgressView: NSView {
         min(max(position + (playing ? CACurrentMediaTime() - anchorTime : 0), 0), duration)
     }
 
+    private var colorScheme: ColorScheme {
+        effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
+    }
+
     /// The bar's pixel color under the view's current appearance, forced to
     /// a concrete (non-dynamic) color — see `DotMatrixDisplay.resolvedGlowColor`
     /// for why `NSColor(Theme.readoutGlow)` alone can resolve against the
     /// wrong appearance later (this is what let the bar intermittently
     /// render dark mode's cyan while the window was in light mode).
     private var glowColor: NSColor {
+        if theme == .teenageEngineering {
+            // The TE ink is already concrete per scheme.
+            return TeenageEngineeringPalette.displayInkNSColor(for: colorScheme)
+        }
         var color = NSColor.controlAccentColor
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let dynamic = NSColor(Theme.readoutGlow)
@@ -922,28 +975,19 @@ final class DotMatrixProgressView: NSView {
     /// whole-device-pixel pitch, with the row centered between the caps so
     /// neither end has a stray partial gap.
     ///
-    /// At this bar's sub-2pt block sizes, a fractional-pixel edge anti-aliases
-    /// into a visibly blurry notch on a Retina display — but snapping each
-    /// block's left/right edge *independently* rounds `blockWidth` differently
-    /// depending on where each block's unrounded position falls in the pixel
-    /// grid, so blocks alternate between e.g. 2 and 3 device pixels wide.
-    /// Quantizing the geometry *once* and stepping by the exact quantized
-    /// pitch from a pixel-aligned origin keeps every block identically sized
-    /// and evenly spaced with zero accumulated drift (each step adds an exact
-    /// multiple of `1/scale`, which is exactly representable in binary
-    /// floating point).
-    ///
-    /// The gap is quantized on its own and the pitch *derived* as block plus
-    /// gap. Rounding the block width and the pitch independently let the gap
-    /// vanish: at `dotSize 1.3` / `dotGap 0.4` on a 2x display, both
-    /// `round(1.3 × 2)` and `round(1.7 × 2)` are 3 device pixels, so
-    /// consecutive blocks touched and the bar drew as one solid line. With the
-    /// gap floored at one device pixel, the same metrics give a 3px block,
-    /// 1px gap, 4px pitch (1.5pt / 0.5pt / 2pt).
+    /// The block, gap and cap widths come straight from the whole-point
+    /// `metrics`, so at 1x and 2x the snapping here is a no-op; it remains
+    /// so the geometry stays on the device grid at non-integral scales. The
+    /// row is stepped by the exact pitch from a pixel-aligned origin so every
+    /// block is identically sized with no accumulated drift (each step is a
+    /// multiple of `1/scale`, exactly representable in binary floating
+    /// point). The gap is quantized on its own and the pitch *derived* as
+    /// block plus gap, and floored at one device pixel, so consecutive blocks
+    /// can never touch and draw as a solid line.
     ///
     /// `barHeight` (the lit segments'/endcaps' height) is independent of
-    /// `metrics` — it's set by the caller to match the elapsed-time digits'
-    /// rendered height exactly, not derived from the block pitch.
+    /// `metrics` — the caller sets it from the elapsed-time row, as a whole
+    /// number of points.
     static func barGeometry(width: CGFloat, metrics: DotMatrixMetrics, barHeight: CGFloat, scale: CGFloat) -> BarGeometry {
         let pixel = 1 / scale
         func snapped(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
@@ -956,7 +1000,8 @@ final class DotMatrixProgressView: NSView {
         let segmentHeight = max(snapped(barHeight), pixel)
         let offHeight = min(max(snapped(metrics.dotSize * 2), pixel), segmentHeight)
         let offY = snapped((segmentHeight - offHeight) / 2)
-        let cornerRadius = metrics.dotSize * 0.2
+        // Square blocks, like the text dots: every edge is on the pixel grid.
+        let cornerRadius: CGFloat = 0
 
         // Endcaps: a thin post at either end, the lit segments' height, set
         // off from the row by a double gap. Narrower than a segment so it
@@ -1068,6 +1113,7 @@ private struct ReadoutPanelChrome: ViewModifier {
     let style: ReadoutStyle
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.controlBarTheme) private var controlBarTheme
 
     private static let cornerRadius: CGFloat = 10
     /// Width of the raised bezel ring the glass window is sunk into.
@@ -1087,15 +1133,25 @@ private struct ReadoutPanelChrome: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background {
-                switch style {
-                case .retro: retroPanel
-                case .glass: convexGlassPanel
+                switch controlBarTheme {
+                case .classic:
+                    switch style {
+                    case .retro: retroPanel
+                    case .glass: convexGlassPanel
+                    }
+                case .teenageEngineering:
+                    TeenageEngineeringReadoutBackground()
                 }
             }
             .overlay {
-                switch style {
-                case .retro: retroSheen
-                case .glass: convexGlassLight
+                switch controlBarTheme {
+                case .classic:
+                    switch style {
+                    case .retro: retroSheen
+                    case .glass: convexGlassLight
+                    }
+                case .teenageEngineering:
+                    TeenageEngineeringReadoutOverlay()
                 }
             }
     }

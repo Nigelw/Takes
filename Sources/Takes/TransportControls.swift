@@ -193,6 +193,19 @@ extension EnvironmentValues {
     }
 }
 
+private struct ControlBarThemeKey: EnvironmentKey {
+    static let defaultValue: ControlBarTheme = .classic
+}
+
+extension EnvironmentValues {
+    /// The control bar's overall visual theme, read by the transport button
+    /// style and the readout views to pick their rendering.
+    var controlBarTheme: ControlBarTheme {
+        get { self[ControlBarThemeKey.self] }
+        set { self[ControlBarThemeKey.self] = newValue }
+    }
+}
+
 /// Circular transport button styling shared by Play, Switch Track, and Repeat.
 ///
 /// - `.primary` is the filled indigo call-to-action (Play/Pause).
@@ -209,10 +222,15 @@ struct CircleTransportButtonStyle: ButtonStyle {
     var diameter: CGFloat
     var glyphSize: CGFloat
     var pressedGlyphOffset: CGFloat = 0.75
+    /// Short silkscreen caption ("PREV", "SHFL"…) the Teenage Engineering
+    /// theme prints on the panel under a secondary key. The classic theme
+    /// ignores it.
+    var caption: String? = nil
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.transportAppearance) private var transportAppearance
+    @Environment(\.controlBarTheme) private var controlBarTheme
 
     /// The treatment for this button's role and the current appearance mode —
     /// primary/secondary are tuned separately so effects stay proportional to
@@ -226,7 +244,27 @@ struct CircleTransportButtonStyle: ButtonStyle {
         }
     }
 
+    @ViewBuilder
     func makeBody(configuration: Configuration) -> some View {
+        switch controlBarTheme {
+        case .classic:
+            classicBody(configuration: configuration)
+        case .teenageEngineering:
+            TeenageEngineeringButtonChrome(
+                kind: kind,
+                isOn: isOn,
+                diameter: diameter,
+                glyphSize: glyphSize,
+                pressedGlyphOffset: pressedGlyphOffset,
+                isEnabled: isEnabled,
+                caption: caption,
+                label: { configuration.label },
+                isPressed: configuration.isPressed
+            )
+        }
+    }
+
+    private func classicBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed
         return configuration.label
             .font(.system(size: glyphSize, weight: .semibold))
@@ -354,15 +392,22 @@ struct CircleTransportButtonStyle: ButtonStyle {
 /// way an 80s rack unit or tape deck counter reads.
 struct DigitalTimeReadout: View {
     /// Fixed panel height. Shared with the Play button diameter so the two line
-    /// up exactly.
-    static let panelHeight: CGFloat = 56
+    /// up exactly, and with the playlist readout, whose three rows (two 20pt
+    /// dot-matrix lines, 2pt apart, over a 10pt clock row, inside the 4pt
+    /// bezel with a 5pt inset) set the minimum.
+    static let panelHeight: CGFloat = 64
 
     let style: ReadoutStyle
     let elapsed: String
+    /// Session state the Teenage Engineering theme's display dashboard
+    /// mirrors as indicator tiles around the digits. Ignored by the classic
+    /// theme.
+    var status: TeenageEngineeringDisplayStatus? = nil
 
     /// Light mode's LCD is backlit, so its glass gets a soft bloom overlay;
     /// dark mode's LED glass stays unlit.
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.controlBarTheme) private var controlBarTheme
 
     private let cornerRadius: CGFloat = 10
     /// Width of the raised bezel ring the glass window is sunk into.
@@ -374,20 +419,36 @@ struct DigitalTimeReadout: View {
     private let convexCornerRadius: CGFloat = 11
 
     var body: some View {
-        SevenSegmentDisplay(text: elapsed, digitHeight: 27)
-            .padding(.horizontal, 28)
+        Group {
+            if controlBarTheme == .teenageEngineering, let status {
+                TeenageEngineeringTimeDisplayContent(elapsed: elapsed, status: status)
+            } else {
+                SevenSegmentDisplay(text: elapsed, digitHeight: 27)
+                    .padding(.horizontal, 28)
+            }
+        }
             .frame(minWidth: 180)
             .frame(height: Self.panelHeight)
             .background {
-                switch style {
-                case .retro: retroPanel
-                case .glass: convexGlassPanel
+                switch controlBarTheme {
+                case .classic:
+                    switch style {
+                    case .retro: retroPanel
+                    case .glass: convexGlassPanel
+                    }
+                case .teenageEngineering:
+                    TeenageEngineeringReadoutBackground()
                 }
             }
             .overlay {
-                switch style {
-                case .retro: retroSheen
-                case .glass: convexGlassLight
+                switch controlBarTheme {
+                case .classic:
+                    switch style {
+                    case .retro: retroSheen
+                    case .glass: convexGlassLight
+                    }
+                case .teenageEngineering:
+                    TeenageEngineeringReadoutOverlay()
                 }
             }
             .accessibilityLabel("Elapsed Time")
@@ -579,6 +640,10 @@ struct SevenSegmentDisplay: View {
     /// Light mode renders as an LCD (dark ink segments that cast a soft shadow
     /// onto the pale glass), dark mode as an LED (glowing segments).
     @Environment(\.colorScheme) private var colorScheme
+    /// The Teenage Engineering theme prints the segments flat in the display
+    /// window's ink — no LED bloom, no LCD shadow. Only the paint branches;
+    /// the cell layout and segment logic are shared.
+    @Environment(\.controlBarTheme) private var controlBarTheme
 
     // MARK: Metrics (all derived from digitHeight so the display scales as one)
 
@@ -617,10 +682,14 @@ struct SevenSegmentDisplay: View {
                 a: 1, b: 0, c: -skew, d: 1, tx: skew * digitHeight, ty: 0
             ))
 
-            let isLED = colorScheme == .dark
+            let isFlatInk = controlBarTheme == .teenageEngineering
+            let isLED = colorScheme == .dark && !isFlatInk
+            let segmentColor = isFlatInk ? TeenageEngineeringPalette.displayInk(for: colorScheme) : Theme.readoutGlow
 
+            // Unlit segments: softened a touch on the LED/LCD glass; printed
+            // crisp on the flat TE panel.
             var ghost = context
-            ghost.addFilter(.blur(radius: thickness * 0.12))
+            if !isFlatInk { ghost.addFilter(.blur(radius: thickness * 0.12)) }
 
             // LED: a wide halo of the segment color underneath the crisp fill.
             var glow = context
@@ -637,17 +706,17 @@ struct SevenSegmentDisplay: View {
                 let cell = CGRect(x: x, y: 0, width: width(of: glyph), height: digitHeight)
                 let lit = litPaths(for: glyph, in: cell)
                 for path in unlitPaths(for: glyph, in: cell) {
-                    ghost.fill(path, with: .color(Theme.readoutGlow.opacity(0.14)))
+                    ghost.fill(path, with: .color(segmentColor.opacity(isFlatInk ? 0.10 : 0.14)))
                 }
-                for path in lit {
+                for path in lit where !isFlatInk {
                     if isLED {
-                        glow.fill(path, with: .color(Theme.readoutGlow.opacity(0.95)))
+                        glow.fill(path, with: .color(segmentColor.opacity(0.95)))
                     } else {
                         shade.fill(path, with: .color(.black.opacity(0.30)))
                     }
                 }
                 for path in lit {
-                    context.fill(path, with: .color(Theme.readoutGlow))
+                    context.fill(path, with: .color(segmentColor))
                 }
                 x = cell.maxX + cellSpacing
             }

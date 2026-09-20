@@ -1162,6 +1162,7 @@ struct ContentView: View {
             // under the hidden titlebar so the bar starts at the window's top edge.
             .ignoresSafeArea(.container, edges: .top)
             .environment(\.transportAppearance, settings.transportAppearance)
+            .environment(\.controlBarTheme, settings.controlBarTheme)
             .background(WindowBackground().ignoresSafeArea())
             .background {
                 MainWindowConfigurationView { window in
@@ -1312,7 +1313,8 @@ struct ContentView: View {
                     style: settings.readoutStyle,
                     elapsed: controller.session.isPlaying
                         ? controller.playingReadoutText
-                        : controller.session.transportPosition.formattedSignedTimestamp
+                        : controller.session.transportPosition.formattedSignedTimestamp,
+                    status: TeenageEngineeringDisplayStatus(session: controller.session)
                 )
                 .background {
                     GeometryReader { readoutProxy in
@@ -1388,7 +1390,7 @@ struct ContentView: View {
         } label: {
             Image(systemName: "arrow.trianglehead.swap")
         }
-        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: 40, glyphSize: 15))
+        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: 40, glyphSize: 15, caption: "SWAP"))
         .disabled(!controller.session.canSwitchPlayback)
         .help("Switch Track")
         .accessibilityLabel("Switch Track")
@@ -1456,7 +1458,7 @@ struct ContentView: View {
         } label: {
             Image(systemName: Self.repeatSymbol(for: mode))
         }
-        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: mode != .off, diameter: 40, glyphSize: 15))
+        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: mode != .off, diameter: 40, glyphSize: 15, caption: "RPT"))
         .disabled(!controller.session.isPlayable)
         .help(Self.repeatHelp(for: mode))
         .accessibilityLabel("Repeat")
@@ -1583,7 +1585,7 @@ struct ContentView: View {
                 Image(systemName: "eye")
             }
         }
-        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: isOn, diameter: 40, glyphSize: 15))
+        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: isOn, diameter: 40, glyphSize: 15, caption: "BLND"))
         .disabled(!controller.session.canToggleBlindListeningMode)
         .help("Blind Listening Mode")
         .accessibilityLabel("Blind Listening Mode")
