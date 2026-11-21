@@ -50,7 +50,11 @@ Key ownership:
   remote media commands, main-window sizing policy, and Debug menu wiring.
 - `WorkspaceView.swift`: playlist/comparison navigation, shared import routing,
   startup restoration ordering, playlist transport, and keyboard focus handling.
-- `PlaylistView.swift`: playlist rows, selection, organization, and commands.
+- `PlaylistView.swift`: playlist header bar, selection/expansion presentation
+  state, and the selection-aware organization commands (`PlaylistCommandContext`).
+- `PlaylistOutlineView.swift`: the playlist table — an `NSOutlineView` wrapped
+  in `NSViewRepresentable` (items with versions as children), its cells,
+  context menu, inline rename, keyboard handling, and row drag and drop.
 - `ContentView.swift`: comparison waveform/timeline UI, drag-and-drop,
   loop gestures, and offset controls.
 - `AppSettings.swift` and `SettingsView.swift`: persisted user preferences and
@@ -157,6 +161,18 @@ These are here to prevent parallel implementations and subtle regressions:
   offsets, while removing all tracks clears session-wide state.
 - Preserve Blind Listening Mode as a runtime anonymization/shuffle layer that
   reapplies when importing while the mode is already enabled.
+- The playlist table is an `NSOutlineView`, not a SwiftUI `List`. Do not move
+  it back: SwiftUI row `onDrag` swallowed selection clicks and offered no
+  insertion indicator, drop-on-row, or multi-row drag image.
+  `PlaylistPresentationState` stays the source of truth for selection and
+  expansion; the outline controller mirrors it in both directions.
+- Playlist row drags are in-app only for organization (reorder, drop on an
+  item to group, drag versions between items or out to separate) and carry a
+  file URL for dragging out to Finder. Finder file drops are position
+  independent: they go through the shared import path, which merges into a
+  metadata match or appends.
+- Context-menu commands act on the selection when opened on a selected row and
+  on the clicked row alone otherwise (`PlaylistCommandContext.rows`).
 - Keep global shortcuts focus-safe; active numeric text fields should retain
   normal text editing behavior.
 

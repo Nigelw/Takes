@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 enum PlaylistRowID: Hashable {
     case item(UUID)
@@ -14,15 +13,14 @@ final class PlaylistPresentationState: ObservableObject {
     @Published var renamingItemID: UUID?
     @Published var locateVersionID: UUID?
     @Published var listHasFocus = false
-    var draggingItemIDs: [UUID] = []
 
-    func itemIDs(in workspace: PlaylistWorkspace) -> [UUID] {
-        workspace.items.filter { selection.contains(.item($0.id)) }.map(\.id)
-    }
-
-    func versionIDs(in workspace: PlaylistWorkspace) -> [UUID] {
-        workspace.items.filter { !selection.contains(.item($0.id)) }
-            .flatMap(\.versions).filter { selection.contains(.version($0.id)) }.map(\.id)
+    /// Rows in display order: each item, then its versions while a
+    /// multi-version item is expanded.
+    func visibleRows(in workspace: PlaylistWorkspace) -> [PlaylistRowID] {
+        workspace.items.flatMap { item in
+            [.item(item.id)] + (item.versions.count > 1 && expanded.contains(item.id)
+                ? item.versions.map { .version($0.id) } : [])
+        }
     }
 
     func prune(in workspace: PlaylistWorkspace) {
@@ -38,10 +36,27 @@ struct PlaylistCommandContext {
     let coordinator: PlaylistCoordinator
     let presentation: PlaylistPresentationState
     let undoManager: UndoManager?
+    /// Rows the commands act on. Nil means the current selection; a context
+    /// menu opened on an unselected row passes that row instead.
+    var rows: Set<PlaylistRowID>?
 
-    var itemIDs: [UUID] { presentation.itemIDs(in: coordinator.workspace) }
-    var versionIDs: [UUID] { presentation.versionIDs(in: coordinator.workspace) }
-    var canGroup: Bool { itemIDs.count > 1 && versionIDs.isEmpty }
+    private var targetRows: Set<PlaylistRowID> { rows ?? presentation.selection }
+
+    var itemIDs: [UUID] {
+        let rows = targetRows
+        return coordinator.workspace.items.filter { rows.contains(.item($0.id)) }.map(\.id)
+    }
+
+    /// Selected versions whose item is not itself selected.
+    var versionIDs: [UUID] {
+        let rows = targetRows
+        return coordinator.workspace.items.filter { !rows.contains(.item($0.id)) }
+            .flatMap(\.versions).filter { rows.contains(.version($0.id)) }.map(\.id)
+    }
+
+    /// Grouping needs a destination item; loose versions selected alongside
+    /// it are moved into the group.
+    var canGroup: Bool { !itemIDs.isEmpty && itemIDs.count + versionIDs.count > 1 }
     var canRemove: Bool { !itemIDs.isEmpty || !versionIDs.isEmpty }
     var canSeparate: Bool {
         coordinator.workspace.items.contains { item in
@@ -52,22 +67,42 @@ struct PlaylistCommandContext {
 
     func group(compare: Bool) {
         let ids = itemIDs
+        let looseVersions = versionIDs
         Task {
-            if let id = await coordinator.groupItems(ids, compare: compare, undoManager: undoManager) {
-                presentation.selection = [.item(id)]
-                presentation.expanded.insert(id)
+            let destination: UUID?
+            if ids.count > 1 {
+                destination = await coordinator.groupItems(
+                    ids, compare: compare && looseVersions.isEmpty, undoManager: undoManager
+                )
+            } else {
+                destination = ids.first
             }
+            guard let destination else { return }
+            if !looseVersions.isEmpty {
+                for id in looseVersions { coordinator.moveVersion(id, to: destination, undoManager: undoManager) }
+                if compare { await coordinator.enterComparison(itemID: destination) }
+            }
+            presentation.selection = [.item(destination)]
+            presentation.expanded.insert(destination)
         }
     }
 
     func remove() {
         let items = itemIDs
         let versions = versionIDs
+        let removed = targetRows
+        let firstRemovedIndex = presentation.visibleRows(in: coordinator.workspace).firstIndex(where: removed.contains)
         undoManager?.beginUndoGrouping()
         if !items.isEmpty { coordinator.removeItems(items, undoManager: undoManager) }
         if !versions.isEmpty { coordinator.removeVersions(versions, undoManager: undoManager) }
         undoManager?.endUndoGrouping()
         presentation.prune(in: coordinator.workspace)
+        // Select the row that took the removed rows' place, so Delete can be
+        // pressed repeatedly.
+        let remaining = presentation.visibleRows(in: coordinator.workspace)
+        if presentation.selection.isEmpty, let firstRemovedIndex, !remaining.isEmpty {
+            presentation.selection = [remaining[min(firstRemovedIndex, remaining.count - 1)]]
+        }
     }
 
     func separate() {
@@ -137,23 +172,18 @@ struct PlaylistCommands: Commands {
     }
 }
 
-private enum PlaylistItemDrag {
-    static let type = UTType(exportedAs: "com.nigelwarren.takes.playlist-item")
-}
-
 struct PlaylistView: View {
     let coordinator: PlaylistCoordinator
     @ObservedObject var presentation: PlaylistPresentationState
     @ObservedObject var openFiles: OpenFileCommandState
     @Environment(\.undoManager) private var undoManager
-    @State private var renameText = ""
-    @FocusState private var listFocused: Bool
 
     private var commands: PlaylistCommandContext {
         .init(coordinator: coordinator, presentation: presentation, undoManager: undoManager)
     }
 
     var body: some View {
+        let items = coordinator.workspace.items
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 ImportActionSplitButton(dropdownItems: ImportActionMenuItem.dropdownItems) { action in
@@ -166,218 +196,43 @@ struct PlaylistView: View {
                 }
                 .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
                 Spacer()
-                Text("\(coordinator.workspace.items.count) items")
+                Text(items.count == 1 ? "1 item" : "\(items.count) items")
                     .foregroundStyle(.secondary).font(.caption)
                 Button("Group and Compare") { commands.group(compare: true) }
                     .disabled(!commands.canGroup)
                 Menu {
                     organizationMenu
                 } label: { Image(systemName: "ellipsis.circle") }
-                .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Playlist Actions")
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .accessibilityLabel("Playlist Actions")
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
             Divider()
-            List(selection: $presentation.selection) {
-                ForEach(visibleRows, id: \.self) { rowID in
-                    playlistRow(rowID).tag(rowID)
+            if items.isEmpty {
+                ContentUnavailableView {
+                    Label("Your Playlist", systemImage: "music.note.list")
+                } description: {
+                    Text("Add audio files, then group versions of a song to compare them.")
+                } actions: {
+                    Button("Add Files…") { openFiles.presentOpenDialog() }
                 }
-                if !coordinator.workspace.items.isEmpty {
-                    Color.clear.frame(height: 12).listRowSeparator(.hidden)
-                        .onDrop(of: [PlaylistItemDrag.type], isTargeted: nil) { _ in reorder(before: nil) }
-                        .accessibilityHidden(true)
-                }
-            }
-            .listStyle(.inset)
-            .focused($listFocused)
-            .onChange(of: listFocused) { _, focused in presentation.listHasFocus = focused }
-            .onKeyPress(.return) { playSelection(); return .handled }
-            .onKeyPress(.rightArrow) {
-                presentation.expanded.formUnion(presentation.itemIDs(in: coordinator.workspace)); return .handled
-            }
-            .onKeyPress(.leftArrow) {
-                presentation.expanded.subtract(presentation.itemIDs(in: coordinator.workspace)); return .handled
-            }
-            .contextMenu(forSelectionType: PlaylistRowID.self) { _ in
-                organizationMenu
-            } primaryAction: { ids in
-                playSelection(ids)
-            }
-            .overlay {
-                if coordinator.workspace.items.isEmpty {
-                    ContentUnavailableView {
-                        Label("Your Playlist", systemImage: "music.note.list")
-                    } description: {
-                        Text("Add audio files, then group versions of a song to compare them.")
-                    } actions: {
-                        Button("Add Files…") { openFiles.presentOpenDialog() }
-                    }
-                    .allowsHitTesting(true)
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                PlaylistOutline(
+                    playlist: coordinator,
+                    presentation: presentation,
+                    items: items,
+                    currentItemID: coordinator.currentItemID,
+                    isPlaying: coordinator.isPlaying,
+                    isActive: coordinator.mode == .playlist,
+                    undoManager: undoManager
+                )
             }
         }
         .background(Theme.timelineWellShade)
-        .onChange(of: coordinator.workspace.items.map { ($0.id.uuidString + $0.versions.map { $0.id.uuidString }.joined()) }) { _, _ in
+        .onChange(of: items.map { ($0.id.uuidString + $0.versions.map { $0.id.uuidString }.joined()) }) { _, _ in
             presentation.prune(in: coordinator.workspace)
         }
-        .onChange(of: coordinator.mode) { _, mode in
-            listFocused = mode == .playlist
-        }
-        .sheet(isPresented: Binding(
-            get: { presentation.renamingItemID != nil },
-            set: { if !$0 { presentation.renamingItemID = nil } }
-        )) { renameSheet }
-    }
-
-    private var visibleRows: [PlaylistRowID] {
-        coordinator.workspace.items.flatMap { item in
-            [.item(item.id)] + (presentation.expanded.contains(item.id)
-                ? item.versions.map { .version($0.id) } : [])
-        }
-    }
-
-    @ViewBuilder private func playlistRow(_ rowID: PlaylistRowID) -> some View {
-        switch rowID {
-        case let .item(id):
-            if let item = coordinator.workspace.items.first(where: { $0.id == id }) {
-                itemRow(item)
-                    .onDrop(of: [PlaylistItemDrag.type], isTargeted: nil) { _ in reorder(before: item.id) }
-            }
-        case let .version(id):
-            if let item = coordinator.workspace.items.first(where: { $0.versions.contains { $0.id == id } }),
-               let version = item.versions.first(where: { $0.id == id }) {
-                versionRow(version, item: item)
-            }
-        }
-    }
-
-    private func itemRow(_ item: PlaylistItem) -> some View {
-        let metadata = item.selectedVersion?.metadata
-        let isCurrent = coordinator.currentItemID == item.id
-        return HStack(spacing: PlaylistRowMetrics.spacing) {
-            Button {
-                if presentation.expanded.contains(item.id) { presentation.expanded.remove(item.id) }
-                else { presentation.expanded.insert(item.id) }
-            } label: {
-                Image(systemName: presentation.expanded.contains(item.id) ? "chevron.down" : "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .frame(width: PlaylistRowMetrics.disclosureWidth)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("Versions for \(item.title)")
-            .accessibilityValue(presentation.expanded.contains(item.id) ? "Expanded" : "Collapsed")
-            ZStack(alignment: .leading) {
-                Color.clear
-                if item.versions.count > 1 {
-                    Text("\(item.versions.count)")
-                        .font(.caption2.weight(.semibold)).monospacedDigit()
-                        .padding(.horizontal, 5)
-                        .background(.quaternary, in: Capsule())
-                        .accessibilityLabel("\(item.versions.count) versions")
-                }
-            }
-            .frame(width: PlaylistRowMetrics.countWidth, alignment: .leading)
-            ZStack {
-                Color.clear
-                if isCurrent {
-                    Image(systemName: coordinator.isPlaying ? "speaker.wave.2.fill" : "speaker.fill")
-                        .font(.caption)
-                        .foregroundStyle(Theme.primary)
-                        .accessibilityLabel(coordinator.isPlaying ? "Playing" : "Current")
-                }
-            }
-            .frame(width: PlaylistRowMetrics.indicatorWidth)
-            HStack(spacing: PlaylistRowMetrics.spacing) {
-                Text(item.title).lineLimit(1).help(item.title)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(metadata?.artist ?? "—").foregroundStyle(.secondary).lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(metadata?.album ?? "—").foregroundStyle(.secondary).lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text((metadata?.duration ?? 0).formattedSignedTimestamp).monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(width: 48, alignment: .trailing)
-            }
-            .contentShape(Rectangle())
-            .onDrag {
-                if !presentation.selection.contains(.item(item.id)) {
-                    presentation.selection = [.item(item.id)]
-                }
-                presentation.draggingItemIDs = presentation.itemIDs(in: coordinator.workspace)
-                return NSItemProvider(item: item.id.uuidString as NSString, typeIdentifier: PlaylistItemDrag.type.identifier)
-            }
-            if item.versions.count > 1 {
-                Button("Compare") { compare(item) }
-                    .buttonStyle(.borderless).controlSize(.small)
-                    .frame(width: PlaylistRowMetrics.trailingWidth)
-            } else {
-                Color.clear.frame(width: PlaylistRowMetrics.trailingWidth, height: 1).accessibilityHidden(true)
-            }
-        }
-        .padding(.vertical, 1)
-        .contentShape(Rectangle())
-        .contextMenu {
-            Button("Play") { play(item) }
-            if item.versions.count > 1 {
-                Button("Compare") { compare(item) }
-            }
-            Button("Rename…") { presentation.renamingItemID = item.id }
-            Button("Remove") { coordinator.removeItem(item.id, undoManager: undoManager) }
-            if let version = item.selectedVersion, availableURL(for: version) == nil {
-                Button("Locate File…") { presentation.locateVersionID = version.id }
-            }
-        }
-        .accessibilityElement(children: .contain)
-    }
-
-    private func versionRow(_ version: PlaylistVersion, item: PlaylistItem) -> some View {
-        let available = availableURL(for: version) != nil
-        return HStack(spacing: PlaylistRowMetrics.spacing) {
-            Button { Task { await coordinator.selectPlaybackVersion(version.id, in: item.id) } } label: {
-                Image(systemName: item.selectedVersionID == version.id ? "checkmark.circle.fill" : "circle")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .frame(width: PlaylistRowMetrics.indicatorWidth)
-            .accessibilityLabel("Use \(version.metadata.displayName) for playback")
-            .accessibilityValue(item.selectedVersionID == version.id ? "Selected" : "Not selected")
-            Text(version.metadata.displayName.isEmpty ? version.file.storedURL.lastPathComponent : version.metadata.displayName)
-                .lineLimit(1).help(version.file.storedURL.path)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(available ? version.metadata.fileFormatDescription : "File unavailable")
-                .foregroundStyle(.secondary).lineLimit(1)
-            Text(version.metadata.duration.formattedSignedTimestamp).monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(width: 48, alignment: .trailing)
-            HStack(spacing: 4) {
-                if !available {
-                    Button("Locate…") { presentation.locateVersionID = version.id }
-                        .buttonStyle(.borderless).controlSize(.small)
-                }
-                Menu {
-                    Button("Play This Version") { play(item, version: version) }
-                    Menu("Move To") {
-                        ForEach(coordinator.workspace.items.filter { $0.id != item.id }) { destination in
-                            Button(destination.title) {
-                                coordinator.moveVersion(version.id, to: destination.id, undoManager: undoManager)
-                            }.disabled(destination.versions.count >= PlaylistWorkspace.maximumVersionsPerItem)
-                        }
-                    }
-                    Button("Separate into Playlist Item") { _ = coordinator.separateVersion(version.id, undoManager: undoManager) }
-                        .disabled(item.versions.count < 2)
-                    Button("Reveal in Finder") {
-                        if let url = availableURL(for: version) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                    }.disabled(!available)
-                    Button("Locate File…") { presentation.locateVersionID = version.id }
-                    Divider()
-                    Button("Remove Version") { coordinator.removeVersion(version.id, undoManager: undoManager) }
-                } label: { Image(systemName: "ellipsis") }
-                .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Version Actions")
-            }
-            .frame(minWidth: PlaylistRowMetrics.trailingWidth, alignment: .trailing)
-        }
-        .padding(.leading, PlaylistRowMetrics.versionLeadingInset).padding(.vertical, 1)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder private var organizationMenu: some View {
@@ -390,82 +245,8 @@ struct PlaylistView: View {
         Button("Move Down") { commands.moveSelection(direction: 1) }.disabled(commands.itemIDs.isEmpty)
         Button("Remove") { commands.remove() }.disabled(!commands.canRemove)
         Button("Clear Playlist") { coordinator.clearPlaylist(undoManager: undoManager) }
-            .disabled(coordinator.workspace.items.isEmpty)
+            .disabled(items.isEmpty)
     }
 
-    private var renameSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Rename Playlist Item").font(.headline)
-            TextField("Title", text: $renameText).textFieldStyle(.roundedBorder)
-            HStack {
-                Spacer()
-                Button("Cancel") { presentation.renamingItemID = nil }.keyboardShortcut(.cancelAction)
-                Button("Rename") {
-                    if let id = presentation.renamingItemID {
-                        coordinator.renameItem(id, to: renameText.trimmingCharacters(in: .whitespacesAndNewlines), undoManager: undoManager)
-                    }
-                    presentation.renamingItemID = nil
-                }.keyboardShortcut(.defaultAction)
-                    .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }.padding(20).frame(width: 360)
-            .onAppear { renameText = coordinator.workspace.items.first { $0.id == presentation.renamingItemID }?.title ?? "" }
-    }
-
-    private func availableURL(for version: PlaylistVersion) -> URL? {
-        guard case let .available(url) = PlaylistWorkspaceStore.resolveFileReference(version.file) else { return nil }
-        return url
-    }
-
-    private func play(_ item: PlaylistItem, version: PlaylistVersion? = nil) {
-        guard let version = version ?? item.selectedVersion else { return }
-        guard availableURL(for: version) != nil else {
-            presentation.locateVersionID = version.id
-            return
-        }
-        Task { await coordinator.playItem(id: item.id, versionID: version.id) }
-    }
-
-    private func compare(_ item: PlaylistItem) {
-        if let missing = item.versions.first(where: { availableURL(for: $0) == nil }) {
-            presentation.locateVersionID = missing.id
-            return
-        }
-        Task { await coordinator.enterComparison(itemID: item.id) }
-    }
-
-    private func playSelection(_ selectedRows: Set<PlaylistRowID>? = nil) {
-        let selectedRows = selectedRows ?? presentation.selection
-        for item in coordinator.workspace.items {
-            if selectedRows.contains(.item(item.id)) {
-                play(item); return
-            }
-            if let version = item.versions.first(where: { selectedRows.contains(.version($0.id)) }) {
-                play(item, version: version); return
-            }
-        }
-    }
-
-    private func reorder(before destination: UUID?) -> Bool {
-        let ids = presentation.draggingItemIDs
-        presentation.draggingItemIDs = []
-        guard !ids.isEmpty, destination.map({ !ids.contains($0) }) ?? true else { return false }
-        var order = coordinator.workspace.items.map(\.id).filter { !ids.contains($0) }
-        let index = destination.flatMap { order.firstIndex(of: $0) } ?? order.endIndex
-        order.insert(contentsOf: ids, at: index)
-        return coordinator.reorderItems(order, undoManager: undoManager)
-    }
-}
-
-/// Column widths shared by playlist item and version rows so a version's
-/// title lines up under its item's title.
-private enum PlaylistRowMetrics {
-    static let spacing: CGFloat = 6
-    static let disclosureWidth: CGFloat = 12
-    static let countWidth: CGFloat = 24
-    static let indicatorWidth: CGFloat = 16
-    static let trailingWidth: CGFloat = 70
-    /// Places a version row's selection circle in the item row's indicator
-    /// column, so version titles align with item titles.
-    static let versionLeadingInset = disclosureWidth + spacing + countWidth + spacing
+    private var items: [PlaylistItem] { coordinator.workspace.items }
 }

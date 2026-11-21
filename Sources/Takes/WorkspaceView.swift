@@ -168,7 +168,7 @@ struct WorkspaceView: View {
             .overlay {
                 if !mainWindowIsKey { InactiveWindowInteractionShield(window: mainWindow).ignoresSafeArea() }
             }
-            .onDrop(of: [UTType.fileURL], isTargeted: $isDropTargeted, perform: importProviders)
+            .onDrop(of: [UTType.fileURL], delegate: WorkspaceFileDropDelegate(isTargeted: $isDropTargeted, perform: importProviders))
             .overlay {
                 if isDropTargeted {
                     RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.primary, lineWidth: 3)
@@ -204,12 +204,19 @@ struct WorkspaceView: View {
                     Task { await coordinator.locateFile(versionID: versionID, url: url) }
                 }
             }
+            .fileDialogMessage(Text(locateFileMessage))
+            .fileDialogConfirmationLabel(Text(presentation.locateVersionID == nil ? "Open" : "Locate"))
             .alert("Takes Error", isPresented: Binding(
                 get: { coordinator.errorMessage != nil || controller.playbackError != nil },
                 set: { if !$0 { coordinator.clearError(); controller.clearPlaybackError() } }
             )) {
                 Button("OK") { coordinator.clearError(); controller.clearPlaybackError() }
             } message: { Text(coordinator.errorMessage ?? controller.playbackError?.localizedDescription ?? "") }
+    }
+
+    private var locateFileMessage: String {
+        guard let version = coordinator.workspace.allVersions.first(where: { $0.id == presentation.locateVersionID }) else { return "" }
+        return "Locate “\(version.file.storedURL.lastPathComponent)”"
     }
 
     private var focusedContent: some View {
@@ -383,7 +390,11 @@ struct WorkspaceView: View {
     private func importProviders(_ providers: [NSItemProvider]) -> Bool {
         // Internal comparison drags carry a file URL for dragging out to Finder.
         // Their private marker takes precedence over the external-file flavor.
-        guard !providers.contains(where: { $0.hasItemConformingToTypeIdentifier(TrackReorderDrag.contentType.identifier) }) else { return false }
+        // Playlist row drags carry one too, and are handled by the playlist table.
+        let internalTypes = [TrackReorderDrag.contentType.identifier, PlaylistItemDrag.type.identifier]
+        guard !providers.contains(where: { provider in
+            internalTypes.contains(where: provider.hasItemConformingToTypeIdentifier)
+        }) else { return false }
         let files = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
         guard !files.isEmpty, persistence.restorationComplete else { return false }
         let destination = coordinator.captureImportDestination()
@@ -594,5 +605,26 @@ private struct PlaylistTransportView: View {
     /// and is the only thing that re-renders the readout's text lines.
     private var elapsedText: String {
         coordinator.isPlaying ? controller.playingReadoutText : controller.session.transportPosition.formattedSignedTimestamp
+    }
+}
+
+/// Window-wide file drop. Playlist row drags also carry a file URL (so rows
+/// can be dragged out to Finder); they are rejected here so the import
+/// highlight never appears for an in-app reorder.
+private struct WorkspaceFileDropDelegate: DropDelegate {
+    @Binding var isTargeted: Bool
+    let perform: ([NSItemProvider]) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [UTType.fileURL.identifier])
+            && !info.hasItemsConforming(to: [PlaylistItemDrag.type.identifier])
+    }
+
+    func dropEntered(info: DropInfo) { isTargeted = true }
+    func dropExited(info: DropInfo) { isTargeted = false }
+
+    func performDrop(info: DropInfo) -> Bool {
+        isTargeted = false
+        return perform(info.itemProviders(for: [UTType.fileURL.identifier]))
     }
 }
