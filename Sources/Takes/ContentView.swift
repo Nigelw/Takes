@@ -347,32 +347,44 @@ struct CompareTitleBarRow: Layout {
 /// light primary in light appearance), with a faint top highlight and a
 /// small drop shadow, the canvas's values. Built by hand because
 /// `.borderedProminent` follows the system accent and sizes differently.
+///
+/// Pressed, it sinks into the bar as Play does (`CircleTransportButtonStyle`):
+/// a dark inner shadow falls across the top of the face, the rim inverts
+/// (dark top edge), the drop shadow goes, the label drops half a point, and
+/// the face darkens.
 struct CompareDoneButtonStyle: ButtonStyle {
     static let height: CGFloat = 22
     static let cornerRadius: CGFloat = 5
     static let horizontalPadding: CGFloat = 12
+    /// Play's pressed inner shadow, scaled from its 56 pt face to 22 pt.
+    static let pressedInnerShadowRadius: CGFloat = 1.5
+    static let pressedInnerShadowY: CGFloat = 1
+    static let pressedLabelOffset: CGFloat = 0.5
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.colorScheme) private var colorScheme
 
     func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
         let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
         return configuration.label
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(.white)
             .lineLimit(1)
             .fixedSize()
+            .offset(y: pressed ? Self.pressedLabelOffset : 0)
             .padding(.horizontal, Self.horizontalPadding)
             .frame(height: Self.height)
             .background {
                 shape
-                    .fill(Theme.primary)
-                    // Canvas: inset 0 0.5px 0 rgba(255,255,255,0.3).
+                    .fill(face(pressed: pressed))
+                    // Canvas: inset 0 0.5px 0 rgba(255,255,255,0.3). Pressed,
+                    // the lit top edge becomes a shadowed one.
                     .overlay {
                         shape.strokeBorder(
                             LinearGradient(
                                 stops: [
-                                    .init(color: .white.opacity(0.3), location: 0),
+                                    .init(color: pressed ? .black.opacity(0.3) : .white.opacity(0.3), location: 0),
                                     .init(color: .clear, location: 0.12)
                                 ],
                                 startPoint: .top,
@@ -381,15 +393,27 @@ struct CompareDoneButtonStyle: ButtonStyle {
                             lineWidth: 0.5
                         )
                     }
-                    .overlay {
-                        if configuration.isPressed { shape.fill(.black.opacity(0.18)) }
-                    }
                     // Canvas: 0 0.5px 1.5px rgba(0,0,0,0.5); lighter on the
-                    // pale light-appearance well.
-                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.5 : 0.25), radius: 0.75, y: 0.5)
+                    // pale light-appearance well. Gone while pressed: the
+                    // button sits in the bar instead of on it.
+                    .shadow(color: .black.opacity(pressed ? 0 : (colorScheme == .dark ? 0.5 : 0.25)),
+                            radius: 0.75, y: 0.5)
             }
+            .brightness(pressed ? -0.10 : 0)
+            .animation(.easeOut(duration: 0.12), value: pressed)
             .contentShape(shape)
             .opacity(isEnabled ? 1 : 0.5)
+    }
+
+    /// The primary fill, with Play's dark inner shadow from the top while
+    /// pressed (its opacities: 0.80 light, 0.55 dark).
+    private func face(pressed: Bool) -> AnyShapeStyle {
+        guard pressed else { return AnyShapeStyle(Theme.primary) }
+        return AnyShapeStyle(Theme.primary.shadow(.inner(
+            color: .black.opacity(colorScheme == .dark ? 0.55 : 0.80),
+            radius: Self.pressedInnerShadowRadius,
+            y: Self.pressedInnerShadowY
+        )))
     }
 }
 

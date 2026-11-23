@@ -21,7 +21,7 @@ enum ControlBarReadoutTitle {
     }
 }
 
-/// Playlist readout, 42 pt, two lines (spec §5.2): elapsed time, a divider
+/// Playlist readout, 41 pt, two lines (spec §5.2): elapsed time, a divider
 /// and the playing version's title, over an LED progress meter that is also
 /// the seek control.
 ///
@@ -31,19 +31,23 @@ enum ControlBarReadoutTitle {
 /// scrolls on Core Animation, and the meter steps on a discrete Core
 /// Animation keyframe per transport anchor event.
 struct PlaylistControlBarReadout: View {
-    static let height: CGFloat = 42
+    /// 8 pt above the digits, 6 pt to the meter, 8 pt below it, every edge
+    /// on a whole point: 8 + 14 + 6 + 5 + 8 = 41 pt.
+    static var height: CGFloat {
+        contentTopInset + ControlBarReadoutLine.height + lineSpacing + meterHeight + verticalMargin
+    }
+    /// v2.9.0's radius scale (11 at 56, 9 at 42), rounded at 41.
     static let cornerRadius: CGFloat = 9
     /// 3 pt cells on a 4 pt pitch: about 80 cells across the 340 pt
     /// readout of a 360 pt window.
     static let meterMetrics = DotMatrixMetrics(dotSize: 3, dotGap: 1, cellGap: 3)
     static let meterHeight: CGFloat = 5
+    /// The gap from the digits' bottom to the meter's top.
     static let lineSpacing: CGFloat = 6
-    /// Inset from the panel top to the title line, rounded down to a whole
-    /// point so the first dot row sits on the pixel grid (13 + 6 + 5 = 24 pt
-    /// of content: 9 pt above and below).
-    static var contentTopInset: CGFloat {
-        ((height - ControlBarReadoutLine.height - lineSpacing - meterHeight) / 2).rounded(.down)
-    }
+    /// The margin above the digits and below the meter.
+    static let verticalMargin: CGFloat = 8
+    /// Inset from the panel top to the line (the digits' top).
+    static var contentTopInset: CGFloat { verticalMargin }
     /// Extra hit area above and below the 5 pt meter, so it is easy to grab.
     static let meterHitOutset: CGFloat = 3
 
@@ -101,15 +105,15 @@ struct ControlBarReadoutLine: View {
     /// 1 pt gaps give 13 pt capitals on an 11 pt advance, just under the
     /// 14 pt digits. Whole points, so every dot lands on the pixel grid.
     static let titleMetrics = DotMatrixMetrics(dotSize: 1, dotGap: 1, cellGap: 2)
-    /// The line is as tall as the title; the digits (not pixel-snapped)
-    /// overhang it by half a point either side.
-    static var height: CGFloat { titleMetrics.lineHeight }
+    /// The line is as tall as the digits. The 13 pt title sits on their
+    /// bottom edge, 1 pt below their top, so both start on whole points.
+    static var height: CGFloat { digitHeight }
 
     let controller: PlaybackController
     let title: String
 
     var body: some View {
-        HStack(spacing: Self.spacing) {
+        HStack(alignment: .bottom, spacing: Self.spacing) {
             ControlBarElapsedDigits(controller: controller, digitHeight: Self.digitHeight)
             Rectangle()
                 .fill(Theme.readoutGlow.opacity(0.25))
@@ -1205,7 +1209,8 @@ final class DotMatrixProgressView: NSView {
 extension View {
     /// v2.9.0's Glass readout frame (its `ReadoutStyle.glass`), sized for any
     /// panel: a convex tile on the control-bar surface with no bezel. The
-    /// corner radius scales with the panel height (11 at 56, 9 at 42, 7 at 30).
+    /// corner radius scales with the panel height (11 at 56, 9 at 42 and 41,
+    /// 7 at 30).
     func readoutGlass(cornerRadius: CGFloat) -> some View {
         modifier(ReadoutGlassChrome(cornerRadius: cornerRadius))
     }

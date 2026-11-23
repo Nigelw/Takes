@@ -256,7 +256,7 @@ These are here to prevent parallel implementations and subtle regressions:
 - The playlist has no header bar. Its bottom bar (A2 §7) has Add Files…
   (⌘O's dialog) and Remove Selected (Delete's selection-aware removal), the
   `…` pull-down with the Playlist menu's organization commands, and the
-  `N items · m:ss` summary. The File menu (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M), Delete, the
+  `N tracks · m:ss` summary (one track per item). The File menu (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M), Delete, the
   context menu and the Playlist menu keep every one of those commands; the
   bar is another way in, not a replacement.
 - Keep global shortcuts focus-safe; active numeric text fields should retain
@@ -299,8 +299,8 @@ These are here to prevent parallel implementations and subtle regressions:
   though its centre group is narrower; in playlist mode the readout inside
   the 10 pt insets; then the one `ControlBarDivider`. Compare has no readout
   (`ControlBarLayout`'s readout-less init): its bar ends 10 pt under the
-  transport row (`ControlBarMetrics.transportRowBottomPadding`), 54 pt
-  shorter than the playlist's (77 vs 131 pt with the artwork), and the
+  transport row (`ControlBarMetrics.transportRowBottomPadding`), 53 pt
+  shorter than the playlist's (77 vs 130 pt with the artwork), and the
   transport row doesn't move between modes. It stretches to any width of
   360 pt or more; do not
   reintroduce width-dependent layouts. Side buttons are plain icons

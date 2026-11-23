@@ -1155,6 +1155,13 @@ private extension NSTextField {
         return field
     }
 
+    /// The text is wider than the field, so it shows truncated.
+    var isTruncatingText: Bool {
+        guard let cell, !stringValue.isEmpty else { return false }
+        let unbounded = NSRect(x: 0, y: 0, width: CGFloat.greatestFiniteMagnitude, height: bounds.height)
+        return ceil(cell.cellSize(forBounds: unbounded).width) > bounds.width
+    }
+
     /// Single-line height for the field's font.
     var lineHeight: CGFloat {
         let saved = stringValue
@@ -1231,6 +1238,11 @@ final class PlaylistItemCellView: NSTableCellView {
         titleHeight = titleField.lineHeight
         artistHeight = artistField.lineHeight
         super.init(frame: .zero)
+        // The title has its own truncation tooltip (`layout`), and the
+        // duration never needs one: AppKit's expansion tooltip showed on it
+        // whenever its tight frame clipped a fraction of a point.
+        titleField.allowsExpansionToolTips = false
+        durationField.allowsExpansionToolTips = false
         identifier = Self.reuseIdentifier
         titleField.cell?.sendsActionOnEndEditing = true
         textField = titleField
@@ -1340,6 +1352,9 @@ final class PlaylistItemCellView: NSTableCellView {
             artistField.frame = NSRect(x: M.titleX, y: top + titleHeight + 1, width: textWidth, height: artistHeight)
         }
         artistField.isHidden = content.artist.isEmpty || isEditingTitle
+        // The full title, only while it is cut short: by a narrow window or
+        // by the hover Compare pill, which takes room from it.
+        titleField.toolTip = !isEditingTitle && titleField.isTruncatingText ? content.title : nil
     }
 
     @objc private func comparePressed() { onCompare?() }
@@ -1371,6 +1386,8 @@ final class PlaylistVersionCellView: NSTableCellView {
         super.init(frame: .zero)
         identifier = Self.reuseIdentifier
         textField = titleField
+        // As on item rows, the duration shows no expansion tooltip.
+        durationField.allowsExpansionToolTips = false
         markView.imageScaling = .scaleNone
         for view in [markView, titleField, formatField, durationField] as [NSView] { addSubview(view) }
     }
@@ -1492,6 +1509,18 @@ final class PlaylistDisclosureButton: NSView {
         setAccessibilityValue(isExpanded ? 1 : 0)
     }
 
+    /// The whole slot is the hit target, never the glyph's image view, so
+    /// the table proposes this view for the click.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // `point` is in the superview's coordinates, as `frame` is.
+        !isHidden && frame.contains(point) ? self : nil
+    }
+    /// The table hands a click in a row to a subview only when the subview
+    /// accepts it here; otherwise the table takes it (as a row selection),
+    /// and the chevron's `mouseDown` never runs.
+    override func validateProposedFirstResponder(_ responder: NSResponder, for event: NSEvent?) -> Bool {
+        responder === self || super.validateProposedFirstResponder(responder, for: event)
+    }
     override func mouseDown(with event: NSEvent) { action?() }
     override func accessibilityPerformPress() -> Bool {
         action?()

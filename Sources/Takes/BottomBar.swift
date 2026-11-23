@@ -111,8 +111,8 @@ struct BottomBarAddRemoveControl: NSViewRepresentable {
 
 // MARK: - Playlist
 
-/// The playlist bar's summary (A2 §7): `6 items · 19:35`. The total adds up
-/// each item's playback version, the duration its row shows. An empty
+/// The playlist bar's summary (A2 §7): `6 tracks · 19:35`, one track per
+/// playlist item. The total adds up each item's playback version, the duration its row shows. An empty
 /// playlist shows no summary; its empty state already says so.
 enum PlaylistSummaryText {
     static func text(for items: [PlaylistItem]) -> String {
@@ -126,7 +126,7 @@ enum PlaylistSummaryText {
     }
 
     static func count(_ count: Int) -> String {
-        count == 1 ? "1 item" : "\(count.formatted()) items"
+        count == 1 ? "1 track" : "\(count.formatted()) tracks"
     }
 
     static func totalDuration(of items: [PlaylistItem]) -> TimeInterval {

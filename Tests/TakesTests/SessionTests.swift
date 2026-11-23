@@ -85,15 +85,38 @@ struct SessionTests {
         #expect(metrics.cellAdvance == 11)
 
         let inset = PlaylistControlBarReadout.contentTopInset
-        #expect(inset == inset.rounded())
-        #expect(inset == 9)
+        let titleTop = inset + ControlBarReadoutLine.digitHeight - metrics.lineHeight
+        #expect(titleTop == titleTop.rounded())
+        #expect(titleTop == 9)
+    }
+
+    /// The playlist readout keeps 8 pt above the digits, 6 pt to the meter
+    /// and 8 pt below it, with every edge on a whole point: the digits, the
+    /// title on their bottom edge, and the meter.
+    @Test
+    func playlistReadoutSpacingSitsOnWholePoints() {
+        let readout = PlaylistControlBarReadout.self
+        let digitsTop = readout.contentTopInset
+        let digitsBottom = digitsTop + ControlBarReadoutLine.digitHeight
+        let titleTop = digitsBottom - ControlBarReadoutLine.titleMetrics.lineHeight
+        let meterTop = digitsTop + ControlBarReadoutLine.height + readout.lineSpacing
+        let meterBottom = meterTop + readout.meterHeight
+
+        #expect(readout.height == 41)
+        #expect(ControlBarReadoutLine.height == ControlBarReadoutLine.digitHeight)
+        #expect(digitsTop == 8)
+        #expect(meterTop - digitsBottom == 6)
+        #expect(readout.height - meterBottom == 8)
+        for edge in [digitsTop, titleTop, meterTop] {
+            #expect(edge == edge.rounded())
+        }
     }
 
     // MARK: A2 compare title bar
 
     /// Compare's control bar ends 10 pt under the transport row (no
-    /// readout), so it is 54 pt shorter than the playlist's, whose readout
-    /// keeps 10 + 42 + 12 pt below the row.
+    /// readout), so it is 53 pt shorter than the playlist's, whose readout
+    /// keeps 10 + 41 + 12 pt below the row.
     @MainActor
     @Test
     func compareControlBarEndsUnderTheTransportRow() {
@@ -107,8 +130,8 @@ struct SessionTests {
 
         let playlistBelowRow = ControlBarMetrics.readoutTopSpacing + PlaylistControlBarReadout.height
             + ControlBarMetrics.readoutBottomPadding
-        #expect(playlistBelowRow == 64)
-        #expect(playlistBelowRow - ControlBarMetrics.transportRowBottomPadding == 54)
+        #expect(playlistBelowRow == 63)
+        #expect(playlistBelowRow - ControlBarMetrics.transportRowBottomPadding == 53)
     }
 
     /// Below the divider, the 32 pt title bar replaces the 30 pt readout and
@@ -2379,15 +2402,15 @@ struct SessionTests {
         // Each item counts once, at its playback version's duration.
         let taxman = makeSummaryItem("Taxman", durations: [159, 161], playback: 1)
         let rigby = makeSummaryItem("Eleanor Rigby", durations: [127.4])
-        #expect(PlaylistSummaryText.text(for: [taxman, rigby]) == "2 items · 4:48")
-        #expect(PlaylistSummaryText.accessibilityText(for: [taxman, rigby]) == "2 items, 4:48 in total")
+        #expect(PlaylistSummaryText.text(for: [taxman, rigby]) == "2 tracks · 4:48")
+        #expect(PlaylistSummaryText.accessibilityText(for: [taxman, rigby]) == "2 tracks, 4:48 in total")
 
-        #expect(PlaylistSummaryText.text(for: [rigby]) == "1 item · 2:07")
+        #expect(PlaylistSummaryText.text(for: [rigby]) == "1 track · 2:07")
         #expect(PlaylistSummaryText.text(for: []).isEmpty)
 
         // Past an hour the total gains an hours field, as the rows' durations do.
         let long = (0..<16).map { makeSummaryItem("Side \($0)", durations: [240]) }
-        #expect(PlaylistSummaryText.text(for: long) == "16 items · 1:04:00")
+        #expect(PlaylistSummaryText.text(for: long) == "16 tracks · 1:04:00")
 
         // A version without a known duration adds nothing.
         let unknown = makeSummaryItem("Unknown", durations: [.nan])

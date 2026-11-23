@@ -121,10 +121,10 @@ below it to the divider.
   `DigitalTimeReadout.convexGlassPanel` / `convexGlassLight`): no bezel,
   `Theme.readoutGlass` fill, domed highlight centred high on the tile, 1 pt
   dark rim, lit top edge and shadowed bottom edge. Corner radius scales with
-  height (v2.9.0: 11 pt at 56 pt tall): 9 pt at 42, 7 pt at 30.
+  height (v2.9.0: 11 pt at 56 pt tall): 9 pt at 42 and 41, 7 pt at 30.
 - Content colour: `Theme.readoutGlow` (cyan LED in dark).
 
-**Playlist readout, 42 pt tall, two lines:**
+**Playlist readout, 41 pt tall, two lines** (42 on the canvas; see §13):
 1. Seven-segment elapsed time (`SevenSegmentDisplay`), a faint divider, then
    the playing item's track title in the dot-matrix face, uppercase, e.g.
    `TAXMAN (1967 MONO MIX)`. Long titles scroll (`DotMatrixMarqueeDisplay`).
@@ -194,7 +194,7 @@ macOS **small** controls (`.controlSize(.small)`, 20 pt tall, 10 pt glyphs).
 
 | Mode | Left | Right |
 |---|---|---|
-| Playlist | `+`/`−` segmented (Add Files / Remove Selected) · `…` pull-down menu (the organisation commands from `PlaylistCommandContext`) | `6 items · 19:35` (item count and total duration) |
+| Playlist | `+`/`−` segmented (Add Files / Remove Selected) · `…` pull-down menu (the organisation commands from `PlaylistCommandContext`) | `6 tracks · 19:35` (item count and total duration) |
 | Compare | `+`/`−` segmented (Add Version / Remove Active Version) · Align button | Zoom: magnifier − · small slider · magnifier + (no Fit button) |
 
 Built in milestone 5; the decisions it settled (surface and light values,
@@ -291,7 +291,7 @@ Each is meant to fit one session and leave the app working.
 5. **Bottom bars.** *Done.* One 30 pt small-control bar layout for both
    modes, below the playlist table and the compare lanes. Playlist: Add
    Files… / Remove Selected, the `…` pull-down with the Playlist menu's
-   organisation commands, and the `6 items · 19:35` summary. Compare: Add
+   organisation commands, and the `6 tracks · 19:35` summary. Compare: Add
    Version… / Remove Active Version, the Align button (its progress, outcome
    flash and "Analyze Further" popover back from the pre-A2 header, replacing
    the interim alert), and zoom. Settled the window minimum height (§13).
@@ -363,8 +363,10 @@ None open. The version check for a missing file was decided in milestone 3
 - **Readout title face:** 1 pt dots with 1 pt gaps (13 pt capitals on an
   11 pt advance), the closest whole-point match to the canvas's 16 px Doto,
   sitting just under the 14 pt seven-segment digits. Playlist readout
-  content: 13 pt line, 6 pt gap, 5 pt meter, 9 pt above and below. Compare:
-  the 13 pt line 8 pt from the top.
+  content, on whole points: 8 pt above the digits, 14 pt digits, 6 pt
+  gap, 5 pt meter, 8 pt below, so the panel is 41 pt (the canvas's 42 pt
+  panel would leave 8.5 pt margins); the 13 pt title line sits on the
+  digits' bottom edge, its top at 9. Compare: the 13 pt line 8 pt from the top.
 - **Divider:** the existing groove tokens (`Theme.transportDividerShadow`
   over `transportDividerHighlight`) drawn as two half-point lines, 1 pt in
   all, as the comparison section already drew it; the 1 pt + 1 pt in §3 is
@@ -373,9 +375,9 @@ None open. The version check for a missing file was decided in milestone 3
 - **Control-bar heights differ by mode.** Milestone 2: the readouts were
   42 and 30 pt, so the compare bar was 12 pt shorter (119 vs 131 pt with
   artwork). Since the compare title-bar variant (below) compare has no
-  readout: its bar ends 10 pt under the transport row, 54 pt shorter than
-  the playlist's (77 vs 131 pt with artwork, 91 vs 145 under the
-  titlebar), and its 32 pt title bar sits below the divider, so the ruler
+  readout: its bar ends 10 pt under the transport row, 53 pt shorter than
+  the playlist's (77 vs 130 pt with artwork, 91 vs 144 under the
+  titlebar; 54 pt while the playlist readout was 42 pt), and its 32 pt title bar sits below the divider, so the ruler
   starts 10 pt higher than with the readout. The transport row and
   everything above it stay put.
 - **Compare is unavailable for single-version items.** They show no
@@ -448,10 +450,11 @@ None open. The version check for a missing file was decided in milestone 3
   edges step toward the background (near #B9B9C0, far #D5D5DA). Dark values
   are the canvas's. All live in `PlaylistRowPalette`.
 - **Playlist summary** (milestone 5). The bottom bar's right side shows the
-  item count and total duration, `6 items · 19:35` (`1 item · 2:07` for one),
+  item count and total duration, `6 tracks · 19:35` (`1 track · 2:07` for one;
+  each item counts as one track, "items" until after milestone 5),
   in 11 pt secondary tabular digits. The total adds up each item's playback
   version, the duration its row shows, rounded once at the end; it gains an
-  hours field past an hour (`16 items · 1:04:00`), as the rows do. Versions
+  hours field past an hour (`16 tracks · 1:04:00`), as the rows do. Versions
   without a known duration add nothing. An empty playlist shows no summary:
   its empty state already says so. This replaces the header bar's `N items`
   label, removed in milestone 3.
