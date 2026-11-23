@@ -6,8 +6,9 @@ Handoff spec for implementing the A2 design. The design lives on the
 *A2 · Compare*, *A2 · Playlist, artwork hidden*). The **Archive** page holds
 the rejected directions and every A2 iteration; read it only for history.
 
-The artboards are HTML approximations drawn in dark appearance. Where this
-spec and an artboard disagree, this spec wins. Values marked **v2.9.0** were
+The artboards are HTML approximations drawn in dark appearance only; light
+appearance is also required (§13). Where this spec and an artboard
+disagree, this spec wins. Values marked **v2.9.0** were
 taken from that tag's source and must match it; everything else is new.
 
 Before starting, read `AGENTS.md`. The invariants there (one
@@ -160,7 +161,7 @@ Replaces the current column table. Still an `NSOutlineView`
   (not beside the duration).
 - Hover on a multi-version item: a **Compare** pill before the duration.
   Opens compare for that item **without starting its playback**.
-  Double-click does the same.
+  Double-click still plays the item, as today.
 - Selection highlight and every row background sit inside the 10 pt inset,
   6 pt radius.
 
@@ -227,8 +228,10 @@ invariant: per-scroll/zoom values still flow only into lane leaves.
 
 ## 9. Behaviour
 
-- **Enter compare:** row Compare pill or double-click on a multi-version
-  item. Does not start playback of that item.
+- **Enter compare:** the row's Compare pill on a multi-version item (plus
+  the existing menu commands). Does not start playback of that item.
+  Single-version items can't enter compare (§13). Double-click keeps its
+  current meaning on every row: play (`PlaylistOutlineView.rowDoubleClicked`).
 - **Leave compare:** back button or Esc. The version audible when leaving
   becomes the item's playback version (since there is no other in-place
   version picker besides the playlist's version rows).
@@ -277,13 +280,23 @@ Update `AGENTS.md` (ownership, invariants, test map) as each milestone lands.
 ## 12. Open questions
 
 - Window resizability (§2).
-- Light appearance: the design is dark only. v2.9.0's light values exist for
-  the buttons and readout; the frosted toggle chip and lane overlay strip
-  need light variants.
-- Teenage Engineering control-bar theme: how the two-line readout and
-  360 pt width interact with `ControlBarTheme.teenageEngineering`.
 - Long readout titles: confirm scrolling (marquee) versus truncation.
-- Items with one version: no Compare pill, no chevron; confirm compare is
-  simply unavailable for them.
 - What the version check (§6) does when the playback version's file is
   missing.
+
+## 13. Decisions
+
+- **Light appearance is required.** The canvas only draws dark, so light
+  values come from the existing tokens: v2.9.0's `lightPrimary` /
+  `lightSecondary` `TransportAppearance`, the light `Theme` colours (amber
+  backlit LCD readout, amber secondary accent), and system label colours.
+  New elements need light designs of their own: the frosted artwork-toggle
+  chip, the lane info strip's fade, the stacked-thumbnail card edges, and
+  the list's row tints.
+- **Teenage Engineering control-bar theme: out of scope.** A2 targets the
+  classic theme only. Leave `ControlBarTheme.teenageEngineering` as it is;
+  how it maps onto the A2 control bar is a later question.
+- **Compare is unavailable for single-version items.** They show no
+  disclosure chevron and no Compare pill.
+- **Double-click plays, on every row.** It does not open compare, even for
+  multi-version items; the Compare pill is the way in.
