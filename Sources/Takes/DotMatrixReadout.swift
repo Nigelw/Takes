@@ -756,17 +756,18 @@ final class DotMatrixMarqueeView: NSView {
 
 // MARK: - Progress bar
 
-/// Segmented LCD progress bar: a row of pixel-pitch blocks, all drawn dim in
-/// their "off" state between two endcaps, lit from the left up to the current
-/// position. Only transport anchor events update this leaf; Core Animation
-/// grows the lit run between anchors, and native input / accessibility write
-/// seeks back to transport.
+/// Segmented LED progress bar: a row of pixel-pitch blocks across the full
+/// width, all drawn dim in their "off" state, lit from the left up to the
+/// current position. In dark appearance the lit run glows and the leading
+/// cell glows brighter (the canvas's LED). Only transport anchor events
+/// update this leaf; Core Animation steps the lit run between anchors, and
+/// native input / accessibility write seeks back to transport.
 struct DotMatrixProgressBar: NSViewRepresentable {
     let controller: PlaybackController
     let seek: (TimeInterval) -> Void
     var metrics = DotMatrixMetrics()
-    /// Height of the lit segments/endcaps — independent of `metrics`'
-    /// dot pitch, which only governs the segments' horizontal width/spacing.
+    /// Height of the segments — independent of `metrics`' dot pitch, which
+    /// only governs the segments' horizontal width/spacing.
     var barHeight: CGFloat
 
     func makeNSView(context: Context) -> DotMatrixProgressView { DotMatrixProgressView() }
@@ -783,9 +784,16 @@ final class DotMatrixProgressView: NSView {
     /// so the whole scrubbable extent reads as an LCD bar graph with every
     /// segment present and only the leading ones lit.
     private let rail = CAShapeLayer()
-    /// The endcaps framing the segment row at either end, in their dim
-    /// resting state; the lit fill covers them once progress reaches them.
-    private let caps = CAShapeLayer()
+    /// Dark appearance's LED glow, under the cells: a pre-blurred image of
+    /// every cell's halo, clipped to the lit run by its container's width
+    /// (stepped with the fill), and a brighter halo for the leading cell
+    /// (stepped with the head). Static images, so the glow costs no shadow
+    /// rendering per frame.
+    private let runGlowClip = CALayer()
+    private let runGlow = CALayer()
+    private let headGlowClip = CALayer()
+    private let headGlow = CALayer()
+    private var glowCacheKey: GlowCacheKey?
     private let track = CALayer()
     private let fill = CALayer()
     /// The leading lit element, drawn brighter than the rest of the run
@@ -812,8 +820,15 @@ final class DotMatrixProgressView: NSView {
         track.addSublayer(fill)
         track.addSublayer(head)
         track.mask = blocks
+        runGlowClip.anchorPoint = CGPoint(x: 0, y: 0.5)
+        runGlowClip.masksToBounds = true
+        runGlowClip.addSublayer(runGlow)
+        headGlowClip.masksToBounds = true
+        headGlow.anchorPoint = CGPoint(x: 1, y: 0.5)
+        headGlowClip.addSublayer(headGlow)
         layer?.addSublayer(rail)
-        layer?.addSublayer(caps)
+        layer?.addSublayer(runGlowClip)
+        layer?.addSublayer(headGlowClip)
         layer?.addSublayer(track)
         setAccessibilityElement(true)
         setAccessibilityRole(.slider)
@@ -865,14 +880,13 @@ final class DotMatrixProgressView: NSView {
         let height = geometry.frameHeight
 
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        // One pixel-aligned frame shared by the three layers.
+        // One pixel-aligned frame shared by the cell layers.
         let frame = CGRect(x: 0, y: (((bounds.height - height) / 2) * scale).rounded() / scale,
                            width: width, height: height)
-        track.frame = frame; rail.frame = frame; caps.frame = frame
+        track.frame = frame; rail.frame = frame
         blocks.frame = track.bounds
         blocks.path = geometry.litMask
         rail.path = geometry.offSegments
-        caps.path = geometry.caps
         applyHoverStyle(glow: glow)
         // Dark: the run glows a step below full and the head runs white-hot.
         // Light (dark ink on the backlit LCD): the run is a touch faded and
@@ -882,6 +896,9 @@ final class DotMatrixProgressView: NSView {
         head.backgroundColor = (isDark ? glow.blended(withFraction: 0.55, of: .white) ?? glow : glow).cgColor
         fill.removeAnimation(forKey: "progress")
         head.removeAnimation(forKey: "progress")
+        runGlowClip.removeAnimation(forKey: "progress")
+        headGlow.removeAnimation(forKey: "progress")
+        layOutGlow(geometry: geometry, frame: frame, glow: glow, scale: scale, isDark: isDark)
 
         // A real bar graph lights whole elements only. The fill's width is
         // quantized to element boundaries (its edge always sits in a gap, so
@@ -895,12 +912,18 @@ final class DotMatrixProgressView: NSView {
         fill.bounds = CGRect(x: 0, y: 0, width: geometry.fillWidth(litCount: lit), height: height)
         head.bounds = CGRect(x: 0, y: 0, width: geometry.headWidth, height: height)
         head.position = CGPoint(x: geometry.fillWidth(litCount: lit), y: height / 2)
+        runGlowClip.bounds.size.width = Self.runGlowClipWidth(geometry: geometry, litCount: lit)
+        headGlow.position.x = Self.headGlowX(geometry: geometry, litCount: lit)
         if playing && duration > current && lit < elementCount {
             let remaining = duration - current
             var values: [CGFloat] = []
+            var runGlowValues: [CGFloat] = []
+            var headGlowValues: [CGFloat] = []
             var keyTimes: [NSNumber] = []
             for count in lit...elementCount {
                 values.append(geometry.fillWidth(litCount: count))
+                runGlowValues.append(Self.runGlowClipWidth(geometry: geometry, litCount: count))
+                headGlowValues.append(Self.headGlowX(geometry: geometry, litCount: count))
                 // Element `count` lights when position reaches `count / elementCount`
                 // of the duration; the first keyframe is the current state.
                 let at = duration * TimeInterval(count) / TimeInterval(elementCount) - current
@@ -921,28 +944,132 @@ final class DotMatrixProgressView: NSView {
             headAnimation.duration = remaining
             headAnimation.fillMode = .forwards; headAnimation.isRemovedOnCompletion = false
             head.add(headAnimation, forKey: "progress")
+            if !runGlowClip.isHidden {
+                runGlowClip.add(Self.steps("bounds.size.width", runGlowValues, keyTimes, remaining), forKey: "progress")
+                headGlow.add(Self.steps("position.x", headGlowValues, keyTimes, remaining), forKey: "progress")
+            }
         }
         CATransaction.commit()
     }
 
+    private static func steps(_ keyPath: String, _ values: [CGFloat], _ keyTimes: [NSNumber],
+                              _ duration: TimeInterval) -> CAKeyframeAnimation {
+        let animation = CAKeyframeAnimation(keyPath: keyPath)
+        animation.values = values
+        animation.keyTimes = keyTimes
+        animation.calculationMode = .discrete
+        animation.duration = duration
+        animation.fillMode = .forwards; animation.isRemovedOnCompletion = false
+        return animation
+    }
+
+    // MARK: LED glow
+
+    /// The canvas's LED glow, dark appearance only (light is an LCD: ink
+    /// doesn't glow): the lit run's cells carry a 2 pt blur of the glow
+    /// colour at 50% (CSS `0 0 2px`), the leading cell a 5 pt blur at full
+    /// strength (`0 0 5px`). Blur radii follow CSS, where the blur is twice
+    /// the Gaussian's standard deviation.
+    enum GlowMetrics {
+        static let runBlur: CGFloat = 2
+        static let runOpacity: CGFloat = 0.5
+        static let headBlur: CGFloat = 5
+        static let headOpacity: CGFloat = 1
+        /// Room around a glow image for its blur to fade out.
+        static func bleed(blur: CGFloat) -> CGFloat { (blur * 1.5).rounded(.up) }
+    }
+
+    private struct GlowCacheKey: Equatable {
+        var width: CGFloat
+        var height: CGFloat
+        var scale: CGFloat
+        var color: NSColor
+    }
+
+    /// The run glow's clip width: the bleed left of the first cell plus the
+    /// fill, so the halo of every lit cell shows and none of an unlit one;
+    /// nothing at all when no cell is lit.
+    static func runGlowClipWidth(geometry: BarGeometry, litCount: Int) -> CGFloat {
+        litCount > 0 ? geometry.fillWidth(litCount: litCount) + GlowMetrics.bleed(blur: GlowMetrics.runBlur) : 0
+    }
+
+    /// The head glow's right edge in its clip (which starts one bleed left
+    /// of the bar): the leading cell's right edge plus the image's bleed.
+    /// With nothing lit it parks far outside the clip.
+    static func headGlowX(geometry: BarGeometry, litCount: Int) -> CGFloat {
+        guard litCount > 0, litCount <= geometry.litRightEdges.count else { return -10_000 }
+        return geometry.litRightEdges[litCount - 1] + GlowMetrics.bleed(blur: GlowMetrics.headBlur) * 2
+    }
+
+    private func layOutGlow(geometry: BarGeometry, frame: CGRect, glow: NSColor, scale: CGFloat, isDark: Bool) {
+        runGlowClip.isHidden = !isDark
+        headGlowClip.isHidden = !isDark
+        guard isDark, !geometry.litRightEdges.isEmpty else { return }
+        let runBleed = GlowMetrics.bleed(blur: GlowMetrics.runBlur)
+        let headBleed = GlowMetrics.bleed(blur: GlowMetrics.headBlur)
+        let runSize = CGSize(width: frame.width + runBleed * 2, height: frame.height + runBleed * 2)
+        runGlowClip.position = CGPoint(x: frame.minX - runBleed, y: frame.midY)
+        runGlowClip.bounds = CGRect(x: 0, y: 0, width: runGlowClip.bounds.width, height: runSize.height)
+        runGlow.frame = CGRect(origin: .zero, size: runSize)
+        headGlowClip.frame = frame.insetBy(dx: -headBleed, dy: -headBleed)
+        let headSize = CGSize(width: geometry.blockWidth + headBleed * 2, height: frame.height + headBleed * 2)
+        headGlow.bounds = CGRect(origin: .zero, size: headSize)
+        headGlow.position.y = headGlowClip.bounds.midY
+        runGlow.contentsScale = scale
+        headGlow.contentsScale = scale
+
+        let key = GlowCacheKey(width: frame.width, height: frame.height, scale: scale, color: glow)
+        guard key != glowCacheKey else { return }
+        glowCacheKey = key
+        let cells = geometry.cellRects.map { $0.offsetBy(dx: runBleed, dy: runBleed) }
+        runGlow.contents = Self.glowImage(
+            cells: cells, size: runSize, scale: scale, blur: GlowMetrics.runBlur,
+            color: glow.withAlphaComponent(GlowMetrics.runOpacity)
+        )
+        let cell = CGRect(x: headBleed, y: headBleed, width: geometry.blockWidth, height: frame.height)
+        headGlow.contents = Self.glowImage(
+            cells: [cell], size: headSize, scale: scale, blur: GlowMetrics.headBlur,
+            color: glow.withAlphaComponent(GlowMetrics.headOpacity)
+        )
+    }
+
+    /// Only the blurred halo of `cells`, not the cells themselves: they are
+    /// drawn far to the right and their shadow is cast back into place.
+    /// Shadow offset and blur are in device pixels, so both take `scale`.
+    static func glowImage(cells: [CGRect], size: CGSize, scale: CGFloat, blur: CGFloat, color: NSColor) -> CGImage? {
+        let pixelWidth = Int((size.width * scale).rounded(.up))
+        let pixelHeight = Int((size.height * scale).rounded(.up))
+        guard pixelWidth > 0, pixelHeight > 0,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.scaleBy(x: scale, y: scale)
+        let shift = size.width + blur * 4
+        context.setShadow(offset: CGSize(width: -shift * scale, height: 0), blur: blur * scale, color: color.cgColor)
+        context.setFillColor(NSColor.black.cgColor)
+        for cell in cells { context.fill(cell.offsetBy(dx: shift, dy: 0)) }
+        return context.makeImage()
+    }
+
     /// The bar's shapes for a given width, in a common coordinate space
-    /// `frameHeight` tall. The lit elements — left cap, each segment, right
-    /// cap, in that order — are what progress consumes one at a time.
+    /// `frameHeight` tall. The segments, left to right, are what progress
+    /// consumes one at a time.
     struct BarGeometry {
-        /// Full-height segments plus both caps: the lit fill's mask.
+        /// Every segment at full height: the lit fill's mask.
         var litMask: CGPath
-        /// The shorter "off" bar under each segment.
+        /// The "off" bar under each segment.
         var offSegments: CGPath
-        /// Both endcaps at full height, for their dim resting state.
-        var caps: CGPath
-        /// Right edge of every lit element in left-to-right order.
+        /// Every segment's rect, left to right (the glow's source).
+        var cellRects: [CGRect]
+        /// Right edge of every segment in left-to-right order.
         var litRightEdges: [CGFloat]
+        var blockWidth: CGFloat
         var gap: CGFloat
         var frameHeight: CGFloat
         /// Width of the head layer: one block plus a gap, so right-anchored
-        /// at `fillWidth(litCount:)` it covers the leading element only (the
-        /// caps sit two gaps off the row, so it never reaches the block next
-        /// to a cap).
+        /// at `fillWidth(litCount:)` it covers the leading segment only.
         var headWidth: CGFloat
 
         /// How many whole elements are lit at `fraction` of the duration:
@@ -963,10 +1090,10 @@ final class DotMatrixProgressView: NSView {
         }
     }
 
-    /// Lays out every full block that fits between the two endcaps, each an
-    /// identical whole-*device*-pixel width advancing by an identical
-    /// whole-device-pixel pitch, with the row centered between the caps so
-    /// neither end has a stray partial gap.
+    /// Lays out every full block that fits the width, each an identical
+    /// whole-*device*-pixel width advancing by an identical whole-device-pixel
+    /// pitch, with the row centered so neither end has a stray partial gap.
+    /// No endcaps: the canvas has none (they were dropped after milestone 5).
     ///
     /// The block, gap and cap widths come straight from the whole-point
     /// `metrics`, so at 1x and 2x the snapping here is a no-op; it remains
@@ -978,7 +1105,7 @@ final class DotMatrixProgressView: NSView {
     /// block plus gap, and floored at one device pixel, so consecutive blocks
     /// can never touch and draw as a solid line.
     ///
-    /// `barHeight` (the lit segments'/endcaps' height) is independent of
+    /// `barHeight` (the segments' height) is independent of
     /// `metrics` — the caller sets it from the elapsed-time row, as a whole
     /// number of points.
     static func barGeometry(width: CGFloat, metrics: DotMatrixMetrics, barHeight: CGFloat, scale: CGFloat) -> BarGeometry {
@@ -987,69 +1114,49 @@ final class DotMatrixProgressView: NSView {
         let blockWidth = max(snapped(metrics.dotSize), pixel)
         let gap = max(snapped(metrics.dotGap), pixel)
         let advance = blockWidth + gap
-        // Lit segments and caps stand the full bar height; an unlit segment
-        // is a shorter bar centered in the same slot, so "off" and "on" differ
-        // in size as well as brightness.
+        // Lit segments stand the full bar height; an unlit segment is a
+        // bar centered in the same slot, never taller (with the meter's 3 pt
+        // cells and 5 pt bar the two are the same height).
         let segmentHeight = max(snapped(barHeight), pixel)
         let offHeight = min(max(snapped(metrics.dotSize * 2), pixel), segmentHeight)
         let offY = snapped((segmentHeight - offHeight) / 2)
         // Square blocks, like the text dots: every edge is on the pixel grid.
-        let cornerRadius: CGFloat = 0
-
-        // Endcaps: a thin post at either end, the lit segments' height, set
-        // off from the row by a double gap. Narrower than a segment so it
-        // reads as the frame the bar graph sits in, and lit like one when
-        // progress reaches it.
-        let capWidth = max(snapped(metrics.dotGap * 2), pixel)
-        let capInset = gap * 2
         let frameHeight = segmentHeight
 
         let litMask = CGMutablePath()
         let offSegments = CGMutablePath()
-        let caps = CGMutablePath()
+        var cellRects: [CGRect] = []
         var litRightEdges: [CGFloat] = []
-        let regionStart = capWidth + capInset
-        let regionEnd = snapped(width) - capWidth - capInset
-        let regionWidth = regionEnd - regionStart
-        guard regionWidth >= blockWidth else {
-            return BarGeometry(litMask: litMask, offSegments: offSegments, caps: caps, litRightEdges: litRightEdges,
-                               gap: gap, frameHeight: frameHeight, headWidth: blockWidth + gap)
-        }
-        let capRadius = min(cornerRadius, capWidth / 2)
-        let leftCap = CGRect(x: 0, y: 0, width: capWidth, height: frameHeight)
-        let rightCap = CGRect(x: snapped(width) - capWidth, y: 0, width: capWidth, height: frameHeight)
-        caps.addRoundedRect(in: leftCap, cornerWidth: capRadius, cornerHeight: capRadius)
-        caps.addRoundedRect(in: rightCap, cornerWidth: capRadius, cornerHeight: capRadius)
-        litMask.addRoundedRect(in: leftCap, cornerWidth: capRadius, cornerHeight: capRadius)
-        litRightEdges.append(leftCap.maxX)
-
+        let regionWidth = snapped(width)
         // n blocks span n advances minus the trailing gap.
-        let count = Int(((regionWidth + gap + 0.01) / advance).rounded(.down))
+        let count = regionWidth >= blockWidth ? Int(((regionWidth + gap + 0.01) / advance).rounded(.down)) : 0
         let rowWidth = CGFloat(count) * advance - gap
-        var x = snapped(regionStart + (regionWidth - rowWidth) / 2)
+        var x = snapped((regionWidth - rowWidth) / 2)
         for _ in 0..<count {
-            litMask.addRoundedRect(in: CGRect(x: x, y: 0, width: blockWidth, height: segmentHeight),
-                                   cornerWidth: cornerRadius, cornerHeight: cornerRadius)
-            offSegments.addRoundedRect(in: CGRect(x: x, y: offY, width: blockWidth, height: offHeight),
-                                       cornerWidth: cornerRadius, cornerHeight: cornerRadius)
-            litRightEdges.append(x + blockWidth)
+            let cell = CGRect(x: x, y: 0, width: blockWidth, height: segmentHeight)
+            litMask.addRect(cell)
+            offSegments.addRect(CGRect(x: x, y: offY, width: blockWidth, height: offHeight))
+            cellRects.append(cell)
+            litRightEdges.append(cell.maxX)
             x += advance
         }
-
-        litMask.addRoundedRect(in: rightCap, cornerWidth: capRadius, cornerHeight: capRadius)
-        litRightEdges.append(rightCap.maxX)
-        return BarGeometry(litMask: litMask, offSegments: offSegments, caps: caps, litRightEdges: litRightEdges,
-                           gap: gap, frameHeight: frameHeight, headWidth: blockWidth + gap)
+        return BarGeometry(litMask: litMask, offSegments: offSegments, cellRects: cellRects,
+                           litRightEdges: litRightEdges, blockWidth: blockWidth, gap: gap,
+                           frameHeight: frameHeight, headWidth: blockWidth + gap)
     }
 
     // MARK: Hover affordance
 
-    /// Hover state: the unlit segments and endcaps brighten so the full
-    /// scrubbable extent stands out. Static once applied; only the transition
-    /// animates.
+    /// The unlit segments' opacity: the canvas's 9% in dark; light's LCD
+    /// keeps its fainter-ink 22% (the canvas draws dark only). Hover
+    /// brightens them so the full scrubbable extent stands out.
+    static func unlitOpacity(isDark: Bool, hovered: Bool) -> CGFloat {
+        isDark ? (hovered ? 0.2 : 0.09) : (hovered ? 0.45 : 0.22)
+    }
+
+    /// Hover state: static once applied; only the transition animates.
     private func applyHoverStyle(glow: NSColor) {
-        rail.fillColor = glow.withAlphaComponent(isHovered ? 0.45 : 0.22).cgColor
-        caps.fillColor = glow.withAlphaComponent(isHovered ? 0.6 : 0.36).cgColor
+        rail.fillColor = glow.withAlphaComponent(Self.unlitOpacity(isDark: colorScheme == .dark, hovered: isHovered)).cgColor
     }
 
     private func setHovered(_ hovered: Bool) {

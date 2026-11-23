@@ -164,8 +164,12 @@ struct SessionTests {
             width: 320, metrics: PlaylistControlBarReadout.meterMetrics,
             barHeight: PlaylistControlBarReadout.meterHeight, scale: 2
         )
-        let cells = geometry.litRightEdges.count - 2
-        #expect((75...85).contains(cells))
+        // No endcaps: every element is a cell, 80 across, as on the canvas.
+        #expect(geometry.litRightEdges.count == 80)
+        #expect(geometry.cellRects.count == 80)
+        // 80 cells and 79 gaps make 319 pt, centred in the 320.
+        #expect(geometry.cellRects.first?.minX == 0.5)
+        #expect(geometry.cellRects.last?.maxX == 319.5)
         #expect(geometry.frameHeight == PlaylistControlBarReadout.meterHeight)
 
         for lit in 1...geometry.litRightEdges.count {
@@ -178,6 +182,49 @@ struct SessionTests {
                 #expect(headRight < geometry.litRightEdges[lit - 1] + geometry.gap)
             }
         }
+    }
+
+    /// The canvas's LED: unlit cells at 9% in dark (light's LCD keeps 22%),
+    /// a 2 pt glow at 50% on the lit run and a 5 pt glow on the leading cell.
+    /// The run's glow shows only lit cells' halos; the head's follows the
+    /// leading cell and hides when nothing is lit.
+    @MainActor
+    @Test
+    func playlistMeterGlowsLikeTheCanvasLED() {
+        typealias View = DotMatrixProgressView
+        #expect(View.unlitOpacity(isDark: true, hovered: false) == 0.09)
+        #expect(View.unlitOpacity(isDark: true, hovered: true) > 0.09)
+        #expect(View.unlitOpacity(isDark: false, hovered: false) == 0.22)
+        #expect(View.GlowMetrics.runBlur == 2)
+        #expect(View.GlowMetrics.runOpacity == 0.5)
+        #expect(View.GlowMetrics.headBlur == 5)
+        #expect(View.GlowMetrics.headOpacity == 1)
+
+        let geometry = View.barGeometry(
+            width: 320, metrics: PlaylistControlBarReadout.meterMetrics,
+            barHeight: PlaylistControlBarReadout.meterHeight, scale: 2
+        )
+        let runBleed = View.GlowMetrics.bleed(blur: View.GlowMetrics.runBlur)
+        let headBleed = View.GlowMetrics.bleed(blur: View.GlowMetrics.headBlur)
+        #expect(View.runGlowClipWidth(geometry: geometry, litCount: 0) == 0)
+        for lit in [1, 24, 80] {
+            // The clip starts one bleed left of the bar and ends past the
+            // last lit cell, before the next cell starts.
+            let clipEnd = View.runGlowClipWidth(geometry: geometry, litCount: lit) - runBleed
+            #expect(clipEnd > geometry.litRightEdges[lit - 1])
+            if lit < 80 { #expect(clipEnd < geometry.cellRects[lit].minX) }
+            // The head glow's image ends one bleed past the leading cell.
+            #expect(View.headGlowX(geometry: geometry, litCount: lit) - headBleed * 2
+                == geometry.litRightEdges[lit - 1])
+        }
+        #expect(View.headGlowX(geometry: geometry, litCount: 0) < -1000)
+
+        let image = View.glowImage(
+            cells: [CGRect(x: 10, y: 10, width: 3, height: 5)], size: CGSize(width: 23, height: 25),
+            scale: 2, blur: 5, color: .cyan
+        )
+        #expect(image?.width == 46)
+        #expect(image?.height == 50)
     }
 
     @Test

@@ -347,11 +347,19 @@ None open. The version check for a missing file was decided in milestone 3
   glyph lights in `Theme.primaryLitGlyph` with the secondary appearance's
   glow and bloom, the same treatment v2.9.0's engaged secondary buttons
   use, still without a circle. Disabled: 35% opacity.
-- **LED meter:** 3 pt cells on a 4 pt pitch, 5 pt tall (about 78 cells in a
-  360 pt window), keeping `DotMatrixProgressBar`'s endcaps and dim unlit
-  cells. The lit run is drawn a step below full; the leading cell is
-  brightest (white-hot in dark, full ink in light). It has 3 pt of extra
-  hit area above and below.
+- **LED meter:** 3 pt cells on a 4 pt pitch, 5 pt tall, across the full
+  width (80 cells in a 360 pt window, the canvas's count). The lit run is
+  drawn a step below full; the leading cell is brightest (white-hot in
+  dark, full ink in light). It has 3 pt of extra hit area above and below.
+  Matched to the canvas after the compare title-bar variant: the endcaps
+  milestone 2 kept from `DotMatrixProgressBar` are gone, unlit cells are
+  the canvas's 9% in dark (were 22%; light's LCD keeps 22%), and in dark
+  the lit run glows (2 pt blur at 50%) and the leading cell glows brighter
+  (5 pt blur, full strength), as the canvas's `box-shadow`s do. Light is an
+  LCD, so it has no glow. The glow is two pre-blurred images clipped and
+  stepped with the fill and head, so it adds no per-frame work. The cells
+  stay square on the pixel grid rather than the canvas's stretched,
+  0.5 pt-rounded ones.
 - **Readout title face:** 1 pt dots with 1 pt gaps (13 pt capitals on an
   11 pt advance), the closest whole-point match to the canvas's 16 px Doto,
   sitting just under the 14 pt seven-segment digits. Playlist readout

@@ -392,7 +392,8 @@ these reintroduces the exact regressions it fixed):
   title bar) that re-renders once per displayed second from
   `playingReadoutText`; nothing else in the control bar or the title bar
   reads it or the transport position.
-  The LED meter's fill and brighter head step on discrete
+  The LED meter's fill and brighter head, and dark appearance's glow under
+  them (pre-blurred images, never live layer shadows), step on discrete
   `CAKeyframeAnimation`s armed per transport anchor event; titles scroll on
   Core Animation only when they overflow.
 - **Continuous on-screen motion must use Core Animation, never SwiftUI
@@ -452,7 +453,7 @@ these reintroduces the exact regressions it fixed):
   A2 readout title rule (tag, filename), the compare control bar's height
   and the title bar (its geometry, centring and take-count text), the
   ruler labels' tops level with the major notches, the LED meter's cell count
-  and head geometry, the control bar's side-button placement, the cover
+  (no endcaps), head geometry, unlit opacity and glow, the control bar's side-button placement, the cover
   rule (`CoverVersionRule`), the A2 playlist row metrics and version names, the
   thumbnail cache (visible-only queue, concurrency bound, capacity, cover
   reuse), the A2 compact compare geometry (ruler and seat, the fixed lane
