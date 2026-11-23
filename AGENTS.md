@@ -263,6 +263,10 @@ these reintroduces the exact regressions it fixed):
   of the playback/UI performance improvement effort (what's landed, what's
   measured, what's left). Check this before starting new perf work so it
   isn't duplicated or redone.
+- [docs/a2-redesign-spec.md](docs/a2-redesign-spec.md): the planned A2
+  compact cover-column redesign (360 pt window, artwork toggle, glass
+  readout, two-line playlist rows, compact compare). Not started; read it
+  before working on any of its milestones.
 - [docs/comparative-quality-analysis.md](docs/comparative-quality-analysis.md):
   the multi-track "which of these is the better copy?" feature — design,
   milestones, tuning findings, and limitations. Read it before touching
