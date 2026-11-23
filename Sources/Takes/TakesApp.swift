@@ -314,17 +314,85 @@ final class RemotePlaybackCommandController: ObservableObject {
     }
 }
 
+/// Main-window geometry for the A2 cover-column layout
+/// (docs/a2-redesign-spec.md §2).
+///
+/// One window serves playlist and comparison. It opens 360 pt wide in both
+/// modes, and mode switches never resize it. The user can resize it both ways
+/// down to the minimums below. The artwork toggle is the only automatic
+/// resize: hiding the 360 pt cover shrinks the window by
+/// `artworkCollapseHeight` and showing it grows it back by the same amount,
+/// keeping the top edge where it is.
 enum TakesWindowPolicy {
     static let mainWindowID = "main"
-    static let comparisonNavigationHeight: CGFloat = 32
     static let resetComparisonLayoutNotification = Notification.Name("TakesResetComparisonLayout")
-    static let playlistDefaultSize = CGSize(width: 760, height: 520)
     static let analysisWindowID = "analysis"
     static let comparisonWindowID = "comparison"
     static let replacesDefaultNewItemCommands = true
-    static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
-    static let minimumContentWidth: CGFloat = 640
-    static let defaultWindowWidth: CGFloat = 700
+    /// The frame is saved under an A2-specific name so a pre-A2 frame (640 pt
+    /// or wider, sized per mode) is not restored into the cover-column layout.
+    static let mainWindowFrameAutosaveName = "main.a2"
+    static let mainWindowFrameDefaultsKey = "NSWindow Frame \(mainWindowFrameAutosaveName)"
+    /// Pre-A2 keys for the playlist frame and the comparison's per-window
+    /// autosave. No longer read; removed on launch.
+    static let retiredFrameDefaultsKeys = ["playlistWindowFrame", "NSWindow Frame main"]
+
+    // MARK: Window size
+
+    static let defaultWidth: CGFloat = 360
+    static let minimumWidth: CGFloat = 360
+    /// Full-bleed square cover at the top of the window.
+    static let artworkHeight: CGFloat = 360
+    /// Control-bar top padding under the cover.
+    static let controlBarTopPaddingBelowArtwork: CGFloat = 10
+    /// Control-bar top padding when the titlebar overlays the bar, so the
+    /// transport buttons clear the window buttons and the artwork toggle.
+    static let controlBarTopPaddingUnderTitlebar: CGFloat = 24
+    /// How much the window shrinks when the cover is hidden: the cover, less
+    /// the extra padding the control bar gains under the titlebar (346 pt).
+    static let artworkCollapseHeight = artworkHeight
+        - (controlBarTopPaddingUnderTitlebar - controlBarTopPaddingBelowArtwork)
+    static let defaultHeightWithArtwork: CGFloat = 760
+    /// Room below the cover at the minimum height: the control bar plus a few
+    /// list rows or one lane. Provisional until the control bar, rows and
+    /// bottom bar land (A2 milestones 2–5).
+    static let minimumHeightWithoutArtwork: CGFloat = 300
+
+    static func controlBarTopPadding(showsArtwork: Bool) -> CGFloat {
+        showsArtwork ? controlBarTopPaddingBelowArtwork : controlBarTopPaddingUnderTitlebar
+    }
+
+    static func defaultHeight(showsArtwork: Bool) -> CGFloat {
+        showsArtwork ? defaultHeightWithArtwork : defaultHeightWithArtwork - artworkCollapseHeight
+    }
+
+    static func minimumHeight(showsArtwork: Bool) -> CGFloat {
+        minimumHeightWithoutArtwork + (showsArtwork ? artworkCollapseHeight : 0)
+    }
+
+    static func defaultSize(showsArtwork: Bool) -> CGSize {
+        CGSize(width: defaultWidth, height: defaultHeight(showsArtwork: showsArtwork))
+    }
+
+    static func minimumSize(showsArtwork: Bool) -> CGSize {
+        CGSize(width: minimumWidth, height: minimumHeight(showsArtwork: showsArtwork))
+    }
+
+    // The hidden titlebar still reports a top safe-area inset, and
+    // NSHostingView adds that inset to the root view's declared minimum height
+    // when it enforces the window's minimum size — even though the root view
+    // ignores the inset and lays out under the titlebar. Declare the SwiftUI
+    // minimum short by the inset so the enforced window minimum lands exactly
+    // on `minimumHeight(showsArtwork:)`.
+    static let hiddenTitlebarSafeAreaInset: CGFloat = 28
+
+    static func rootViewMinimumHeight(showsArtwork: Bool) -> CGFloat {
+        minimumHeight(showsArtwork: showsArtwork) - hiddenTitlebarSafeAreaInset
+    }
+
+    // MARK: Comparison metrics (pre-A2 layout, replaced in milestone 4)
+
+    static let comparisonNavigationHeight: CGFloat = 32
     static let trackInfoColumnWidthKey = "trackInfoColumnWidth"
     static let defaultTrackInfoColumnWidth: CGFloat = 240
     static let minimumTrackInfoColumnWidth: CGFloat = defaultTrackInfoColumnWidth - 10
@@ -332,33 +400,12 @@ enum TakesWindowPolicy {
     static let trackRowHeight: CGFloat = 96
     static let trackTimelineDividerHeight: CGFloat = 1
     static let trackTimelineHeaderHeight: CGFloat = 34
-    static let contentPadding: CGFloat = 0
-    static let timelineHeaderSpacing: CGFloat = 1
     // Play button / readout (56) + vertical padding (20 top + 16 bottom,
     // optically shifted 2pt below true center).
     static let controlBarReservedHeight: CGFloat = 92
-    static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
-    static let defaultContentHeight = contentHeight(displayingTrackRows: 1)
-    // The root view ignores the top safe area, so the control bar occupies
-    // the hidden-titlebar region and the window adds no extra chrome height.
-    static let windowChromeHeight: CGFloat = 0
-    // The hidden titlebar still reports a top safe-area inset, and
-    // NSHostingView adds that inset to the root view's declared minimum height
-    // when it enforces the window's minimum size — even though the root view
-    // ignores the inset and lays out under the titlebar. Declare the SwiftUI
-    // minimum short by the inset so the enforced window minimum lands exactly
-    // on `minimumContentHeight`.
-    static let hiddenTitlebarSafeAreaInset: CGFloat = 28
-    static let rootViewMinimumHeight = minimumContentHeight - hiddenTitlebarSafeAreaInset
-    static let defaultWindowHeight = defaultContentHeight + windowChromeHeight
-    static let minimumWindowSize = CGSize(
-        width: minimumContentWidth,
-        height: minimumContentHeight + windowChromeHeight
-    )
-    static let defaultWindowSize = CGSize(
-        width: defaultWindowWidth,
-        height: defaultWindowHeight
-    )
+    /// Below this width the pre-A2 control bars stack their buttons over the
+    /// readout instead of flanking it. Interim until milestone 2.
+    static let wideControlBarMinimumWidth: CGFloat = 640
 
     static func trackTimelineHeight(displayingTrackRows rowCount: Int) -> CGFloat {
         let rowCount = max(rowCount, 1)
@@ -371,80 +418,49 @@ enum TakesWindowPolicy {
         return min(max(width, minimumTrackInfoColumnWidth), maximumWidth)
     }
 
-    static func contentHeight(displayingTrackRows rowCount: Int) -> CGFloat {
-        contentPadding * 2
-            + controlBarReservedHeight
-            + trackTimelineHeaderHeight
-            + timelineHeaderSpacing
-            + trackTimelineHeight(displayingTrackRows: rowCount)
+    // MARK: Frames
+
+    /// Default size at the top-left of the visible screen.
+    static func defaultFrame(showsArtwork: Bool, visibleFrame: CGRect) -> CGRect {
+        let size = defaultSize(showsArtwork: showsArtwork)
+        return clampedFrame(
+            CGRect(x: visibleFrame.minX, y: visibleFrame.maxY - size.height, width: size.width, height: size.height),
+            visibleFrame: visibleFrame
+        )
     }
 
-    static func windowHeight(displayingTrackRows rowCount: Int) -> CGFloat {
-        contentHeight(displayingTrackRows: rowCount) + windowChromeHeight
+    /// Default size, keeping the top-left corner.
+    static func frameResettingSize(currentFrame: CGRect, showsArtwork: Bool, visibleFrame: CGRect) -> CGRect {
+        let size = defaultSize(showsArtwork: showsArtwork)
+        return clampedFrame(
+            CGRect(x: currentFrame.minX, y: currentFrame.maxY - size.height, width: size.width, height: size.height),
+            visibleFrame: visibleFrame
+        )
     }
 
-    static func frame(fittingTrackRows rowCount: Int, currentFrame: CGRect, visibleFrame: CGRect) -> CGRect {
-        let desiredHeight = windowHeight(displayingTrackRows: rowCount)
-        let maximumHeightBeforeMonitorBottom = max(currentFrame.maxY - visibleFrame.minY, 0)
-        let height = min(desiredHeight, maximumHeightBeforeMonitorBottom)
+    /// The frame after the artwork is shown or hidden: the height changes by
+    /// `artworkCollapseHeight`, the width and top edge stay. A window that
+    /// would run off the bottom of the screen moves up only as far as needed.
+    static func frameTogglingArtwork(currentFrame: CGRect, showsArtwork: Bool, visibleFrame: CGRect) -> CGRect {
+        let delta = showsArtwork ? artworkCollapseHeight : -artworkCollapseHeight
+        let height = max(currentFrame.height + delta, minimumHeight(showsArtwork: showsArtwork))
+        return clampedFrame(
+            CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: currentFrame.width, height: height),
+            visibleFrame: visibleFrame
+        )
+    }
 
+    /// Fits a frame inside the visible screen: shrinks it if it is larger,
+    /// then shifts it the least distance that brings it fully on screen.
+    static func clampedFrame(_ frame: CGRect, visibleFrame: CGRect) -> CGRect {
+        let width = min(frame.width, visibleFrame.width)
+        let height = min(frame.height, visibleFrame.height)
         return CGRect(
-            x: currentFrame.minX,
-            y: currentFrame.maxY - height,
-            width: currentFrame.width,
+            x: min(max(frame.minX, visibleFrame.minX), visibleFrame.maxX - width),
+            y: min(max(frame.maxY - height, visibleFrame.minY), visibleFrame.maxY - height),
+            width: width,
             height: height
         )
-    }
-
-    static func defaultFrame(visibleFrame: CGRect) -> CGRect {
-        CGRect(
-            x: visibleFrame.minX,
-            y: visibleFrame.maxY - defaultWindowSize.height,
-            width: defaultWindowSize.width,
-            height: defaultWindowSize.height
-        )
-    }
-
-    static func frameResettingHeight(currentFrame: CGRect, visibleFrame: CGRect) -> CGRect {
-        let height = min(defaultWindowHeight, max(currentFrame.maxY - visibleFrame.minY, 0))
-        return CGRect(
-            x: currentFrame.minX,
-            y: currentFrame.maxY - height,
-            width: currentFrame.width,
-            height: height
-        )
-    }
-
-    static func frameResettingSize(currentFrame: CGRect, visibleFrame: CGRect) -> CGRect {
-        let height = min(defaultWindowHeight, max(currentFrame.maxY - visibleFrame.minY, 0))
-        return CGRect(
-            x: currentFrame.minX,
-            y: currentFrame.maxY - height,
-            width: defaultWindowWidth,
-            height: height
-        )
-    }
-
-    static func shouldAutoGrowWindow(
-        previousTrackRowCount: Int,
-        newTrackRowCount: Int,
-        currentWindowHeight: CGFloat
-    ) -> Bool {
-        guard newTrackRowCount > previousTrackRowCount else { return false }
-
-        let desiredHeight = windowHeight(displayingTrackRows: newTrackRowCount)
-        return desiredHeight > currentWindowHeight + 0.5
-    }
-
-    static func shouldAutoShrinkWindow(
-        previousTrackRowCount: Int,
-        newTrackRowCount: Int,
-        currentWindowHeight: CGFloat
-    ) -> Bool {
-        guard newTrackRowCount < previousTrackRowCount else { return false }
-
-        let desiredHeight = windowHeight(displayingTrackRows: newTrackRowCount)
-        return desiredHeight < currentWindowHeight - 0.5
     }
 
     static func hasSavedMainWindowFrame(defaults: UserDefaults = .standard) -> Bool {
@@ -452,22 +468,23 @@ enum TakesWindowPolicy {
     }
 
     static func hasSavedMainWindowFrame(objectForKey: (String) -> Any?) -> Bool {
-        objectForKey(mainWindowFrameAutosaveName) != nil
+        objectForKey(mainWindowFrameDefaultsKey) != nil
     }
+
+    // MARK: Window configuration
 
     @MainActor
     static func configureMainWindow(
         _ window: NSWindow,
+        showsArtwork: Bool,
         defaults: UserDefaults = .standard,
-        resetsLayoutForLaunch: Bool = false,
-        playlistMode: Bool = false
+        resetsLayoutForLaunch: Bool = false
     ) {
-        let hasSavedFrame = hasSavedMainWindowFrame(defaults: defaults)
-        window.minSize = minimumWindowSize
+        window.minSize = minimumSize(showsArtwork: showsArtwork)
 
-        // Unify the titlebar with the control bar: let content draw up
-        // behind a transparent titlebar so the top bar reads as one surface,
-        // with only the traffic lights floating over it.
+        // Content draws up behind a transparent titlebar so the cover (or,
+        // with the artwork hidden, the control bar) reaches the window's top
+        // edge, with only the window buttons and artwork toggle over it.
         window.styleMask.insert(.fullSizeContentView)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -475,51 +492,57 @@ enum TakesWindowPolicy {
         window.isMovableByWindowBackground = false
 
         guard !resetsLayoutForLaunch else {
-            resetMainWindowSize(window, animate: false)
+            resetMainWindowSize(window, showsArtwork: showsArtwork, animate: false)
             return
         }
 
-        window.setFrameAutosaveName(mainWindowID)
+        retiredFrameDefaultsKeys.forEach(defaults.removeObject(forKey:))
+        let hasSavedFrame = hasSavedMainWindowFrame(defaults: defaults)
+        window.setFrameAutosaveName(mainWindowFrameAutosaveName)
+        let visibleFrame = visibleFrame(for: window)
         if !hasSavedFrame {
-            let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-            window.setFrame(defaultFrame(visibleFrame: visibleFrame), display: true)
-        } else if !playlistMode {
-            resetMainWindowHeight(window, animate: false)
+            window.setFrame(defaultFrame(showsArtwork: showsArtwork, visibleFrame: visibleFrame), display: true)
+        } else {
+            // A frame saved with the other artwork state (or below the
+            // current minimum) is brought up to this state's minimum.
+            var frame = window.frame
+            let minimum = minimumSize(showsArtwork: showsArtwork)
+            frame.size.width = max(frame.width, minimum.width)
+            let height = max(frame.height, minimum.height)
+            frame.origin.y = frame.maxY - height
+            frame.size.height = height
+            window.setFrame(clampedFrame(frame, visibleFrame: visibleFrame), display: true)
         }
     }
 
+    /// Applies an artwork toggle to the window: the new minimum, then the
+    /// shrink or grow.
     @MainActor
-    static func resizeMainWindow(_ window: NSWindow, displayingTrackRows rowCount: Int, includesNavigation: Bool = false) {
-        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-        var resizedFrame = frame(
-            fittingTrackRows: rowCount,
+    static func applyArtworkVisibility(_ showsArtwork: Bool, to window: NSWindow, animate: Bool = true) {
+        window.minSize = minimumSize(showsArtwork: showsArtwork)
+        let frame = frameTogglingArtwork(
             currentFrame: window.frame,
-            visibleFrame: visibleFrame
+            showsArtwork: showsArtwork,
+            visibleFrame: visibleFrame(for: window)
         )
-        if includesNavigation {
-            let height = min(resizedFrame.height + comparisonNavigationHeight, max(window.frame.maxY - visibleFrame.minY, 0))
-            resizedFrame.origin.y = window.frame.maxY - height
-            resizedFrame.size.height = height
-        }
-
-        guard abs(resizedFrame.height - window.frame.height) > 0.5 else { return }
-        window.setFrame(resizedFrame, display: true, animate: true)
+        guard frame != window.frame else { return }
+        window.setFrame(frame, display: true, animate: animate)
     }
 
     @MainActor
-    static func resetMainWindowHeight(_ window: NSWindow, animate: Bool) {
-        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-        let resetFrame = frameResettingHeight(currentFrame: window.frame, visibleFrame: visibleFrame)
-        guard abs(resetFrame.height - window.frame.height) > 0.5 else { return }
-        window.setFrame(resetFrame, display: true, animate: animate)
+    static func resetMainWindowSize(_ window: NSWindow, showsArtwork: Bool, animate: Bool = true) {
+        let frame = frameResettingSize(
+            currentFrame: window.frame,
+            showsArtwork: showsArtwork,
+            visibleFrame: visibleFrame(for: window)
+        )
+        guard frame != window.frame else { return }
+        window.setFrame(frame, display: true, animate: animate)
     }
 
     @MainActor
-    static func resetMainWindowSize(_ window: NSWindow, animate: Bool = true) {
-        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-        let resetFrame = frameResettingSize(currentFrame: window.frame, visibleFrame: visibleFrame)
-        guard resetFrame != window.frame else { return }
-        window.setFrame(resetFrame, display: true, animate: animate)
+    private static func visibleFrame(for window: NSWindow) -> CGRect {
+        window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
     }
 }
 
@@ -572,10 +595,7 @@ struct TakesApp: App {
                     appDelegate.flushWorkspaceBeforeTermination = { await persistence.flush() }
                 }
         }
-        .defaultSize(
-            width: TakesWindowPolicy.playlistDefaultSize.width,
-            height: TakesWindowPolicy.playlistDefaultSize.height
-        )
+        .defaultSize(TakesWindowPolicy.defaultSize(showsArtwork: settings.showsArtwork))
         // Declared on the scene (not just patched onto the NSWindow later) so
         // SwiftUI sizes the hosting view full-height from creation, letting
         // the window background genuinely draw under the titlebar.

@@ -1069,6 +1069,10 @@ struct ContentView: View {
     /// `.onChange`; see `LaneViewport` for why it can't be a row input.
     @State private var laneViewportStore = LaneViewportStore()
     @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
+    /// Below `TakesWindowPolicy.wideControlBarMinimumWidth` the control bar
+    /// stacks its buttons over the readout. Interim until milestone 2.
+    @State private var controlBarIsNarrow = true
+    @State private var controlBarHeight: CGFloat = TakesWindowPolicy.controlBarReservedHeight
     @State private var trackInfoColumnWidth: Double
     @State private var showsAlignmentAttentionPopover = false
     @State private var alignmentOutcomePulse = false
@@ -1154,10 +1158,7 @@ struct ContentView: View {
 
     var body: some View {
         inactiveAwareContent
-            .frame(
-                minWidth: TakesWindowPolicy.minimumContentWidth,
-                minHeight: TakesWindowPolicy.rootViewMinimumHeight
-            )
+            .frame(minWidth: TakesWindowPolicy.minimumWidth)
             // The control bar doubles as the titlebar: lay the root view out
             // under the hidden titlebar so the bar starts at the window's top edge.
             .ignoresSafeArea(.container, edges: .top)
@@ -1194,20 +1195,6 @@ struct ContentView: View {
             }
             .onChange(of: controller.session.tracks) { _, tracks in
                 waveformStore.sync(tracks: tracks, context: controller.runtimeContext)
-            }
-            .onChange(of: controller.displayedTrackRowCount) { previousTrackCount, trackCount in
-                guard let mainWindow else { return }
-                let shouldResize = TakesWindowPolicy.shouldAutoGrowWindow(
-                    previousTrackRowCount: previousTrackCount,
-                    newTrackRowCount: trackCount,
-                    currentWindowHeight: mainWindow.frame.height
-                ) || TakesWindowPolicy.shouldAutoShrinkWindow(
-                    previousTrackRowCount: previousTrackCount,
-                    newTrackRowCount: trackCount,
-                    currentWindowHeight: mainWindow.frame.height
-                )
-                guard shouldResize else { return }
-                TakesWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount, includesNavigation: true)
             }
             .onReceive(NotificationCenter.default.publisher(for: TakesWindowPolicy.resetComparisonLayoutNotification)) { _ in
                 trackInfoColumnWidthBinding.wrappedValue = TakesWindowPolicy.defaultTrackInfoColumnWidth
@@ -1282,7 +1269,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Color.clear
                 .frame(
-                    height: TakesWindowPolicy.controlBarReservedHeight
+                    height: controlBarHeight
                         + (controller.displayedTrackRowCount == 0 ? 0 : trackHeaderHeight + trackTimelineDividerHeight)
                 )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
@@ -1291,6 +1278,66 @@ struct ContentView: View {
     }
 
     private var controlBar: some View {
+        Group {
+            if controlBarIsNarrow { narrowControlBarContent } else { wideControlBarContent }
+        }
+        .padding(.top, TakesWindowPolicy.controlBarTopPadding(showsArtwork: settings.showsArtwork))
+        .padding(.bottom, 16)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+            let narrow = size.width < TakesWindowPolicy.wideControlBarMinimumWidth
+            if narrow != controlBarIsNarrow { controlBarIsNarrow = narrow }
+            if abs(size.height - controlBarHeight) > 0.5 { controlBarHeight = size.height }
+        }
+        // Raised deck: a light wash lifts the bar off the shared window
+        // material, pairing with `timelineWellShade` below the divider.
+        // Purely decorative, so it must not intercept clicks — otherwise it
+        // swallows the mouseDown before the WindowDragArea behind it can drag.
+        .background(Theme.controlBarLift.allowsHitTesting(false))
+        // The control bar is the titlebar: any click on empty bar space
+        // (not claimed by a control above) drags the window.
+        .background(WindowDragArea())
+        .componentDebugLabel("Control Bar", enabled: settings.showsComponentDebugLabels)
+    }
+
+    /// While playing the text comes from `playingReadoutText`, which changes
+    /// only when the displayed second rolls over; while paused it derives from
+    /// `transportPosition`, whose writes are then only user seeks. (A
+    /// TimelineView here kept the window's display-link layout cycle running
+    /// at full refresh for the whole duration of playback.)
+    private var transportReadout: some View {
+        DigitalTimeReadout(
+            style: settings.readoutStyle,
+            elapsed: controller.session.isPlaying
+                ? controller.playingReadoutText
+                : controller.session.transportPosition.formattedSignedTimestamp,
+            status: TeenageEngineeringDisplayStatus(session: controller.session)
+        )
+        // Purely informational, so let clicks fall through to the window
+        // drag area — the readout shouldn't be a dead spot in the titlebar.
+        .allowsHitTesting(false)
+    }
+
+    /// Interim 360 pt layout: buttons on one row, the readout below.
+    private var narrowControlBarContent: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 0) {
+                playButton
+                switchTrackButton
+                    .padding(.leading, 12)
+                Spacer(minLength: 8)
+                repeatButton
+                blindListeningButton
+                    .padding(.leading, 8)
+                zoomControls
+                    .padding(.leading, 8)
+            }
+            transportReadout
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 10)
+    }
+
+    private var wideControlBarContent: some View {
         GeometryReader { proxy in
             let sideRegionWidth = max((proxy.size.width - transportReadoutWidth) / 2, 0)
 
@@ -1303,31 +1350,16 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Pinned to the true window center, independent of the side clusters.
-                // While playing the text comes from `playingReadoutText`,
-                // which changes only when the displayed second rolls over;
-                // while paused it derives from `transportPosition`, whose
-                // writes are then only user seeks. (A TimelineView here kept
-                // the window's display-link layout cycle running at full
-                // refresh for the whole duration of playback.)
-                DigitalTimeReadout(
-                    style: settings.readoutStyle,
-                    elapsed: controller.session.isPlaying
-                        ? controller.playingReadoutText
-                        : controller.session.transportPosition.formattedSignedTimestamp,
-                    status: TeenageEngineeringDisplayStatus(session: controller.session)
-                )
-                .background {
-                    GeometryReader { readoutProxy in
-                        Color.clear.preference(
-                            key: TransportReadoutWidthKey.self,
-                            value: readoutProxy.size.width
-                        )
+                transportReadout
+                    .background {
+                        GeometryReader { readoutProxy in
+                            Color.clear.preference(
+                                key: TransportReadoutWidthKey.self,
+                                value: readoutProxy.size.width
+                            )
+                        }
                     }
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-                // Purely informational, so let clicks fall through to the window
-                // drag area — the readout shouldn't be a dead spot in the titlebar.
-                .allowsHitTesting(false)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
@@ -1343,23 +1375,10 @@ struct ContentView: View {
             }
         }
         .frame(height: DigitalTimeReadout.panelHeight)
-        // Metrically 18 + 18, but shifted 2pt down: dead-center reads a touch
-        // high in the bar, so the controls sit slightly low of true center.
-        .padding(.top, 20)
-        .padding(.bottom, 16)
         .onPreferenceChange(TransportReadoutWidthKey.self) { width in
             guard width > 0, abs(width - transportReadoutWidth) > 0.5 else { return }
             transportReadoutWidth = width
         }
-        // Raised deck: a light wash lifts the bar off the shared window
-        // material, pairing with `timelineWellShade` below the divider.
-        // Purely decorative, so it must not intercept clicks — otherwise it
-        // swallows the mouseDown before the WindowDragArea behind it can drag.
-        .background(Theme.controlBarLift.allowsHitTesting(false))
-        // The control bar is the titlebar: any click on empty bar space
-        // (not claimed by a control above) drags the window.
-        .background(WindowDragArea())
-        .componentDebugLabel("Control Bar", enabled: settings.showsComponentDebugLabels)
     }
 
     private var playButton: some View {

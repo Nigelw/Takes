@@ -58,6 +58,26 @@ struct AudioFileLoader: AudioFileLoading {
         return await (value(.commonKeyTitle), value(.commonKeyArtist), value(.commonKeyAlbumName))
     }
 
+    /// The file's embedded cover image, as stored (JPEG, PNG…), or `nil` when
+    /// it has none. Checks the common artwork key, then every format-specific
+    /// item that maps to it (ID3 `APIC`, iTunes `covr`, Vorbis pictures).
+    /// Nothing is cached here or written to disk.
+    nonisolated static func embeddedArtworkData(for url: URL) async -> Data? {
+        let asset = AVURLAsset(url: url)
+        var items = (try? await asset.load(.commonMetadata)) ?? []
+        if let formats = try? await asset.load(.availableMetadataFormats) {
+            for format in formats {
+                if let formatItems = try? await asset.loadMetadata(for: format) {
+                    items.append(contentsOf: formatItems)
+                }
+            }
+        }
+        for item in items where item.commonKey == .commonKeyArtwork {
+            if let data = try? await item.load(.dataValue), !data.isEmpty { return data }
+        }
+        return nil
+    }
+
     /// Best-effort estimated data rate (bits/sec) of the file's first audio track.
     /// Returns `0` when no rate is available (e.g. some lossless files) so the UI
     /// can drop the bit-rate segment rather than show "0 kbps". Any failure degrades

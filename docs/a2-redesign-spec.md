@@ -36,6 +36,7 @@ One narrow window, 360 pt wide, in both modes.
 | Playlist, artwork shown | 360 | 760 |
 | Playlist, artwork hidden | 360 | 414 |
 | Compare, artwork shown | 360 | 760 |
+| Compare, artwork hidden | 360 | 414 |
 
 - Width is the same in both modes; mode switches never resize horizontally.
 - Hiding the artwork removes the 360 pt cover. The titlebar then overlays the
@@ -49,9 +50,9 @@ One narrow window, 360 pt wide, in both modes.
   (760 × 520), `resizeMainWindow(...)` for compare, and
   `applyModeWindowSize(previousMode:)` in `WorkspaceView.swift`.
 
-**Open:** whether the window is user-resizable (taller lists and lanes, wider
-lanes) or fixed. The design assumes fixed width; height could reasonably
-stretch the list or lane area.
+**Decided (§13):** the window is user-resizable in both directions. The
+sizes above are the defaults; the minimum width is 360. Every A2 element
+must therefore stretch horizontally as well as vertically.
 
 ## 3. Shared layout grid
 
@@ -261,9 +262,10 @@ invariant: per-scroll/zoom values still flow only into lane leaves.
 
 Each is meant to fit one session and leave the app working.
 
-1. **Window shell and artwork.** 360 pt window for both modes, artwork area,
-   titlebar overlay, artwork toggle with persistence and resizing. Embedded
-   artwork loading.
+1. **Window shell and artwork.** *Done.* 360 pt window for both modes,
+   artwork area, titlebar overlay, artwork toggle with persistence and
+   resizing. Embedded artwork loading. Until milestone 2, the pre-A2 control
+   bars stack their buttons above the readout below 640 pt wide.
 2. **Control bar.** New transport row layout, glass readout (playlist
    two-line with LED meter; compare one-line with back button). Remove the
    comparison navigation bar.
@@ -279,7 +281,6 @@ Update `AGENTS.md` (ownership, invariants, test map) as each milestone lands.
 
 ## 12. Open questions
 
-- Window resizability (§2).
 - What the version check (§6) does when the playback version's file is
   missing.
 
@@ -302,5 +303,24 @@ Update `AGENTS.md` (ownership, invariants, test map) as each milestone lands.
   Use the existing `DotMatrixMarqueeText` / `DotMatrixMarqueeDisplay`, which
   only animate lines that actually overflow. The compare readout is narrower,
   so it scrolls more often.
+- **The window is resizable in both directions** (§2). Defaults are the §2
+  sizes. Minimum width 360; minimum height is 300 below the cover (646 with
+  artwork, 300 without), provisional until milestones 2–5 settle the control
+  bar, rows and bottom bar (`TakesWindowPolicy.minimumHeightWithoutArtwork`).
+  Mode switches never resize. The artwork toggle changes the height by
+  exactly 346 pt, keeping any extra height the user added; a window that
+  would run off the bottom of the screen moves up only as far as needed.
+- **Cover in a wider window:** the cover area stays 360 pt tall; the square
+  stays 360 × 360, centred over a blurred fill of the same image. No artwork
+  (or nothing playing): a neutral tile with a music-note glyph and no top
+  shade.
+- **Artwork-toggle chip, light appearance:** a pale frosted chip (system
+  thin material under a white 50% fill), 0.5 pt white 70% inner hairline,
+  black 20% drop shadow. The glyph is `Theme.primaryLitGlyph` with
+  `lightSecondary`'s engaged glow. Dark uses the §4 values with
+  `darkSecondary`'s glow.
+- **Which cover:** in playlist mode, the playing (or current) version's
+  artwork, as the readout shows. In compare, the item's playback version, so
+  Switch Track doesn't swap the cover.
 - **Double-click plays, on every row.** It does not open compare, even for
   multi-version items; the Compare pill is the way in.

@@ -93,6 +93,19 @@ enum Theme {
         dark: (0.263, 0.272, 0.310)
     )
 
+    /// Neutral tile behind the cover when the playing item has no artwork
+    /// (or nothing is playing).
+    static let artworkPlaceholderFill = dynamic(
+        light: (0.88, 0.88, 0.90),
+        dark: (0.10, 0.10, 0.11)
+    )
+
+    /// Music-note glyph on the artwork placeholder.
+    static let artworkPlaceholderGlyph = dynamic(
+        light: (0.66, 0.66, 0.70),
+        dark: (0.30, 0.30, 0.33)
+    )
+
     /// Waveform color for inactive (non-selected) tracks.
     static let waveformInactive = dynamic(
         light: (0.52, 0.52, 0.56),

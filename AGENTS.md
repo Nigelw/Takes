@@ -47,9 +47,16 @@ The app project is `Takes.xcodeproj`.
 Key ownership:
 
 - `TakesApp.swift`: app windows, app/menu commands, files opened from Finder,
-  remote media commands, main-window sizing policy, and Debug menu wiring.
+  remote media commands, the main-window size policy (`TakesWindowPolicy`:
+  A2 default/minimum sizes, the artwork toggle's resize, frame clamping), and
+  Debug menu wiring.
 - `WorkspaceView.swift`: playlist/comparison navigation, shared import routing,
-  startup restoration ordering, playlist transport, and keyboard focus handling.
+  startup restoration ordering, playlist transport, keyboard focus handling,
+  and the window chrome both modes share: the cover above the control bar and
+  the titlebar artwork toggle.
+- `CoverArtwork.swift`: `PlaylistArtworkStore` (in-memory, downsampled,
+  bounded embedded-artwork cache), the 360 pt cover view, and the artwork
+  toggle with its custom sleeve glyph.
 - `PlaylistView.swift`: playlist header bar, selection/expansion presentation
   state, and the selection-aware organization commands (`PlaylistCommandContext`).
 - `PlaylistOutlineView.swift`: the playlist table — an `NSOutlineView` wrapped
@@ -57,8 +64,9 @@ Key ownership:
   context menu, inline rename, keyboard handling, and row drag and drop.
 - `ContentView.swift`: comparison waveform/timeline UI, drag-and-drop,
   loop gestures, and offset controls.
-- `AppSettings.swift` and `SettingsView.swift`: persisted user preferences and
-  the Settings window.
+- `AppSettings.swift` and `SettingsView.swift`: persisted user preferences
+  (including `showsArtwork`, the titlebar toggle's state) and the Settings
+  window.
 - `PlaybackController.swift`: loading files, session state, transport control,
   playback scheduling, and audibility.
 - `Models.swift`: `LoadedTrack`, `SessionTrack`, `ComparisonSession`,
@@ -89,7 +97,8 @@ Key ownership:
   multi-resolution peak pyramid (`Waveform.reducedLevels`) the lanes draw
   from. No disk caches.
 - `AudioFileLoader.swift`: local file metadata through `AVAudioFile`, embedded
-  title/artist/album tags through `AVURLAsset`, and audio-runtime file preparation.
+  title/artist/album tags and cover art (`embeddedArtworkData(for:)`) through
+  `AVURLAsset`, and audio-runtime file preparation.
 - `LibraryTrackSelectionLoader.swift`: AppleScript-based Music.app selection
   loading.
 - `StreamingTrackImport.swift`: streaming URL metadata, yt-dlp management, and
@@ -175,6 +184,22 @@ These are here to prevent parallel implementations and subtle regressions:
   on the clicked row alone otherwise (`PlaylistCommandContext.rows`).
 - Keep global shortcuts focus-safe; active numeric text fields should retain
   normal text editing behavior.
+- One main window serves both modes (A2). It opens 360 pt wide (760 tall with
+  artwork, 414 without) and is user-resizable down to
+  `TakesWindowPolicy.minimumSize(showsArtwork:)`. Mode switches and track
+  counts never resize it; the artwork toggle is the only automatic resize
+  (±`artworkCollapseHeight`, 346 pt, top edge fixed, clamped on screen). Its
+  frame autosaves as `main.a2`; do not reintroduce per-mode frames.
+- The cover and artwork toggle live in `WorkspaceView`, above both modes'
+  control bars, so entering compare never moves them. The control bars take
+  their top padding from `TakesWindowPolicy.controlBarTopPadding(showsArtwork:)`
+  (10 under the cover, 24 under the titlebar). In compare the cover shows the
+  item's playback version, not the audible one.
+- Artwork is in-memory only (no disk caches), loaded only for the version on
+  display, downsampled to 720 px and capped at `PlaylistArtworkStore.capacity`
+  decoded images. One store instance is shared by the cover and the readout.
+- Until A2 milestone 2 lands, both control bars fall back to a stacked
+  layout (buttons over readout) below `wideControlBarMinimumWidth` (640 pt).
 
 Performance-architecture invariants (established by the perf effort; breaking
 these reintroduces the exact regressions it fixed):
@@ -227,8 +252,9 @@ these reintroduces the exact regressions it fixed):
 - `TransportMappingTests.swift`: transport math and range behavior, plus
   loop-wrap anchor math and gapless pre-queue segment mapping.
 - `SessionTests.swift`: higher-level state, import behavior, Music/Finder
-  selection handling, numeric control stepping, blind listening, window policy,
-  and other non-UI logic.
+  selection handling, numeric control stepping, blind listening, the A2 window
+  policy (sizes, minimums, artwork-toggle frames, clamping), the persisted
+  artwork setting, and other non-UI logic.
 - `StreamingTrackImportTests.swift`: streaming metadata, yt-dlp resolution,
   download/import behavior, checksum parsing, and error handling.
 - `WaveformSourceTests.swift`: waveform generation and the peak pyramid
@@ -263,10 +289,11 @@ these reintroduces the exact regressions it fixed):
   of the playback/UI performance improvement effort (what's landed, what's
   measured, what's left). Check this before starting new perf work so it
   isn't duplicated or redone.
-- [docs/a2-redesign-spec.md](docs/a2-redesign-spec.md): the planned A2
-  compact cover-column redesign (360 pt window, artwork toggle, glass
-  readout, two-line playlist rows, compact compare). Not started; read it
-  before working on any of its milestones.
+- [docs/a2-redesign-spec.md](docs/a2-redesign-spec.md): the A2 compact
+  cover-column redesign (360 pt window, artwork toggle, glass readout,
+  two-line playlist rows, compact compare). Milestone 1 (window shell and
+  artwork) is done; 2–5 are not started. Read it before working on any of
+  its milestones.
 - [docs/comparative-quality-analysis.md](docs/comparative-quality-analysis.md):
   the multi-track "which of these is the better copy?" feature — design,
   milestones, tuning findings, and limitations. Read it before touching

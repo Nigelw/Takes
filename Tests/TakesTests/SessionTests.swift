@@ -234,161 +234,128 @@ struct SessionTests {
     }
 
     @Test
-    func windowPolicyAllowsOneTrackRowAtMinimumHeight() {
-        #expect(TakesWindowPolicy.minimumContentHeight == TakesWindowPolicy.contentHeight(displayingTrackRows: 1))
+    func windowPolicyUsesTheA2SizesInBothArtworkStates() {
+        #expect(TakesWindowPolicy.defaultSize(showsArtwork: true) == CGSize(width: 360, height: 760))
+        #expect(TakesWindowPolicy.defaultSize(showsArtwork: false) == CGSize(width: 360, height: 414))
+        #expect(TakesWindowPolicy.artworkCollapseHeight == 346)
+        #expect(TakesWindowPolicy.controlBarTopPadding(showsArtwork: true) == 10)
+        #expect(TakesWindowPolicy.controlBarTopPadding(showsArtwork: false) == 24)
     }
 
     @Test
-    func windowPolicyDefaultsToOneVisibleTrackRow() {
-        #expect(TakesWindowPolicy.defaultContentHeight == TakesWindowPolicy.contentHeight(displayingTrackRows: 1))
-    }
-
-    @Test
-    func windowPolicyAddsNoChromeHeightAboveContent() {
-        // The control bar occupies the hidden-titlebar region (the root view
-        // ignores the top safe area), so the window is exactly content-sized.
-        #expect(TakesWindowPolicy.windowChromeHeight == 0)
-        #expect(TakesWindowPolicy.defaultWindowHeight == TakesWindowPolicy.defaultContentHeight)
-    }
-
-    @Test
-    func windowPolicyGrowsFrameDownwardForAdditionalTrackRows() {
-        let currentFrame = CGRect(x: 80, y: 700, width: 700, height: TakesWindowPolicy.defaultWindowHeight)
-        let visibleFrame = CGRect(x: 0, y: 100, width: 1200, height: 800)
-
-        let resizedFrame = TakesWindowPolicy.frame(
-            fittingTrackRows: 3,
-            currentFrame: currentFrame,
-            visibleFrame: visibleFrame
+    func windowPolicyMinimumsSitBelowTheDefaultsAndDifferByTheCover() {
+        for showsArtwork in [true, false] {
+            let minimum = TakesWindowPolicy.minimumSize(showsArtwork: showsArtwork)
+            let defaultSize = TakesWindowPolicy.defaultSize(showsArtwork: showsArtwork)
+            #expect(minimum.width == 360)
+            #expect(minimum.height <= defaultSize.height)
+        }
+        #expect(
+            TakesWindowPolicy.minimumHeight(showsArtwork: true) - TakesWindowPolicy.minimumHeight(showsArtwork: false)
+                == TakesWindowPolicy.artworkCollapseHeight
         )
-
-        #expect(resizedFrame.maxY == currentFrame.maxY)
-        #expect(resizedFrame.height == TakesWindowPolicy.windowHeight(displayingTrackRows: 3))
-        #expect(resizedFrame.minY < currentFrame.minY)
     }
 
     @Test
     func windowPolicyDefaultsFrameToVisibleScreenTopLeft() {
         let visibleFrame = CGRect(x: 48, y: 80, width: 1200, height: 800)
 
-        let defaultFrame = TakesWindowPolicy.defaultFrame(visibleFrame: visibleFrame)
+        let defaultFrame = TakesWindowPolicy.defaultFrame(showsArtwork: true, visibleFrame: visibleFrame)
 
         #expect(defaultFrame.minX == visibleFrame.minX)
         #expect(defaultFrame.maxY == visibleFrame.maxY)
-        #expect(defaultFrame.width == TakesWindowPolicy.defaultWindowWidth)
-        #expect(defaultFrame.height == TakesWindowPolicy.defaultWindowHeight)
+        #expect(defaultFrame.size == TakesWindowPolicy.defaultSize(showsArtwork: true))
     }
 
     @Test
-    func windowPolicyResetsLaunchHeightWhilePreservingWidthAndTopLeft() {
-        let currentFrame = CGRect(x: 96, y: 360, width: 920, height: TakesWindowPolicy.windowHeight(displayingTrackRows: 4))
-        let visibleFrame = CGRect(x: 0, y: 80, width: 1200, height: 800)
+    func windowPolicyHidingArtworkShrinksFromTheBottomKeepingWidthAndTopEdge() {
+        let currentFrame = CGRect(x: 96, y: 100, width: 420, height: 900)
+        let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 1000)
 
-        let resetFrame = TakesWindowPolicy.frameResettingHeight(
-            currentFrame: currentFrame,
-            visibleFrame: visibleFrame
+        let hidden = TakesWindowPolicy.frameTogglingArtwork(
+            currentFrame: currentFrame, showsArtwork: false, visibleFrame: visibleFrame
         )
 
-        #expect(resetFrame.minX == currentFrame.minX)
-        #expect(resetFrame.maxY == currentFrame.maxY)
-        #expect(resetFrame.width == currentFrame.width)
-        #expect(resetFrame.height == TakesWindowPolicy.defaultWindowHeight)
+        #expect(hidden.maxY == currentFrame.maxY)
+        #expect(hidden.minX == currentFrame.minX)
+        #expect(hidden.width == currentFrame.width)
+        #expect(hidden.height == currentFrame.height - TakesWindowPolicy.artworkCollapseHeight)
+
+        let shown = TakesWindowPolicy.frameTogglingArtwork(
+            currentFrame: hidden, showsArtwork: true, visibleFrame: visibleFrame
+        )
+        #expect(shown == currentFrame)
+    }
+
+    @Test
+    func windowPolicyShowingArtworkNearTheScreenBottomMovesUpOnlyAsFarAsNeeded() {
+        let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 860)
+        let currentFrame = CGRect(x: 96, y: 100, width: 360, height: 414)
+
+        let shown = TakesWindowPolicy.frameTogglingArtwork(
+            currentFrame: currentFrame, showsArtwork: true, visibleFrame: visibleFrame
+        )
+
+        #expect(shown.height == 760)
+        #expect(shown.minY == visibleFrame.minY)
+        #expect(shown.maxY == visibleFrame.minY + 760)
+    }
+
+    @Test
+    func windowPolicyCapsAFrameTallerThanTheScreen() {
+        let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 600)
+        let currentFrame = CGRect(x: 96, y: 200, width: 360, height: 414)
+
+        let shown = TakesWindowPolicy.frameTogglingArtwork(
+            currentFrame: currentFrame, showsArtwork: true, visibleFrame: visibleFrame
+        )
+
+        #expect(shown.height == visibleFrame.height)
+        #expect(shown.minY == visibleFrame.minY)
+    }
+
+    @Test
+    func windowPolicyHidingArtworkNeverGoesBelowTheHiddenMinimum() {
+        let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 1000)
+        let currentFrame = CGRect(x: 96, y: 300, width: 360, height: 500)
+
+        let hidden = TakesWindowPolicy.frameTogglingArtwork(
+            currentFrame: currentFrame, showsArtwork: false, visibleFrame: visibleFrame
+        )
+
+        #expect(hidden.height == TakesWindowPolicy.minimumHeight(showsArtwork: false))
+        #expect(hidden.maxY == currentFrame.maxY)
     }
 
     @Test
     func windowPolicyResetSizeUsesDefaultSizeWhilePreservingTopLeft() {
-        let currentFrame = CGRect(x: 96, y: 360, width: 920, height: TakesWindowPolicy.windowHeight(displayingTrackRows: 4))
-        let visibleFrame = CGRect(x: 0, y: 80, width: 1200, height: 800)
+        let currentFrame = CGRect(x: 96, y: 100, width: 920, height: 700)
+        let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 1000)
 
         let resetFrame = TakesWindowPolicy.frameResettingSize(
-            currentFrame: currentFrame,
-            visibleFrame: visibleFrame
+            currentFrame: currentFrame, showsArtwork: false, visibleFrame: visibleFrame
         )
 
         #expect(resetFrame.minX == currentFrame.minX)
         #expect(resetFrame.maxY == currentFrame.maxY)
-        #expect(resetFrame.width == TakesWindowPolicy.defaultWindowWidth)
-        #expect(resetFrame.height == TakesWindowPolicy.defaultWindowHeight)
+        #expect(resetFrame.size == TakesWindowPolicy.defaultSize(showsArtwork: false))
     }
 
+    @MainActor
     @Test
-    func windowPolicyCapsResizedFrameAtVisibleMonitorBottom() {
-        let currentFrame = CGRect(x: 80, y: 300, width: 700, height: TakesWindowPolicy.defaultWindowHeight)
-        let visibleFrame = CGRect(x: 0, y: 260, width: 1200, height: 800)
+    func showsArtworkDefaultsOnPersistsAndSurvivesRestoreDefaults() {
+        let defaults = InMemoryAppSettingsDefaults()
+        let settings = AppSettings(defaults: defaults)
 
-        let resizedFrame = TakesWindowPolicy.frame(
-            fittingTrackRows: 8,
-            currentFrame: currentFrame,
-            visibleFrame: visibleFrame
-        )
+        #expect(settings.showsArtwork)
+        settings.showsArtwork = false
+        #expect(defaults.object(forKey: AppSettings.showsArtworkKey) as? Bool == false)
+        #expect(!AppSettings(defaults: defaults).showsArtwork)
 
-        #expect(resizedFrame.maxY == currentFrame.maxY)
-        #expect(resizedFrame.minY == visibleFrame.minY)
-        #expect(resizedFrame.height < TakesWindowPolicy.windowHeight(displayingTrackRows: 8))
-    }
-
-    @Test
-    func windowPolicyOnlyAutoGrowsWhenTrackRowsAreAdded() {
-        let currentWindowHeight = TakesWindowPolicy.windowHeight(displayingTrackRows: 2)
-
-        #expect(TakesWindowPolicy.shouldAutoGrowWindow(
-            previousTrackRowCount: 2,
-            newTrackRowCount: 3,
-            currentWindowHeight: currentWindowHeight
-        ))
-        #expect(!TakesWindowPolicy.shouldAutoGrowWindow(
-            previousTrackRowCount: 6,
-            newTrackRowCount: 5,
-            currentWindowHeight: currentWindowHeight
-        ))
-        #expect(!TakesWindowPolicy.shouldAutoGrowWindow(
-            previousTrackRowCount: 5,
-            newTrackRowCount: 5,
-            currentWindowHeight: currentWindowHeight
-        ))
-    }
-
-    @Test
-    func windowPolicyDoesNotAutoGrowWhenAddedRowsAlreadyFitCurrentWindowHeight() {
-        let currentWindowHeight = TakesWindowPolicy.windowHeight(displayingTrackRows: 4)
-
-        #expect(!TakesWindowPolicy.shouldAutoGrowWindow(
-            previousTrackRowCount: 2,
-            newTrackRowCount: 4,
-            currentWindowHeight: currentWindowHeight
-        ))
-    }
-
-    @Test
-    func windowPolicyAutoShrinksWhenRemovedRowsFitBelowCurrentWindowHeight() {
-        let currentWindowHeight = TakesWindowPolicy.windowHeight(displayingTrackRows: 4)
-
-        #expect(TakesWindowPolicy.shouldAutoShrinkWindow(
-            previousTrackRowCount: 4,
-            newTrackRowCount: 2,
-            currentWindowHeight: currentWindowHeight
-        ))
-    }
-
-    @Test
-    func windowPolicyDoesNotAutoShrinkWhenRemainingRowsNeedCurrentWindowHeight() {
-        let currentWindowHeight = TakesWindowPolicy.windowHeight(displayingTrackRows: 4)
-
-        #expect(!TakesWindowPolicy.shouldAutoShrinkWindow(
-            previousTrackRowCount: 4,
-            newTrackRowCount: 4,
-            currentWindowHeight: currentWindowHeight
-        ))
-        #expect(!TakesWindowPolicy.shouldAutoShrinkWindow(
-            previousTrackRowCount: 5,
-            newTrackRowCount: 4,
-            currentWindowHeight: currentWindowHeight
-        ))
-    }
-
-    @Test
-    func windowPolicyUsesNarrowerMinimumWidthThanDefaultWidth() {
-        #expect(TakesWindowPolicy.defaultWindowWidth > TakesWindowPolicy.minimumContentWidth)
+        // Window state, not a preference: Restore Defaults leaves it alone.
+        settings.restoreDefaults()
+        #expect(!settings.showsArtwork)
+        #expect(settings.settingsAreDefault)
     }
 
     @Test
@@ -401,7 +368,7 @@ struct SessionTests {
     func trackInfoColumnPolicyClampsToMinimumWidth() {
         let width = TakesWindowPolicy.clampedTrackInfoColumnWidth(
             120,
-            sectionWidth: TakesWindowPolicy.defaultWindowWidth
+            sectionWidth: 700
         )
 
         #expect(width == TakesWindowPolicy.minimumTrackInfoColumnWidth)
@@ -411,10 +378,10 @@ struct SessionTests {
     func trackInfoColumnPolicyPreservesWaveformMinimumWidth() {
         let width = TakesWindowPolicy.clampedTrackInfoColumnWidth(
             640,
-            sectionWidth: TakesWindowPolicy.defaultWindowWidth
+            sectionWidth: 700
         )
 
-        #expect(width == TakesWindowPolicy.defaultWindowWidth - TakesWindowPolicy.minimumWaveformColumnWidth)
+        #expect(width == 700 - TakesWindowPolicy.minimumWaveformColumnWidth)
     }
 
     @Test
@@ -423,7 +390,7 @@ struct SessionTests {
 
         #expect(!TakesWindowPolicy.hasSavedMainWindowFrame { defaults[$0] })
 
-        defaults[TakesWindowPolicy.mainWindowFrameAutosaveName] = "10 20 900 568 0 0 1512 944"
+        defaults[TakesWindowPolicy.mainWindowFrameDefaultsKey] = "10 20 360 760 0 0 1512 944"
 
         #expect(TakesWindowPolicy.hasSavedMainWindowFrame { defaults[$0] })
     }

@@ -1,5 +1,4 @@
 import AppKit
-import AVFoundation
 import SwiftUI
 
 // MARK: - Now-playing panel
@@ -1287,56 +1286,5 @@ private struct ReadoutPanelChrome: ViewModifier {
                 .padding(bezelWidth)
         }
         .allowsHitTesting(false)
-    }
-}
-
-// MARK: - Artwork store
-
-/// In-memory embedded-artwork cache for the now-playing panel, keyed by
-/// stable version ID. Like `WaveformStore`, it is process-lifetime runtime
-/// state: nothing here is persisted or written to disk, and artwork is loaded
-/// only for the version currently shown, never for the whole playlist.
-@MainActor
-@Observable
-final class PlaylistArtworkStore {
-    /// `.some(nil)` records a finished load that found no art, so it is not
-    /// retried every time the version is shown again.
-    private var images: [PlaylistVersion.ID: NSImage?] = [:]
-    private var inFlight: Set<PlaylistVersion.ID> = []
-
-    /// Cached artwork, or `nil` until `load(for:)` resolves (or when the
-    /// file has none).
-    func artwork(for versionID: PlaylistVersion.ID?) -> NSImage? {
-        guard let versionID, let cached = images[versionID] else { return nil }
-        return cached
-    }
-
-    /// Starts loading the version's embedded artwork if it hasn't been
-    /// loaded already. Safe to call on every navigation.
-    func load(for version: PlaylistVersion) {
-        let id = version.id
-        guard images[id] == nil, !inFlight.contains(id) else { return }
-        guard case let .available(url) = PlaylistWorkspaceStore.resolveFileReference(version.file) else {
-            images[id] = .some(nil)
-            return
-        }
-        inFlight.insert(id)
-        Task { [weak self] in
-            let data = await Self.artworkData(for: url)
-            guard let self else { return }
-            self.inFlight.remove(id)
-            self.images[id] = .some(data.flatMap(NSImage.init(data:)))
-        }
-    }
-
-    /// Mirrors `AudioFileLoader.descriptiveMetadata(for:)`, for the common
-    /// artwork key.
-    nonisolated private static func artworkData(for url: URL) async -> Data? {
-        let asset = AVURLAsset(url: url)
-        guard let items = try? await asset.load(.commonMetadata) else { return nil }
-        for item in AVMetadataItem.metadataItems(from: items, withKey: AVMetadataKey.commonKeyArtwork, keySpace: .common) {
-            if let data = try? await item.load(.dataValue), !data.isEmpty { return data }
-        }
-        return nil
     }
 }

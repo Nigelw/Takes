@@ -117,6 +117,7 @@ final class AppSettings: ObservableObject {
     nonisolated static let readoutStyleDefault: ReadoutStyle = .glass
     nonisolated static let controlBarThemeDefault: ControlBarTheme = .classic
     nonisolated static let automaticGroupingModeDefault: AutomaticGroupingMode = .automatic
+    nonisolated static let showsArtworkDefault = true
 
     nonisolated static let offsetStepKey = "offsetNudgeStep"
     nonisolated static let offsetLargeStepKey = "offsetLargeNudgeStep"
@@ -125,6 +126,7 @@ final class AppSettings: ObservableObject {
     nonisolated static let readoutStyleKey = "readoutStyle"
     nonisolated static let controlBarThemeKey = "controlBarTheme"
     nonisolated static let automaticGroupingModeKey = "automaticGroupingMode"
+    nonisolated static let showsArtworkKey = "showsArtwork"
     nonisolated static let appearanceThemeOverrideArgument = "--appearance-theme"
 
     private let defaults: AppSettingsDefaults
@@ -176,6 +178,14 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(automaticGroupingMode.rawValue, forKey: Self.automaticGroupingModeKey) }
     }
 
+    /// Whether the main window shows the playing item's cover above the
+    /// control bar. Toggled from the titlebar, shared by playlist and
+    /// comparison, and persisted. Window state rather than a preference, so
+    /// Settings' Restore Defaults leaves it alone.
+    @Published var showsArtwork: Bool {
+        didSet { defaults.set(showsArtwork, forKey: Self.showsArtworkKey) }
+    }
+
     /// When enabled, the main window overlays each major UI component with a
     /// labelled badge naming its region. A developer aid for discussing the
     /// layout during redesign work; toggled from the Help menu. Intentionally
@@ -202,6 +212,7 @@ final class AppSettings: ObservableObject {
         readoutStyle = Self.storedReadoutStyle(defaults)
         controlBarTheme = Self.storedControlBarTheme(defaults)
         automaticGroupingMode = Self.storedAutomaticGroupingMode(defaults)
+        showsArtwork = Self.storedShowsArtwork(defaults)
     }
 
     /// The offset control configuration reflecting the user's chosen nudge amounts.
@@ -264,6 +275,10 @@ final class AppSettings: ObservableObject {
 
     nonisolated static func storedControlBarTheme(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> ControlBarTheme {
         defaults.string(forKey: controlBarThemeKey).flatMap(ControlBarTheme.init(rawValue:)) ?? controlBarThemeDefault
+    }
+
+    nonisolated static func storedShowsArtwork(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> Bool {
+        defaults.object(forKey: showsArtworkKey) as? Bool ?? showsArtworkDefault
     }
 
     nonisolated static func storedAutomaticGroupingMode(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> AutomaticGroupingMode {
