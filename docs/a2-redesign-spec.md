@@ -322,8 +322,12 @@ Update `AGENTS.md` (ownership, invariants, test map) as each milestone lands.
   360 pt window), keeping `DotMatrixProgressBar`'s endcaps and dim unlit
   cells. The lit run is drawn a step below full; the leading cell is
   brightest (white-hot in dark, full ink in light). It has 3 pt of extra
-  hit area above and below. Playlist readout content: 20 pt line, 5 pt gap,
-  5 pt meter, 6 pt above and below.
+  hit area above and below.
+- **Readout title face:** 1 pt dots with 1 pt gaps (13 pt capitals on an
+  11 pt advance), the closest whole-point match to the canvas's 16 px Doto,
+  sitting just under the 14 pt seven-segment digits. Playlist readout
+  content: 13 pt line, 6 pt gap, 5 pt meter, 9 pt above and below. Compare:
+  the 13 pt line 8 pt from the top.
 - **Divider:** the existing groove tokens (`Theme.transportDividerShadow`
   over `transportDividerHighlight`) drawn as two half-point lines, 1 pt in
   all, as the comparison section already drew it; the 1 pt + 1 pt in §3 is

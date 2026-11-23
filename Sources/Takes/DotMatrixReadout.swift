@@ -45,7 +45,13 @@ struct PlaylistControlBarReadout: View {
     /// readout of a 360 pt window.
     static let meterMetrics = DotMatrixMetrics(dotSize: 3, dotGap: 1, cellGap: 3)
     static let meterHeight: CGFloat = 5
-    static let lineSpacing: CGFloat = 5
+    static let lineSpacing: CGFloat = 6
+    /// Inset from the panel top to the title line, rounded down to a whole
+    /// point so the first dot row sits on the pixel grid (13 + 6 + 5 = 24 pt
+    /// of content: 9 pt above and below).
+    static var contentTopInset: CGFloat {
+        ((height - ControlBarReadoutLine.height - lineSpacing - meterHeight) / 2).rounded(.down)
+    }
     /// Extra hit area above and below the 5 pt meter, so it is easy to grab.
     static let meterHitOutset: CGFloat = 3
 
@@ -54,8 +60,6 @@ struct PlaylistControlBarReadout: View {
     let seek: (TimeInterval) -> Void
 
     var body: some View {
-        // 20 + 5 + 5 = 30 pt of content, 6 pt above and below: whole points,
-        // so the first dot row sits on the pixel grid.
         VStack(alignment: .leading, spacing: Self.lineSpacing) {
             ControlBarReadoutLine(controller: controller, title: title)
             DotMatrixProgressBar(controller: controller, seek: seek, metrics: Self.meterMetrics,
@@ -64,7 +68,8 @@ struct PlaylistControlBarReadout: View {
                 .padding(.vertical, -Self.meterHitOutset)
         }
         .padding(.horizontal, ControlBarReadoutLine.horizontalInset)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, Self.contentTopInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(height: Self.height)
         .readoutGlass(cornerRadius: Self.cornerRadius)
         .accessibilityElement(children: .contain)
@@ -78,6 +83,9 @@ struct CompareControlBarReadout: View {
     static let height: CGFloat = 30
     static let cornerRadius: CGFloat = 7
     static let backButtonSpacing: CGFloat = 8
+    /// Whole-point inset to the title line (8 pt above, the spare point
+    /// below), so the first dot row sits on the pixel grid.
+    static var contentTopInset: CGFloat { ((height - ControlBarReadoutLine.height) / 2).rounded(.down) }
 
     let controller: PlaybackController
     let back: () -> Void
@@ -95,7 +103,8 @@ struct CompareControlBarReadout: View {
                 .accessibilityLabel("Back to Playlist")
             ControlBarReadoutLine(controller: controller, title: ControlBarReadoutTitle.comparison(controller.session))
                 .padding(.horizontal, ControlBarReadoutLine.horizontalInset)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, Self.contentTopInset)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .frame(height: Self.height)
                 .readoutGlass(cornerRadius: Self.cornerRadius)
                 .allowsHitTesting(false)
@@ -111,6 +120,13 @@ struct ControlBarReadoutLine: View {
     static let horizontalInset: CGFloat = 10
     static let digitHeight: CGFloat = 14
     static let spacing: CGFloat = 9
+    /// The title face, matched to the canvas's 16 px Doto: 1 pt dots with
+    /// 1 pt gaps give 13 pt capitals on an 11 pt advance, just under the
+    /// 14 pt digits. Whole points, so every dot lands on the pixel grid.
+    static let titleMetrics = DotMatrixMetrics(dotSize: 1, dotGap: 1, cellGap: 2)
+    /// The line is as tall as the title; the digits (not pixel-snapped)
+    /// overhang it by half a point either side.
+    static var height: CGFloat { titleMetrics.lineHeight }
 
     let controller: PlaybackController
     let title: String
@@ -124,7 +140,7 @@ struct ControlBarReadoutLine: View {
                 .accessibilityHidden(true)
             ControlBarReadoutTitleField(title: title)
         }
-        .frame(height: DotMatrixMetrics().lineHeight)
+        .frame(height: Self.height)
         // Informational: clicks fall through to the window drag area, so
         // the readout isn't a dead spot in the titlebar.
         .allowsHitTesting(false)
@@ -155,7 +171,7 @@ private struct ControlBarElapsedDigits: View {
 /// cells; a title wider than that scrolls (`DotMatrixMarqueeText`).
 private struct ControlBarReadoutTitleField: View {
     let title: String
-    private let metrics = DotMatrixMetrics()
+    private let metrics = ControlBarReadoutLine.titleMetrics
     @State private var columns = 1
 
     var body: some View {
@@ -174,8 +190,9 @@ private struct ControlBarReadoutTitleField: View {
 // MARK: - Dot-matrix character display
 
 /// Geometry shared by the text lines and the progress bar so their pixel
-/// pitches match, the way one LCD controller drives the whole panel. Sized so
-/// three lines fit inside the comparison readout's 56pt panel.
+/// pitches match, the way one LCD controller drives the whole panel. The
+/// defaults (2 pt dots) are the large face; the A2 readout titles use
+/// `ControlBarReadoutLine.titleMetrics`.
 ///
 /// Every value is a whole number of points. A 2pt dot is a 2×2 block of
 /// device pixels at 1x and 4×4 at 2x, the 1pt gap one pixel and two, so the

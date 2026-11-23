@@ -79,6 +79,23 @@ struct SessionTests {
         #expect(ControlBarReadoutTitle.comparison(session) == "")
     }
 
+    /// The title face sits just under the elapsed digits (canvas: 16 px
+    /// Doto beside 14 pt digits), and both readouts start their first dot
+    /// row on a whole point.
+    @Test
+    func readoutTitleFaceMatchesTheDigitsAndSitsOnThePixelGrid() {
+        let metrics = ControlBarReadoutLine.titleMetrics
+        #expect(metrics.lineHeight == 13)
+        #expect(metrics.lineHeight < ControlBarReadoutLine.digitHeight)
+        #expect(metrics.cellAdvance == 11)
+
+        for inset in [PlaylistControlBarReadout.contentTopInset, CompareControlBarReadout.contentTopInset] {
+            #expect(inset == inset.rounded())
+        }
+        #expect(PlaylistControlBarReadout.contentTopInset == 9)
+        #expect(CompareControlBarReadout.contentTopInset == 8)
+    }
+
     @MainActor
     @Test
     func playlistMeterHasAboutEightyCellsAndItsHeadCoversOnlyTheLeadingOne() {
