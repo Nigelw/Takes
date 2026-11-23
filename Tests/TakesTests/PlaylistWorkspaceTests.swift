@@ -238,6 +238,37 @@ struct PlaylistWorkspaceTests {
         #expect(workspace.activeView == .comparison(itemID: destination.id))
     }
 
+    @Test func batchMoveUsesOriginalReferencesAndSuppliedOrder() throws {
+        let reference = makeVersion("source-ref", offsetSeconds: 4)
+        let other = makeVersion("other", offsetSeconds: 9)
+        let kept = makeVersion("kept", offsetSeconds: 11)
+        let source = PlaylistItem(title: "Source", versions: [reference, other, kept])
+        let destRef = makeVersion("destination-ref", offsetSeconds: -2)
+        let anchor = makeVersion("anchor")
+        let destination = PlaylistItem(title: "Destination", versions: [anchor, destRef], selectedVersionID: destRef.id)
+        var workspace = PlaylistWorkspace(items: [source, destination])
+        let ids = [reference.id, destRef.id, other.id]
+        try workspace.moveVersions(ids, to: destination.id, before: anchor.id, playingVersionID: other.id)
+        #expect(workspace.items[0].selectedVersionID == kept.id)
+        #expect(workspace.items[1].versions.map(\.id) == ids + [anchor.id])
+        #expect(workspace.items[1].versions.map(\.offsetSeconds) == [-2, -2, 3, 0])
+        #expect(workspace.items[1].selectedVersionID == other.id)
+    }
+
+    @Test func dragGroupingPreservesExplicitDestinationAndSourceOrder() throws {
+        let a = makeVersion("a", offsetSeconds: 5)
+        let b = makeVersion("b", offsetSeconds: 8)
+        let first = PlaylistItem(title: "First", versions: [a, b])
+        let second = PlaylistItem(title: "Second", versions: [makeVersion("second")])
+        let target = PlaylistItem(title: "Target", versions: [makeVersion("target", offsetSeconds: -1)])
+        var workspace = PlaylistWorkspace(items: [first, second, target])
+        try workspace.groupItems([second.id, first.id], into: target.id)
+        #expect(workspace.items.map(\.id) == [target.id])
+        #expect(workspace.items[0].versions.map(\.id) == (target.versions + second.versions + first.versions).map(\.id))
+        #expect(workspace.items[0].versions.map(\.offsetSeconds) == [-1, -1, -1, 2])
+        #expect(workspace.items[0].selectedVersionID == target.selectedVersionID)
+    }
+
     @Test
     func separatingVersionResetsOffsetAndLoopButRetainsGainAndID() throws {
         let kept = makeVersion("kept")

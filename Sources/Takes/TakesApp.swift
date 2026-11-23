@@ -503,13 +503,14 @@ enum TakesWindowPolicy {
         }
     }
 
-    /// Applies an artwork toggle to the window: the new minimum, then the
-    /// shrink or grow.
+    /// Use the frame before SwiftUI's new minimum can grow the window.
     @MainActor
-    static func applyArtworkVisibility(_ showsArtwork: Bool, to window: NSWindow, animate: Bool = true) {
+    static func applyArtworkVisibility(
+        _ showsArtwork: Bool, to window: NSWindow, from previousFrame: CGRect, animate: Bool = true
+    ) {
         window.minSize = minimumSize(showsArtwork: showsArtwork)
         let frame = frameTogglingArtwork(
-            currentFrame: window.frame,
+            currentFrame: previousFrame,
             showsArtwork: showsArtwork,
             visibleFrame: visibleFrame(for: window)
         )
@@ -551,7 +552,7 @@ struct TakesApp: App {
     @State private var persistence: PlaylistPersistenceController
     private var controller: PlaybackController { coordinator.controller }
     @StateObject private var remotePlaybackCommands = RemotePlaybackCommandController()
-    @StateObject private var settings = AppSettings()
+    @StateObject private var settings = AppSettings.shared
     @StateObject private var updater = SoftwareUpdater()
     @StateObject private var ytdlpUpdates = YTDLPUpdateState()
     @StateObject private var zoomHaptics = ZoomHapticsController()
@@ -977,22 +978,22 @@ private struct PlaybackCommands: Commands {
 
             Menu("Nudge Track") {
                 Button("Nudge Left") {
-                    controller.nudgeActiveTrackOffset(direction: -1, largeStep: false)
+                    coordinator.nudgeActiveTrackOffset(direction: -1, largeStep: false)
                 }
                 .keyboardShortcut("j", modifiers: [.command])
 
                 Button("Large Nudge Left") {
-                    controller.nudgeActiveTrackOffset(direction: -1, largeStep: true)
+                    coordinator.nudgeActiveTrackOffset(direction: -1, largeStep: true)
                 }
                 .keyboardShortcut("j", modifiers: [.command, .shift])
 
                 Button("Nudge Right") {
-                    controller.nudgeActiveTrackOffset(direction: 1, largeStep: false)
+                    coordinator.nudgeActiveTrackOffset(direction: 1, largeStep: false)
                 }
                 .keyboardShortcut("k", modifiers: [.command])
 
                 Button("Large Nudge Right") {
-                    controller.nudgeActiveTrackOffset(direction: 1, largeStep: true)
+                    coordinator.nudgeActiveTrackOffset(direction: 1, largeStep: true)
                 }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
             }

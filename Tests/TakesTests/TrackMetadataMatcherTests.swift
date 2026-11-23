@@ -70,6 +70,17 @@ struct TrackMetadataMatcherTests {
         #expect(TrackMetadataMatcher.decision(between: studio, and: live) == .mismatch)
     }
 
+    @Test(arguments: ["Live", "Demo", "Acoustic", "Cover", "Alternate Take 2"])
+    func fuzzyMatchingCannotAbsorbAPerformanceQualifier(_ qualifier: String) {
+        let title = "A Very Long Song Title That Easily Crosses the Fuzzy Matching Threshold"
+        let studio = version(title: title, artist: "Artist", duration: 200)
+        let alternate = version(title: "\(title) (\(qualifier))", artist: "Artist", duration: 201)
+        let remaster = version(title: "\(title) (\(qualifier)) (Remastered 2009)", artist: "Artist", duration: 201)
+
+        #expect(TrackMetadataMatcher.decision(between: studio, and: alternate) == .mismatch)
+        #expect(TrackMetadataMatcher.decision(between: alternate, and: remaster) == .match)
+    }
+
     @Test
     func ordinaryVersionsUseFiveSecondOrFivePercentDurationTolerance() {
         let first = version(title: "Example", artist: "Artist", duration: 200)

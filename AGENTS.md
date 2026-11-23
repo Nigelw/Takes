@@ -190,17 +190,28 @@ These are here to prevent parallel implementations and subtle regressions:
   the user navigates. Canonical duplicate detection covers the whole workspace.
 - Save comparison edits by stable version ID; playlist playback ignores their
   gain, offset, loop, and blind ordering. Mode transitions translate file time.
+  Read the transport and active offset from the same runtime when handing off.
+  Back and failed Compare restoration return to the playlist so missing files
+  remain repairable.
 - Restore before draining external-open events and always restore paused.
   Failed recovery blocks automatic saves; successful streaming downloads stay
   in workspace storage so navigation, quit, and Undo cannot delete them.
 - Keep persistence snapshots side-effect free. Position checkpoints may read
   transport anchors but must not create periodic observed workspace mutations.
+  Save observation follows the settled viewport revision so scrolling and
+  animated playback page turns do not rearm it per frame.
 - Route new import/open entry points through the existing shared loading path
   instead of adding separate import behavior.
+- Validate multi-row organization on one candidate workspace; use the source
+  and destination references from before the edit for offset translation.
+  Undo and Redo rebase the recorded edit against current versions and retain
+  live playback by stable ID when that version survives.
 - Keep automatic grouping conservative: missing metadata or incompatible
   duration must not create a match; incoming and existing tracks use the same
   rules, existing items require an unambiguous all-member witness, and imports
-  never merge existing items.
+  never merge existing items. Normalize each version once per matching pass,
+  check performance qualifiers before fuzzy matching, and recheck the matching
+  inputs before committing evidence computed off the main actor.
 - Preserve canonical duplicate detection by standardized, symlink-resolved file
   URL.
 - Keep removal behavior state-safe: removing one track preserves remaining

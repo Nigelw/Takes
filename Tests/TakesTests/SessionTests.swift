@@ -2396,6 +2396,26 @@ struct SessionTests {
         #expect(abs(controller.zoomSliderValue - 1) < 0.0001)
     }
 
+    @MainActor
+    @Test
+    func viewportSaveRevisionChangesOnlyWhenTimelineScrollSettles() async throws {
+        let url = try makeTemporaryAudioFile(name: "viewport-save.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+        controller.zoomVisibleSpan(to: 0.5)
+        let revision = controller.settledViewportRevision
+
+        controller.setTimelineScrollActive(true)
+        controller.scrollTimeline(toVisibleStart: 0.1)
+        controller.scrollTimeline(toVisibleStart: 0.2)
+        #expect(controller.visibleStart == 0.2)
+        #expect(controller.settledViewportRevision == revision)
+
+        controller.setTimelineScrollActive(false)
+        #expect(controller.settledViewportRevision == revision + 1)
+    }
+
     @Test
     func windowMinimumHeightHoldsTheBarsAndOneWholeLane() {
         // Compare control bar under the titlebar, ruler, one lane, bottom bar.
@@ -2487,6 +2507,37 @@ struct SessionTests {
         #expect(image.size.width == CGFloat(PlaylistArtworkStore.thumbnailPixelSize))
         // A relocated file is a different thumbnail.
         #expect(store.thumbnail(for: rows[5].id, url: URL(fileURLWithPath: "/tmp/elsewhere.m4a")) == .unknown)
+    }
+
+    @MainActor
+    @Test
+    func finishedCoverWaitsForThumbnailCapacityAndCurrentVisibility() async throws {
+        let url = try makeTemporaryAudioFile(name: "queued-cover.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let gate = ThumbnailLoadGate()
+        let store = PlaylistArtworkStore { url, size in await gate.load(url, size: size) }
+        let version = PlaylistVersion(
+            file: PlaylistWorkspaceStore.makeFileReference(for: url),
+            metadata: PlaylistMetadata(fileFormatDescription: "WAV", displayName: url.lastPathComponent)
+        )
+        let rows = (0..<2).map { (id: UUID(), url: URL(fileURLWithPath: "/tmp/busy-\($0).wav")) }
+        store.load(for: version)
+        try await waitUntil { await gate.callCount == 1 }
+        store.requestThumbnails([(version.id, url)] + rows)
+        try await waitUntil { await gate.callCount == 3 }
+
+        await gate.releaseFirst()
+        try await waitUntil { store.hasResolvedArtwork(for: version.id) }
+        #expect(store.thumbnailLoadsInFlight == 2)
+        #expect(store.thumbnail(for: version.id, url: url) == .unknown)
+
+        store.requestThumbnails(rows)
+        await gate.releaseAll()
+        try await waitUntil { store.thumbnailLoadsInFlight == 0 }
+        #expect(store.thumbnail(for: version.id, url: url) == .unknown)
+        store.requestThumbnails([(version.id, url)])
+        try await waitUntil { store.thumbnail(for: version.id, url: url) != .unknown }
+        #expect(await gate.callCount == 3)
     }
 
     @MainActor
@@ -2600,6 +2651,11 @@ private actor ThumbnailLoadGate {
         return SessionTests.makeImage(side: size)
     }
 
+    func releaseFirst() {
+        guard !waiting.isEmpty else { return }
+        waiting.removeFirst().resume()
+    }
+
     /// Releases every waiting load, and lets later ones through.
     func releaseAll() {
         isOpen = true
@@ -2645,7 +2701,7 @@ private struct FakeLibraryTrackSelector: LibraryTrackSelecting {
     }
 }
 
-private final class InMemoryAppSettingsDefaults: AppSettingsDefaults {
+final class InMemoryAppSettingsDefaults: AppSettingsDefaults {
     private var values: [String: Any] = [:]
 
     func object(forKey defaultName: String) -> Any? {

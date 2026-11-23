@@ -97,8 +97,8 @@ final class PlaylistPersistenceController {
 
     private func observeChanges() {
         guard savesEnabled else { return }
-        _ = withObservationTracking {
-            coordinator.snapshotForPersistence()
+        withObservationTracking {
+            coordinator.observePersistenceInputs()
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self, self.savesEnabled else { return }

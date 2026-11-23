@@ -316,20 +316,6 @@ enum TrackDropHighlight: Equatable {
     }
 }
 
-enum DroppedFileImportAction: Equatable {
-    case append
-
-    static func action(targetTrackID _: SessionTrack.ID?) -> DroppedFileImportAction {
-        .append
-    }
-}
-
-enum DroppedFileURLResolver {
-    static func audioFileURLs(from urls: [URL], fileManager: FileManager = .default) -> [URL] {
-        AppOpenedURLResolver.audioFileURLs(from: urls, fileManager: fileManager)
-    }
-}
-
 enum TrackReorderDrag {
     /// Private marker type identifying an in-app track reorder drag. Must be a
     /// type no external drag can carry: Finder file drags include a plain-text
@@ -535,41 +521,6 @@ private struct TrackListDropDelegate: DropDelegate {
         revealingID = draggingID
         draggingID = nil
         targetIndex = nil
-    }
-}
-
-/// The window-wide audio-file import target. Accepts genuine external file drags
-/// (append). A track being reordered also carries a file URL, so it lands here
-/// too when it strays over the window's chrome (control bar, header); it's
-/// claimed but proposed as `.cancel`, so it reads as a cancel matching the menu
-/// bar — leaving it target-less instead would make AppKit fall back to the drag
-/// source's copy mask and flash a stray copy badge.
-private struct WindowFileImportDropDelegate: DropDelegate {
-    @Binding var isTargeted: Bool
-    let loadDroppedURLs: ([NSItemProvider]) -> Bool
-
-    private func isReorderDrag(_ info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier])
-    }
-
-    func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [UTType.fileURL.identifier])
-    }
-
-    func dropEntered(info: DropInfo) {
-        isTargeted = !isReorderDrag(info)
-    }
-
-    func dropExited(info: DropInfo) { isTargeted = false }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: isReorderDrag(info) ? .cancel : .copy)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        isTargeted = false
-        guard !isReorderDrag(info) else { return false }
-        return loadDroppedURLs(info.itemProviders(for: [UTType.fileURL.identifier]))
     }
 }
 
@@ -995,6 +946,7 @@ extension FocusedValues {
 
 struct ContentView: View {
     let coordinator: PlaylistCoordinator
+    private let importProviders: ([NSItemProvider]) -> Bool
     var controller: PlaybackController { coordinator.controller }
     @Environment(\.undoManager) private var undoManager
     @EnvironmentObject private var settings: AppSettings
@@ -1086,17 +1038,19 @@ struct ContentView: View {
     /// Horizontal travel (points) that turns a click into a loop drag.
     private static let loopDragThreshold: CGFloat = 4
 
-    init(coordinator: PlaylistCoordinator, openFileCommandState: OpenFileCommandState) {
+    init(
+        coordinator: PlaylistCoordinator,
+        openFileCommandState: OpenFileCommandState,
+        importProviders: @escaping ([NSItemProvider]) -> Bool
+    ) {
         self.coordinator = coordinator
         self.openFileCommandState = openFileCommandState
+        self.importProviders = importProviders
     }
 
     var body: some View {
         inactiveAwareContent
             .frame(minWidth: TakesWindowPolicy.minimumWidth)
-            // The control bar doubles as the titlebar: lay the root view out
-            // under the hidden titlebar so the bar starts at the window's top edge.
-            .ignoresSafeArea(.container, edges: .top)
             .environment(\.transportAppearance, settings.transportAppearance)
             .background(WindowBackground().ignoresSafeArea())
             .background {
@@ -1459,7 +1413,7 @@ struct ContentView: View {
                                 gapGeneration: $reorderGapGeneration,
                                 revealingID: $reorderRevealingID,
                                 isImportTargeted: $windowIsDropTargeted,
-                                loadDroppedURLs: { loadDroppedURLs(from: $0) },
+                                loadDroppedURLs: importProviders,
                                 reorderVersion: { coordinator.reorderVersion($0, before: $1, undoManager: undoManager) }
                             )
                         )
@@ -2344,38 +2298,6 @@ struct ContentView: View {
         controller.magnifyTimeline(by: magnification, atFraction: fraction)
     }
 
-    private func loadDroppedURLs(from providers: [NSItemProvider]) -> Bool {
-        let fileProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
-        guard !fileProviders.isEmpty else { return false }
-
-        let destination = coordinator.captureImportDestination()
-        var urlsByProvider = Array<URL?>(repeating: nil, count: fileProviders.count)
-        let group = DispatchGroup()
-
-        for (index, provider) in fileProviders.enumerated() {
-            group.enter()
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                let url = extractDroppedFileURL(from: item)
-                DispatchQueue.main.async {
-                    urlsByProvider[index] = url
-                    group.leave()
-                }
-            }
-        }
-
-        group.notify(queue: .main) {
-            let urls = DroppedFileURLResolver.audioFileURLs(from: urlsByProvider.compactMap(\.self))
-            guard !urls.isEmpty else { return }
-            Task { @MainActor in
-                switch DroppedFileImportAction.action(targetTrackID: nil) {
-                case .append:
-                    await coordinator.importFiles(urls, destination: destination)
-                }
-            }
-        }
-
-        return true
-    }
 }
 
 /// Where a lane sits during a reorder drag: hidden while it is lifted (the
@@ -3184,22 +3106,6 @@ private struct IntegerInputField: NSViewRepresentable {
             return true
         }
     }
-}
-
-private func extractDroppedFileURL(from item: NSSecureCoding?) -> URL? {
-    if let data = item as? Data {
-        return URL(dataRepresentation: data, relativeTo: nil)
-    }
-
-    if let url = item as? URL {
-        return url
-    }
-
-    if let text = item as? String {
-        return URL(string: text)
-    }
-
-    return nil
 }
 
 /// One lane's visuals — the active tint and the waveform lane — as a

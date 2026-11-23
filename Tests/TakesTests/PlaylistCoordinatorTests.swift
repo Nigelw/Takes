@@ -368,6 +368,42 @@ struct PlaylistCoordinatorTests {
     }
 
     @MainActor
+    @Test func mixedGroupOverLimitLeavesEveryItemAndUndoUnchanged() async {
+        let destination = PlaylistItem(title: "Destination", versions: (0..<31).map { makeVersion("dest-\($0).wav") })
+        let first = makeVersion("loose-one.wav")
+        let second = makeVersion("loose-two.wav")
+        let source = PlaylistItem(title: "Source", versions: [first, second])
+        let before = PlaylistWorkspace(items: [destination, source])
+        let coordinator = PlaylistCoordinator(workspace: before)
+        let undo = UndoManager()
+        let result = await coordinator.groupItems([destination.id], looseVersionIDs: [first.id, second.id],
+                                                  compare: true, undoManager: undo)
+        #expect(result == nil)
+        #expect(coordinator.workspace == before)
+        #expect(!undo.canUndo)
+        #expect(coordinator.errorMessage != nil)
+    }
+
+    @MainActor
+    @Test func dragSeparationAndPlacementUndoTogether() throws {
+        let versions = ["a", "b", "c"].map { makeVersion("\($0).wav") }
+        let source = PlaylistItem(title: "Source", versions: versions)
+        let before = PlaylistWorkspace(items: [source])
+        let coordinator = PlaylistCoordinator(workspace: before)
+        let undo = UndoManager()
+        let ids = [versions[1].id, versions[0].id]
+        #expect(coordinator.separateVersions(ids, placement: .beforeItem(UUID()), undoManager: undo) == nil)
+        #expect(coordinator.workspace == before)
+        #expect(!undo.canUndo)
+        let created = try #require(coordinator.separateVersions(ids, placement: .beforeItem(source.id), undoManager: undo))
+        #expect(coordinator.workspace.items.map(\.id) == created + [source.id])
+        #expect(coordinator.workspace.items.flatMap { $0.versions.map(\.id) } == ids + [versions[2].id])
+        undo.undo()
+        #expect(coordinator.workspace == before)
+        #expect(!undo.canUndo)
+    }
+
+    @MainActor
     @Test
     func undoAndRedoRestoreWorkspaceSnapshots() {
         let item = PlaylistItem(title: "Original", versions: [makeVersion("undo.wav")])
@@ -692,8 +728,8 @@ struct PlaylistCoordinatorTests {
     }
 
     @MainActor
-    @Test
-    func singleGroupedItemInAnEmptyPlaylistOpensComparison() async throws {
+    @Test(arguments: [false, true])
+    func singleGroupedItemInAnEmptyPlaylistOpensComparison(alignOnOpen: Bool) async throws {
         let firstURL = try makeTemporaryAudioFile(name: "single-group-first.wav")
         let secondURL = try makeTemporaryAudioFile(name: "single-group-second.wav")
         defer {
@@ -705,6 +741,9 @@ struct PlaylistCoordinatorTests {
             secondURL: makeLoadedTrack(for: secondURL, title: "Single Group (Stereo Mix)", artist: "Artist")
         ])
         let coordinator = PlaylistCoordinator(loader: loader)
+        let settings = AppSettings(defaults: InMemoryAppSettingsDefaults())
+        settings.alignTracksOnOpen = alignOnOpen
+        coordinator.controller.settings = settings
         defer { coordinator.pause() }
 
         let imported = await coordinator.importFiles(
@@ -716,6 +755,29 @@ struct PlaylistCoordinatorTests {
         #expect(imported.count == 1)
         #expect(coordinator.mode == .comparison(itemID: itemID))
         #expect(coordinator.controller.runtimeTrackCount == 2)
+        #expect((coordinator.controller.isAligning || coordinator.controller.alignmentOutcome != nil) == alignOnOpen)
+    }
+
+    @MainActor
+    @Test
+    func groupAndCompareWithAMissingFileKeepsPlaybackWithTheNewOwner() async throws {
+        let url = try makeTemporaryAudioFile(name: "playing.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let version = makePlaylistVersion(url: url, title: "Playing")
+        let playing = PlaylistItem(title: "Playing", versions: [version])
+        let missing = PlaylistItem(title: "Missing", versions: [makeVersion("missing.wav")])
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [missing, playing]))
+        await coordinator.playItem(id: playing.id)
+        try #require(coordinator.isPlaying)
+        defer { coordinator.pause() }
+
+        let group = await coordinator.groupItems([missing.id, playing.id], compare: true)
+        #expect(group == missing.id)
+        #expect(coordinator.mode == .playlist)
+        #expect(coordinator.runtimeContext?.itemID == missing.id)
+        #expect(coordinator.controller.session.activeTrackID == version.id)
+        #expect(coordinator.isPlaying)
+        #expect(coordinator.errorMessage != nil)
     }
 
     @MainActor
@@ -823,6 +885,148 @@ struct PlaylistCoordinatorTests {
         await coordinator.enterComparison(itemID: compareItem.id)
         #expect(coordinator.mode == .comparison(itemID: compareItem.id))
         #expect(coordinator.isPlaying)
+    }
+
+    @MainActor
+    @Test func missingComparisonFileLeavesPlaylistAvailableForRepair() async throws {
+        let version = makeVersion("unavailable.wav")
+        let item = PlaylistItem(title: "Unavailable", versions: [version])
+        let saved = PlaylistWorkspace(items: [item], activeView: .comparison(itemID: item.id),
+                                      listeningState: .init(itemID: item.id, versionID: version.id, filePosition: 1))
+        let coordinator = PlaylistCoordinator()
+        try await coordinator.restoreWorkspace(saved)
+        #expect(coordinator.mode == .playlist)
+        #expect(coordinator.workspace.activeView == .playlist)
+        #expect(coordinator.workspace.listeningState == saved.listeningState)
+        #expect(coordinator.runtimeContext == nil)
+        #expect(coordinator.errorMessage != nil)
+    }
+
+    @MainActor
+    @Test func backLeavesComparisonWhenItsFileDisappears() async throws {
+        let url = try makeTemporaryAudioFile(name: "back.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let version = makePlaylistVersion(url: url, title: "Back")
+        let item = PlaylistItem(title: "Back", versions: [version])
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
+        await coordinator.enterComparison(itemID: item.id)
+        coordinator.seek(to: 1)
+        try FileManager.default.removeItem(at: url)
+        await coordinator.backToPlaylist()
+        #expect(coordinator.workspace.activeView == .playlist)
+        #expect(coordinator.mode == .playlist)
+        #expect(coordinator.runtimeContext == nil)
+        #expect(coordinator.workspace.listeningState?.filePosition == 1)
+        #expect(coordinator.errorMessage != nil)
+    }
+
+    @MainActor
+    @Test func removalWithMissingSuccessorDetachesPlayingFile() async throws {
+        let url = try makeTemporaryAudioFile(name: "remove.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let item = PlaylistItem(title: "Remove", versions: [makePlaylistVersion(url: url, title: "Remove")])
+        let successor = PlaylistItem(title: "Missing", versions: [makeVersion("missing.wav")])
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item, successor]))
+        await coordinator.playItem(id: item.id)
+        #expect(coordinator.isPlaying)
+        #expect(coordinator.removeItem(item.id))
+        #expect(!coordinator.isPlaying)
+        for _ in 0..<100 where coordinator.errorMessage == nil { await Task.yield() }
+        #expect(coordinator.errorMessage != nil)
+        #expect(coordinator.currentItemID == successor.id)
+        #expect(coordinator.runtimeContext == nil)
+        #expect(coordinator.controller.runtimeTrackCount == 0)
+    }
+
+    @MainActor
+    @Test func reorderUsesLiveKeyboardOffsetForAudibleFileTime() async throws {
+        let first = try makeTemporaryAudioFile(name: "first.wav")
+        let second = try makeTemporaryAudioFile(name: "second.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
+        let versions = [makePlaylistVersion(url: first, title: "A"), makePlaylistVersion(url: second, title: "B")]
+        let item = PlaylistItem(title: "Pair", versions: versions)
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
+        await coordinator.enterComparison(itemID: item.id)
+        coordinator.seek(to: 1)
+        coordinator.controller.nudgeActiveTrackOffset(direction: 1, largeStep: true)
+        let expected = coordinator.snapshotForPersistence().listeningState?.filePosition
+        let context = coordinator.runtimeContext
+        #expect(coordinator.reorderVersion(versions[1].id, before: versions[0].id))
+        for _ in 0..<100 where coordinator.runtimeContext == context { await Task.yield() }
+        #expect(coordinator.runtimeContext != context)
+        #expect(coordinator.snapshotForPersistence().listeningState?.filePosition == expected)
+    }
+
+    @MainActor
+    @Test func organizationUndoPreservesLaterNavigationPositionAndLocate() async throws {
+        let first = try makeTemporaryAudioFile(name: "repaired.wav")
+        let second = try makeTemporaryAudioFile(name: "playing.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
+        let missing = makeVersion("missing.wav")
+        let original = PlaylistItem(title: "Original", versions: [missing])
+        let playing = PlaylistItem(title: "Playing", versions: [makePlaylistVersion(url: second, title: "B")])
+        let loader = CoordinatorTestAudioLoader(tracks: [first: makeLoadedTrack(for: first)])
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [original, playing]), loader: loader)
+        defer { coordinator.pause() }
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        undo.beginUndoGrouping()
+        #expect(coordinator.renameItem(original.id, to: "Changed", undoManager: undo))
+        undo.endUndoGrouping()
+        await coordinator.locateFile(versionID: missing.id, url: first)
+        await coordinator.enterComparison(itemID: playing.id)
+        coordinator.seek(to: 1)
+        coordinator.play()
+        let context = coordinator.runtimeContext
+        undo.undo()
+        #expect(coordinator.workspace.items.first?.title == "Original")
+        #expect(coordinator.workspace.items.first?.versions.first?.file.storedURL == first)
+        #expect(coordinator.mode == .comparison(itemID: playing.id))
+        #expect(coordinator.currentVersionID == playing.selectedVersionID)
+        #expect(coordinator.runtimeContext == context)
+        #expect(coordinator.isPlaying)
+        #expect(coordinator.controller.displayTransportPosition() >= 1)
+    }
+
+    @MainActor
+    @Test func groupUndoFollowsAuditionedVersionBackToItsOwner() async throws {
+        let first = try makeTemporaryAudioFile(name: "one.wav")
+        let second = try makeTemporaryAudioFile(name: "two.wav")
+        defer {
+            try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
+        }
+        let original = PlaylistItem(title: "One", versions: [makePlaylistVersion(url: first, title: "A")])
+        let moved = makePlaylistVersion(url: second, title: "B")
+        let other = PlaylistItem(title: "Two", versions: [moved])
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [original, other]))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        undo.beginUndoGrouping()
+        let grouped = await coordinator.groupItems([original.id, other.id], undoManager: undo)
+        let group = try #require(grouped)
+        undo.endUndoGrouping()
+        await coordinator.enterComparison(itemID: group)
+        await coordinator.selectPlaybackVersion(moved.id, in: group)
+        coordinator.seek(to: 1)
+        undo.undo()
+        for _ in 0..<100 where coordinator.runtimeContext?.itemID != other.id { await Task.yield() }
+        #expect(coordinator.mode == .comparison(itemID: other.id))
+        #expect(coordinator.runtimeContext?.itemID == other.id)
+        #expect(coordinator.controller.session.activeTrackID == moved.id)
+        #expect(coordinator.controller.session.transportPosition == 1)
+        undo.redo()
+        for _ in 0..<100 where coordinator.runtimeContext?.itemID != group { await Task.yield() }
+        #expect(coordinator.mode == .comparison(itemID: group))
+        #expect(coordinator.runtimeContext?.itemID == group)
+        #expect(coordinator.controller.session.activeTrackID == moved.id)
+        #expect(coordinator.controller.session.transportPosition == 1)
     }
 
     private func makeVersion(_ name: String, id: UUID = UUID()) -> PlaylistVersion {

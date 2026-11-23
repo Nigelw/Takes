@@ -63,8 +63,6 @@ final class PlaylistArtworkStore {
     @ObservationIgnored private var thumbnailRecency: [PlaylistVersion.ID] = []
     @ObservationIgnored private var thumbnailQueue: [(id: PlaylistVersion.ID, url: URL)] = []
     @ObservationIgnored private var thumbnailsLoading: [PlaylistVersion.ID: URL] = [:]
-    /// Thumbnails waiting on the same version's cover decode.
-    @ObservationIgnored private var thumbnailsAwaitingCover: [PlaylistVersion.ID: URL] = [:]
     /// Called on the main actor when a thumbnail finishes loading, with or
     /// without art.
     @ObservationIgnored var onThumbnailLoaded: ((PlaylistVersion.ID) -> Void)?
@@ -110,7 +108,7 @@ final class PlaylistArtworkStore {
             self.inFlight.remove(id)
             self.images[id] = .some(image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) })
             if image != nil { self.markRecent(id) }
-            self.coverFinished(id, image: image)
+            self.pumpThumbnails()
         }
     }
 
@@ -145,14 +143,15 @@ final class PlaylistArtworkStore {
     var thumbnailLoadsInFlight: Int { thumbnailsLoading.count }
 
     private func pumpThumbnails() {
-        while thumbnailsLoading.count < Self.maximumConcurrentThumbnailLoads, !thumbnailQueue.isEmpty {
-            let (id, url) = thumbnailQueue.removeFirst()
-            guard thumbnails[id]?.url != url, thumbnailsLoading[id] == nil, thumbnailsAwaitingCover[id] == nil else { continue }
+        // Leave requests waiting on a cover in the visible queue. Other rows
+        // can start while they wait, and scrolling replaces the whole queue.
+        while thumbnailsLoading.count < Self.maximumConcurrentThumbnailLoads,
+              let index = thumbnailQueue.firstIndex(where: { !inFlight.contains($0.id) && thumbnailsLoading[$0.id] == nil }) {
+            let (id, url) = thumbnailQueue.remove(at: index)
+            guard thumbnails[id]?.url != url else { continue }
             if case let .some(.some(cover)) = images[id],
                let cgImage = cover.cgImage(forProposedRect: nil, context: nil, hints: nil) {
                 startThumbnail(id, url) { Self.scaled(cgImage, maximumPixelSize: Self.thumbnailPixelSize) }
-            } else if inFlight.contains(id) {
-                thumbnailsAwaitingCover[id] = url
             } else {
                 let loadArtwork = loadArtwork
                 startThumbnail(id, url) { await loadArtwork(url, Self.thumbnailPixelSize) }
@@ -168,18 +167,6 @@ final class PlaylistArtworkStore {
             self.thumbnailsLoading[id] = nil
             self.storeThumbnail(id, url: url, image: image)
             self.pumpThumbnails()
-        }
-    }
-
-    private func coverFinished(_ id: PlaylistVersion.ID, image: CGImage?) {
-        guard let url = thumbnailsAwaitingCover.removeValue(forKey: id) else { return }
-        if let image {
-            startThumbnail(id, url) { Self.scaled(image, maximumPixelSize: Self.thumbnailPixelSize) }
-        } else {
-            // The cover found no art (or no file); read the file once at
-            // thumbnail size rather than trusting a miss recorded elsewhere.
-            thumbnailQueue.insert((id, url), at: 0)
-            pumpThumbnails()
         }
     }
 

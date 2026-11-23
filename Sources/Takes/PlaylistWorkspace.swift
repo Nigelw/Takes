@@ -390,86 +390,110 @@ struct PlaylistWorkspace: Codable, Equatable {
         return newItems.map(\.id)
     }
 
-    /// Merge selected items into the row that appears earliest in the current
-    /// order. The earliest item's title and comparison configuration survive;
-    /// incoming versions are translated relative to each group's selected
-    /// reference version.
+    /// Menu grouping retains the earliest selected item. A drop retains its explicit target.
+    /// Append whole source items in supplied order, followed by individually selected versions.
     @discardableResult
     mutating func groupItems(
         _ itemIDs: [PlaylistItem.ID],
+        looseVersionIDs: [PlaylistVersion.ID] = [],
+        into explicitDestination: PlaylistItem.ID? = nil,
         playingVersionID: PlaylistVersion.ID? = nil
     ) throws -> PlaylistItem.ID {
-        guard !itemIDs.isEmpty else { throw PlaylistWorkspaceError.noItemsSelected }
-        var candidate = self
-        try candidate.validate()
-
-        let selectedIDs = Set(itemIDs)
-        guard selectedIDs.count == itemIDs.count else {
-            throw PlaylistWorkspaceError.invalidItemOrder
+        let selected = Set(itemIDs)
+        guard selected.count == itemIDs.count else { throw PlaylistWorkspaceError.invalidItemOrder }
+        let selectedItems = items.filter { selected.contains($0.id) }
+        var byID = [UUID: PlaylistItem]()
+        for item in selectedItems { byID[item.id] = item }
+        let ordered = try itemIDs.map { id in
+            guard let item = byID[id] else { throw PlaylistWorkspaceError.itemNotFound(id) }
+            return item
         }
-        let selectedIndexes = candidate.items.indices.filter { selectedIDs.contains(candidate.items[$0].id) }
-        guard selectedIndexes.count == selectedIDs.count else {
-            let missingID = itemIDs.first { requestedID in
-                !candidate.items.contains { item in item.id == requestedID }
-            }
-            throw PlaylistWorkspaceError.itemNotFound(missingID ?? itemIDs[0])
+        guard let destination = explicitDestination ?? selectedItems.first?.id else {
+            throw PlaylistWorkspaceError.noItemsSelected
         }
-
-        let destinationIndex = selectedIndexes[0]
-        let destination = candidate.items[destinationIndex]
-        let destinationID = destination.id
-        let destinationOffset = Self.referenceOffset(for: destination)
-        let flattened: [PlaylistVersion] = selectedIndexes.flatMap { index in
-            let item = candidate.items[index]
-            let delta = index == destinationIndex ? 0 : destinationOffset - Self.referenceOffset(for: item)
-            return item.versions.map { version in
-                var translated = version
-                translated.offsetSeconds += delta
-                return translated
-            }
-        }
-
-        // `listeningState` is persisted paused state, so it is not evidence
-        // that a version is currently playing. A coordinator may pass an
-        // explicit playing ID; an ID outside this grouping is simply ignored.
-        let effectivePlayingVersionID = playingVersionID.flatMap { playingID in
-            flattened.contains(where: { $0.id == playingID }) ? playingID : nil
-        }
-
-        var merged = destination
-        merged.versions = flattened
-        merged.selectedVersionID = effectivePlayingVersionID
-            ?? (destination.selectedVersionID.flatMap { id in flattened.contains(where: { $0.id == id }) ? id : nil })
-            ?? flattened.first?.id
-
-        var rebuiltItems: [PlaylistItem] = []
-        rebuiltItems.reserveCapacity(candidate.items.count - selectedIndexes.count + 1)
-        for index in candidate.items.indices {
-            if index == destinationIndex {
-                rebuiltItems.append(merged)
-            } else if !selectedIDs.contains(candidate.items[index].id) {
-                rebuiltItems.append(candidate.items[index])
-            }
-        }
-        candidate.items = rebuiltItems
-
-        if case let .comparison(activeItemID) = candidate.activeView,
-           selectedIDs.contains(activeItemID) {
-            candidate.activeView = .comparison(itemID: destinationID)
-        }
-        if var state = candidate.listeningState, selectedIDs.contains(state.itemID) {
-            state.itemID = destinationID
-            candidate.listeningState = state
-        }
-
-        try candidate.validate()
-        self = candidate
-        return destinationID
+        let incoming = ordered.filter { $0.id != destination }.flatMap { $0.versions.map(\.id) } + looseVersionIDs
+        try transferVersions(incoming, to: destination, before: nil, playingVersionID: playingVersionID,
+                             preserveDestinationSelection: true)
+        return destination
     }
 
-    /// Move a version to another item. `at` is an insertion index in the
-    /// destination after the source version has been removed; nil appends it.
-    /// Moving the last version removes the now-empty source item.
+    mutating func moveVersions(
+        _ versionIDs: [UUID], to destination: UUID, before anchor: UUID? = nil, playingVersionID: UUID? = nil
+    ) throws {
+        try transferVersions(versionIDs, to: destination, before: anchor, playingVersionID: playingVersionID,
+                             preserveDestinationSelection: false)
+    }
+
+    private mutating func transferVersions(
+        _ versionIDs: [UUID], to destinationID: UUID, before anchor: UUID?, playingVersionID: UUID?,
+        preserveDestinationSelection: Bool
+    ) throws {
+        try validate()
+        guard var destination = items.first(where: { $0.id == destinationID }) else {
+            throw PlaylistWorkspaceError.itemNotFound(destinationID)
+        }
+        let moving = Set(versionIDs)
+        guard moving.count == versionIDs.count else { throw PlaylistWorkspaceError.invalidItemOrder }
+        var translated = [UUID: PlaylistVersion]()
+        var selectedIncoming = Set<UUID>()
+        let destinationOffset = Self.referenceOffset(for: destination)
+        var candidate = self
+        candidate.items = items.compactMap { source in
+            let delta = destinationOffset - Self.referenceOffset(for: source)
+            var remaining = source
+            remaining.versions.removeAll { version in
+                guard moving.contains(version.id) else { return false }
+                var copy = version
+                copy.offsetSeconds += delta
+                translated[version.id] = copy
+                return true
+            }
+            if source.id == destinationID {
+                destination.versions = remaining.versions
+                return source
+            }
+            if let selected = source.selectedVersionID, moving.contains(selected),
+               let index = source.versions.firstIndex(where: { $0.id == selected }) {
+                selectedIncoming.insert(selected)
+                remaining.selectedVersionID = source.versions[index...].first { !moving.contains($0.id) }?.id
+                    ?? remaining.versions.last?.id
+            }
+            return remaining.versions.isEmpty ? nil : remaining
+        }
+        let ordered = try versionIDs.map { id in
+            guard let version = translated[id] else {
+                throw PlaylistWorkspaceError.versionNotFound(id)
+            }
+            return version
+        }
+        let insertion = try anchor.map { id in
+            guard let index = destination.versions.firstIndex(where: { $0.id == id }) else {
+                throw PlaylistWorkspaceError.versionNotInItem(versionID: id, itemID: destinationID)
+            }
+            return index
+        } ?? destination.versions.endIndex
+        destination.versions.insert(contentsOf: ordered, at: insertion)
+        if let playingVersionID, destination.versions.contains(where: { $0.id == playingVersionID }) {
+            destination.selectedVersionID = playingVersionID
+        } else if !preserveDestinationSelection, let selected = versionIDs.last(where: selectedIncoming.contains) {
+            destination.selectedVersionID = selected
+        }
+        destination.selectedVersionID = destination.selectedVersionID ?? destination.versions.first?.id
+        guard let index = candidate.items.firstIndex(where: { $0.id == destinationID }) else {
+            throw PlaylistWorkspaceError.itemNotFound(destinationID)
+        }
+        candidate.items[index] = destination
+        if case let .comparison(activeID) = activeView, !candidate.items.contains(where: { $0.id == activeID }) {
+            candidate.activeView = .comparison(itemID: destinationID)
+        }
+        if let state = listeningState, moving.contains(state.versionID) {
+            candidate.listeningState?.itemID = destinationID
+        }
+        try candidate.validate()
+        self = candidate
+    }
+
+    /// The insertion index is relative to the destination after removal.
     mutating func moveVersion(
         _ versionID: PlaylistVersion.ID,
         from sourceItemID: PlaylistItem.ID,
@@ -477,80 +501,20 @@ struct PlaylistWorkspace: Codable, Equatable {
         at destinationIndex: Int? = nil,
         playingVersionID: PlaylistVersion.ID? = nil
     ) throws {
-        var candidate = self
-        try candidate.validate()
-        guard let sourceIndex = candidate.items.firstIndex(where: { $0.id == sourceItemID }) else {
+        guard let source = items.first(where: { $0.id == sourceItemID }) else {
             throw PlaylistWorkspaceError.itemNotFound(sourceItemID)
         }
-        guard let destinationIndexInItems = candidate.items.firstIndex(where: { $0.id == destinationItemID }) else {
-            throw PlaylistWorkspaceError.itemNotFound(destinationItemID)
-        }
-        guard let sourceVersionIndex = candidate.items[sourceIndex].versions.firstIndex(where: { $0.id == versionID }) else {
+        guard source.versions.contains(where: { $0.id == versionID }) else {
             throw PlaylistWorkspaceError.versionNotInItem(versionID: versionID, itemID: sourceItemID)
         }
-
-        if sourceItemID == destinationItemID {
-            var item = candidate.items[sourceIndex]
-            let movedVersion = item.versions.remove(at: sourceVersionIndex)
-            let insertionIndex = destinationIndex ?? item.versions.count
-            guard (0...item.versions.count).contains(insertionIndex) else {
-                throw PlaylistWorkspaceError.invalidDestinationIndex(insertionIndex)
-            }
-            item.versions.insert(movedVersion, at: insertionIndex)
-            candidate.items[sourceIndex] = item
-            try candidate.validate()
-            self = candidate
-            return
-        }
-
-        let sourceReferenceOffset = Self.referenceOffset(for: candidate.items[sourceIndex])
-        let destinationReferenceOffset = Self.referenceOffset(for: candidate.items[destinationIndexInItems])
-        var source = candidate.items[sourceIndex]
-        let movedVersion = source.versions.remove(at: sourceVersionIndex)
-        var translatedVersion = movedVersion
-        translatedVersion.offsetSeconds += destinationReferenceOffset - sourceReferenceOffset
-        let sourceWasSelected = source.selectedVersionID == versionID
-        if source.versions.isEmpty {
-            candidate.items.remove(at: sourceIndex)
-        } else {
-            if sourceWasSelected {
-                source.selectedVersionID = Self.fallbackVersionID(in: source, preferredIndex: sourceVersionIndex)
-            }
-            candidate.items[sourceIndex] = source
-        }
-
-        guard let destinationIndexAfterRemoval = candidate.items.firstIndex(where: { $0.id == destinationItemID }) else {
+        guard let destination = items.first(where: { $0.id == destinationItemID }) else {
             throw PlaylistWorkspaceError.itemNotFound(destinationItemID)
         }
-        var destination = candidate.items[destinationIndexAfterRemoval]
-        guard destination.versions.count < Self.maximumVersionsPerItem else {
-            throw PlaylistWorkspaceError.versionLimitExceeded(
-                itemID: destination.id,
-                limit: Self.maximumVersionsPerItem
-            )
-        }
-        let insertionIndex = destinationIndex ?? destination.versions.count
-        guard (0...destination.versions.count).contains(insertionIndex) else {
-            throw PlaylistWorkspaceError.invalidDestinationIndex(insertionIndex)
-        }
-        destination.versions.insert(translatedVersion, at: insertionIndex)
-        if sourceWasSelected || playingVersionID == versionID || destination.selectedVersionID == nil {
-            destination.selectedVersionID = versionID
-        }
-        candidate.items[destinationIndexAfterRemoval] = destination
-
-        if case let .comparison(activeItemID) = candidate.activeView,
-           activeItemID == sourceItemID,
-           !candidate.items.contains(where: { $0.id == sourceItemID }) {
-            candidate.activeView = .comparison(itemID: destinationItemID)
-        }
-        if var state = candidate.listeningState, state.versionID == versionID {
-            state.itemID = destinationItemID
-            candidate.listeningState = state
-        }
-
-        try candidate.validate()
-        self = candidate
+        let remaining = destination.versions.filter { $0.id != versionID }
+        let index = destinationIndex ?? remaining.count
+        guard (0...remaining.count).contains(index) else { throw PlaylistWorkspaceError.invalidDestinationIndex(index) }
+        try moveVersions([versionID], to: destinationItemID, before: index < remaining.count ? remaining[index].id : nil,
+                         playingVersionID: playingVersionID)
     }
 
     /// Move a version when its source item can be inferred from its ID.

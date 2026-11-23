@@ -49,14 +49,6 @@ struct TrackDropHighlightTests {
     }
 
     @Test
-    func droppedFilesAlwaysAppendRegardlessOfFormerRowTarget() {
-        let targetTrackID = UUID()
-
-        #expect(DroppedFileImportAction.action(targetTrackID: nil) == .append)
-        #expect(DroppedFileImportAction.action(targetTrackID: targetTrackID) == .append)
-    }
-
-    @Test
     func droppedFolderRecursivelyResolvesAudioFiles() throws {
         let root = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
@@ -74,7 +66,7 @@ struct TrackDropHighlightTests {
         try Data().write(to: directInputAudio)
         defer { try? FileManager.default.removeItem(at: directInputAudio) }
 
-        let resolvedURLs = DroppedFileURLResolver.audioFileURLs(from: [root, directInputAudio])
+        let resolvedURLs = AppOpenedURLResolver.audioFileURLs(from: [root, directInputAudio])
 
         #expect(
             resolvedURLs.map { $0.resolvingSymlinksInPath() }

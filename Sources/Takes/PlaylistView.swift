@@ -69,19 +69,9 @@ struct PlaylistCommandContext {
         let ids = itemIDs
         let looseVersions = versionIDs
         Task {
-            let destination: UUID?
-            if ids.count > 1 {
-                destination = await coordinator.groupItems(
-                    ids, compare: compare && looseVersions.isEmpty, undoManager: undoManager
-                )
-            } else {
-                destination = ids.first
-            }
-            guard let destination else { return }
-            if !looseVersions.isEmpty {
-                for id in looseVersions { coordinator.moveVersion(id, to: destination, undoManager: undoManager) }
-                if compare { await coordinator.enterComparison(itemID: destination) }
-            }
+            guard let destination = await coordinator.groupItems(
+                ids, looseVersionIDs: looseVersions, compare: compare, undoManager: undoManager
+            ) else { return }
             presentation.selection = [.item(destination)]
             presentation.expanded.insert(destination)
         }
@@ -92,10 +82,7 @@ struct PlaylistCommandContext {
         let versions = versionIDs
         let removed = targetRows
         let firstRemovedIndex = presentation.visibleRows(in: coordinator.workspace).firstIndex(where: removed.contains)
-        undoManager?.beginUndoGrouping()
-        if !items.isEmpty { coordinator.removeItems(items, undoManager: undoManager) }
-        if !versions.isEmpty { coordinator.removeVersions(versions, undoManager: undoManager) }
-        undoManager?.endUndoGrouping()
+        guard coordinator.removeVersions(versions, alongWithItems: items, undoManager: undoManager) else { return }
         presentation.prune(in: coordinator.workspace)
         // Select the row that took the removed rows' place, so Delete can be
         // pressed repeatedly.
@@ -112,13 +99,7 @@ struct PlaylistCommandContext {
             guard item.versions.count > 1 else { return [] }
             return item.versions.filter { selectedItems.contains(item.id) || selectedVersions.contains($0.id) }.map(\.id)
         }
-        undoManager?.beginUndoGrouping()
-        for id in ids.reversed() {
-            guard let source = coordinator.workspace.items.first(where: { $0.versions.contains { $0.id == id } }),
-                  source.versions.count > 1 else { continue }
-            _ = coordinator.separateVersion(id, undoManager: undoManager)
-        }
-        undoManager?.endUndoGrouping()
+        guard coordinator.separateVersions(ids, placement: .adjacent, undoManager: undoManager) != nil else { return }
         presentation.prune(in: coordinator.workspace)
     }
 

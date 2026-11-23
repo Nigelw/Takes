@@ -33,6 +33,8 @@ final class PlaybackController {
     /// through `setVisibleWindow` so `laneWindowStart` stays in sync.
     private(set) var visibleStart: TimeInterval = 0
     private(set) var visibleSpan: TimeInterval = 0
+    private(set) var settledViewportRevision = 0
+    @ObservationIgnored private var viewportChanged = false
 
     var visibleEnd: TimeInterval {
         visibleStart + visibleSpan
@@ -48,12 +50,27 @@ final class PlaybackController {
     /// Sole mutation path for the visible window. Guards every write (with
     /// `@Observable`, assigning an equal value still invalidates observers).
     private func setVisibleWindow(start: TimeInterval? = nil, span: TimeInterval? = nil) {
-        if let start, visibleStart != start { visibleStart = start }
-        if let span, visibleSpan != span { visibleSpan = span }
+        if let start, visibleStart != start {
+            visibleStart = start
+            viewportChanged = true
+        }
+        if let span, visibleSpan != span {
+            visibleSpan = span
+            viewportChanged = true
+        }
         // Matches the view's `makeLaneViewport` span clamp.
         let quantum = max(visibleSpan, 0.001) / 2
         let windowStart = (visibleStart / quantum).rounded(.down) * quantum
         if laneWindowStart != windowStart { laneWindowStart = windowStart }
+        publishSettledViewport()
+    }
+
+    // Save observation follows completed viewport changes. Rendering still
+    // reads the live window throughout a gesture or playback page turn.
+    private func publishSettledViewport() {
+        guard viewportChanged, scrollAnimation == nil, !isTimelineScrollActive else { return }
+        viewportChanged = false
+        settledViewportRevision &+= 1
     }
 
     private(set) var playbackError: PlaybackError?
@@ -1634,6 +1651,7 @@ final class PlaybackController {
             return
         }
 
+        publishSettledViewport()
         guard session.isPlaying else { return }
         followPlayheadIfZoomed(transport: currentTransportPosition())
     }
@@ -1754,6 +1772,7 @@ final class PlaybackController {
         scrollAnimationTimer?.invalidate()
         scrollAnimationTimer = nil
         scrollAnimation = nil
+        publishSettledViewport()
     }
 
     nonisolated static func transportPositionAfterTimelineRecalculation(

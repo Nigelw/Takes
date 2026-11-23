@@ -4,11 +4,12 @@ import Foundation
 /// title and artist tags are preferred; the filename is used when tags are
 /// absent. Duration can reject a match but never establishes one.
 struct TrackMetadataMatcher {
-    private struct Identity {
+    struct Identity {
         let artist: String?
         let title: String
         let duration: TimeInterval
         let isExplicitEdit: Bool
+        let performanceQualifiers: Set<String>
 
         var isUsable: Bool {
             !title.isEmpty && duration.isFinite && duration > 0
@@ -26,12 +27,13 @@ struct TrackMetadataMatcher {
         identity(for: version).isUsable
     }
 
-    private static func decision(
+    static func decision(
         between first: Identity,
         and second: Identity
     ) -> TrackSimilarityClusterDecision {
         guard first.isUsable, second.isUsable else { return .unknown }
         guard durationsAreCompatible(first, second) else { return .mismatch }
+        guard first.performanceQualifiers == second.performanceQualifiers else { return .mismatch }
 
         switch (first.artist, second.artist) {
         case let (.some(lhs), .some(rhs)) where lhs != rhs:
@@ -42,11 +44,13 @@ struct TrackMetadataMatcher {
             break
         }
 
-        guard !first.title.isEmpty, !second.title.isEmpty else { return .unknown }
         if first.title == second.title { return .match }
 
-        let longestCount = max(first.title.count, second.title.count)
-        guard longestCount >= 6 else { return .mismatch }
+        let firstCount = first.title.count
+        let secondCount = second.title.count
+        let longestCount = max(firstCount, secondCount)
+        guard longestCount >= 6,
+              1 - Double(abs(firstCount - secondCount)) / Double(longestCount) >= 0.92 else { return .mismatch }
         return similarity(first.title, second.title) >= 0.92 ? .match : .mismatch
     }
 
@@ -62,22 +66,29 @@ struct TrackMetadataMatcher {
         return difference <= tolerance
     }
 
-    private static func identity(for version: PlaylistVersion) -> Identity {
-        let filename = version.metadata.displayName.isEmpty
-            ? version.file.storedURL.lastPathComponent
-            : version.metadata.displayName
-        let parsedFilename = parseFilename(filename)
+    static func identity(for version: PlaylistVersion) -> Identity {
         let taggedTitle = meaningful(version.metadata.title)
         let taggedArtist = meaningful(version.metadata.artist)
+        let parsedFilename: (artist: String?, title: String)
+        if taggedTitle == nil || taggedArtist == nil {
+            let filename = version.metadata.displayName.isEmpty
+                ? version.file.storedURL.lastPathComponent
+                : version.metadata.displayName
+            parsedFilename = parseFilename(filename)
+        } else {
+            parsedFilename = (nil, "")
+        }
         let rawTitle = taggedTitle ?? parsedFilename.title
         let rawArtist = taggedArtist ?? parsedFilename.artist
         let normalizedTitle = normalizeTitle(rawTitle)
+        let qualifierPattern = #/\b(?:live|demo|acoustic|cover|(?:alternate|alt)\s+take(?:\s+\d+)?)\b/#
 
         return Identity(
             artist: rawArtist.map(normalizeArtist).flatMap { $0.isEmpty ? nil : $0 },
             title: normalizedTitle.base,
             duration: version.metadata.duration,
-            isExplicitEdit: normalizedTitle.isExplicitEdit
+            isExplicitEdit: normalizedTitle.isExplicitEdit,
+            performanceQualifiers: Set(normalizedTitle.base.matches(of: qualifierPattern).map { String($0.0) })
         )
     }
 

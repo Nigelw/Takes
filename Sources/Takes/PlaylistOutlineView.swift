@@ -985,29 +985,16 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         case let .reorderItems(order):
             return playlist.reorderItems(order, undoManager: undoManager)
         case let .group(itemIDs, into: destination):
-            let versionIDs = itemIDs.flatMap { itemsByID[$0]?.versions.map(\.id) ?? [] }
-            grouped(actionName: "Group Items") {
-                for id in versionIDs { playlist.moveVersion(id, to: destination, undoManager: undoManager) }
-            }
+            guard playlist.groupItems(itemIDs, into: destination, undoManager: undoManager) else { return false }
             presentation.selection = [.item(destination)]
             presentation.expanded.insert(destination)
         case let .separate(versionIDs, beforeItem: anchor):
-            var created: [UUID] = []
-            grouped(actionName: versionIDs.count == 1 ? "Separate Version" : "Separate Versions") {
-                for id in versionIDs {
-                    // The last version of an item stays put as that item.
-                    guard let owner = playlist.workspace.items.first(where: { $0.versions.contains { $0.id == id } }),
-                          owner.versions.count > 1,
-                          let newID = playlist.separateVersion(id, undoManager: undoManager) else { continue }
-                    created.append(newID)
-                }
-                var order = playlist.workspace.items.map(\.id).filter { !created.contains($0) }
-                order.insert(contentsOf: created, at: anchor.flatMap { order.firstIndex(of: $0) } ?? order.endIndex)
-                if order != playlist.workspace.items.map(\.id) { playlist.reorderItems(order, undoManager: undoManager) }
-            }
+            guard let created = playlist.separateVersions(
+                versionIDs, placement: .beforeItem(anchor), undoManager: undoManager
+            ) else { return false }
             if !created.isEmpty { presentation.selection = Set(created.map(PlaylistRowID.item)) }
         case let .moveVersions(versionIDs, to: destination, before: anchor):
-            moveVersions(versionIDs, to: destination, before: anchor)
+            return moveVersions(versionIDs, to: destination, before: anchor)
         }
         return true
     }
@@ -1015,28 +1002,14 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     /// Move versions into `destination` ahead of `anchor` (nil appends),
     /// preserving their relative order. Versions already in the destination
     /// are reordered in place.
-    private func moveVersions(_ versionIDs: [UUID], to destination: UUID, before anchor: UUID?) {
-        grouped(actionName: versionIDs.count == 1 ? "Move Version" : "Move Versions") {
-            for id in versionIDs {
-                let workspace = playlist.workspace
-                guard let target = workspace.items.first(where: { $0.id == destination }) else { return }
-                if target.versions.contains(where: { $0.id == id }) {
-                    playlist.reorderVersion(id, before: anchor, undoManager: undoManager)
-                } else {
-                    let index = anchor.flatMap { anchor in target.versions.firstIndex { $0.id == anchor } }
-                    playlist.moveVersion(id, to: destination, at: index, undoManager: undoManager)
-                }
-            }
+    @discardableResult
+    private func moveVersions(_ versionIDs: [UUID], to destination: UUID, before anchor: UUID?) -> Bool {
+        guard playlist.moveVersions(versionIDs, to: destination, before: anchor, undoManager: undoManager) else {
+            return false
         }
         presentation.expanded.insert(destination)
         presentation.selection = Set(versionIDs.map(PlaylistRowID.version))
-    }
-
-    private func grouped(actionName: String, _ body: () -> Void) {
-        undoManager?.beginUndoGrouping()
-        body()
-        undoManager?.setActionName(actionName)
-        undoManager?.endUndoGrouping()
+        return true
     }
 }
 

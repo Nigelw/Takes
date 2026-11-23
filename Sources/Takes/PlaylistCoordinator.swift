@@ -269,7 +269,7 @@ final class PlaylistCoordinator {
         var isPlaying: Bool
     }
 
-    private struct AutomaticImportPlan {
+    private struct AutomaticImportPlan: Sendable {
         let decisions: [TrackSimilarityClusterEvidence<UUID>]
         let hadFallback: Bool
     }
@@ -398,29 +398,19 @@ final class PlaylistCoordinator {
             return []
         }
 
-        // A newer operation does not redirect this operation to another
-        // destination. It only makes its commit use the latest workspace value.
-        // The operation token is retained for diagnostics and the cancellation
-        // check above is the only condition that may discard its content; two
-        // imports captured for different destinations are independent.
-        _ = operationGeneration
-
         guard !Task.isCancelled,
               cancellationGenerationAtStart == importCancellationGeneration else { return [] }
 
         let automaticPlan: AutomaticImportPlan?
-        if destination == .playlist, automaticGroupingMode != .off {
-            automaticPlan = makeAutomaticImportPlan(
+        if destination == .playlist, automaticGroupingMode == .automatic {
+            guard let plan = await prepareAutomaticImportPlan(
                 versions: versions,
-                workspace: workspace
-            )
+                cancellationGeneration: cancellationGenerationAtStart
+            ) else { return [] }
+            automaticPlan = plan
         } else {
             automaticPlan = nil
         }
-
-        // Cancellation means cancel the import, not merely skip grouping.
-        guard !Task.isCancelled,
-              cancellationGenerationAtStart == importCancellationGeneration else { return [] }
 
         // The user may have changed gain, blind-listening state, or playback
         // while metadata loading was running. Capture those
@@ -508,7 +498,7 @@ final class PlaylistCoordinator {
                workspace.items[0].versions.count >= 2,
                mode == .playlist,
                navigationGeneration == navigationGenerationAtStart {
-                await enterComparison(itemID: workspace.items[0].id)
+                await enterComparison(itemID: workspace.items[0].id, autoAlignAfterActivation: true)
             }
             return newItemIDs
         } catch {
@@ -583,7 +573,7 @@ final class PlaylistCoordinator {
     /// Enter the current item's comparison view. The playing item preserves
     /// file time, version, and playing state; another item begins paused at
     /// its timeline start.
-    func enterComparison(itemID: PlaylistItem.ID) async {
+    func enterComparison(itemID: PlaylistItem.ID, autoAlignAfterActivation: Bool = false) async {
         guard workspace.items.contains(where: { $0.id == itemID }) else {
             reportError(PlaylistWorkspaceError.itemNotFound(itemID).localizedDescription)
             return
@@ -591,9 +581,16 @@ final class PlaylistCoordinator {
 
         let oldSnapshot = capturePlaybackSnapshot()
         captureRuntimeEdits()
+        await enterComparison(itemID: itemID, from: oldSnapshot, autoAlignAfterActivation: autoAlignAfterActivation)
+    }
+
+    @discardableResult
+    private func enterComparison(
+        itemID: PlaylistItem.ID, from oldSnapshot: PlaybackSnapshot, autoAlignAfterActivation: Bool = false
+    ) async -> ActivationResult {
         guard let item = workspace.items.first(where: { $0.id == itemID }) else {
             reportError(PlaylistWorkspaceError.itemNotFound(itemID).localizedDescription)
-            return
+            return .failed
         }
         let sameItem = oldSnapshot.itemID == itemID
         let versionID = (sameItem ? oldSnapshot.versionID : nil)
@@ -602,7 +599,7 @@ final class PlaylistCoordinator {
             ?? item.versions.first?.id
         guard let versionID else {
             reportError(PlaylistWorkspaceError.emptyItem(itemID).localizedDescription)
-            return
+            return .failed
         }
         // Entering compare never starts an item (A2 spec §9): another item's
         // playback stops, and only the item already playing keeps going.
@@ -612,10 +609,11 @@ final class PlaylistCoordinator {
             filePosition: sameItem ? oldSnapshot.filePosition : 0,
             isPlaying: sameItem && oldSnapshot.isPlaying
         )
-        await activateComparison(
+        return await activateComparison(
             itemID: itemID,
             versionID: versionID,
             snapshot: snapshot,
+            autoAlignAfterActivation: autoAlignAfterActivation,
             startAtTimelineBeginning: !sameItem
         )
     }
@@ -644,18 +642,15 @@ final class PlaylistCoordinator {
             ?? item.selectedVersion?.id
             ?? item.versions.first?.id
         guard let versionID else { return }
-        let filePosition = item.versions.first(where: { $0.id == versionID }).map {
-            snapshot.itemID == targetItemID
-                ? PlaylistPlaybackBoundary.filePosition(transport: controller.displayTransportPosition(), version: $0)
-                : workspace.listeningState?.filePosition ?? 0
-        } ?? 0
         let nextSnapshot = PlaybackSnapshot(
             itemID: targetItemID,
             versionID: versionID,
-            filePosition: filePosition,
+            filePosition: snapshot.filePosition,
             isPlaying: snapshot.isPlaying
         )
-        await activatePlaylist(itemID: targetItemID, versionID: versionID, snapshot: nextSnapshot)
+        if await activatePlaylist(itemID: targetItemID, versionID: versionID, snapshot: nextSnapshot) == .failed {
+            showPlaylistWithoutRuntime(nextSnapshot)
+        }
     }
 
     /// Select the version used for playlist playback or, when the item is the
@@ -809,26 +804,97 @@ final class PlaylistCoordinator {
     @discardableResult
     func groupItems(
         _ itemIDs: [PlaylistItem.ID],
+        looseVersionIDs: [PlaylistVersion.ID] = [],
         compare: Bool = false,
         undoManager: UndoManager? = nil
     ) async -> PlaylistItem.ID? {
         let snapshot = capturePlaybackSnapshot()
-        captureRuntimeEdits()
-        let before = workspace
+        var before = workspace
+        _ = captureRuntimeEdits(into: &before)
         do {
+            var candidate = before
             let playingID = snapshot.isPlaying ? snapshot.versionID : nil
-            let resultID = try workspace.groupItems(itemIDs, playingVersionID: playingID)
+            let resultID = try candidate.groupItems(itemIDs, looseVersionIDs: looseVersionIDs, playingVersionID: playingID)
+            let newOwnerID = snapshot.versionID.flatMap { versionID in
+                candidate.items.first { $0.versions.contains { $0.id == versionID } }?.id
+            }
+            let needsRefresh = pendingRuntimeRefreshTask != nil || newOwnerID != snapshot.itemID
+                || runtimeRequiresRefresh(before: before, after: candidate, mode: mode)
+            workspace = candidate
             registerUndo(before: before, undoManager: undoManager, actionName: "Group Items")
             rebuildTraversal()
             clearError()
-            beginNavigation()
-            await refreshAfterOrganization(snapshot: snapshot)
-            if compare { await enterComparison(itemID: resultID) }
+            if compare {
+                var incoming = snapshot
+                if newOwnerID == resultID { incoming.itemID = resultID }
+                if await enterComparison(itemID: resultID, from: incoming) == .failed, needsRefresh {
+                    let comparisonError = errorMessage
+                    await refreshAfterOrganization(snapshot: snapshot)
+                    if errorMessage == nil { errorMessage = comparisonError }
+                }
+            } else if needsRefresh {
+                beginNavigation()
+                await refreshAfterOrganization(snapshot: snapshot)
+            }
             return resultID
         } catch {
             reportError(error.localizedDescription)
             return nil
         }
+    }
+
+    func groupItems(_ itemIDs: [UUID], into destination: UUID, undoManager: UndoManager?) -> Bool {
+        let playingID = controller.session.isPlaying ? currentVersionID : nil
+        return mutateWorkspace(beforeAction: "Group Items", undoManager: undoManager) {
+            try $0.groupItems(itemIDs, into: destination, playingVersionID: playingID)
+        }
+    }
+
+    func moveVersions(_ ids: [UUID], to destination: UUID, before anchor: UUID?, undoManager: UndoManager?) -> Bool {
+        let playingID = controller.session.isPlaying ? currentVersionID : nil
+        return mutateWorkspace(beforeAction: ids.count == 1 ? "Move Version" : "Move Versions", undoManager: undoManager) {
+            try $0.moveVersions(ids, to: destination, before: anchor, playingVersionID: playingID)
+        }
+    }
+
+    enum SeparationPlacement {
+        case adjacent
+        case beforeItem(UUID?)
+    }
+
+    func separateVersions(_ ids: [UUID], placement: SeparationPlacement, undoManager: UndoManager?) -> [UUID]? {
+        var created: [UUID] = []
+        let succeeded = mutateWorkspace(beforeAction: ids.count == 1 ? "Separate Version" : "Separate Versions",
+                                        undoManager: undoManager) { candidate in
+            guard Set(ids).count == ids.count else { throw PlaylistWorkspaceError.invalidItemOrder }
+            // Adjacent insertion puts each new row directly after the source.
+            // Visit those versions backwards to retain their displayed order.
+            let visitOrder: [UUID]
+            switch placement {
+            case .adjacent: visitOrder = ids.reversed()
+            case .beforeItem: visitOrder = ids
+            }
+            for id in visitOrder {
+                guard let owner = candidate.items.first(where: { $0.versions.contains { $0.id == id } }) else {
+                    throw PlaylistWorkspaceError.versionNotFound(id)
+                }
+                if owner.versions.count > 1 {
+                    created.append(try candidate.separateVersion(id, from: owner.id))
+                }
+            }
+            if case let .beforeItem(anchor) = placement {
+                var order = candidate.items.map(\.id).filter { !created.contains($0) }
+                let index = try anchor.map { id in
+                    guard let index = order.firstIndex(of: id) else { throw PlaylistWorkspaceError.itemNotFound(id) }
+                    return index
+                } ?? order.endIndex
+                order.insert(contentsOf: created, at: index)
+                try candidate.reorderItems(order)
+            } else {
+                created.reverse()
+            }
+        }
+        return succeeded ? created : nil
     }
 
     @discardableResult
@@ -915,7 +981,7 @@ final class PlaylistCoordinator {
                 from: item.id,
                 to: item.id,
                 at: destinationIndex,
-                playingVersionID: self.controller.session.isPlaying ? self.currentVersionID : nil
+                playingVersionID: self.controller.session.isPlaying ? self.controller.session.activeTrackID : nil
             )
         }
     }
@@ -983,10 +1049,12 @@ final class PlaylistCoordinator {
     @discardableResult
     func removeVersions(
         _ versionIDs: [PlaylistVersion.ID],
+        alongWithItems itemIDs: [PlaylistItem.ID] = [],
         undoManager: UndoManager? = nil
     ) -> Bool {
-        guard !versionIDs.isEmpty else { return false }
-        return mutateWorkspace(beforeAction: "Remove Versions", undoManager: undoManager) {
+        guard !versionIDs.isEmpty || !itemIDs.isEmpty else { return false }
+        return mutateWorkspace(beforeAction: itemIDs.isEmpty ? "Remove Versions" : "Remove Items", undoManager: undoManager) {
+            _ = try $0.removeItems(itemIDs)
             var seen = Set<PlaylistVersion.ID>()
             for versionID in versionIDs {
                 guard seen.insert(versionID).inserted else {
@@ -1057,6 +1125,11 @@ final class PlaylistCoordinator {
         captureRuntimeEdits()
     }
 
+    func nudgeActiveTrackOffset(direction: Int, largeStep: Bool) {
+        controller.nudgeActiveTrackOffset(direction: direction, largeStep: largeStep)
+        captureRuntimeEdits()
+    }
+
     func beginLoop(_ region: LoopRegion) {
         controller.beginLoop(region)
         captureRuntimeEdits()
@@ -1095,7 +1168,8 @@ final class PlaylistCoordinator {
               let item = workspace.items.first(where: { $0.id == currentItemID }) else {
             return
         }
-        let versionID = currentVersionID ?? item.selectedVersion?.id ?? item.versions.first?.id
+        let versionID = currentVersionID.flatMap { id in item.versions.contains { $0.id == id } ? id : nil }
+            ?? item.selectedVersion?.id ?? item.versions.first?.id
         guard let versionID else { return }
         let filePosition = restored.listeningState?.itemID == item.id
             && restored.listeningState?.versionID == versionID
@@ -1103,12 +1177,12 @@ final class PlaylistCoordinator {
             : 0
         let snapshot = PlaybackSnapshot(itemID: item.id, versionID: versionID, filePosition: filePosition, isPlaying: false)
         if restored.activeItemID == item.id {
-            await activateComparison(itemID: item.id, versionID: versionID, snapshot: snapshot)
+            if await activateComparison(itemID: item.id, versionID: versionID, snapshot: snapshot) == .failed {
+                showPlaylistWithoutRuntime(snapshot)
+            }
         } else {
             await activatePlaylist(itemID: item.id, versionID: versionID, snapshot: snapshot)
         }
-        controller.pause()
-        workspace.activeView = restored.activeView
     }
 
     /// Return the workspace's persisted representation. It captures anchors
@@ -1117,6 +1191,17 @@ final class PlaylistCoordinator {
         var snapshot = workspace
         _ = captureRuntimeEdits(into: &snapshot)
         return snapshot
+    }
+
+    /// Register save dependencies without materializing a workspace snapshot.
+    func observePersistenceInputs() {
+        _ = workspace
+        _ = mode
+        _ = currentItemID
+        _ = currentVersionID
+        _ = runtimeContext
+        _ = controller.session
+        _ = controller.settledViewportRevision
     }
 
     func reportError(_ message: String) {
@@ -1211,19 +1296,39 @@ final class PlaylistCoordinator {
 
     // MARK: - Runtime activation
 
+    private enum ActivationResult { case activated, failed, superseded }
+
+    private func showPlaylistWithoutRuntime(_ snapshot: PlaybackSnapshot) {
+        controller.invalidateRuntimeContext()
+        runtimeContext = nil
+        runtimeTrackCount = 0
+        mode = .playlist
+        workspace.activeView = .playlist
+        currentItemID = snapshot.itemID
+        currentVersionID = snapshot.versionID
+        if let itemID = snapshot.itemID, let versionID = snapshot.versionID {
+            workspace.listeningState = PlaylistListeningState(
+                itemID: itemID, versionID: versionID, filePosition: snapshot.filePosition
+            )
+        } else {
+            workspace.listeningState = nil
+        }
+    }
+
+    @discardableResult
     private func activatePlaylist(
         itemID: PlaylistItem.ID,
         versionID: PlaylistVersion.ID,
         snapshot: PlaybackSnapshot
-    ) async {
+    ) async -> ActivationResult {
         guard let item = workspace.items.first(where: { $0.id == itemID }),
               let version = item.versions.first(where: { $0.id == versionID }) else {
             reportError(PlaylistWorkspaceError.versionNotInItem(versionID: versionID, itemID: itemID).localizedDescription)
-            return
+            return .failed
         }
         let generation = beginNavigation()
         let context = PlaylistRuntimeContext(itemID: itemID)
-        guard let resolvedURL = resolvedURL(for: version) else { return }
+        guard let resolvedURL = resolvedURL(for: version) else { return .failed }
         let loaded = playlistLoadedTrack(for: version, url: resolvedURL)
         let session = ComparisonSession(
             tracks: [SessionTrack(id: version.id, loadedTrack: loaded)],
@@ -1242,7 +1347,7 @@ final class PlaylistCoordinator {
                 if controller.runtimeContext == context {
                     controller.invalidateRuntimeContext()
                 }
-                return
+                return .superseded
             }
             runtimeContext = context
             runtimeTrackCount = controller.runtimeTrackCount
@@ -1253,25 +1358,29 @@ final class PlaylistCoordinator {
             if snapshot.isPlaying { controller.play() }
             updateListeningStateFromRuntime()
             clearError()
+            return .activated
         } catch {
-            if generation == navigationGeneration { reportError(error.localizedDescription) }
+            guard generation == navigationGeneration else { return .superseded }
+            reportError(error.localizedDescription)
+            return .failed
         }
     }
 
+    @discardableResult
     private func activateComparison(
         itemID: PlaylistItem.ID,
         versionID: PlaylistVersion.ID,
         snapshot: PlaybackSnapshot,
         autoAlignAfterActivation: Bool = false,
         startAtTimelineBeginning: Bool = false
-    ) async {
+    ) async -> ActivationResult {
         guard let item = workspace.items.first(where: { $0.id == itemID }) else {
             reportError(PlaylistWorkspaceError.itemNotFound(itemID).localizedDescription)
-            return
+            return .failed
         }
         let generation = beginNavigation()
         let context = PlaylistRuntimeContext(itemID: itemID)
-        guard let runtimeItem = materializedComparisonItem(item) else { return }
+        guard let runtimeItem = materializedComparisonItem(item) else { return .failed }
         var session = PlaylistPlaybackBoundary.session(
             for: runtimeItem,
             incomingVersionID: versionID,
@@ -1294,7 +1403,7 @@ final class PlaylistCoordinator {
                 if controller.runtimeContext == context {
                     controller.invalidateRuntimeContext()
                 }
-                return
+                return .superseded
             }
             runtimeContext = context
             runtimeTrackCount = controller.runtimeTrackCount
@@ -1314,8 +1423,11 @@ final class PlaylistCoordinator {
                 controller.autoAlignTracks()
             }
             clearError()
+            return .activated
         } catch {
-            if generation == navigationGeneration { reportError(error.localizedDescription) }
+            guard generation == navigationGeneration else { return .superseded }
+            reportError(error.localizedDescription)
+            return .failed
         }
     }
 
@@ -1396,11 +1508,15 @@ final class PlaylistCoordinator {
             filePosition: versionWasRemoved ? 0 : snapshot.filePosition,
             isPlaying: versionWasRemoved ? false : snapshot.isPlaying
         )
+        let result: ActivationResult
         switch mode {
         case .playlist:
-            await activatePlaylist(itemID: item.id, versionID: versionID, snapshot: refreshed)
+            result = await activatePlaylist(itemID: item.id, versionID: versionID, snapshot: refreshed)
         case .comparison:
-            await activateComparison(itemID: item.id, versionID: versionID, snapshot: refreshed)
+            result = await activateComparison(itemID: item.id, versionID: versionID, snapshot: refreshed)
+        }
+        if result == .failed {
+            showPlaylistWithoutRuntime(refreshed)
         }
     }
 
@@ -1515,31 +1631,55 @@ final class PlaylistCoordinator {
         return [itemID]
     }
 
-    private func makeAutomaticImportPlan(
+    private func prepareAutomaticImportPlan(
         versions: [PlaylistVersion],
-        workspace: PlaylistWorkspace
-    ) -> AutomaticImportPlan {
-        let existingVersions = workspace.allVersions
-        let incomingPairs: [(PlaylistVersion, PlaylistVersion)] = versions.indices.flatMap { left in
-            versions.indices.compactMap { right in
-                guard right > left else { return nil }
-                return (versions[left], versions[right])
+        cancellationGeneration: Int
+    ) async -> AutomaticImportPlan? {
+        var existingVersions = workspace.allVersions
+        while !Task.isCancelled, cancellationGeneration == importCancellationGeneration {
+            let plan = await Self.makeAutomaticImportPlan(versions: versions, existingVersions: existingVersions)
+            guard !Task.isCancelled, cancellationGeneration == importCancellationGeneration else { return nil }
+            let currentVersions = workspace.allVersions
+            // Group ownership and capacity are read at commit. Pair evidence
+            // is reusable as long as the IDs and matching inputs still agree.
+            if currentVersions.elementsEqual(existingVersions, by: { current, previous in
+                current.id == previous.id
+                    && current.metadata == previous.metadata
+                    && current.file.storedURL == previous.file.storedURL
+            }) {
+                return plan
             }
+            existingVersions = currentVersions
         }
-        let existingPairs = versions.flatMap { incoming in
-            existingVersions.map { (incoming, $0) }
-        }
-        let pairs = incomingPairs + existingPairs
-        let decisions = pairs.map { first, second in
-            return TrackSimilarityClusterEvidence(
-                first: first.id,
-                second: second.id,
-                decision: TrackMetadataMatcher.decision(between: first, and: second)
-            )
+        return nil
+    }
+
+    nonisolated private static func makeAutomaticImportPlan(
+        versions: [PlaylistVersion],
+        existingVersions: [PlaylistVersion]
+    ) async -> AutomaticImportPlan {
+        let incoming = versions.map { (id: $0.id, identity: TrackMetadataMatcher.identity(for: $0)) }
+        let existing = existingVersions.map { (id: $0.id, identity: TrackMetadataMatcher.identity(for: $0)) }
+        var decisions: [TrackSimilarityClusterEvidence<UUID>] = []
+        for index in incoming.indices {
+            if Task.isCancelled { break }
+            let first = incoming[index]
+            for second in incoming[(index + 1)...] {
+                decisions.append(.init(
+                    first: first.id, second: second.id,
+                    decision: TrackMetadataMatcher.decision(between: first.identity, and: second.identity)
+                ))
+            }
+            for second in existing {
+                decisions.append(.init(
+                    first: first.id, second: second.id,
+                    decision: TrackMetadataMatcher.decision(between: first.identity, and: second.identity)
+                ))
+            }
         }
         return AutomaticImportPlan(
             decisions: decisions,
-            hadFallback: versions.contains { !TrackMetadataMatcher.canAttemptMatch($0) }
+            hadFallback: incoming.contains { !$0.identity.isUsable }
         )
     }
 
@@ -1620,10 +1760,10 @@ final class PlaylistCoordinator {
         _ mutation: (inout PlaylistWorkspace) throws -> Void
     ) -> Bool {
         let playback = capturePlaybackSnapshot()
-        captureRuntimeEdits()
-        let before = workspace
+        var before = workspace
+        _ = captureRuntimeEdits(into: &before)
         do {
-            var candidate = workspace
+            var candidate = before
             try mutation(&candidate)
             workspace = candidate
             let modeBeforeMutation = mode
@@ -1633,8 +1773,15 @@ final class PlaylistCoordinator {
             if runtimeRequiresRefresh(before: before, after: workspace, mode: modeBeforeMutation) {
                 // Metadata-only edits must not cancel a runtime refresh queued
                 // by an earlier organization action in this same event.
+                if let activeID = controller.session.activeTrackID,
+                   !candidate.allVersions.contains(where: { $0.id == activeID }) {
+                    controller.invalidateRuntimeContext()
+                    runtimeContext = nil
+                    runtimeTrackCount = 0
+                    currentItemID = candidate.listeningState?.itemID
+                    currentVersionID = candidate.listeningState?.versionID
+                }
                 let organizationGeneration = beginNavigation()
-                pendingRuntimeRefreshTask?.cancel()
                 pendingRuntimeRefreshTask = Task { [weak self] in
                     guard let self,
                           self.navigationGeneration == organizationGeneration else { return }
@@ -1655,54 +1802,114 @@ final class PlaylistCoordinator {
 
     private func registerUndo(before: PlaylistWorkspace, undoManager: UndoManager?, actionName: String) {
         guard let undoManager else { return }
-        undoManager.setActionName(actionName)
+        let after = workspace
         undoManager.registerUndo(withTarget: self) { target in
-            target.applyWorkspaceSnapshotForUndo(before, manager: undoManager, actionName: actionName)
+            target.applyOrganizationUndo(from: after, to: before, manager: undoManager, actionName: actionName)
         }
+        undoManager.setActionName(actionName)
     }
 
-    private func applyWorkspaceSnapshotForUndo(
-        _ snapshot: PlaylistWorkspace,
+    /// Apply the recorded organization change to today's versions. File repairs,
+    /// comparison edits and items added since the command keep their live values.
+    private func applyOrganizationUndo(
+        from original: PlaylistWorkspace,
+        to target: PlaylistWorkspace,
         manager: UndoManager,
         actionName: String
     ) {
-        let playback = capturePlaybackSnapshot()
+        var playback = capturePlaybackSnapshot()
         captureRuntimeEdits()
-        let current = workspace
-        manager.registerUndo(withTarget: self) { target in
-            target.applyWorkspaceSnapshotForUndo(current, manager: manager, actionName: actionName)
-        }
-        workspace = snapshot
-        mode = snapshot.activeView.itemID.map { .comparison(itemID: $0) } ?? .playlist
-        currentItemID = snapshot.listeningState?.itemID ?? snapshot.activeItemID
-        currentVersionID = snapshot.listeningState?.versionID
-            ?? workspace.items.first(where: { $0.id == currentItemID })?.selectedVersion?.id
-        rebuildTraversal()
-        beginNavigation()
-        controller.invalidateRuntimeContext()
-        runtimeContext = nil
-        runtimeTrackCount = controller.runtimeTrackCount
-        pendingRuntimeRefreshTask?.cancel()
-        if let currentItemID,
-           let item = workspace.items.first(where: { $0.id == currentItemID }),
-           let versionID = currentVersionID ?? item.selectedVersion?.id {
-            let position = snapshot.listeningState?.filePosition ?? playback.filePosition
-            let restored = PlaybackSnapshot(
-                itemID: currentItemID,
-                versionID: versionID,
-                filePosition: position,
-                isPlaying: playback.isPlaying
-            )
-            let generation = navigationGeneration
-            pendingRuntimeRefreshTask = Task { [weak self] in
-                guard let self else { return }
-                guard self.navigationGeneration == generation else { return }
-                self.pendingRuntimeRefreshTask = nil
-                if self.mode.itemID == item.id {
-                    await self.activateComparison(itemID: item.id, versionID: versionID, snapshot: restored)
-                } else {
-                    await self.activatePlaylist(itemID: item.id, versionID: versionID, snapshot: restored)
+        let live = workspace
+        var candidate = live
+        let originalItems = Dictionary(uniqueKeysWithValues: original.items.map { ($0.id, $0) })
+        let liveItems = Dictionary(uniqueKeysWithValues: live.items.map { ($0.id, $0) })
+        let originalVersions = Dictionary(uniqueKeysWithValues: original.allVersions.map { ($0.id, $0) })
+        let liveVersions = Dictionary(uniqueKeysWithValues: live.allVersions.map { ($0.id, $0) })
+        let targetItemIDs = Set(target.items.map(\.id))
+        let recordedIDs = Set(originalVersions.keys)
+        let targetIDs = Set(target.allVersions.map(\.id))
+
+        candidate.items = target.items.compactMap { recorded in
+            let prior = originalItems[recorded.id]
+            let current = liveItems[recorded.id]
+            guard prior == nil || current != nil else { return nil }
+            var item = current ?? recorded
+            if current?.title == prior?.title { item.title = recorded.title }
+            if prior?.versions.map(\.id) != recorded.versions.map(\.id) {
+                item.versions = recorded.versions.compactMap { version in
+                    guard let old = originalVersions[version.id] else { return version }
+                    guard var latest = liveVersions[version.id] else { return nil }
+                    latest.offsetSeconds += version.offsetSeconds - old.offsetSeconds
+                    return latest
                 }
+                item.versions += (current?.versions ?? []).filter { !recordedIDs.contains($0.id) && !targetIDs.contains($0.id) }
+            }
+            if item.selectedVersionID == prior?.selectedVersionID {
+                item.selectedVersionID = recorded.selectedVersionID
+            }
+            if !item.versions.contains(where: { $0.id == item.selectedVersionID }) {
+                item.selectedVersionID = item.versions.first?.id
+            }
+            return item.versions.isEmpty ? nil : item
+        }
+        for item in live.items where !targetItemIDs.contains(item.id) {
+            var retained = item
+            if originalItems[item.id] != nil {
+                retained.versions.removeAll { recordedIDs.contains($0.id) || targetIDs.contains($0.id) }
+                if !retained.versions.contains(where: { $0.id == retained.selectedVersionID }) {
+                    retained.selectedVersionID = retained.versions.first?.id
+                }
+            }
+            if !retained.versions.isEmpty { candidate.items.append(retained) }
+        }
+        if original.items.map(\.id) == target.items.map(\.id) {
+            let order = Dictionary(uniqueKeysWithValues: live.items.enumerated().map { ($1.id, $0) })
+            candidate.items.sort { order[$0.id, default: .max] < order[$1.id, default: .max] }
+        }
+
+        let owner = candidate.items.first { item in item.versions.contains { $0.id == playback.versionID } }
+        if let owner, let versionID = playback.versionID {
+            playback.itemID = owner.id
+            candidate.listeningState = PlaylistListeningState(
+                itemID: owner.id, versionID: versionID, filePosition: playback.filePosition
+            )
+            candidate.activeView = mode == .playlist ? .playlist : .comparison(itemID: owner.id)
+        } else {
+            let fallback = target.listeningState.flatMap { state in
+                candidate.items.contains { $0.id == state.itemID && $0.versions.contains { $0.id == state.versionID } }
+                    ? state : nil
+            }
+            candidate.listeningState = fallback
+            if playback.itemID == nil, let itemID = fallback?.itemID, target.activeItemID == itemID {
+                candidate.activeView = .comparison(itemID: itemID)
+            } else {
+                candidate.activeView = .playlist
+            }
+            playback = PlaybackSnapshot(itemID: fallback?.itemID, versionID: fallback?.versionID,
+                                        filePosition: fallback?.filePosition ?? 0, isPlaying: false)
+        }
+        do { try candidate.validate() } catch {
+            reportError(error.localizedDescription)
+            return
+        }
+        workspace = candidate
+        registerUndo(before: live, undoManager: manager, actionName: actionName)
+        rebuildTraversal()
+        let targetMode: Mode = candidate.activeItemID.map { .comparison(itemID: $0) } ?? .playlist
+        let needsRefresh = pendingRuntimeRefreshTask != nil || runtimeContext?.itemID != playback.itemID
+            || controller.session.activeTrackID != playback.versionID || targetMode != mode
+            || runtimeRequiresRefresh(before: live, after: candidate, mode: mode)
+        mode = targetMode
+        currentItemID = playback.itemID
+        currentVersionID = playback.versionID
+        let generation = beginNavigation()
+        if playback.itemID == nil {
+            showPlaylistWithoutRuntime(playback)
+        } else if needsRefresh {
+            pendingRuntimeRefreshTask = Task { [weak self] in
+                guard let self, self.navigationGeneration == generation else { return }
+                self.pendingRuntimeRefreshTask = nil
+                await self.refreshAfterOrganization(snapshot: playback)
             }
         }
     }
@@ -1721,16 +1928,11 @@ final class PlaylistCoordinator {
             ? (controller.session.activeTrackID ?? currentVersionID)
             : currentVersionID
         let filePosition: TimeInterval
-        if let version = versionID.flatMap({ id in workspace.allVersions.first(where: { $0.id == id }) }),
-           runtimeMatchesMode {
-            if mode.itemID == nil {
-                filePosition = min(max(controller.displayTransportPosition(), 0), version.metadata.duration)
-            } else {
-                filePosition = PlaylistPlaybackBoundary.filePosition(
-                    transport: controller.displayTransportPosition(),
-                    version: version
-                )
-            }
+        if runtimeMatchesMode, let track = controller.session.activeTrack?.loadedTrack {
+            let position = TransportMapping.filePosition(
+                forGlobalTime: controller.displayTransportPosition(), offset: track.offsetSeconds
+            )
+            filePosition = min(max(position, 0), track.duration)
         } else if let state = workspace.listeningState,
                   state.itemID == itemID,
                   state.versionID == versionID {
@@ -1842,6 +2044,7 @@ final class PlaylistCoordinator {
     private func beginNavigation() -> Int {
         navigationGeneration &+= 1
         pendingRuntimeRefreshTask?.cancel()
+        pendingRuntimeRefreshTask = nil
         return navigationGeneration
     }
 
