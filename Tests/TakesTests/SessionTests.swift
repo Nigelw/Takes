@@ -79,6 +79,25 @@ struct SessionTests {
         #expect(ControlBarReadoutTitle.comparison(session) == "")
     }
 
+    @MainActor
+    @Test
+    func playlistVersionTitleFollowsAppearanceAfterConfiguration() throws {
+        let light = try #require(NSAppearance(named: .aqua))
+        let dark = try #require(NSAppearance(named: .darkAqua))
+        let cell = PlaylistVersionCellView()
+
+        light.performAsCurrentDrawingAppearance {
+            cell.configure(title: "Alternate Mix", format: "FLAC", duration: "2:41", mark: .none, toolTip: "")
+        }
+        let titleColor = try #require(cell.textField?.textColor)
+
+        for appearance in [light, dark] {
+            appearance.performAsCurrentDrawingAppearance {
+                #expect(titleColor.usingColorSpace(.sRGB) == NSColor.labelColor.usingColorSpace(.sRGB))
+            }
+        }
+    }
+
     /// The title face sits just under the elapsed digits (canvas: 16 px
     /// Doto beside 14 pt digits), and both readouts start their first dot
     /// row on a whole point.

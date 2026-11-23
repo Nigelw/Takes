@@ -1406,7 +1406,8 @@ final class PlaylistVersionCellView: NSTableCellView {
             formatField.textColor = selectedText.withAlphaComponent(0.75)
             durationField.textColor = selectedText.withAlphaComponent(0.75)
         } else {
-            titleField.textColor = dimmed ? .tertiaryLabelColor : NSColor.labelColor.withAlphaComponent(0.85)
+            // Keep the system label color dynamic across appearance changes.
+            titleField.textColor = dimmed ? .tertiaryLabelColor : .labelColor
             formatField.textColor = .secondaryLabelColor
             durationField.textColor = .secondaryLabelColor
         }
