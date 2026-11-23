@@ -79,8 +79,14 @@ Key ownership:
   visible-row thumbnail requests, context menu, inline rename, keyboard
   handling, and row drag and drop. Row colors are `PlaylistRowPalette` in
   `Theme.swift`.
-- `ContentView.swift`: the compare control bar's buttons, comparison
-  waveform/timeline UI, drag-and-drop, loop gestures, and offset controls.
+- `ContentView.swift`: the compare control bar's buttons and the compact
+  compare area (A2 §8): ruler and lane sizing (`CompareLaneLayout`), the
+  26 pt ruler (`TimelineHeaderRulerView`, `TimelineRulerMetrics`), the
+  playhead (`PlayheadGeometry`, `TimelinePlayheadVisual`), the full-width
+  lanes (`TrackRowView` → `LaneView` → `WaveformLaneView`), their info
+  strips (`LaneStripView`, `LaneOffsetField`, `LaneStripText`, the strip's
+  drag source and context menu), loop gestures, reorder drag-and-drop, and
+  the "Couldn't Align Tracks" alert (`TempoAnalysisOfferAlert`).
 - `AppSettings.swift` and `SettingsView.swift`: persisted user preferences
   (including `showsArtwork`, the titlebar toggle's state) and the Settings
   window.
@@ -112,7 +118,10 @@ Key ownership:
 - `WaveformStore.swift`: in-memory (process-lifetime) waveform generation —
   bounded to 2 concurrent decodes in session (top-first) order — plus the
   multi-resolution peak pyramid (`Waveform.reducedLevels`) the lanes draw
-  from. No disk caches.
+  from. No disk caches. A new runtime context restarts in-flight generations;
+  finished waveforms survive a re-activation of the same item (Remove
+  Version, reorder and regroup rebuild the runtime), so lanes don't redraw
+  from scratch.
 - `AudioFileLoader.swift`: local file metadata through `AVAudioFile`, embedded
   title/artist/album tags and cover art (`embeddedArtworkData(for:)`) through
   `AVURLAsset`, and audio-runtime file preparation.
@@ -231,8 +240,12 @@ These are here to prevent parallel implementations and subtle regressions:
 - The cover and artwork toggle live in `WorkspaceView`, above both modes'
   control bars, so entering compare never moves them. The control bars take
   their top padding from `TakesWindowPolicy.controlBarTopPadding(showsArtwork:)`
-  (10 under the cover, 24 under the titlebar). In compare the cover shows the
-  item's playback version, not the audible one.
+  (10 under the cover, 24 under the titlebar). The cover's version comes from
+  `CoverVersionRule`: in compare it follows the audible version, except in
+  Blind Listening Mode, where it stays on the item's playback version so it
+  can't reveal which version is audible. The previous cover stays up until
+  the next one has loaded (`shownCoverVersionID`), so switching never
+  flashes the placeholder.
 - Artwork is in-memory only (no disk caches); the readouts carry none. The
   cover loads only the version on display, downsampled to 720 px, capped at
   `PlaylistArtworkStore.capacity` decoded images. Playlist item rows show a
@@ -247,9 +260,12 @@ These are here to prevent parallel implementations and subtle regressions:
   instead of reading its file again. Finished thumbnails are pushed into the
   visible cell (`onThumbnailLoaded`), never by reloading the table.
 - Both modes build their control bar from one `ControlBarLayout` (A2 §5):
-  side slots of 30 × 40 pt pinned to the 10 pt insets, the centre group
-  centred with 12 pt gaps, the readout taking the remaining width, then the
-  one `ControlBarDivider`. It stretches to any width of 360 pt or more; do not
+  the centre group centred with 12 pt gaps; the 30 × 40 pt side buttons each
+  centred midway between its window edge and the playlist's Previous · Play
+  · Next group (`ControlBarTransportRow`,
+  `ControlBarMetrics.sideButtonCenterX`), at the same place in compare even
+  though its centre group is narrower; the readout inside the 10 pt insets;
+  then the one `ControlBarDivider`. It stretches to any width of 360 pt or more; do not
   reintroduce width-dependent layouts. Side buttons are plain icons
   (`ControlBarSideButtonStyle`); centre buttons are v2.9.0's
   `CircleTransportButtonStyle` (Play 56/22, secondary 40/15). Previous/Next
@@ -261,10 +277,42 @@ These are here to prevent parallel implementations and subtle regressions:
   playing (or current) version; compare shows the audible version and, in
   Blind Listening Mode, `TRACK n` so it never reveals which version is
   audible. `PlaylistPlaybackBoundary.loadedTrack(for:)` carries the tags for
-  this. Long titles scroll (`DotMatrixMarqueeText`).
+  this. Long titles scroll (`DotMatrixMarqueeText`). The title field takes
+  its width from the line, never from its text (the cells draw in an
+  overlay); sized by its cells it could only grow, and a launch-time layout at
+  a restored wider frame left the readout wider than the window.
 - Compare leaves through the readout's back button, Esc, or ⌘[. The compare
   control bar has no zoom controls until the A2 bottom bar (milestone 5);
   ⌘+/⌘− and pinch still zoom.
+- Compare has no track-info column (A2 §8). Below the control bar's divider:
+  a 26 pt ruler with a 1 pt bottom border and no top border, then lanes edge
+  to edge. Every lane has one fixed height (`CompareLaneLayout.laneStep`,
+  96 pt: a 95 pt lane and its 1 pt divider); lanes that don't fit scroll, and
+  neither the window size nor the version count ever resizes a lane, so
+  adding or removing a version never redraws the others. The 14 × 16
+  grabber's tip sits on the ruler's bottom edge
+  (`CompareLaneLayout.seatBottom`, 27) in an overlay above the section; the
+  2 pt line runs through the lanes inside their scroll content.
+- Each lane's 21 pt info strip (`LaneStripView`) is its own layer ABOVE the
+  lanes' seek/loop gesture surface and the playhead line, with the lane
+  visuals below them; it has no background. Only the badge, title and format
+  (the drag source: reorder, drag-out to Finder, and the context menu —
+  Remove Version, Reveal in Finder, Reset Offset) and the offset field take
+  clicks; the strip's empty middle passes clicks through. Don't fold the
+  strip into `TrackRowView` or put it under the gesture surface: its controls
+  would stop receiving clicks and the playhead line would cross them. The
+  strip's frame runs from the lane's top to the waveform band
+  (`CompareLaneLayout.stripFrameHeight`), its contents centred. The offset
+  field (`LaneOffsetField`) sizes itself to its number, including while it is
+  typed; hovering it shows an "Offset" label to its left that takes room in
+  the row, so a long title truncates rather than running under it. Its hover
+  comes from an AppKit tracking area (`HoverSensor`), because SwiftUI hover is
+  unreliable over the AppKit text field. Strip titles use
+  the version-row rule (`PlaylistRowText.versionName`); Blind Listening Mode
+  shows `Track n`, no format or tooltip, and disables Reveal in Finder.
+- Compare's header controls are gone until the bottom bar: imports are in the
+  File menu, Remove All Versions is ⌘⌫, Auto-Align is ⌥⌘A, and the "Analyze
+  Further" offer is an alert. Keep each reachable from one of those.
 
 Performance-architecture invariants (established by the perf effort; breaking
 these reintroduces the exact regressions it fixed):
@@ -283,19 +331,22 @@ these reintroduces the exact regressions it fixed):
   Core Animation only when they overflow.
 - **Continuous on-screen motion must use Core Animation, never SwiftUI
   `TimelineView(.animation)` or `withAnimation`** — both burn main-thread CPU
-  per frame on macOS. The playhead is CALayer-driven (one `CABasicAnimation`
-  per transport anchor event); steady playback does zero per-frame main-thread
-  work.
+  per frame on macOS. The playhead is CALayer-driven: its grabber and its
+  line are two layer views (`PlayheadPart`), each moved by one
+  `CABasicAnimation` per transport anchor event; steady playback does zero
+  per-frame main-thread work.
 - **`PlaybackController` is `@Observable`** (not `ObservableObject`). Live
   transport position is derived from schedule anchors via
   `displayTransportPosition()`; `session.transportPosition` is written only at
   anchor events (play/pause/seek/stop/wrap), never per tick. The visible window
   (`visibleStart`/`visibleSpan`/`laneWindowStart`) lives on the controller and
   is written only on real change (equality-guarded).
-- **Keep the track-row / lane-leaf isolation.** `TrackRowView` is `Equatable`
-  and must not receive any per-scroll or per-zoom value; the zoom/scroll-varying
-  lane window flows through `LaneViewportStore` → `LaneView` leaves, so
-  scrolling and zooming never re-lay-out the track `VStack`.
+- **Keep the track-row / lane-leaf isolation.** `TrackRowView` and
+  `LaneStripView` are `Equatable` and must not receive any per-scroll or
+  per-zoom value; the zoom/scroll-varying lane window flows through
+  `LaneViewportStore` → `LaneView` leaves, so scrolling and zooming never
+  re-lay-out the lane `VStack`s. Reorder offsets and lifted opacity are applied
+  around both (`ReorderPlacement`), never inside them.
 - **Loop/repeat wraps are gapless via a pre-queued next iteration**
   (`establishLoopPreQueue` / `handleLoopWrap`, `isLoopPreQueued`): a wrap is
   bookkeeping-only (re-anchor + audibility flip + enqueue the following
@@ -316,7 +367,8 @@ these reintroduces the exact regressions it fixed):
   schema handling, file references, and retained downloads.
 - `PlaylistPersistenceControllerTests.swift`: restoration/save gating, failures,
   and automatic event-save observation rearming.
-- `PlaylistWaveformContextTests.swift`: stale waveform rejection across activations.
+- `PlaylistWaveformContextTests.swift`: stale waveform rejection across
+  activations, and finished waveforms kept when the same item re-activates.
 - `PlaylistWorkspaceTests.swift`: playlist value encoding/validation, stable
   ownership, canonical duplicates, and atomic organization operations.
 - `PlaylistPlaybackBoundaryTests.swift`: signed position conversion, session
@@ -329,9 +381,13 @@ these reintroduces the exact regressions it fixed):
   policy (sizes, minimums, artwork-toggle frames, clamping), the persisted
   artwork setting, retired control-bar preferences loading as defaults, the
   A2 readout title rules (tag, filename, blind), the LED meter's cell count
-  and head geometry, the A2 playlist row metrics and version names, the
+  and head geometry, the control bar's side-button placement, the cover
+  rule (`CoverVersionRule`), the A2 playlist row metrics and version names, the
   thumbnail cache (visible-only queue, concurrency bound, capacity, cover
-  reuse), and other non-UI logic.
+  reuse), the A2 compact compare geometry (ruler and seat, the fixed lane
+  height, the waveform band, ruler notches and labels, the playhead's line
+  and grabber), the lane strip's text and blind rules, the offset field's
+  width, and other non-UI logic.
 - `StreamingTrackImportTests.swift`: streaming metadata, yt-dlp resolution,
   download/import behavior, checksum parsing, and error handling.
 - `WaveformSourceTests.swift`: waveform generation and the peak pyramid
@@ -369,8 +425,8 @@ these reintroduces the exact regressions it fixed):
 - [docs/a2-redesign-spec.md](docs/a2-redesign-spec.md): the A2 compact
   cover-column redesign (360 pt window, artwork toggle, glass readout,
   two-line playlist rows, compact compare). Milestones 1 (window shell and
-  artwork), 2 (control bar) and 3 (playlist rows) are done; 4–5 are not
-  started. Read it before working on any of
+  artwork), 2 (control bar), 3 (playlist rows) and 4 (compact compare) are
+  done; 5 (bottom bars) is not started. Read it before working on any of
   its milestones.
 - [docs/comparative-quality-analysis.md](docs/comparative-quality-analysis.md):
   the multi-track "which of these is the better copy?" feature — design,

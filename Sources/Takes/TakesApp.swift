@@ -325,7 +325,6 @@ final class RemotePlaybackCommandController: ObservableObject {
 /// keeping the top edge where it is.
 enum TakesWindowPolicy {
     static let mainWindowID = "main"
-    static let resetComparisonLayoutNotification = Notification.Name("TakesResetComparisonLayout")
     static let analysisWindowID = "analysis"
     static let comparisonWindowID = "comparison"
     static let replacesDefaultNewItemCommands = true
@@ -333,9 +332,10 @@ enum TakesWindowPolicy {
     /// or wider, sized per mode) is not restored into the cover-column layout.
     static let mainWindowFrameAutosaveName = "main.a2"
     static let mainWindowFrameDefaultsKey = "NSWindow Frame \(mainWindowFrameAutosaveName)"
-    /// Pre-A2 keys for the playlist frame and the comparison's per-window
-    /// autosave. No longer read; removed on launch.
-    static let retiredFrameDefaultsKeys = ["playlistWindowFrame", "NSWindow Frame main"]
+    /// Pre-A2 keys for the playlist frame, the comparison's per-window
+    /// autosave, and the comparison's track-info column width (removed with
+    /// the column in A2 milestone 4). No longer read; removed on launch.
+    static let retiredLayoutDefaultsKeys = ["playlistWindowFrame", "NSWindow Frame main", "trackInfoColumnWidth"]
 
     // MARK: Window size
 
@@ -390,30 +390,13 @@ enum TakesWindowPolicy {
         minimumHeight(showsArtwork: showsArtwork) - hiddenTitlebarSafeAreaInset
     }
 
-    // MARK: Comparison metrics (pre-A2 layout, replaced in milestone 4)
+    // MARK: Comparison
 
-    static let trackInfoColumnWidthKey = "trackInfoColumnWidth"
-    static let defaultTrackInfoColumnWidth: CGFloat = 240
-    static let minimumTrackInfoColumnWidth: CGFloat = defaultTrackInfoColumnWidth - 10
-    static let minimumWaveformColumnWidth: CGFloat = 240
-    static let trackRowHeight: CGFloat = 96
-    static let trackTimelineDividerHeight: CGFloat = 1
-    static let trackTimelineHeaderHeight: CGFloat = 34
     /// The compare control bar's height with the artwork shown (10 + 56 +
     /// 10 + 30 + 12 + 1 divider): the import highlight's starting inset
-    /// until the bar's measured height arrives.
+    /// until the bar's measured height arrives. The ruler and lanes below it
+    /// are sized by `CompareLaneLayout`.
     static let controlBarReservedHeight: CGFloat = 119
-
-    static func trackTimelineHeight(displayingTrackRows rowCount: Int) -> CGFloat {
-        let rowCount = max(rowCount, 1)
-        let dividerCount = max(rowCount - 1, 0)
-        return trackRowHeight * CGFloat(rowCount) + trackTimelineDividerHeight * CGFloat(dividerCount)
-    }
-
-    static func clampedTrackInfoColumnWidth(_ width: CGFloat, sectionWidth: CGFloat) -> CGFloat {
-        let maximumWidth = max(minimumTrackInfoColumnWidth, sectionWidth - minimumWaveformColumnWidth)
-        return min(max(width, minimumTrackInfoColumnWidth), maximumWidth)
-    }
 
     // MARK: Frames
 
@@ -493,7 +476,7 @@ enum TakesWindowPolicy {
             return
         }
 
-        retiredFrameDefaultsKeys.forEach(defaults.removeObject(forKey:))
+        retiredLayoutDefaultsKeys.forEach(defaults.removeObject(forKey:))
         let hasSavedFrame = hasSavedMainWindowFrame(defaults: defaults)
         window.setFrameAutosaveName(mainWindowFrameAutosaveName)
         let visibleFrame = visibleFrame(for: window)

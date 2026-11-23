@@ -124,9 +124,21 @@ final class WaveformStore: ObservableObject {
     /// newly added tracks, cancel and drop waveforms for removed ones,
     /// regenerate if a track's underlying file changed, and re-prioritize the
     /// waiting queue to match the (possibly reordered) session order.
+    ///
+    /// A new runtime context restarts every generation still in flight, so a
+    /// result from the previous activation can never land in this one. When
+    /// the context re-activates the same item (removing, reordering or
+    /// regrouping its versions rebuilds the runtime), finished waveforms are
+    /// kept: a waveform depends only on its file, which the identity check
+    /// below still verifies, so redrawing them from scratch would only flash
+    /// every lane.
     func sync(tracks: [SessionTrack], context: PlaylistRuntimeContext? = nil) {
         if runtimeContext != context {
-            for id in Array(sourceIdentities.keys) { cancel(id) }
+            let isSameItem = runtimeContext?.itemID != nil && runtimeContext?.itemID == context?.itemID
+            for id in Array(sourceIdentities.keys) {
+                if isSameItem, tasks[id] == nil, waveforms[id]?.isComplete == true { continue }
+                cancel(id)
+            }
             runtimeContext = context
         }
         let liveIDs = Set(tracks.map(\.id))

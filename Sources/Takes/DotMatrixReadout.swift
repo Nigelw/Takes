@@ -169,14 +169,24 @@ private struct ControlBarElapsedDigits: View {
 
 /// The title takes whatever width the line leaves it, as whole character
 /// cells; a title wider than that scrolls (`DotMatrixMarqueeText`).
+///
+/// The field's width comes only from the line, never from the text: the
+/// cells draw in an overlay. Sized by its own cells, the field could only
+/// grow — once laid out wide (as when SwiftUI restores another window frame
+/// before the launch code applies the A2 one), its cell count held that
+/// width and pushed the readout past the window.
 private struct ControlBarReadoutTitleField: View {
     let title: String
     private let metrics = ControlBarReadoutLine.titleMetrics
     @State private var columns = 1
 
     var body: some View {
-        DotMatrixMarqueeText(text: title, columns: columns, metrics: metrics)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: metrics.lineHeight)
+            .overlay(alignment: .leading) {
+                DotMatrixMarqueeText(text: title, columns: columns, metrics: metrics)
+            }
             .onGeometryChange(for: Int.self) { proxy in
                 // A line of n cells is n advances minus the trailing cell gap.
                 max(Int(((proxy.size.width + metrics.cellGap) / metrics.cellAdvance).rounded(.down)), 1)

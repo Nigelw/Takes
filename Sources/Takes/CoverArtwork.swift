@@ -82,6 +82,13 @@ final class PlaylistArtworkStore {
         return cached
     }
 
+    /// Whether the version's cover has finished loading: decoded, or known to
+    /// have no artwork.
+    func hasResolvedArtwork(for versionID: PlaylistVersion.ID?) -> Bool {
+        guard let versionID else { return false }
+        return images[versionID] != nil
+    }
+
     /// Starts loading the version's embedded artwork if it isn't cached or
     /// loading already. Safe to call on every navigation.
     func load(for version: PlaylistVersion) {

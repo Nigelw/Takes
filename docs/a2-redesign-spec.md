@@ -100,8 +100,9 @@ centred.
 - Blind takes Shuffle's place; Repeat never moves. Previous/Next have no
   compare equivalent and are not shown there.
 - Side buttons are **plain icons** (no circle), 20 pt glyph, secondary
-  colour, centred in a 30 × 40 pt slot. The slot width is chosen so Blind
-  sits directly above compare's 30 pt back button.
+  colour, centred in a 30 × 40 pt slot. Each slot is centred midway between
+  its window edge and the playlist's centre group, in both modes (§13,
+  milestone 4 review); Blind no longer sits above compare's back button.
 - Centre buttons use **v2.9.0's `CircleTransportButtonStyle`** unchanged
   (dark values from `TransportAppearance`):
   - Play: `.primary`, 56 pt, 22 pt glyph.
@@ -213,12 +214,13 @@ edge down through the lanes; v2.9.0's 14 × 16 pt `PlayheadHandle` grabber
 with its tip seated on the ruler's bottom edge. Keep the existing
 Core Animation playhead (`TimelinePlayheadVisual`).
 
-**Lanes:** full width, equal height filling the space (≈74 pt each for three
-versions in the default window). More than three versions scroll.
-- Info overlaid on a 21 pt strip at the top of each lane, over a dark
-  fade: index badge (15 pt; primary fill when active), version track title
-  (11.5 pt semibold), format (10 pt secondary), and an offset field on the
-  right (e.g. `0 ms`, editable).
+**Lanes:** full width, one fixed height (96 pt with its divider; changed from
+the canvas's equal shares in the milestone 4 review, §13). Lanes that don't
+fit scroll.
+- Info overlaid on a 21 pt strip at the top of each lane, with no fade (the
+  canvas's fade was dropped in review, §13): index badge (15 pt; primary
+  fill when active), version track title (11.5 pt semibold), format (10 pt
+  secondary), and an offset field on the right (e.g. `0 ms`, editable).
 - Waveform beneath the strip, centred in the remaining height.
 - Active lane: primary-tinted background (~11%), primary waveform, filled
   badge. **No** leading accent bar.
@@ -274,8 +276,11 @@ Each is meant to fit one session and leave the app working.
    version rows with tag names, middle truncation, hover Compare,
    missing-file overlay. Removed the header bar, the version-count badge and
    the column headers. Entering compare no longer starts another item (§13).
-4. **Compact compare.** Drop the info column, overlaid lane info, 26 pt
-   ruler, playhead seating, lane sizing and scrolling.
+4. **Compact compare.** *Done.* Dropped the info column with its width
+   setting, resize handle and policy constants. Overlaid lane info strips,
+   26 pt ruler, playhead seating, lane sizing and scrolling. Removed the
+   compare header's import button, Align button and Remove All; their
+   commands stay in the menus (§13).
 5. **Bottom bars.** Small-control bars for both modes; move organisation
    commands into the `…` menu.
 
@@ -315,6 +320,13 @@ None open. The version check for a missing file was decided in milestone 3
   still zoom; the bottom bar brings the on-screen controls back.
 - **Esc leaves compare**, as the back button and ⌘[ do (§9). It goes through
   the same focus-safe shortcut gate, so text fields keep Esc.
+- **Side-button placement** (milestone 4 review). Shuffle/Blind and Repeat
+  are each centred midway between their window edge and the playlist's
+  Previous · Play · Next group (160 pt): 50 pt from the edges in a 360 pt
+  window, further in as it widens. Compare keeps those positions rather than
+  re-centring against its narrower Play · Switch Track group, so the buttons
+  never move between modes. The readout keeps the 10 pt insets, so compare's
+  back button no longer sits under Blind.
 - **Engaged side buttons** (Shuffle on, Blind on, Repeat not Off): the plain
   glyph lights in `Theme.primaryLitGlyph` with the secondary appearance's
   glow and bloom, the same treatment v2.9.0's engaged secondary buttons
@@ -362,8 +374,12 @@ None open. The version check for a missing file was decided in milestone 3
   `lightSecondary`'s engaged glow. Dark uses the §4 values with
   `darkSecondary`'s glow.
 - **Which cover:** in playlist mode, the playing (or current) version's
-  artwork, as the readout shows. In compare, the item's playback version, so
-  Switch Track doesn't swap the cover.
+  artwork, as the readout shows. In compare, the audible version's, so
+  Switch Track swaps the cover (milestone 4 review; milestone 1 kept the
+  playback version). In Blind Listening Mode compare keeps the item's
+  playback version, so the cover can't reveal which version is audible. The
+  previous cover stays up until the next has loaded, so a switch never
+  flashes the placeholder.
 - **Double-click plays, on every row.** It does not open compare, even for
   multi-version items; the Compare pill is the way in.
 - **Missing version file** (milestone 3, was §12). A version row whose file
@@ -399,3 +415,67 @@ None open. The version check for a missing file was decided in milestone 3
 - **No item count until milestone 5.** The header bar's `N items` label is
   gone with the bar; the bottom bar's `6 items · 19:35` brings it back. Its
   commands remain in the context menu, the Playlist menu and the File menu.
+- **Lane sizing** (milestone 4, changed in review). Every lane is a fixed
+  96 pt: a 95 pt lane and its 1 pt bottom divider (`CompareLaneLayout`), the
+  height five versions shared in a 986 pt window with the artwork shown.
+  Lanes never resize with the window or the version count; those that don't
+  fit scroll, and fewer leave the well empty below. In the default 760 pt
+  window two and a half lanes show (two and a third once milestone 5's
+  bottom bar is in). The first build gave lanes equal shares of the space
+  (74 pt for three in the default window, 64 pt minimum), which resized
+  every lane, and redrew every waveform, whenever a version was added or
+  removed. The ruler is 26 pt plus its 1 pt bottom border, so the lanes and
+  the playhead line start 27 pt below the divider, where the grabber's tip
+  sits.
+- **Lane waveform** (milestone 4). Centred in the space below the strip with
+  5 pt clearance above and below. The active waveform is primary and inactive
+  ones `Theme.waveformInactive`, at v2.9.0's 85% and 70% (the first milestone 4
+  build drew both at full strength, as the canvas does; restored in review). The tick guides and the 0:00 line run the full
+  lane height, behind the strip. The ruler has no fill of its own: it
+  shares the well with the lanes rather than the canvas's lighter band.
+- **Lane strip** (milestone 4). No fade or background (dropped in review):
+  it sits in the empty space above the waveform, its contents centred
+  between the divider above the lane and the waveform (26 pt, review). 9 pt leading and 8 pt
+  trailing insets, 6 pt gaps. Badge 15 pt, 4 pt radius, 10 pt bold digits, keeping the tunable
+  bevel (`IndexBadgeAppearance`). Title: the version-row rule (title tag, else
+  filename without extension), 11.5 pt semibold, middle truncation; it
+  outranks the format, which truncates first. Format: container, sample rate
+  and bit rate (`FLAC · 44.1 kHz`, as the canvas draws it and as the info
+  column's metadata line showed). The duration and filename, which the
+  column also showed, are in the strip's tooltip. Blind Listening Mode: `Track
+  n`, no format, no tooltip; the waveform stays the redaction-bar hatch.
+- **Offset field** (milestone 4). `0 ms` in a 17 pt box, 4 pt radius, 10 pt
+  tabular digits, sized to its number and growing (or shrinking) as one is
+  typed. No stepper: ↑/↓ while
+  editing (⇧ for large steps), ⌘J/⌘K nudges, and double-clicking `ms` resets
+  to zero. Focused: the primary ring and glow the old field had. Editing
+  keeps the global shortcuts off, as every text field does. Hovering the box
+  shows an "Offset" label (10 pt secondary) 4 pt to its left; the label
+  takes room in the strip, so a long title or format truncates rather than
+  running under it (review).
+- **Strip interaction** (milestone 4). The strip is its own layer above the
+  lanes' seek and loop gestures. Dragging the badge, title or format reorders
+  the lane (with the lifted card, now showing badge, title and format) or
+  copies the file out to Finder; a plain click makes the lane active. A
+  right-click there opens Remove Version, Reveal in Finder (disabled while
+  blind) and Reset Offset, acting on that lane; it replaces the info column's
+  hover trash button. The strip's empty middle passes clicks through, so
+  seeking, loop drags and the playhead band work across the whole lane. The
+  strip draws over the playhead line (review); the grabber stays on the
+  ruler, above everything.
+- **Light lane values** (milestone 4). Active lane: light primary at 10%
+  (dark: primary 11%). Ruler border and lane dividers: black 10% (dark 30%,
+  the canvas's #18181A on #1F1F21). Offset field: white 85% with a black 16%
+  hairline (dark: #141416 at 85% with a #3C3C40 hairline). All in `Theme`.
+- **Compare header removed until milestone 5.** The import split button's
+  commands are in the File menu, Remove All is File ▸ Remove All Versions
+  (⌘⌫), and Auto-Align is Playback ▸ Auto-Align Tracks (⌥⌘A). Until the
+  bottom bar's Align button returns there is no alignment progress
+  indicator or outcome flash, and the "Couldn't Align Tracks → Analyze
+  Further" offer is an alert rather than a popover.
+- **Missing files in compare.** Compare does not open an item while any of
+  its versions' files is missing (unchanged by milestone 4), so lanes have no
+  missing-file state; the playlist's version rows carry it (milestone 3).
+- **Retired column width.** The stored `trackInfoColumnWidth` preference is
+  removed on launch with the pre-A2 frame keys, and Reset Window Size no
+  longer resets a column.

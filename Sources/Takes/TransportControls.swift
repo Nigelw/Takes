@@ -555,9 +555,10 @@ struct SevenSegmentDisplay: View {
 
 /// The A2 control bar shared by playlist and compare (spec §3, §5): the
 /// transport row over the readout on one surface, then the one divider to
-/// the content below. Stretches to any window width: the side slots stay
-/// pinned to the 10 pt edge insets, the centre group stays centred (the side
-/// slots are equal), and the readout takes the remaining width.
+/// the content below. Stretches to any window width: the centre group stays
+/// centred, the side buttons sit midway between the window edges and the
+/// playlist's centre group (`ControlBarTransportRow`), and the readout takes
+/// the width inside the 10 pt edge insets.
 struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: View>: View {
     let showsArtwork: Bool
     @ViewBuilder let leading: Leading
@@ -568,12 +569,10 @@ struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: Vi
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
-                HStack(spacing: 0) {
+                ControlBarTransportRow {
                     leading
                         .frame(width: ControlBarMetrics.sideSlotSize.width, height: ControlBarMetrics.sideSlotSize.height)
-                    Spacer(minLength: 0)
                     HStack(spacing: ControlBarMetrics.centerSpacing) { center }
-                    Spacer(minLength: 0)
                     trailing
                         .frame(width: ControlBarMetrics.sideSlotSize.width, height: ControlBarMetrics.sideSlotSize.height)
                 }
@@ -581,10 +580,10 @@ struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: Vi
                 // the side buttons clear the window buttons and the toggle.
                 .padding(.top, TakesWindowPolicy.controlBarTopPadding(showsArtwork: showsArtwork))
                 readout
+                    .padding(.horizontal, ControlBarMetrics.edgeInset)
                     .padding(.top, ControlBarMetrics.readoutTopSpacing)
                     .padding(.bottom, ControlBarMetrics.readoutBottomPadding)
             }
-            .padding(.horizontal, ControlBarMetrics.edgeInset)
             // Raised deck: a light wash lifts the bar off the shared window
             // material. Decorative, so it must not take clicks from the drag
             // area behind it.
@@ -646,12 +645,36 @@ struct ControlBarSideButtonStyle: ButtonStyle {
     }
 }
 
+/// The transport row: the centre group centred, and the two side buttons
+/// (Shuffle or Blind, and Repeat) each centred between its window edge and
+/// the playlist's Previous · Play · Next group. Compare keeps the same side
+/// positions even though its centre group (Play · Switch Track) is narrower,
+/// so Blind and Repeat don't move between modes. Spans the full bar width.
+/// Expects three subviews: leading, centre group, trailing.
+struct ControlBarTransportRow: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        return CGSize(
+            width: proposal.width ?? sizes.reduce(0) { $0 + $1.width },
+            height: sizes.map(\.height).max() ?? 0
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 3 else { return }
+        let sideCenter = ControlBarMetrics.sideButtonCenterX(barWidth: bounds.width)
+        let xs = [bounds.minX + sideCenter, bounds.midX, bounds.maxX - sideCenter]
+        for (subview, x) in zip(subviews, xs) {
+            subview.place(at: CGPoint(x: x, y: bounds.midY), anchor: .center, proposal: .unspecified)
+        }
+    }
+}
+
 /// A2 control-bar metrics (spec §3, §5.1) and v2.9.0's transport button
 /// sizes.
 enum ControlBarMetrics {
     static let edgeInset: CGFloat = 10
-    /// Shuffle/Blind and Repeat: chosen so Blind sits directly above
-    /// compare's 30 pt back button.
+    /// Shuffle/Blind and Repeat: a 20 pt glyph's hit area.
     static let sideSlotSize = CGSize(width: 30, height: 40)
     static let centerSpacing: CGFloat = 12
     static let readoutTopSpacing: CGFloat = 10
@@ -660,6 +683,16 @@ enum ControlBarMetrics {
     static let primaryGlyphSize: CGFloat = 22
     static let secondaryDiameter: CGFloat = 40
     static let secondaryGlyphSize: CGFloat = 15
+
+    /// The playlist's Previous · Play · Next group (160 pt), which places the
+    /// side buttons in both modes.
+    static let playlistCenterGroupWidth = secondaryDiameter * 2 + primaryDiameter + centerSpacing * 2
+
+    /// A side button's centre, from its window edge: midway between the edge
+    /// and the playlist's centre group (50 pt in a 360 pt window).
+    static func sideButtonCenterX(barWidth: CGFloat) -> CGFloat {
+        max((barWidth - playlistCenterGroupWidth) / 4, sideSlotSize.width / 2)
+    }
 }
 
 /// Debug panel (surfaced in an inspector via Debug ▸ Appearance Tuner) for

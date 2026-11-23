@@ -454,32 +454,6 @@ struct SessionTests {
     }
 
     @Test
-    func trackInfoColumnPolicyDefaultsNearExistingFixedWidth() {
-        #expect(TakesWindowPolicy.defaultTrackInfoColumnWidth == 240)
-        #expect(TakesWindowPolicy.minimumTrackInfoColumnWidth == TakesWindowPolicy.defaultTrackInfoColumnWidth - 10)
-    }
-
-    @Test
-    func trackInfoColumnPolicyClampsToMinimumWidth() {
-        let width = TakesWindowPolicy.clampedTrackInfoColumnWidth(
-            120,
-            sectionWidth: 700
-        )
-
-        #expect(width == TakesWindowPolicy.minimumTrackInfoColumnWidth)
-    }
-
-    @Test
-    func trackInfoColumnPolicyPreservesWaveformMinimumWidth() {
-        let width = TakesWindowPolicy.clampedTrackInfoColumnWidth(
-            640,
-            sectionWidth: 700
-        )
-
-        #expect(width == 700 - TakesWindowPolicy.minimumWaveformColumnWidth)
-    }
-
-    @Test
     func windowPolicyDetectsSavedMainWindowFrame() {
         var defaults: [String: Any] = [:]
 
@@ -2051,16 +2025,6 @@ struct SessionTests {
     }
 
     @Test
-    func timelineCursorPrioritizesTheColumnResizeHitStrip() {
-        #expect(TimelineCursorHitPolicy.isColumnResizeTarget(columnX: -6, hasDisplayedTracks: true))
-        #expect(TimelineCursorHitPolicy.isColumnResizeTarget(columnX: 0, hasDisplayedTracks: true))
-        #expect(TimelineCursorHitPolicy.isColumnResizeTarget(columnX: 6, hasDisplayedTracks: true))
-        #expect(!TimelineCursorHitPolicy.isColumnResizeTarget(columnX: -6.01, hasDisplayedTracks: true))
-        #expect(!TimelineCursorHitPolicy.isColumnResizeTarget(columnX: 6.01, hasDisplayedTracks: true))
-        #expect(!TimelineCursorHitPolicy.isColumnResizeTarget(columnX: 0, hasDisplayedTracks: false))
-    }
-
-    @Test
     func timelineLaneGestureChoosesPlayheadOnlyWithinItsMouseDownHitStrip() {
         #expect(TimelineLaneGesturePolicy.dragMode(startX: 94, playheadX: 100, playheadHitWidth: 12) == .playhead)
         #expect(TimelineLaneGesturePolicy.dragMode(startX: 100, playheadX: 100, playheadHitWidth: 12) == .playhead)
@@ -2125,6 +2089,173 @@ struct SessionTests {
         #expect(ContentView.renderableRowRange(contentMinY: -1000, viewportHeight: 300, rowStep: 100) == 8...15)
         // Degenerate geometry stays fully open (nothing culled).
         #expect(ContentView.renderableRowRange(contentMinY: 0, viewportHeight: 0, rowStep: 100) == 0...Int.max)
+    }
+
+    // MARK: A2 compact compare (milestone 4)
+
+    /// The compare section below the control bar in a window `height` tall
+    /// with the artwork shown: less the 360 pt cover and the 119 pt bar.
+    private static func compareSectionHeight(windowHeight height: CGFloat) -> CGFloat {
+        height - 360 - 119
+    }
+
+    @Test
+    func compareRulerSeatsTheLanesBelowItsBorder() {
+        #expect(CompareLaneLayout.rulerHeight == 26)
+        #expect(CompareLaneLayout.dividerHeight == 1)
+        #expect(CompareLaneLayout.seatBottom == 27)
+        #expect(CompareLaneLayout.stripHeight == 21)
+    }
+
+    @Test
+    func compareLanesKeepOneFixedHeight() {
+        #expect(CompareLaneLayout.laneStep == 96)
+        #expect(CompareLaneLayout.laneHeight == 95)
+        // The height five versions shared in a 986 pt window: exactly filled.
+        let lanesArea = Self.compareSectionHeight(windowHeight: 986) - CompareLaneLayout.seatBottom
+        #expect(CompareLaneLayout.contentHeight(laneCount: 5) == lanesArea)
+        // Lane count never changes a lane, so removing one never resizes the rest.
+        #expect(CompareLaneLayout.contentHeight(laneCount: 4) == 384)
+        #expect(CompareLaneLayout.contentHeight(laneCount: 32) == 3072)
+        #expect(CompareLaneLayout.contentHeight(laneCount: 0) == 0)
+        #expect(CompareLaneLayout.contentHeight(laneCount: -1) == 0)
+    }
+
+    @Test
+    func compareWaveformIsCentredBelowTheStrip() {
+        let band = CompareLaneLayout.waveformBand()
+        #expect(band.minY == 26)
+        #expect(band.height == 64)
+        // Centred in the 74 pt under the strip: 21 + 74 / 2.
+        #expect(band.minY + band.height / 2 == 58)
+
+        // A lane no taller than its strip collapses the band instead of
+        // inverting it.
+        let collapsed = CompareLaneLayout.waveformBand(laneHeight: 15)
+        #expect(collapsed.minY == 21)
+        #expect(collapsed.height == 0)
+    }
+
+    @Test
+    func compareStripSitsCentredBetweenTheDividerAndTheWaveform() {
+        // The strip's frame runs from the lane's top to the waveform band,
+        // and its contents centre in it.
+        #expect(CompareLaneLayout.stripFrameHeight == CompareLaneLayout.waveformBand().minY)
+        #expect(CompareLaneLayout.stripFrameHeight / 2 == 13)
+    }
+
+    @Test
+    func controlBarSideButtonsSitMidwayToThePlaylistCentreGroup() {
+        #expect(ControlBarMetrics.playlistCenterGroupWidth == 160)
+        // 360 pt window: the group spans 100…260, so the side buttons centre
+        // at 50 and 310 — in compare too, whose centre group is narrower.
+        #expect(ControlBarMetrics.sideButtonCenterX(barWidth: 360) == 50)
+        #expect(ControlBarMetrics.sideButtonCenterX(barWidth: 600) == 110)
+        // Never closer to the edge than half a slot.
+        #expect(ControlBarMetrics.sideButtonCenterX(barWidth: 100) == 15)
+    }
+
+    @Test
+    func compareCoverFollowsTheAudibleVersionUnlessBlind() {
+        func version(_ file: String) -> PlaylistVersion {
+            PlaylistVersion(
+                file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/\(file)")),
+                metadata: PlaylistMetadata(title: nil, fileFormatDescription: "FLAC", displayName: file)
+            )
+        }
+        let mono = version("mono.flac"), stereo = version("stereo.flac")
+        let item = PlaylistItem(title: "Taxman", versions: [mono, stereo], selectedVersionID: mono.id)
+
+        #expect(CoverVersionRule.comparison(item: item, audibleVersionID: stereo.id, isBlind: false)?.id == stereo.id)
+        // Blind: the playback version stays up whichever version is audible.
+        #expect(CoverVersionRule.comparison(item: item, audibleVersionID: stereo.id, isBlind: true)?.id == mono.id)
+        #expect(CoverVersionRule.comparison(item: item, audibleVersionID: nil, isBlind: false)?.id == mono.id)
+
+        #expect(CoverVersionRule.playlist(item: item, currentVersionID: stereo.id)?.id == stereo.id)
+        #expect(CoverVersionRule.playlist(item: item, currentVersionID: nil)?.id == mono.id)
+    }
+
+    @Test
+    func rulerNotchesHangFromTheBottomEdgeAndLabelsSitBesideThem() {
+        #expect(TimelineRulerMetrics.majorTickHeight == 11)
+        #expect(TimelineRulerMetrics.minorTickHeight == 5)
+
+        let major = TimelineRulerMetrics.tickFrame(x: 40, height: TimelineRulerMetrics.majorTickHeight)
+        #expect(major == CGRect(x: 40, y: 15, width: 1, height: 11))
+        #expect(major.maxY == CompareLaneLayout.rulerHeight)
+        let minor = TimelineRulerMetrics.tickFrame(x: 52, height: TimelineRulerMetrics.minorTickHeight)
+        #expect(minor == CGRect(x: 52, y: 21, width: 1, height: 5))
+
+        #expect(TimelineRulerMetrics.labelOrigin(tickX: 40, rulerWidth: 360) == CGPoint(x: 44, y: 3))
+        // A label whose start runs past the ruler isn't drawn.
+        #expect(TimelineRulerMetrics.labelOrigin(tickX: 357, rulerWidth: 360) == nil)
+    }
+
+    @Test
+    func playheadGrabberTipSitsOnTheRulersBottomEdgeWhereTheLineStarts() {
+        #expect(PlayheadGeometry.handleWidth == 14)
+        #expect(PlayheadGeometry.handleHeight == 16)
+
+        // The line lives in the lanes' scroll content, which starts at the
+        // ruler's bottom edge, and runs through every lane.
+        let line = PlayheadGeometry.lineFrame(lineHeight: CompareLaneLayout.contentHeight(laneCount: 5))
+        #expect(line == CGRect(x: -1, y: 0, width: 2, height: 480))
+        #expect(PlayheadGeometry.lineFrame(lineHeight: -4).height == 0)
+
+        let seat = CompareLaneLayout.seatBottom
+        let padding: CGFloat = 4
+        let grabber = PlayheadGeometry.grabberFrame(seatBottom: seat, padding: padding)
+        // The unpadded art ends exactly at the ruler's bottom edge.
+        #expect(grabber.maxY - padding == seat)
+        #expect(grabber.minY + padding == seat - 16)
+        #expect(grabber.midX == 0)
+        #expect(grabber.width == 14 + padding * 2)
+    }
+
+    @MainActor
+    @Test
+    func laneOffsetFieldGrowsWithItsText() {
+        let one = LaneOffsetField.fieldWidth(for: "0")
+        let four = LaneOffsetField.fieldWidth(for: "1250")
+        let longest = LaneOffsetField.fieldWidth(for: "-300000")
+        #expect(one < four)
+        #expect(four < longest)
+        // A cleared field keeps a digit's room.
+        #expect(LaneOffsetField.fieldWidth(for: "") == one)
+    }
+
+    @Test
+    func laneStripNamesVersionsLikeTheVersionRows() {
+        var tagged = makeTrack(name: "05 Taxman.flac")
+        tagged.title = "  Taxman (2009 Stereo Mix) "
+        #expect(LaneStripText.name(for: tagged, index: 1, isBlind: false) == "Taxman (2009 Stereo Mix)")
+
+        let untagged = makeTrack(name: "05 Taxman.flac")
+        #expect(LaneStripText.name(for: untagged, index: 1, isBlind: false) == "05 Taxman")
+
+        #expect(LaneStripText.format(for: untagged, isBlind: false) == "WAV · 44.1 kHz · 256 kbps")
+
+        let tip = LaneStripText.toolTip(for: tagged, isBlind: false)
+        #expect(tip == "Taxman (2009 Stereo Mix)\nWAV · 44.1 kHz · 256 kbps · 2:00\n05 Taxman.flac")
+    }
+
+    @Test
+    func laneStripRevealsNothingWhileBlind() {
+        var track = makeTrack(name: "05 Taxman.flac")
+        track.title = "Taxman (2009 Stereo Mix)"
+        #expect(LaneStripText.name(for: track, index: 2, isBlind: true) == "Track 3")
+        #expect(LaneStripText.format(for: track, isBlind: true).isEmpty)
+        #expect(LaneStripText.toolTip(for: track, isBlind: true) == nil)
+
+        let blindMenu = LaneStripMenuActions(isBlind: true, hasOffset: true, remove: {}, revealInFinder: {}, resetOffset: {})
+        #expect(!blindMenu.canRevealInFinder)
+        let menu = LaneStripMenuActions(isBlind: false, hasOffset: false, remove: {}, revealInFinder: {}, resetOffset: {})
+        #expect(menu.canRevealInFinder)
+    }
+
+    @Test
+    func retiredTrackInfoColumnWidthIsRemovedOnLaunch() {
+        #expect(TakesWindowPolicy.retiredLayoutDefaultsKeys.contains("trackInfoColumnWidth"))
     }
 
     // MARK: A2 playlist rows (milestone 3)

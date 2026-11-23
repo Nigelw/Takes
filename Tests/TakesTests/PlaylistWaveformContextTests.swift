@@ -37,6 +37,29 @@ struct PlaylistWaveformContextTests {
         #expect(store.waveform(for: track.id)?.peaks == [0.3])
     }
 
+    /// Removing, reordering or regrouping a compared item's versions rebuilds
+    /// its runtime under a new activation of the same item. Finished waveforms
+    /// survive that; another item's activation still starts over.
+    @Test @MainActor
+    func reactivatingTheSameItemKeepsFinishedWaveforms() async {
+        let generator = ControlledWaveformGenerator()
+        let store = WaveformStore(generator: generator)
+        let track = makeTrack()
+        let itemID = UUID()
+        store.sync(tracks: [track], context: PlaylistRuntimeContext(itemID: itemID))
+        await generator.waitForStarts(1)
+        await generator.emit(0, peak: 0.8)
+        #expect(store.waveform(for: track.id)?.isComplete == true)
+
+        store.sync(tracks: [track], context: PlaylistRuntimeContext(itemID: itemID))
+        #expect(store.waveform(for: track.id)?.peaks == [0.8])
+        #expect(await generator.startCount == 1)
+
+        store.sync(tracks: [track], context: PlaylistRuntimeContext(itemID: UUID()))
+        await generator.waitForStarts(2)
+        #expect(store.waveform(for: track.id) == .empty)
+    }
+
     private func makeTrack() -> SessionTrack {
         SessionTrack(loadedTrack: LoadedTrack(
             url: URL(fileURLWithPath: "/private/tmp/playlist-waveform-context.wav"),
@@ -49,6 +72,8 @@ struct PlaylistWaveformContextTests {
 private actor ControlledWaveformGenerator: WaveformGenerating {
     private var callbacks: [@Sendable ([Float], Int, Bool) async -> Void] = []
     private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
+
+    var startCount: Int { callbacks.count }
 
     func generate(url: URL, onProgress: @escaping @Sendable ([Float], Int, Bool) async -> Void) async {
         callbacks.append(onProgress)

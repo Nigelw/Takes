@@ -108,15 +108,20 @@ enum PlaylistRowText {
     /// The details that distinguish versions of one song: container, sample
     /// rate, and bit rate. Shown in the version row's tooltip.
     static func format(_ metadata: PlaylistMetadata) -> String {
+        format(fileFormat: metadata.fileFormatDescription, sampleRate: metadata.sampleRate, bitRate: metadata.bitRate)
+    }
+
+    /// Shared with the compare lane strip (`LaneStripText`).
+    static func format(fileFormat: String, sampleRate: Double, bitRate: Double) -> String {
         var parts: [String] = []
-        if !metadata.fileFormatDescription.isEmpty { parts.append(metadata.fileFormatDescription) }
-        if metadata.sampleRate.isFinite, metadata.sampleRate > 0 {
-            let kHz = metadata.sampleRate / 1000
+        if !fileFormat.isEmpty { parts.append(fileFormat) }
+        if sampleRate.isFinite, sampleRate > 0 {
+            let kHz = sampleRate / 1000
             let text = kHz == kHz.rounded() ? String(format: "%.0f", kHz) : String(format: "%.1f", kHz)
             parts.append("\(text) kHz")
         }
-        if metadata.bitRate.isFinite, metadata.bitRate > 0 {
-            parts.append("\(Int((metadata.bitRate / 1000).rounded())) kbps")
+        if bitRate.isFinite, bitRate > 0 {
+            parts.append("\(Int((bitRate / 1000).rounded())) kbps")
         }
         return parts.joined(separator: " · ")
     }
@@ -129,9 +134,13 @@ enum PlaylistRowText {
     /// A version's name: its title tag, else its filename without the
     /// extension (A2 §6) — the readout's rule, without the uppercasing.
     static func versionName(_ version: PlaylistVersion) -> String {
-        let tag = version.metadata.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        versionName(tag: version.metadata.title, url: version.file.storedURL)
+    }
+
+    /// Shared with the compare lane strip (`LaneStripText`).
+    static func versionName(tag: String?, url: URL) -> String {
+        let tag = tag?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !tag.isEmpty { return tag }
-        let url = version.file.storedURL
         let stem = url.deletingPathExtension().lastPathComponent
         return stem.isEmpty ? url.lastPathComponent : stem
     }

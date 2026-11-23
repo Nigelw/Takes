@@ -57,8 +57,41 @@ enum Theme {
 
     // MARK: Semantic tokens
 
-    /// Fill behind an active track row (info + lane).
-    static let activeRowFill = primary.opacity(0.12)
+    private static func dynamicAlpha(
+        light: (r: Double, g: Double, b: Double, a: Double),
+        dark: (r: Double, g: Double, b: Double, a: Double)
+    ) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let c = appearance.isDark ? dark : light
+            return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a)
+        })
+    }
+
+    /// Behind the active compare lane (A2 §8): primary at 11% in dark, as on
+    /// the canvas, and 10% of the light primary, the playlist's now-playing
+    /// strength on the pale well.
+    static let activeLaneFill = dynamicAlpha(
+        light: (0.424, 0.388, 0.914, 0.10),
+        dark: (0.561, 0.529, 0.961, 0.11)
+    )
+
+    /// The ruler's bottom border and each lane's bottom divider: a line a step
+    /// darker than the well (the canvas's #18181A on #1F1F21 in dark).
+    static let laneDivider = dynamicAlpha(
+        light: (0, 0, 0, 0.1),
+        dark: (0, 0, 0, 0.3)
+    )
+
+    /// The lane strip's offset field box: the canvas's near-black at 85% with
+    /// a #3C3C40 hairline in dark; a white box with a soft hairline in light.
+    static let laneOffsetFieldFill = dynamicAlpha(
+        light: (1, 1, 1, 0.85),
+        dark: (0.078, 0.078, 0.086, 0.85)
+    )
+    static let laneOffsetFieldBorder = dynamicAlpha(
+        light: (0, 0, 0, 0.16),
+        dark: (0.235, 0.235, 0.251, 1)
+    )
 
     /// Opaque surface of a track row lifted for reordering — a raised card that
     /// floats above the rows sliding beneath it. White in light mode, a step
@@ -117,13 +150,6 @@ enum Theme {
 
     /// Major and minor timeline ruler ticks.
     static let timelineRulerTick = Color.secondary.opacity(0.45)
-
-    /// Subtle shadow cast by the frozen info/control column onto the timeline.
-    /// Slightly stronger in dark mode so the overlap still reads without a hard
-    /// divider line.
-    static let frozenColumnShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.42 : 0.15)
-    })
 
     /// Dark upper edge of the recessed groove between the control bar and timeline.
     static let transportDividerShadow = Color(nsColor: NSColor(name: nil) { appearance in

@@ -26,6 +26,10 @@ struct WorkspaceView: View {
     @State private var titlebarButtonCenterY: CGFloat = 14
     @State private var mainWindowIsKey = true
     @State private var textInputIsFocused = false
+    /// The version whose cover is on screen: `coverVersion` once its artwork
+    /// has loaded or is known to be missing. Until then the previous cover
+    /// stays up, so switching versions never flashes the placeholder.
+    @State private var shownCoverVersionID: PlaylistVersion.ID?
 
     private var controller: PlaybackController { coordinator.controller }
     private var isComparison: Bool { coordinator.mode.itemID != nil }
@@ -139,6 +143,9 @@ struct WorkspaceView: View {
             .task(id: coverVersion?.id) {
                 if let coverVersion { artworkStore.load(for: coverVersion) }
             }
+            .onChange(of: coverState, initial: true) { _, state in
+                if state.versionID == nil || state.isResolved { shownCoverVersionID = state.versionID }
+            }
             .onChange(of: settings.showsArtwork) { _, showsArtwork in
                 guard let mainWindow else { return }
                 // Next run-loop turn, after SwiftUI has applied the new root
@@ -247,9 +254,6 @@ struct WorkspaceView: View {
             .focusedSceneValue(\.canUseGlobalMenuShortcuts, canUseShortcuts)
             .focusedSceneValue(\.mainWindowCommandState, MainWindowCommandState {
                 guard let mainWindow else { return }
-                if isComparison {
-                    NotificationCenter.default.post(name: TakesWindowPolicy.resetComparisonLayoutNotification, object: nil)
-                }
                 TakesWindowPolicy.resetMainWindowSize(mainWindow, showsArtwork: settings.showsArtwork)
             })
     }
@@ -264,7 +268,7 @@ struct WorkspaceView: View {
             // Shared by both modes: entering compare swaps only what is below
             // the control bar, never the cover.
             if settings.showsArtwork {
-                ArtworkCoverView(image: artworkStore.artwork(for: coverVersion?.id))
+                ArtworkCoverView(image: artworkStore.artwork(for: shownCoverVersionID))
             }
             if let error = persistence.errorMessage {
                 HStack(alignment: .top, spacing: 12) {
@@ -288,8 +292,7 @@ struct WorkspaceView: View {
                         .allowsHitTesting(!isComparison)
                         .accessibilityHidden(isComparison)
                     if isComparison {
-                        ContentView(coordinator: coordinator, openFileCommandState: openFiles,
-                                    usesTemporaryDefaultWindowLayout: usesTemporaryDefaultWindowLayout)
+                        ContentView(coordinator: coordinator, openFileCommandState: openFiles)
                     }
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
@@ -473,16 +476,32 @@ struct WorkspaceView: View {
     }
 
     /// The version whose cover the window shows: in playlist mode the playing
-    /// (or current) version, as the readout shows; in comparison the item's
-    /// playback version, so switching the audible version doesn't swap the
-    /// cover.
+    /// (or current) version, as the readout shows. In comparison the audible
+    /// version, so Switch Track swaps the cover (milestone 4 review) — except
+    /// in Blind Listening Mode, where the item's playback version stays up so
+    /// the cover can't reveal which version is audible.
     private var coverVersion: PlaylistVersion? {
         guard let itemID = coordinator.mode.itemID ?? coordinator.currentItemID,
               let item = coordinator.workspace.items.first(where: { $0.id == itemID }) else { return nil }
-        if coordinator.mode.itemID == nil, let current = item.versions.first(where: { $0.id == coordinator.currentVersionID }) {
-            return current
+        if coordinator.mode.itemID == nil {
+            return CoverVersionRule.playlist(item: item, currentVersionID: coordinator.currentVersionID)
         }
-        return item.selectedVersion
+        let session = controller.session
+        return CoverVersionRule.comparison(
+            item: item,
+            audibleVersionID: session.activeTrackID,
+            isBlind: session.isBlindListeningModeEnabled
+        )
+    }
+
+    private struct CoverState: Equatable {
+        var versionID: PlaylistVersion.ID?
+        var isResolved: Bool
+    }
+
+    private var coverState: CoverState {
+        let id = coverVersion?.id
+        return CoverState(versionID: id, isResolved: artworkStore.hasResolvedArtwork(for: id))
     }
 
     private func setupKeyboard() {
@@ -592,5 +611,23 @@ private struct WorkspaceFileDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         isTargeted = false
         return perform(info.itemProviders(for: [UTType.fileURL.identifier]))
+    }
+}
+
+/// Which version's artwork the cover shows (A2 §13).
+enum CoverVersionRule {
+    /// Playlist: the playing (or current) version, as the readout shows.
+    static func playlist(item: PlaylistItem, currentVersionID: PlaylistVersion.ID?) -> PlaylistVersion? {
+        item.versions.first(where: { $0.id == currentVersionID }) ?? item.selectedVersion
+    }
+
+    /// Compare: the audible version, so Switch Track swaps the cover. Blind
+    /// Listening Mode keeps the item's playback version up instead, so the
+    /// cover can't reveal which version is audible.
+    static func comparison(item: PlaylistItem, audibleVersionID: PlaylistVersion.ID?, isBlind: Bool) -> PlaylistVersion? {
+        guard !isBlind, let audible = item.versions.first(where: { $0.id == audibleVersionID }) else {
+            return item.selectedVersion
+        }
+        return audible
     }
 }
