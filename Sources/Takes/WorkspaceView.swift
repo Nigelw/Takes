@@ -283,6 +283,8 @@ struct WorkspaceView: View {
                                height: isComparison ? retainedPlaylistSize.height : proxy.size.height)
                         .opacity(isComparison ? 0 : 1)
                         .allowsHitTesting(!isComparison)
+                        // Takes its controls out of the Tab loop while compare covers it.
+                        .disabled(isComparison)
                         .accessibilityHidden(isComparison)
                     if isComparison {
                         ContentView(

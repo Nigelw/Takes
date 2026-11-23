@@ -174,7 +174,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private var nodes: [PlaylistRowID: PlaylistNode] = [:]
     private var currentItemID: UUID?
     private var isPlaying = false
-    private var isActive = false
+    private(set) var isActive = false
     private var hasLoaded = false
     /// True while this controller pushes model state into the outline view, so
     /// the resulting delegate callbacks are not echoed back into the model.
@@ -1022,6 +1022,13 @@ final class PlaylistNSOutlineView: NSOutlineView {
     /// disclosure triangle and its indentation are suppressed: every cell
     /// spans the full row.
     override func frameOfOutlineCell(atRow row: Int) -> NSRect { .zero }
+
+    /// Compare keeps the playlist in the hierarchy at zero opacity, so the
+    /// table leaves the Tab loop while it is inactive; otherwise Tab would
+    /// stop on it before reaching the lanes' offset fields.
+    override var canBecomeKeyView: Bool {
+        (controller?.isActive ?? true) && super.canBecomeKeyView
+    }
 
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
         let rowRect = rect(ofRow: row)

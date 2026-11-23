@@ -811,6 +811,9 @@ final class DotMatrixProgressView: NSView {
     private var hoverArea: NSTrackingArea?
     private var isHovered = false
     override var acceptsFirstResponder: Bool { true }
+    /// A click takes focus from a text field, but the meter has no keyboard
+    /// control, so Tab never stops on it.
+    override var canBecomeKeyView: Bool { false }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
