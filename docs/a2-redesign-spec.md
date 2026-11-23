@@ -205,10 +205,13 @@ and the window minimum) are in §13.
 
 Below the divider: ruler, lanes, bottom bar. No track-info column.
 
-**Ruler, 26 pt** (v2.9.0's arrangement, shortened from 34 pt):
-- Notches hang from the bottom edge: major 11 pt, minor 5 pt, colour
+**Ruler, 21 pt** (v2.9.0's arrangement, shortened from 34 pt; 26 pt until
+the compare title-bar variant, §13):
+- Notches hang from the bottom edge: major 19 pt, minor 8 pt (v2.9.0's
+  heights; 11 and 5 until the compare title-bar variant, §13), colour
   `Theme.timelineRulerTick`.
-- Labels 3 pt from the top, 4 pt right of their major notch
+- Labels with their digits' tops level with their major notch's top (2 pt
+  from the ruler's top; 3 pt from the top until §13), 4 pt right of it
   (`TimelineHeaderLabelLayout.leading`), caption size, monospaced digits,
   `00:30` format.
 - 1 pt bottom border; no top border.
@@ -375,13 +378,14 @@ None open. The version check for a missing file was decided in milestone 3
   only animate lines that actually overflow. The compare readout is narrower,
   so it scrolls more often.
 - **The window is resizable in both directions** (§2). Defaults are the §2
-  sizes. Minimum width 360; minimum height 276 below the cover (622 with
-  artwork, 276 without; `TakesWindowPolicy.minimumHeightWithoutArtwork`):
+  sizes. Minimum width 360; minimum height 271 below the cover (617 with
+  artwork, 271 without; `TakesWindowPolicy.minimumHeightWithoutArtwork`):
   the compare control bar (91 pt under the titlebar), its title bar (32),
-  the ruler (27), one whole lane (96) and the bottom bar (30), so compare
-  always shows its controls and one lane. Milestone 5 settled the rule at
-  286 (a 133 pt control bar with the readout and no title bar); the
-  compare title-bar variant kept the rule, which lowered it to 276. The playlist's control bar
+  the ruler (22 with its border), one whole lane (96) and the bottom bar
+  (30), so compare always shows its controls and one lane. Milestone 5
+  settled the rule at 286 (a 133 pt control bar with the readout, no title
+  bar and a 27 pt ruler); the compare title-bar variant kept the rule,
+  which lowered it to 271. The playlist's control bar
   is 12 pt taller, leaving its list two rows and part of a third. Milestones
   1–4 used a provisional 300. Mode switches never resize. The artwork
   toggle changes the height by exactly 346 pt, keeping any extra height the
@@ -453,9 +457,9 @@ None open. The version check for a missing file was decided in milestone 3
   bottom bar). The first build gave lanes equal shares of the space
   (74 pt for three in the default window, 64 pt minimum), which resized
   every lane, and redrew every waveform, whenever a version was added or
-  removed. The ruler is 26 pt plus its 1 pt bottom border, so the lanes and
-  the playhead line start 27 pt below the divider, where the grabber's tip
-  sits.
+  removed. The ruler is 21 pt (26 before the compare title-bar variant)
+  plus its 1 pt bottom border, so the lanes and the playhead line start
+  22 pt below the ruler's top, where the grabber's tip sits.
 - **Lane waveform** (milestone 4). Centred in the space below the strip with
   5 pt clearance above and below. The active waveform is primary and inactive
   ones `Theme.waveformInactive`, at v2.9.0's 85% and 70% (the first milestone 4
@@ -574,9 +578,13 @@ None open. The version check for a missing file was decided in milestone 3
   rectangular Done (22 pt, 5 pt radius, primary fill) on the right. Done
   leaves compare as the back button did (the audible version becomes the
   playback version); Esc and ⌘[ are unchanged. The control bars now differ
-  by 54 pt (see "Control-bar heights differ by mode"); the window minimum
-  drops 10 pt to 276/622 (see "The window is resizable"). The ruler labels
-  moved to the top of the ruler on a 10 pt line (`labelTopInset` 0, was 3),
-  so they end at least 1 pt above the playhead grabber. The title bar shows
+  by 54 pt (see "Control-bar heights differ by mode"). The notches went
+  back to v2.9.0's heights (major 19 pt, minor 8, were 11 and 5), and the
+  ruler shrank from 26 to 21 pt: the labels moved down so their digits'
+  tops are level with the major notches' tops, 2 pt from the ruler's top.
+  The playhead grabber now overlaps the labels; that was accepted, and it
+  replaces the title-bar spec's §3 rule (labels 1 pt clear of the
+  grabber). With the 10 pt from the title bar, the window minimum drops
+  15 pt to 271/617 (see "The window is resizable"). The title bar shows
   whether or not the artwork is (the spec's first open question); the take
   count has no tooltip or menu (its second).

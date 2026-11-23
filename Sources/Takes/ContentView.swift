@@ -209,13 +209,16 @@ struct CursorResetPolicy {
     }
 }
 
-/// Compact compare geometry (A2 §8): a 26 pt ruler with a 1 pt bottom
+/// Compact compare geometry (A2 §8): a 21 pt ruler with a 1 pt bottom
 /// border, then full-width lanes of one fixed height, each carrying a 21 pt
 /// info strip at its top and a 1 pt divider at its bottom. Lanes never
 /// resize: more than fit the window scroll, fewer leave the well empty below.
 enum CompareLaneLayout {
     /// The ruler, above its bottom border.
-    static let rulerHeight: CGFloat = 26
+    /// 21 pt: the 19 pt major notches and a 2 pt margin above them, where
+    /// the labels' tops align (was 26 until the labels moved down to the
+    /// notch tops).
+    static let rulerHeight: CGFloat = 21
     /// The ruler's bottom border, and each lane's bottom divider.
     static let dividerHeight: CGFloat = 1
     /// The ruler's bottom edge, below its border: where the lanes start and
@@ -390,27 +393,38 @@ struct CompareDoneButtonStyle: ButtonStyle {
     }
 }
 
-/// The ruler's notches and labels (A2 §8, v2.9.0's arrangement at 26 pt):
-/// notches hang from the bottom edge, labels sit at the top, 4 pt right of
-/// their notch (`TimelineHeaderLabelLayout.leading`). The labels' 10 pt line
-/// ends at least 1 pt above the playhead grabber's top (A2 compare title-bar
-/// variant §3), so the grabber never covers a label.
+/// The ruler's notches and labels (A2 §8, v2.9.0's arrangement at 21 pt):
+/// notches hang from the bottom edge, and each label sits 4 pt right of its
+/// major notch (`TimelineHeaderLabelLayout.leading`) with its digits' tops
+/// level with the notch's top. The playhead grabber overlaps the labels; that
+/// is accepted (it replaced the title-bar variant's §3 rule, which kept them
+/// clear of it on a 26 pt ruler).
 enum TimelineRulerMetrics {
-    static let majorTickHeight: CGFloat = 11
-    static let minorTickHeight: CGFloat = 5
-    static let labelTopInset: CGFloat = 0
+    /// v2.9.0's notch heights.
+    static let majorTickHeight: CGFloat = 19
+    static let minorTickHeight: CGFloat = 8
     static let labelFontSize: CGFloat = 10
     /// The label's line: its frame height, tighter than the type's natural
     /// line height, as on the canvas (10 pt type on a 10 pt line).
     static let labelHeight: CGFloat = 10
     static var labelFont: Font { .system(size: labelFontSize).monospacedDigit() }
 
+    /// Where a major notch's top, and so its label's digits' tops, sit.
+    static var majorTickTop: CGFloat { CompareLaneLayout.rulerHeight - majorTickHeight }
+
+    /// The label line's top inset, chosen so the digits' tops (the font's
+    /// cap height) land on `majorTickTop` (about 0.5 pt).
+    static let labelTopInset: CGFloat = majorTickTop - labelGlyphBand(topInset: 0).lowerBound
+
     /// The glyph band of a label, in ruler coordinates: the font's natural
     /// line centred on the `labelHeight` line, from the cap height down to
     /// the baseline (the labels are digits and colons: no descenders).
-    static func labelGlyphBand(font: NSFont = .systemFont(ofSize: labelFontSize)) -> ClosedRange<CGFloat> {
+    static func labelGlyphBand(
+        topInset: CGFloat = labelTopInset,
+        font: NSFont = .systemFont(ofSize: labelFontSize)
+    ) -> ClosedRange<CGFloat> {
         let naturalLine = font.ascender - font.descender + font.leading
-        let baseline = labelTopInset + (labelHeight - naturalLine) / 2 + font.ascender
+        let baseline = topInset + (labelHeight - naturalLine) / 2 + font.ascender
         return (baseline - font.capHeight)...baseline
     }
 
@@ -3726,8 +3740,10 @@ private struct TimelineHeaderRulerView: View {
     var headerHeight: CGFloat
 
     // Ruler notches hang from the bottom edge toward the lanes (A2 §8): major
-    // (labeled) notches 11 pt, minor 5 pt. Labels sit at the top, on a 10 pt
-    // line clear of the playhead grabber, 4 pt right of their notch. Geometry lives in `TimelineRulerMetrics`.
+    // (labeled) notches 19 pt, minor 8 pt (v2.9.0's heights). Labels sit
+    // 4 pt right of their notch with their digits' tops level with its top;
+    // the playhead grabber may overlap them. Geometry lives in
+    // `TimelineRulerMetrics`.
     private var tickColor: Color { Theme.timelineRulerTick }
 
     var body: some View {
@@ -3808,8 +3824,8 @@ private struct TimelineHeaderRulerView: View {
                     // the type through the scale factor.
                     .fixedSize(horizontal: false, vertical: true)
                     // A 10 pt line, as the canvas draws it: the 10 pt type's
-                    // natural line (about 12 pt) is centred on it, which puts
-                    // the glyphs between 1.5 and 8.6 pt from the ruler's top.
+                    // natural line (about 12 pt) is centred on it, and the
+                    // inset puts the digits' tops level with the notch's.
                     .frame(width: labelWidth, height: TimelineRulerMetrics.labelHeight, alignment: .leading)
                     .offset(x: labelOrigin.x, y: labelOrigin.y)
             }

@@ -143,19 +143,17 @@ struct SessionTests {
         #expect(CompareTitleBarText.takeCount(32) == "32 takes")
     }
 
-    /// The ruler labels end at least 1 pt above the playhead grabber's top
-    /// (11 pt below the ruler's top), by their line and by their glyphs.
+    /// The ruler labels' digits start level with their major notch's top,
+    /// 2 pt below the ruler's top, and end inside the ruler. The playhead
+    /// grabber may overlap them.
     @Test
-    func rulerLabelsClearThePlayheadGrabber() {
-        let grabberTop = CompareLaneLayout.seatBottom - PlayheadGeometry.handleHeight
-        #expect(grabberTop == 11)
-        #expect(TimelineRulerMetrics.labelTopInset == 0)
-        #expect(TimelineRulerMetrics.labelTopInset + TimelineRulerMetrics.labelHeight
-            <= CompareLaneLayout.seatBottom - 16 - 1)
-
+    func rulerLabelTopsAlignWithTheMajorNotches() {
+        #expect(TimelineRulerMetrics.majorTickTop == 2)
         let glyphs = TimelineRulerMetrics.labelGlyphBand()
-        #expect(glyphs.lowerBound >= 0)
-        #expect(glyphs.upperBound <= grabberTop - 1)
+        #expect(abs(glyphs.lowerBound - TimelineRulerMetrics.majorTickTop) < 0.0001)
+        #expect(glyphs.upperBound <= CompareLaneLayout.rulerHeight)
+        #expect(TimelineRulerMetrics.labelTopInset > 0)
+        #expect(TimelineRulerMetrics.labelTopInset < 1)
     }
 
     @MainActor
@@ -2157,15 +2155,11 @@ struct SessionTests {
 
     /// The compare section below the control bar in a window `height` tall
     /// with the artwork shown: less the 360 pt cover and the 119 pt bar.
-    private static func compareSectionHeight(windowHeight height: CGFloat) -> CGFloat {
-        height - 360 - 119
-    }
-
     @Test
     func compareRulerSeatsTheLanesBelowItsBorder() {
-        #expect(CompareLaneLayout.rulerHeight == 26)
+        #expect(CompareLaneLayout.rulerHeight == 21)
         #expect(CompareLaneLayout.dividerHeight == 1)
-        #expect(CompareLaneLayout.seatBottom == 27)
+        #expect(CompareLaneLayout.seatBottom == 22)
         #expect(CompareLaneLayout.stripHeight == 21)
     }
 
@@ -2173,9 +2167,9 @@ struct SessionTests {
     func compareLanesKeepOneFixedHeight() {
         #expect(CompareLaneLayout.laneStep == 96)
         #expect(CompareLaneLayout.laneHeight == 95)
-        // The height five versions shared in a 986 pt window: exactly filled.
-        let lanesArea = Self.compareSectionHeight(windowHeight: 986) - CompareLaneLayout.seatBottom
-        #expect(CompareLaneLayout.contentHeight(laneCount: 5) == lanesArea)
+        // The height five versions shared in a 986 pt window with milestone
+        // 4's 119 pt control bar and 27 pt ruler seat: exactly filled.
+        #expect(CompareLaneLayout.contentHeight(laneCount: 5) == CGFloat(986 - 360 - 119 - 27))
         // Lane count never changes a lane, so removing one never resizes the rest.
         #expect(CompareLaneLayout.contentHeight(laneCount: 4) == 384)
         #expect(CompareLaneLayout.contentHeight(laneCount: 32) == 3072)
@@ -2239,16 +2233,17 @@ struct SessionTests {
 
     @Test
     func rulerNotchesHangFromTheBottomEdgeAndLabelsSitBesideThem() {
-        #expect(TimelineRulerMetrics.majorTickHeight == 11)
-        #expect(TimelineRulerMetrics.minorTickHeight == 5)
+        #expect(TimelineRulerMetrics.majorTickHeight == 19)
+        #expect(TimelineRulerMetrics.minorTickHeight == 8)
 
         let major = TimelineRulerMetrics.tickFrame(x: 40, height: TimelineRulerMetrics.majorTickHeight)
-        #expect(major == CGRect(x: 40, y: 15, width: 1, height: 11))
+        #expect(major == CGRect(x: 40, y: 2, width: 1, height: 19))
         #expect(major.maxY == CompareLaneLayout.rulerHeight)
         let minor = TimelineRulerMetrics.tickFrame(x: 52, height: TimelineRulerMetrics.minorTickHeight)
-        #expect(minor == CGRect(x: 52, y: 21, width: 1, height: 5))
+        #expect(minor == CGRect(x: 52, y: 13, width: 1, height: 8))
 
-        #expect(TimelineRulerMetrics.labelOrigin(tickX: 40, rulerWidth: 360) == CGPoint(x: 44, y: 0))
+        #expect(TimelineRulerMetrics.labelOrigin(tickX: 40, rulerWidth: 360)
+            == CGPoint(x: 44, y: TimelineRulerMetrics.labelTopInset))
         // A label whose start runs past the ruler isn't drawn.
         #expect(TimelineRulerMetrics.labelOrigin(tickX: 357, rulerWidth: 360) == nil)
     }
@@ -2484,9 +2479,9 @@ struct SessionTests {
         // bottom bar.
         #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: false) == 91)
         #expect(BottomBarMetrics.height == 30)
-        #expect(TakesWindowPolicy.minimumHeightWithoutArtwork == 276)
-        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: false) == 276)
-        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: true) == 622)
+        #expect(TakesWindowPolicy.minimumHeightWithoutArtwork == 271)
+        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: false) == 271)
+        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: true) == 617)
 
         for showsArtwork in [true, false] {
             let lanes = { (windowHeight: CGFloat) in
@@ -2495,10 +2490,10 @@ struct SessionTests {
                     - CompareTitleBarMetrics.height
                     - CompareLaneLayout.seatBottom - BottomBarMetrics.height) / CompareLaneLayout.laneStep
             }
-            // Exactly one lane at the minimum; about two and a half (234 pt)
+            // Exactly one lane at the minimum; about two and a half (239 pt)
             // by default.
             #expect(lanes(TakesWindowPolicy.minimumHeight(showsArtwork: showsArtwork)) == 1)
-            #expect(lanes(TakesWindowPolicy.defaultHeight(showsArtwork: showsArtwork)) == 234.0 / 96)
+            #expect(lanes(TakesWindowPolicy.defaultHeight(showsArtwork: showsArtwork)) == 239.0 / 96)
         }
     }
 

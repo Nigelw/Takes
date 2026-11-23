@@ -97,7 +97,7 @@ Key ownership:
   `CompareTitleBarText`, the centring `CompareTitleBarRow`, and
   `CompareDoneButtonStyle`; [docs/a2-compare-title-bar-spec.md](docs/a2-compare-title-bar-spec.md)),
   and the compact compare area (A2 §8): ruler and lane sizing
-  (`CompareLaneLayout`), the 26 pt ruler (`TimelineHeaderRulerView`,
+  (`CompareLaneLayout`), the 21 pt ruler (`TimelineHeaderRulerView`,
   `TimelineRulerMetrics`), the
   playhead (`PlayheadGeometry`, `TimelinePlayheadVisual`), the full-width
   lanes (`TrackRowView` → `LaneView` → `WaveformLaneView`), their info
@@ -263,8 +263,8 @@ These are here to prevent parallel implementations and subtle regressions:
   normal text editing behavior.
 - One main window serves both modes (A2). It opens 360 pt wide (760 tall with
   artwork, 414 without) and is user-resizable down to
-  `TakesWindowPolicy.minimumSize(showsArtwork:)`: 360 × 622 with the
-  artwork, 360 × 276 without (the compare control bar, its title bar, the
+  `TakesWindowPolicy.minimumSize(showsArtwork:)`: 360 × 617 with the
+  artwork, 360 × 271 without (the compare control bar, its title bar, the
   ruler, one whole lane and the bottom bar; `minimumHeightWithoutArtwork`). Mode switches and
   track counts never resize it; the artwork toggle is the only automatic resize
   (±`artworkCollapseHeight`, 346 pt, top edge fixed, clamped on screen). Its
@@ -328,13 +328,15 @@ These are here to prevent parallel implementations and subtle regressions:
   on-screen control is in the bottom bar (magnifier − · slider · magnifier
   +, no Fit); ⌘+/⌘−, Zoom to Selection, Zoom to Fit and pinch also zoom.
 - Compare has no track-info column (A2 §8). Below the control bar's divider:
-  a 26 pt ruler with a 1 pt bottom border and no top border, then lanes edge
+  a 21 pt ruler with a 1 pt bottom border and no top border (v2.9.0's 19 pt
+  major and 8 pt minor notches hanging from its bottom, each label's digits
+  level with its major notch's top; the grabber may overlap the labels), then lanes edge
   to edge. Every lane has one fixed height (`CompareLaneLayout.laneStep`,
   96 pt: a 95 pt lane and its 1 pt divider); lanes that don't fit scroll, and
   neither the window size nor the version count ever resizes a lane, so
   adding or removing a version never redraws the others. The 14 × 16
   grabber's tip sits on the ruler's bottom edge
-  (`CompareLaneLayout.seatBottom`, 27) in an overlay above the section; the
+  (`CompareLaneLayout.seatBottom`, 22) in an overlay above the section; the
   2 pt line runs through the lanes inside their scroll content. The lanes
   and ruler mask their first point (`TimelineLeadingEdgeMask`), so the 0:00
   marker, guide and notch don't draw a stray line on the window's edge when
@@ -449,7 +451,7 @@ these reintroduces the exact regressions it fixed):
   artwork setting, retired control-bar preferences loading as defaults, the
   A2 readout title rule (tag, filename), the compare control bar's height
   and the title bar (its geometry, centring and take-count text), the
-  ruler labels clearing the playhead grabber, the LED meter's cell count
+  ruler labels' tops level with the major notches, the LED meter's cell count
   and head geometry, the control bar's side-button placement, the cover
   rule (`CoverVersionRule`), the A2 playlist row metrics and version names, the
   thumbnail cache (visible-only queue, concurrency bound, capacity, cover

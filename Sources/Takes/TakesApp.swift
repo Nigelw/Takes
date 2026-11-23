@@ -355,8 +355,8 @@ enum TakesWindowPolicy {
     static let defaultHeightWithArtwork: CGFloat = 760
     /// Room below the cover at the minimum height (A2 milestone 5, §13, and
     /// the compare title-bar variant): the compare control bar, its title
-    /// bar, the ruler, one whole lane and the bottom bar (91 + 32 + 27 + 96
-    /// + 30 = 276 pt). The playlist's control bar is 54 pt taller, which
+    /// bar, the ruler, one whole lane and the bottom bar (91 + 32 + 22 + 96
+    /// + 30 = 271 pt). The playlist's control bar is 54 pt taller, which
     /// leaves its list two rows and part of a third.
     static let minimumHeightWithoutArtwork: CGFloat = compareControlBarHeight(showsArtwork: false)
         + CompareTitleBarMetrics.height + CompareLaneLayout.seatBottom + CompareLaneLayout.laneStep
