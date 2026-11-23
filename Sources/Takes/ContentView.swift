@@ -1571,6 +1571,9 @@ struct ContentView: View {
             .gesture(playheadDragGesture(waveformWidth: waveformWidth, in: Self.rulerSpace))
             .coordinateSpace(name: Self.rulerSpace)
             .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
+            // Hide a notch on the window's edge, as the lanes hide their
+            // guides there; the label beside it stays.
+            .mask(TimelineLeadingEdgeMask())
     }
 
     /// One part of the playhead. The grabber sits on the ruler's bottom edge
@@ -3308,6 +3311,9 @@ private struct TrackRowView: View, Equatable {
             laneHeight: laneHeight,
             showsDebugLabel: showsDebugLabel
         )
+        // The 0:00 marker and a tick guide land on the lane's first point
+        // whenever the timeline starts at 0:00; the active tint shows there.
+        .mask(TimelineLeadingEdgeMask())
         .frame(height: laneHeight)
         // Active lane (A2 §8): a primary tint, with no leading accent bar.
         .background(isActive ? Theme.activeLaneFill : Color.clear)
@@ -3598,6 +3604,21 @@ private struct HoverSensor: NSViewRepresentable {
 @Observable
 final class LaneViewportStore {
     var viewport: ContentView.LaneViewport = .empty
+}
+
+/// Masks the first point of the ruler and the lanes, so a notch, tick guide
+/// or 0:00 marker that lands exactly on the window's left edge isn't drawn
+/// as a stray line there (it does whenever the timeline starts at 0:00 and
+/// is zoomed to fit). Lines one point in from the edge draw as usual, and the
+/// transparent strip reveals the surface below, active-lane tint included.
+private struct TimelineLeadingEdgeMask: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: 1)
+            Color.white
+        }
+    }
 }
 
 /// One lane: the pre-rendered waveform window, positioned for the live scroll

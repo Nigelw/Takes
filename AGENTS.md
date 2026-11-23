@@ -292,7 +292,10 @@ These are here to prevent parallel implementations and subtle regressions:
   adding or removing a version never redraws the others. The 14 × 16
   grabber's tip sits on the ruler's bottom edge
   (`CompareLaneLayout.seatBottom`, 27) in an overlay above the section; the
-  2 pt line runs through the lanes inside their scroll content.
+  2 pt line runs through the lanes inside their scroll content. The lanes
+  and ruler mask their first point (`TimelineLeadingEdgeMask`), so the 0:00
+  marker, guide and notch don't draw a stray line on the window's edge when
+  the timeline starts at 0:00.
 - Each lane's 21 pt info strip (`LaneStripView`) is its own layer ABOVE the
   lanes' seek/loop gesture surface and the playhead line, with the lane
   visuals below them; it has no background. Only the badge, title and format

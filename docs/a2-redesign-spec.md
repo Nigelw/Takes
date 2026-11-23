@@ -431,8 +431,12 @@ None open. The version check for a missing file was decided in milestone 3
   5 pt clearance above and below. The active waveform is primary and inactive
   ones `Theme.waveformInactive`, at v2.9.0's 85% and 70% (the first milestone 4
   build drew both at full strength, as the canvas does; restored in review). The tick guides and the 0:00 line run the full
-  lane height, behind the strip. The ruler has no fill of its own: it
-  shares the well with the lanes rather than the canvas's lighter band.
+  lane height, behind the strip. The lanes and ruler mask their first point,
+  so a guide, notch or 0:00 marker landing exactly on the window's left edge
+  (as it does whenever the timeline starts at 0:00) isn't drawn as a stray
+  line there; v2.9.0 hid it under the info column's edge. The ruler has no
+  fill of its own: it shares the well with the lanes rather than the
+  canvas's lighter band.
 - **Lane strip** (milestone 4). No fade or background (dropped in review):
   it sits in the empty space above the waveform, its contents centred
   between the divider above the lane and the waveform (26 pt, review). 9 pt leading and 8 pt
