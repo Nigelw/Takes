@@ -152,29 +152,40 @@ struct PlaylistCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Playlist") {
-            Button("Group as Versions") { context?.group(compare: false) }
-                .disabled(context?.canGroup != true)
-            Button("Group and Compare") { context?.group(compare: true) }
-                .disabled(context?.canGroup != true)
-            Button("Rename…") { context?.presentation.renamingItemID = context?.itemIDs.first }
-                .disabled(context?.itemIDs.count != 1)
-            Button("Separate Versions") { context?.separate() }
-                .disabled(context?.canSeparate != true)
-            Divider()
-            Button("Move Up") { context?.moveSelection(direction: -1) }
-                .disabled(context?.itemIDs.isEmpty != false)
-            Button("Move Down") { context?.moveSelection(direction: 1) }
-                .disabled(context?.itemIDs.isEmpty != false)
-            Divider()
-            Button("Clear Playlist") { _ = context?.coordinator.clearPlaylist(undoManager: context?.undoManager) }
-                .disabled(context?.coordinator.workspace.items.isEmpty != false)
+            PlaylistOrganizationMenuItems(context: context)
         }
     }
 }
 
-/// The playlist list (A2 §6). There is no header bar: imports live in the
-/// File menu, and the organization commands in the context menu and the
-/// Playlist menu (the bottom bar's `…` menu joins them in milestone 5).
+/// The organisation commands, acting on the selection. The Playlist menu and
+/// the bottom bar's `…` pull-down (A2 §7) both show this one list.
+struct PlaylistOrganizationMenuItems: View {
+    let context: PlaylistCommandContext?
+
+    var body: some View {
+        Button("Group as Versions") { context?.group(compare: false) }
+            .disabled(context?.canGroup != true)
+        Button("Group and Compare") { context?.group(compare: true) }
+            .disabled(context?.canGroup != true)
+        Button("Rename…") { context?.presentation.renamingItemID = context?.itemIDs.first }
+            .disabled(context?.itemIDs.count != 1)
+        Button("Separate Versions") { context?.separate() }
+            .disabled(context?.canSeparate != true)
+        Divider()
+        Button("Move Up") { context?.moveSelection(direction: -1) }
+            .disabled(context?.itemIDs.isEmpty != false)
+        Button("Move Down") { context?.moveSelection(direction: 1) }
+            .disabled(context?.itemIDs.isEmpty != false)
+        Divider()
+        Button("Clear Playlist") { _ = context?.coordinator.clearPlaylist(undoManager: context?.undoManager) }
+            .disabled(context?.coordinator.workspace.items.isEmpty != false)
+    }
+}
+
+/// The playlist list (A2 §6). There is no header bar: the bottom bar below
+/// it (`PlaylistBottomBar`, A2 §7) carries Add Files…, Remove Selected and
+/// the organisation commands, which the File menu, the Playlist menu and
+/// the context menu also offer.
 struct PlaylistView: View {
     let coordinator: PlaylistCoordinator
     @ObservedObject var presentation: PlaylistPresentationState

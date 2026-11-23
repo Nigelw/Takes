@@ -1048,9 +1048,6 @@ struct ContentView: View {
     /// `.onChange`; see `LaneViewport` for why it can't be a row input.
     @State private var laneViewportStore = LaneViewportStore()
     @State private var controlBarHeight: CGFloat = TakesWindowPolicy.controlBarReservedHeight
-    /// Shows the "Couldn't Align Tracks" alert while the quick alignment pass
-    /// leaves tracks unaligned (`PlaybackController.tempoAnalysisOffer`).
-    @State private var showsTempoAnalysisOffer = false
 
     /// An in-progress loop drag, in absolute seconds. `start` is where the drag
     /// began; `current` tracks the pointer. Committed to a `LoopRegion` on mouse-up.
@@ -1140,7 +1137,6 @@ struct ContentView: View {
                 waveformStore.sync(tracks: [], context: nil)
                 mouseMonitor?.stop()
             }
-            .modifier(TempoAnalysisOfferAlert(controller: controller, isPresented: $showsTempoAnalysisOffer))
     }
 
     private var inactiveAwareContent: some View {
@@ -1163,6 +1159,10 @@ struct ContentView: View {
                 // groove is the only divider between them: the ruler has no
                 // top border (A2 §3).
                 .background(Theme.timelineWellShade)
+            // Below the lanes, which it shortens; the lanes keep their fixed
+            // height and scroll (A2 §7).
+            CompareBottomBar(coordinator: coordinator, openFiles: openFileCommandState)
+                .componentDebugLabel("Bottom Bar", enabled: settings.showsComponentDebugLabels)
         }
     }
 
@@ -1174,6 +1174,9 @@ struct ContentView: View {
                         + (controller.displayedTrackRowCount == 0 ? 0 : CompareLaneLayout.seatBottom)
                 )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
+            // The highlight stops at the bottom bar.
+            Color.clear
+                .frame(height: BottomBarMetrics.height)
         }
         .allowsHitTesting(false)
     }
@@ -2395,36 +2398,6 @@ private struct ReorderPlacement: ViewModifier {
     }
 }
 
-/// "Couldn't Align Tracks": offered when the quick alignment pass leaves
-/// tracks unaligned. Until milestone 5's bottom bar brings back an Align
-/// button to anchor a popover, the offer is an alert.
-private struct TempoAnalysisOfferAlert: ViewModifier {
-    var controller: PlaybackController
-    @Binding var isPresented: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .onChange(of: controller.tempoAnalysisOffer) { _, offer in
-                if offer != nil { isPresented = true }
-            }
-            .onChange(of: isPresented) { _, isShowing in
-                if !isShowing { controller.dismissAlignmentAttention() }
-            }
-            .alert(
-                "Couldn't Align Tracks",
-                isPresented: $isPresented,
-                presenting: controller.tempoAnalysisOffer
-            ) { _ in
-                Button("Analyze Further") {
-                    controller.startTempoAnalysis()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: { offer in
-                Text(LaneStripText.tempoAnalysisOfferMessage(trackNames: offer.trackNames))
-            }
-    }
-}
-
 /// The lane strip's text (A2 §8). The title is the version's title tag, else
 /// its filename without the extension — milestone 3's version-row rule. The
 /// format is the container, sample rate and bit rate. Blind Listening Mode
@@ -2456,11 +2429,6 @@ enum LaneStripText {
             details,
             track.url.lastPathComponent
         ].filter { !$0.isEmpty }.joined(separator: "\n")
-    }
-
-    static func tempoAnalysisOfferMessage(trackNames: [String]) -> String {
-        "No matching audio was found for:\n\(trackNames.joined(separator: "\n"))\n\n"
-            + "Deeper analysis can align audio across differing tempos, but it takes longer."
     }
 }
 

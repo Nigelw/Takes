@@ -172,6 +172,15 @@ enum Theme {
         NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.18 : 0.04)
     })
 
+    /// The bottom bar's surface (A2 §7): the well's scrim (black 18% dark,
+    /// 4% light), a step darker than the control bar and the same as the
+    /// playlist behind it, as the canvas draws it (#222224 in dark).
+    static let bottomBarSurface = timelineWellShade
+
+    /// The bottom bar's top hairline: the lane divider's line (the canvas's
+    /// #18181A in dark, black 10% in light).
+    static let bottomBarHairline = laneDivider
+
     // MARK: Beveled transport readout
 
     /// Fill for the transport time readout panel.

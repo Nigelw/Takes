@@ -197,6 +197,10 @@ macOS **small** controls (`.controlSize(.small)`, 20 pt tall, 10 pt glyphs).
 | Playlist | `+`/`−` segmented (Add Files / Remove Selected) · `…` pull-down menu (the organisation commands from `PlaylistCommandContext`) | `6 items · 19:35` (item count and total duration) |
 | Compare | `+`/`−` segmented (Add Version / Remove Active Version) · Align button | Zoom: magnifier − · small slider · magnifier + (no Fit button) |
 
+Built in milestone 5; the decisions it settled (surface and light values,
+the pull-down's contents, the summary, Remove Active Version, Align, zoom,
+and the window minimum) are in §13.
+
 ## 8. Compare area
 
 Below the divider: ruler, lanes, bottom bar. No track-info column.
@@ -281,8 +285,13 @@ Each is meant to fit one session and leave the app working.
    26 pt ruler, playhead seating, lane sizing and scrolling. Removed the
    compare header's import button, Align button and Remove All; their
    commands stay in the menus (§13).
-5. **Bottom bars.** Small-control bars for both modes; move organisation
-   commands into the `…` menu.
+5. **Bottom bars.** *Done.* One 30 pt small-control bar layout for both
+   modes, below the playlist table and the compare lanes. Playlist: Add
+   Files… / Remove Selected, the `…` pull-down with the Playlist menu's
+   organisation commands, and the `6 items · 19:35` summary. Compare: Add
+   Version… / Remove Active Version, the Align button (its progress, outcome
+   flash and "Analyze Further" popover back from the pre-A2 header, replacing
+   the interim alert), and zoom. Settled the window minimum height (§13).
 
 Update `AGENTS.md` (ownership, invariants, test map) as each milestone lands.
 
@@ -298,8 +307,8 @@ None open. The version check for a missing file was decided in milestone 3
   `lightSecondary` `TransportAppearance`, the light `Theme` colours (amber
   backlit LCD readout, amber secondary accent), and system label colours.
   New elements need light designs of their own: the frosted artwork-toggle
-  chip, the lane info strip's fade, the stacked-thumbnail card edges, and
-  the list's row tints.
+  chip, the lane info strip's fade, the stacked-thumbnail card edges, the
+  list's row tints, and the bottom bar (each recorded below).
 - **Teenage Engineering control-bar theme: removed** (milestone 2). A2 has
   one control-bar look, so the theme, `ControlBarTheme`, its setting and
   the Settings picker are gone. A stored `controlBarTheme` preference is
@@ -315,9 +324,10 @@ None open. The version check for a missing file was decided in milestone 3
   the lanes and Now Playing do, so the readout can't reveal the version. The
   playlist readout drops the pre-A2 readout's artist/album line and its small
   artwork tile; the cover carries the artwork.
-- **Compare zoom controls: dropped until milestone 5.** The compare
-  transport row has no room for them. ⌘+/⌘−, Zoom to Selection and pinch
-  still zoom; the bottom bar brings the on-screen controls back.
+- **Compare zoom controls** (milestone 2, back in milestone 5). The compare
+  transport row has no room for them, so they moved to the bottom bar's
+  right side (see "Bottom-bar zoom" below). ⌘+/⌘−, Zoom to Selection, Zoom
+  to Fit and pinch zoom as well.
 - **Esc leaves compare**, as the back button and ⌘[ do (§9). It goes through
   the same focus-safe shortcut gate, so text fields keep Esc.
 - **Side-button placement** (milestone 4 review). Shuffle/Blind and Repeat
@@ -358,12 +368,16 @@ None open. The version check for a missing file was decided in milestone 3
   only animate lines that actually overflow. The compare readout is narrower,
   so it scrolls more often.
 - **The window is resizable in both directions** (§2). Defaults are the §2
-  sizes. Minimum width 360; minimum height is 300 below the cover (646 with
-  artwork, 300 without), provisional until milestones 2–5 settle the control
-  bar, rows and bottom bar (`TakesWindowPolicy.minimumHeightWithoutArtwork`).
-  Mode switches never resize. The artwork toggle changes the height by
-  exactly 346 pt, keeping any extra height the user added; a window that
-  would run off the bottom of the screen moves up only as far as needed.
+  sizes. Minimum width 360; minimum height 286 below the cover (632 with
+  artwork, 286 without; `TakesWindowPolicy.minimumHeightWithoutArtwork`),
+  settled in milestone 5: the compare control bar (133 pt under the
+  titlebar), the ruler (27), one whole lane (96) and the bottom bar (30), so
+  compare always shows its controls and one lane. The playlist's control bar
+  is 12 pt taller, leaving its list two rows and part of a third. Milestones
+  1–4 used a provisional 300. Mode switches never resize. The artwork
+  toggle changes the height by exactly 346 pt, keeping any extra height the
+  user added; a window that would run off the bottom of the screen moves up
+  only as far as needed.
 - **Cover in a wider window:** the cover area stays 360 pt tall; the square
   stays 360 × 360, centred over a blurred fill of the same image. No artwork
   (or nothing playing): a neutral tile with a music-note glyph and no top
@@ -412,16 +426,21 @@ None open. The version check for a missing file was decided in milestone 3
   a 2 pt primary ring; thumbnail tile #DCDCE1 with a #9C9CA3 note; stacked
   edges step toward the background (near #B9B9C0, far #D5D5DA). Dark values
   are the canvas's. All live in `PlaylistRowPalette`.
-- **No item count until milestone 5.** The header bar's `N items` label is
-  gone with the bar; the bottom bar's `6 items · 19:35` brings it back. Its
-  commands remain in the context menu, the Playlist menu and the File menu.
+- **Playlist summary** (milestone 5). The bottom bar's right side shows the
+  item count and total duration, `6 items · 19:35` (`1 item · 2:07` for one),
+  in 11 pt secondary tabular digits. The total adds up each item's playback
+  version, the duration its row shows, rounded once at the end; it gains an
+  hours field past an hour (`16 items · 1:04:00`), as the rows do. Versions
+  without a known duration add nothing. An empty playlist shows no summary:
+  its empty state already says so. This replaces the header bar's `N items`
+  label, removed in milestone 3.
 - **Lane sizing** (milestone 4, changed in review). Every lane is a fixed
   96 pt: a 95 pt lane and its 1 pt bottom divider (`CompareLaneLayout`), the
   height five versions shared in a 986 pt window with the artwork shown.
   Lanes never resize with the window or the version count; those that don't
   fit scroll, and fewer leave the well empty below. In the default 760 pt
-  window two and a half lanes show (two and a third once milestone 5's
-  bottom bar is in). The first build gave lanes equal shares of the space
+  window two and a third lanes show (two and a half before milestone 5's
+  bottom bar). The first build gave lanes equal shares of the space
   (74 pt for three in the default window, 64 pt minimum), which resized
   every lane, and redrew every waveform, whenever a version was added or
   removed. The ruler is 26 pt plus its 1 pt bottom border, so the lanes and
@@ -471,15 +490,65 @@ None open. The version check for a missing file was decided in milestone 3
   (dark: primary 11%). Ruler border and lane dividers: black 10% (dark 30%,
   the canvas's #18181A on #1F1F21). Offset field: white 85% with a black 16%
   hairline (dark: #141416 at 85% with a #3C3C40 hairline). All in `Theme`.
-- **Compare header removed until milestone 5.** The import split button's
-  commands are in the File menu, Remove All is File ▸ Remove All Versions
-  (⌘⌫), and Auto-Align is Playback ▸ Auto-Align Tracks (⌥⌘A). Until the
-  bottom bar's Align button returns there is no alignment progress
-  indicator or outcome flash, and the "Couldn't Align Tracks → Analyze
-  Further" offer is an alert rather than a popover.
+- **Compare header removed** (milestone 4). The import split button's other
+  commands are in the File menu and Remove All is File ▸ Remove All Versions
+  (⌘⌫) only. Milestone 5's bottom bar brought back Add Version…, Align and
+  zoom; milestone 4's interim "Couldn't Align Tracks" alert is gone.
 - **Missing files in compare.** Compare does not open an item while any of
   its versions' files is missing (unchanged by milestone 4), so lanes have no
   missing-file state; the playlist's version rows carry it (milestone 3).
 - **Retired column width.** The stored `trackInfoColumnWidth` preference is
   removed on launch with the pre-A2 frame keys, and Reset Window Size no
   longer resets a column.
+- **Bottom bar** (milestone 5). 30 pt including its 1 pt top hairline, 10 pt
+  insets, 6 pt between controls, standard small controls. Surface: the
+  well's scrim over the window material (`Theme.bottomBarSurface`: black 18%
+  in dark, black 4% in light), the same as the playlist behind it, as the
+  canvas draws it (#222224), and a step darker than the control bar in both
+  appearances. Hairline: the lane
+  divider's line (`Theme.bottomBarHairline`: black 30% in dark, the canvas's
+  #18181A; black 10% in light). Like the control bar, empty bar space drags
+  the window. The bar shortens the playlist table's and the lanes' scroll
+  areas; lanes keep their 96 pt.
+- **+/− control** (milestone 5). An AppKit momentary rounded segmented
+  control at small size, 10 pt semibold `plus` / `minus` symbols; each
+  segment's tooltip and VoiceOver label name its command (Add Files… /
+  Remove Selected; Add Version… / Remove Active Version). + opens ⌘O's
+  dialog, whose import destination is captured as usual (new items in the
+  playlist, the compared item in compare); − runs Delete's command.
+- **`…` pull-down** (milestone 5). A standard pull-down button (ellipsis and
+  indicator) holding exactly the Playlist menu's list, shared as one view
+  (`PlaylistOrganizationMenuItems`): Group as Versions, Group and Compare,
+  Rename…, Separate Versions, Move Up, Move Down and Clear Playlist, acting
+  on the selection with the menu's validation. It is disabled while the
+  playlist is empty, when every command in it is.
+- **Remove Active Version** (milestone 5, decided in review). Follows the
+  lane strip's Remove Version and File ▸ Remove Version: enabled whenever a
+  version is active, including an item's last version, whose removal removes
+  the item and returns to the playlist; removing down to one version leaves
+  a one-lane compare open. In Blind Listening Mode it removes the lane
+  marked active and names no file.
+- **Align button** (milestone 5). A small bordered button with the
+  `arrow.right.and.line.vertical.and.arrow.left` glyph (the canvas's
+  converging arrows). During the quick pass the glyph becomes a mini
+  indeterminate spinner, during tempo analysis a mini determinate progress
+  ring (both native `ProgressView`s), and for the controller's two-second
+  outcome flash a green check or red cross with a static glow of the same
+  colour. The pre-A2 glow pulsed with `withAnimation`; it no longer animates,
+  since continuous motion in Takes is Core Animation's job. It is disabled
+  with fewer than two versions and while a run is in flight (⌥⌘A's rule).
+  "Couldn't Align Tracks" opens as a popover anchored above it and offers
+  Analyze Further; closing it dismisses the offer. In Blind Listening Mode
+  the popover lists the unaligned versions as `Track n`, their lane
+  positions, rather than their file names, which would reveal the audible
+  version by elimination (it is the alignment anchor, never listed).
+- **Bottom-bar zoom** (milestone 5). Borderless `minus.magnifyingglass` and
+  `plus.magnifyingglass` buttons, secondary colour, that step like ⌘− and ⌘+
+  (the canvas draws them as plain icons; buttons keep the pre-A2 control's
+  behaviour), around a 96 pt small slider. The slider is the existing log
+  mapping of the visible span (`TimelineViewport.sliderValue`, through
+  `PlaybackController.zoomSliderValue` / `setZoomSliderValue`): 0 at fit, 1
+  at the 0.5 s maximum, so it, the magnifiers, ⌘+/⌘−, Zoom to Selection,
+  Zoom to Fit and pinch all move one value. The pre-A2 haptic tick at each
+  quarter of the range is kept. All three disable when the timeline is too
+  short to zoom.

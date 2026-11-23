@@ -353,10 +353,12 @@ enum TakesWindowPolicy {
     static let artworkCollapseHeight = artworkHeight
         - (controlBarTopPaddingUnderTitlebar - controlBarTopPaddingBelowArtwork)
     static let defaultHeightWithArtwork: CGFloat = 760
-    /// Room below the cover at the minimum height: the control bar plus a few
-    /// list rows or one lane. Provisional until the control bar, rows and
-    /// bottom bar land (A2 milestones 2–5).
-    static let minimumHeightWithoutArtwork: CGFloat = 300
+    /// Room below the cover at the minimum height (A2 milestone 5, §13): the
+    /// compare control bar, the ruler, one whole lane and the bottom bar
+    /// (133 + 27 + 96 + 30 = 286 pt). The playlist's control bar is 12 pt
+    /// taller, which leaves its list two rows and part of a third.
+    static let minimumHeightWithoutArtwork: CGFloat = compareControlBarHeight(showsArtwork: false)
+        + CompareLaneLayout.seatBottom + CompareLaneLayout.laneStep + BottomBarMetrics.height
 
     static func controlBarTopPadding(showsArtwork: Bool) -> CGFloat {
         showsArtwork ? controlBarTopPaddingBelowArtwork : controlBarTopPaddingUnderTitlebar
@@ -397,6 +399,12 @@ enum TakesWindowPolicy {
     /// until the bar's measured height arrives. The ruler and lanes below it
     /// are sized by `CompareLaneLayout`.
     static let controlBarReservedHeight: CGFloat = 119
+
+    /// The compare control bar's height: 119 pt under the cover, 133 under
+    /// the titlebar, whose overlay adds 14 pt of top padding.
+    static func compareControlBarHeight(showsArtwork: Bool) -> CGFloat {
+        controlBarReservedHeight - controlBarTopPaddingBelowArtwork + controlBarTopPadding(showsArtwork: showsArtwork)
+    }
 
     // MARK: Frames
 

@@ -2258,6 +2258,166 @@ struct SessionTests {
         #expect(TakesWindowPolicy.retiredLayoutDefaultsKeys.contains("trackInfoColumnWidth"))
     }
 
+    // MARK: A2 bottom bars (milestone 5)
+
+    private func makeSummaryItem(_ title: String, durations: [TimeInterval], playback: Int = 0) -> PlaylistItem {
+        let versions = durations.enumerated().map { index, duration in
+            PlaylistVersion(
+                file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/\(title)-\(index).flac")),
+                metadata: PlaylistMetadata(duration: duration, fileFormatDescription: "FLAC", displayName: "\(title)-\(index).flac")
+            )
+        }
+        return PlaylistItem(title: title, versions: versions, selectedVersionID: versions[playback].id)
+    }
+
+    @Test
+    func playlistSummaryCountsItemsAndAddsUpTheirPlaybackVersions() {
+        // Each item counts once, at its playback version's duration.
+        let taxman = makeSummaryItem("Taxman", durations: [159, 161], playback: 1)
+        let rigby = makeSummaryItem("Eleanor Rigby", durations: [127.4])
+        #expect(PlaylistSummaryText.text(for: [taxman, rigby]) == "2 items · 4:48")
+        #expect(PlaylistSummaryText.accessibilityText(for: [taxman, rigby]) == "2 items, 4:48 in total")
+
+        #expect(PlaylistSummaryText.text(for: [rigby]) == "1 item · 2:07")
+        #expect(PlaylistSummaryText.text(for: []).isEmpty)
+
+        // Past an hour the total gains an hours field, as the rows' durations do.
+        let long = (0..<16).map { makeSummaryItem("Side \($0)", durations: [240]) }
+        #expect(PlaylistSummaryText.text(for: long) == "16 items · 1:04:00")
+
+        // A version without a known duration adds nothing.
+        let unknown = makeSummaryItem("Unknown", durations: [.nan])
+        #expect(PlaylistSummaryText.totalDuration(of: [rigby, unknown]) == 127.4)
+    }
+
+    @MainActor
+    @Test
+    func playlistBottomBarFollowsTheSelectionCommands() {
+        let empty = PlaylistCommandContext(
+            coordinator: PlaylistCoordinator(), presentation: PlaylistPresentationState(), undoManager: nil
+        )
+        #expect(PlaylistBottomBarState(context: empty) == PlaylistBottomBarState(itemCount: 0, canRemoveSelection: false))
+        #expect(!PlaylistBottomBarState(context: empty).canShowActions)
+
+        let taxman = makeSummaryItem("Taxman", durations: [159, 161])
+        let rigby = makeSummaryItem("Eleanor Rigby", durations: [127])
+        let presentation = PlaylistPresentationState()
+        let context = PlaylistCommandContext(
+            coordinator: PlaylistCoordinator(workspace: PlaylistWorkspace(items: [taxman, rigby])),
+            presentation: presentation,
+            undoManager: nil
+        )
+        // Nothing selected: nothing to remove, but Clear Playlist is in the
+        // pull-down.
+        var state = PlaylistBottomBarState(context: context)
+        #expect(!state.canRemove)
+        #expect(state.canShowActions)
+
+        presentation.selection = [.item(rigby.id)]
+        state = PlaylistBottomBarState(context: context)
+        #expect(state.canRemove)
+
+        presentation.selection = [.version(taxman.versions[1].id)]
+        #expect(PlaylistBottomBarState(context: context).canRemove)
+    }
+
+    @Test
+    func compareBottomBarFollowsTheCompareCommands() {
+        let ready = CompareBottomBarState(hasActiveVersion: true, canSwitchPlayback: true, isAligning: false, canZoomTimeline: true)
+        #expect(ready.canRemove && ready.canAlign && ready.canZoom)
+
+        // Remove Active Version stays available on an item's last version, as
+        // the lane strip's Remove Version and Delete are.
+        let single = CompareBottomBarState(hasActiveVersion: true, canSwitchPlayback: false, isAligning: false, canZoomTimeline: true)
+        #expect(single.canRemove)
+        #expect(!single.canAlign)
+
+        let aligning = CompareBottomBarState(hasActiveVersion: true, canSwitchPlayback: true, isAligning: true, canZoomTimeline: true)
+        #expect(!aligning.canAlign)
+        #expect(aligning.canRemove)
+
+        let empty = CompareBottomBarState(hasActiveVersion: false, canSwitchPlayback: false, isAligning: false, canZoomTimeline: false)
+        #expect(!empty.canRemove && !empty.canAlign && !empty.canZoom)
+    }
+
+    @MainActor
+    @Test
+    func compareBottomBarReadsAnEmptyControllerAsDisabled() {
+        let state = CompareBottomBarState(controller: PlaybackController())
+        #expect(state == CompareBottomBarState(hasActiveVersion: false, canSwitchPlayback: false, isAligning: false, canZoomTimeline: false))
+    }
+
+    @Test
+    func alignmentOfferNamesNoFileWhileBlind() {
+        let first = UUID(), second = UUID(), third = UUID()
+        let names = ["take 2.wav", "take 3.wav"]
+        #expect(AlignmentOfferText.trackNames(
+            offerTrackIDs: [second, third], offerTrackNames: names, sessionTrackIDs: [first, second, third], isBlind: false
+        ) == names)
+        // Blind: the lane positions, as the strips show them.
+        #expect(AlignmentOfferText.trackNames(
+            offerTrackIDs: [third, first], offerTrackNames: names, sessionTrackIDs: [second, third, first], isBlind: true
+        ) == ["Track 2", "Track 3"])
+        // A version removed since the run is dropped rather than named.
+        #expect(AlignmentOfferText.trackNames(
+            offerTrackIDs: [UUID()], offerTrackNames: ["gone.wav"], sessionTrackIDs: [first], isBlind: true
+        ).isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func zoomSliderSharesTheTimelineZoomModel() async throws {
+        let url = try makeTemporaryAudioFile(name: "zoom-slider.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let controller = PlaybackController()
+        await controller.loadImportedFiles([url])
+        let contentSpan = controller.session.duration
+        #expect(abs(controller.zoomSliderValue) < 0.0001)
+
+        // The slider sets the span through the log mapping and reads it back.
+        controller.setZoomSliderValue(0.5)
+        #expect(abs(controller.visibleSpan - TimelineViewport.visibleSpan(sliderValue: 0.5, contentSpan: contentSpan)) < 0.0001)
+        #expect(abs(controller.zoomSliderValue - 0.5) < 0.0001)
+        controller.setZoomSliderValue(1)
+        #expect(abs(controller.visibleSpan - TimelineViewport.minimumVisibleSpan) < 0.0001)
+        #expect(abs(controller.zoomSliderValue - 1) < 0.0001)
+
+        // ⌘− and Zoom to Fit move it, so the slider follows the menus and pinch.
+        controller.stepZoom(zoomingIn: false)
+        let stepped = TimelineViewport.sliderValue(
+            visibleSpan: TimelineViewport.minimumVisibleSpan * TimelineViewport.zoomButtonStep, contentSpan: contentSpan
+        )
+        #expect(abs(controller.zoomSliderValue - stepped) < 0.0001)
+        controller.zoomToFit()
+        #expect(abs(controller.zoomSliderValue) < 0.0001)
+
+        // Out-of-range positions clamp to the zoom range.
+        controller.setZoomSliderValue(4)
+        #expect(abs(controller.zoomSliderValue - 1) < 0.0001)
+    }
+
+    @Test
+    func windowMinimumHeightHoldsTheBarsAndOneWholeLane() {
+        // Compare control bar under the titlebar, ruler, one lane, bottom bar.
+        #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: true) == 119)
+        #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: false) == 133)
+        #expect(BottomBarMetrics.height == 30)
+        #expect(TakesWindowPolicy.minimumHeightWithoutArtwork == 286)
+        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: false) == 286)
+        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: true) == 632)
+
+        for showsArtwork in [true, false] {
+            let lanes = { (windowHeight: CGFloat) in
+                (windowHeight - (showsArtwork ? TakesWindowPolicy.artworkHeight : 0)
+                    - TakesWindowPolicy.compareControlBarHeight(showsArtwork: showsArtwork)
+                    - CompareLaneLayout.seatBottom - BottomBarMetrics.height) / CompareLaneLayout.laneStep
+            }
+            // Exactly one lane at the minimum; two and a third by default.
+            #expect(lanes(TakesWindowPolicy.minimumHeight(showsArtwork: showsArtwork)) == 1)
+            #expect(abs(lanes(TakesWindowPolicy.defaultHeight(showsArtwork: showsArtwork)) - 7.0 / 3) < 0.0001)
+        }
+    }
+
     // MARK: A2 playlist rows (milestone 3)
 
     @Test

@@ -52,15 +52,24 @@ Key ownership:
   Debug menu wiring.
 - `WorkspaceView.swift`: playlist/comparison navigation, shared import routing,
   startup restoration ordering, the playlist control bar
-  (`PlaylistTransportView`), keyboard focus handling (including Esc leaving
-  compare), and the window chrome both modes share: the cover above the
-  control bar and the titlebar artwork toggle.
+  (`PlaylistTransportView`) with the playlist bottom bar placed below the
+  list, keyboard focus handling (including Esc leaving compare), and the
+  window chrome both modes share: the cover above the control bar and the
+  titlebar artwork toggle.
 - `TransportControls.swift`: the A2 control bar both modes share
   (`ControlBarLayout`: transport row, readout slot, divider;
   `ControlBarMetrics`; `ControlBarSideButtonStyle` for Shuffle/Blind/Repeat;
   `ControlBarDivider`), v2.9.0's `CircleTransportButtonStyle` (with a
   rounded-square option for compare's back button), `SevenSegmentDisplay`,
   window drag/background helpers, and the Debug Appearance Tuner.
+- `BottomBar.swift`: the A2 bottom bar both modes share (A2 §7):
+  `BottomBarLayout` and `BottomBarMetrics`, the +/− segmented control
+  (`BottomBarAddRemoveControl`), the playlist bar (`PlaylistBottomBar`, its
+  `…` pull-down and summary text, `PlaylistSummaryText`), the compare bar
+  (`CompareBottomBar`: `CompareAlignButton` with the "Couldn't Align Tracks"
+  popover and `AlignmentOfferText`, and the zoom leaf `CompareZoomControl`),
+  and each bar's enablement (`PlaylistBottomBarState`,
+  `CompareBottomBarState`).
 - `DotMatrixReadout.swift`: the A2 readouts (`PlaylistControlBarReadout`,
   `CompareControlBarReadout`, their title rules in `ControlBarReadoutTitle`),
   the dot-matrix text and marquee, the seekable LED meter
@@ -71,7 +80,9 @@ Key ownership:
   sleeve glyph.
 - `PlaylistView.swift`: the playlist list's SwiftUI host (empty state, no
   header bar), selection/expansion presentation state, the Playlist menu, and
-  the selection-aware organization commands (`PlaylistCommandContext`).
+  the selection-aware organization commands (`PlaylistCommandContext`); the
+  one list of organization menu items (`PlaylistOrganizationMenuItems`) that
+  the Playlist menu and the bottom bar's `…` pull-down both show.
 - `PlaylistOutlineView.swift`: the playlist table — an `NSOutlineView` wrapped
   in `NSViewRepresentable` (items with versions as children), the A2 rows
   (`PlaylistRowMetrics`, `PlaylistRowView`, `PlaylistItemCellView`,
@@ -85,8 +96,8 @@ Key ownership:
   playhead (`PlayheadGeometry`, `TimelinePlayheadVisual`), the full-width
   lanes (`TrackRowView` → `LaneView` → `WaveformLaneView`), their info
   strips (`LaneStripView`, `LaneOffsetField`, `LaneStripText`, the strip's
-  drag source and context menu), loop gestures, reorder drag-and-drop, and
-  the "Couldn't Align Tracks" alert (`TempoAnalysisOfferAlert`).
+  drag source and context menu), loop gestures, and reorder drag-and-drop.
+  The compare bottom bar sits below the lanes; it lives in `BottomBar.swift`.
 - `AppSettings.swift` and `SettingsView.swift`: persisted user preferences
   (including `showsArtwork`, the titlebar toggle's state) and the Settings
   window.
@@ -225,16 +236,20 @@ These are here to prevent parallel implementations and subtle regressions:
 - Entering compare never starts an item: another item's playback stops, and
   only the item already playing keeps playing
   (`PlaylistCoordinator.enterComparison`).
-- The playlist has no header bar. Until milestone 5's bottom bar, imports are
-  in the File menu (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M), Remove is Delete and the context
-  menu, and the organization commands are in the context menu and the
-  Playlist menu; keep each reachable from one of those.
+- The playlist has no header bar. Its bottom bar (A2 §7) has Add Files…
+  (⌘O's dialog) and Remove Selected (Delete's selection-aware removal), the
+  `…` pull-down with the Playlist menu's organization commands, and the
+  `N items · m:ss` summary. The File menu (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M), Delete, the
+  context menu and the Playlist menu keep every one of those commands; the
+  bar is another way in, not a replacement.
 - Keep global shortcuts focus-safe; active numeric text fields should retain
   normal text editing behavior.
 - One main window serves both modes (A2). It opens 360 pt wide (760 tall with
   artwork, 414 without) and is user-resizable down to
-  `TakesWindowPolicy.minimumSize(showsArtwork:)`. Mode switches and track
-  counts never resize it; the artwork toggle is the only automatic resize
+  `TakesWindowPolicy.minimumSize(showsArtwork:)`: 360 × 632 with the
+  artwork, 360 × 286 without (the compare control bar, the ruler, one whole
+  lane and the bottom bar; `minimumHeightWithoutArtwork`). Mode switches and
+  track counts never resize it; the artwork toggle is the only automatic resize
   (±`artworkCollapseHeight`, 346 pt, top edge fixed, clamped on screen). Its
   frame autosaves as `main.a2`; do not reintroduce per-mode frames.
 - The cover and artwork toggle live in `WorkspaceView`, above both modes'
@@ -281,9 +296,9 @@ These are here to prevent parallel implementations and subtle regressions:
   its width from the line, never from its text (the cells draw in an
   overlay); sized by its cells it could only grow, and a launch-time layout at
   a restored wider frame left the readout wider than the window.
-- Compare leaves through the readout's back button, Esc, or ⌘[. The compare
-  control bar has no zoom controls until the A2 bottom bar (milestone 5);
-  ⌘+/⌘− and pinch still zoom.
+- Compare leaves through the readout's back button, Esc, or ⌘[. Zoom's
+  on-screen control is in the bottom bar (magnifier − · slider · magnifier
+  +, no Fit); ⌘+/⌘−, Zoom to Selection, Zoom to Fit and pinch also zoom.
 - Compare has no track-info column (A2 §8). Below the control bar's divider:
   a 26 pt ruler with a 1 pt bottom border and no top border, then lanes edge
   to edge. Every lane has one fixed height (`CompareLaneLayout.laneStep`,
@@ -313,9 +328,25 @@ These are here to prevent parallel implementations and subtle regressions:
   unreliable over the AppKit text field. Strip titles use
   the version-row rule (`PlaylistRowText.versionName`); Blind Listening Mode
   shows `Track n`, no format or tooltip, and disables Reveal in Finder.
-- Compare's header controls are gone until the bottom bar: imports are in the
-  File menu, Remove All Versions is ⌘⌫, Auto-Align is ⌥⌘A, and the "Analyze
-  Further" offer is an alert. Keep each reachable from one of those.
+- Compare has no header. Its bottom bar (A2 §7) has Add Version… (⌘O's
+  dialog, importing into the captured item), Remove Active Version (File ▸
+  Remove Version, Delete), Align (⌥⌘A) and zoom. Remove All Versions is
+  ⌘⌫ only. Align shows the quick pass's spinner, tempo analysis's progress
+  ring and the two-second outcome flash, and anchors the "Couldn't Align
+  Tracks → Analyze Further" popover; in Blind Listening Mode the popover
+  lists `Track n`, never file names.
+- Both modes build their bottom bar from one `BottomBarLayout` (A2 §7): 30 pt
+  including its 1 pt top hairline, 10 pt insets, standard small controls
+  (`.controlSize(.small)`), stretching to any width with no width-dependent
+  layouts. It sits below the playlist table or the compare lanes and
+  shortens their scroll area, never a lane. Every control runs an existing
+  command (`OpenFileCommandState`, `PlaylistCommandContext`, the
+  controller's align and zoom methods) and follows that command's
+  validation (`PlaylistBottomBarState`, `CompareBottomBarState`); do not add
+  parallel add, remove, organize, align or zoom paths. Remove Active Version
+  follows the lane strip's Remove Version: enabled for any active version,
+  and removing an item's last version removes the item and returns to the
+  playlist.
 
 Performance-architecture invariants (established by the perf effort; breaking
 these reintroduces the exact regressions it fixed):
@@ -346,8 +377,11 @@ these reintroduces the exact regressions it fixed):
   is written only on real change (equality-guarded).
 - **Keep the track-row / lane-leaf isolation.** `TrackRowView` and
   `LaneStripView` are `Equatable` and must not receive any per-scroll or
-  per-zoom value; the zoom/scroll-varying lane window flows through
-  `LaneViewportStore` → `LaneView` leaves, so scrolling and zooming never
+  per-zoom value (the bottom bar's zoom slider included: it is its own leaf,
+  `CompareZoomControl`, the only bar view that reads `visibleSpan`, and it
+  zooms through `setZoomSliderValue`, never `withAnimation`); the
+  zoom/scroll-varying lane window flows through `LaneViewportStore` →
+  `LaneView` leaves, so scrolling and zooming never
   re-lay-out the lane `VStack`s. Reorder offsets and lifted opacity are applied
   around both (`ReorderPlacement`), never inside them.
 - **Loop/repeat wraps are gapless via a pre-queued next iteration**
@@ -390,7 +424,10 @@ these reintroduces the exact regressions it fixed):
   reuse), the A2 compact compare geometry (ruler and seat, the fixed lane
   height, the waveform band, ruler notches and labels, the playhead's line
   and grabber), the lane strip's text and blind rules, the offset field's
-  width, and other non-UI logic.
+  width, the bottom bars (the playlist summary's count and total, both
+  bars' enablement, the zoom slider sharing the timeline zoom model, the
+  alignment offer's blind names), the settled minimum height, and other
+  non-UI logic.
 - `StreamingTrackImportTests.swift`: streaming metadata, yt-dlp resolution,
   download/import behavior, checksum parsing, and error handling.
 - `WaveformSourceTests.swift`: waveform generation and the peak pyramid
@@ -427,10 +464,10 @@ these reintroduces the exact regressions it fixed):
   isn't duplicated or redone.
 - [docs/a2-redesign-spec.md](docs/a2-redesign-spec.md): the A2 compact
   cover-column redesign (360 pt window, artwork toggle, glass readout,
-  two-line playlist rows, compact compare). Milestones 1 (window shell and
-  artwork), 2 (control bar), 3 (playlist rows) and 4 (compact compare) are
-  done; 5 (bottom bars) is not started. Read it before working on any of
-  its milestones.
+  two-line playlist rows, compact compare, bottom bars). All five
+  milestones are done: 1 (window shell and artwork), 2 (control bar),
+  3 (playlist rows), 4 (compact compare) and 5 (bottom bars). Read it, and
+  its §13 decisions, before changing any of them.
 - [docs/comparative-quality-analysis.md](docs/comparative-quality-analysis.md):
   the multi-track "which of these is the better copy?" feature — design,
   milestones, tuning findings, and limitations. Read it before touching

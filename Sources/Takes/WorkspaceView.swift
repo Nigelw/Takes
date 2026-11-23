@@ -334,6 +334,8 @@ struct WorkspaceView: View {
                 .background(.thinMaterial)
             }
             PlaylistView(coordinator: coordinator, presentation: presentation, openFiles: openFiles, artworkStore: artworkStore)
+            // Below the list, which it shortens (A2 §7).
+            PlaylistBottomBar(coordinator: coordinator, presentation: presentation, openFiles: openFiles, undoManager: undoManager)
         }
     }
 

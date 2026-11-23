@@ -1559,6 +1559,20 @@ final class PlaybackController {
         applyRezoom(span: span, cursorFraction: nil)
     }
 
+    /// The bottom bar's zoom slider position (A2 §7): `TimelineViewport`'s
+    /// log mapping of the visible span, 0 at fit and 1 at maximum zoom. It is
+    /// derived from the same visible window ⌘+/⌘−, Zoom to Selection and pinch
+    /// change, so the slider follows them.
+    var zoomSliderValue: Double {
+        TimelineViewport.sliderValue(visibleSpan: max(visibleSpan, 0.001), contentSpan: session.duration)
+    }
+
+    /// Move the zoom slider: the visible span for that position, anchored to
+    /// the playhead like every other zoom step.
+    func setZoomSliderValue(_ value: Double) {
+        zoomVisibleSpan(to: TimelineViewport.visibleSpan(sliderValue: value, contentSpan: session.duration))
+    }
+
     /// Step the zoom by one −/+ increment, anchored to the playhead (D4).
     func stepZoom(zoomingIn: Bool) {
         let span = TimelineViewport.steppedVisibleSpan(
