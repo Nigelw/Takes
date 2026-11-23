@@ -193,11 +193,15 @@ extension EnvironmentValues {
     }
 }
 
-/// Circular transport button styling shared by Play, Switch Track, and Repeat.
+/// Circular transport button styling shared by Play, Previous/Next and
+/// Switch Track (v2.9.0's style, unchanged).
 ///
 /// - `.primary` is the filled indigo call-to-action (Play/Pause).
 /// - `.secondary` is a subtle bordered circle; when `isOn` it adopts the
-///   primary tint to read as an engaged toggle (e.g. Repeat).
+///   primary tint to read as an engaged toggle.
+///
+/// `cornerRadius` swaps the circle for a rounded square of side `diameter`
+/// with the same fill, bevel and inset: compare's back button (§5.2).
 struct CircleTransportButtonStyle: ButtonStyle {
     enum Kind {
         case primary
@@ -209,6 +213,7 @@ struct CircleTransportButtonStyle: ButtonStyle {
     var diameter: CGFloat
     var glyphSize: CGFloat
     var pressedGlyphOffset: CGFloat = 0.75
+    var cornerRadius: CGFloat? = nil
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.colorScheme) private var colorScheme
@@ -226,6 +231,13 @@ struct CircleTransportButtonStyle: ButtonStyle {
         }
     }
 
+    /// A circular-style rounded rectangle with radius `diameter / 2` is
+    /// exactly v2.9.0's `Circle` on the square button frame.
+    private var shape: RoundedRectangle {
+        if let cornerRadius { return RoundedRectangle(cornerRadius: cornerRadius, style: .continuous) }
+        return RoundedRectangle(cornerRadius: diameter / 2, style: .circular)
+    }
+
     func makeBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed
         return configuration.label
@@ -241,7 +253,7 @@ struct CircleTransportButtonStyle: ButtonStyle {
             .frame(width: diameter, height: diameter)
             .background(background(pressed: pressed))
             .overlay(border(pressed: pressed))
-            .clipShape(Circle())
+            .clipShape(shape)
             // Active buttons spill primary-tinted light onto the surrounding bar,
             // so the glow reads as coming from the whole control, not the glyph.
             .shadow(color: activeSpillColor, radius: CGFloat(appearance.activeSpillRadius))
@@ -254,7 +266,7 @@ struct CircleTransportButtonStyle: ButtonStyle {
             // harder than the near-background secondaries.
             .brightness(pressed ? (kind == .primary ? -0.10 : -0.06) : 0)
             .animation(.easeOut(duration: 0.12), value: pressed)
-            .contentShape(Circle())
+            .contentShape(shape)
     }
 
     private var foreground: Color {
@@ -295,13 +307,13 @@ struct CircleTransportButtonStyle: ButtonStyle {
     private func background(pressed: Bool) -> some View {
         switch kind {
         case .primary:
-            Circle().fill(pressedWell(Theme.primary, pressed: pressed))
-                .overlay(Circle().fill(surfaceGloss(pressed: pressed)))
+            shape.fill(pressedWell(Theme.primary, pressed: pressed))
+                .overlay(shape.fill(surfaceGloss(pressed: pressed)))
         case .secondary:
-            Circle()
+            shape
                 .fill(pressedWell(isOn ? AnyShapeStyle(Theme.primary.opacity(appearance.activeFillOpacity)) : AnyShapeStyle(appearance.secondaryFill), pressed: pressed))
-                .overlay(Circle().fill(backlight))
-                .overlay(Circle().fill(surfaceGloss(pressed: pressed)))
+                .overlay(shape.fill(backlight))
+                .overlay(shape.fill(surfaceGloss(pressed: pressed)))
         }
     }
 
@@ -338,7 +350,7 @@ struct CircleTransportButtonStyle: ButtonStyle {
             .white.opacity(appearance.bevelTopOpacity * 0.24),
             .black.opacity(appearance.bevelBottomOpacity)
         ]
-        return Circle().strokeBorder(
+        return shape.strokeBorder(
             LinearGradient(
                 colors: pressed ? raised.reversed() : raised,
                 startPoint: .top,
@@ -346,227 +358,6 @@ struct CircleTransportButtonStyle: ButtonStyle {
             ),
             lineWidth: appearance.bevelWidth
         )
-    }
-}
-
-/// "Digital readout" showing elapsed time as a seven-segment LED display set
-/// behind dark glass — slanted glowing digits over faint ghost segments, the
-/// way an 80s rack unit or tape deck counter reads.
-struct DigitalTimeReadout: View {
-    /// Fixed panel height. Shared with the Play button diameter so the two line
-    /// up exactly, and with the playlist readout, whose three rows (two 20pt
-    /// dot-matrix lines, 2pt apart, over a 10pt clock row, inside the 4pt
-    /// bezel with a 5pt inset) set the minimum.
-    static let panelHeight: CGFloat = 64
-
-    let style: ReadoutStyle
-    let elapsed: String
-
-    /// Light mode's LCD is backlit, so its glass gets a soft bloom overlay;
-    /// dark mode's LED glass stays unlit.
-    @Environment(\.colorScheme) private var colorScheme
-
-    private let cornerRadius: CGFloat = 10
-    /// Width of the raised bezel ring the glass window is sunk into.
-    private let bezelWidth: CGFloat = 4
-
-    private var glassCornerRadius: CGFloat { cornerRadius - bezelWidth }
-
-    /// Corner radius of the convex glass tile.
-    private let convexCornerRadius: CGFloat = 11
-
-    var body: some View {
-        SevenSegmentDisplay(text: elapsed, digitHeight: 27)
-            .padding(.horizontal, 28)
-            .frame(minWidth: 180)
-            .frame(height: Self.panelHeight)
-            .background {
-                switch style {
-                case .retro: retroPanel
-                case .glass: convexGlassPanel
-                }
-            }
-            .overlay {
-                switch style {
-                case .retro: retroSheen
-                case .glass: convexGlassLight
-                }
-            }
-            .accessibilityLabel("Elapsed Time")
-            .accessibilityValue(elapsed)
-    }
-
-    /// Glass sheen: a soft reflection catching the top of the retro window.
-    private var retroSheen: some View {
-        RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
-            .fill(
-                LinearGradient(
-                    stops: [
-                        .init(color: .white.opacity(0.08), location: 0),
-                        .init(color: .white.opacity(0.02), location: 0.35),
-                        .init(color: .clear, location: 0.5)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .padding(bezelWidth)
-            .allowsHitTesting(false)
-    }
-
-    /// A convex glass tile sitting directly on the bar surface. The tile
-    /// itself is just the glass and its backlight; the raised look comes from
-    /// the rim lighting in `convexGlassLight`.
-    private var convexGlassPanel: some View {
-        let shape = RoundedRectangle(cornerRadius: convexCornerRadius, style: .continuous)
-        return shape
-            .fill(Theme.readoutGlass)
-            .overlay {
-                // Same backlight bloom as the retro LCD: the light-mode pane
-                // is lit from within, brightest at the center.
-                if colorScheme == .light {
-                    shape.fill(
-                        EllipticalGradient(
-                            colors: [.white.opacity(0.24), .clear],
-                            center: .center,
-                            startRadiusFraction: 0,
-                            endRadiusFraction: 0.85
-                        )
-                    )
-                }
-            }
-    }
-
-    /// The convex tile's lighting, drawn over the digits since the glass sits
-    /// above them: a domed specular bloom high on the tile where the curved
-    /// surface faces the light, and a rim line that's brightest along the top
-    /// edge with a fainter reflected catch along the bottom.
-    private var convexGlassLight: some View {
-        let shape = RoundedRectangle(cornerRadius: convexCornerRadius, style: .continuous)
-        return shape
-            .fill(
-                EllipticalGradient(
-                    stops: [
-                        .init(color: .white.opacity(colorScheme == .light ? 0.28 : 0.13), location: 0),
-                        .init(color: .white.opacity(colorScheme == .light ? 0.10 : 0.04), location: 0.55),
-                        .init(color: .clear, location: 1)
-                    ],
-                    center: UnitPoint(x: 0.5, y: 0.16),
-                    startRadiusFraction: 0,
-                    endRadiusFraction: 0.95
-                )
-            )
-            .overlay {
-                // Thin bezel: a narrow band where the dome curves away from
-                // the light at the perimeter, darkening the glass rim evenly.
-                shape.strokeBorder(
-                    .black.opacity(colorScheme == .light ? 0.10 : 0.28),
-                    lineWidth: 1
-                )
-            }
-            .overlay {
-                // Raised rim: the top edge catches the light, the bottom edge
-                // falls into shadow — the cue that the tile stands proud of
-                // the bar surface.
-                shape.strokeBorder(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .white.opacity(colorScheme == .light ? 0.60 : 0.30), location: 0),
-                            .init(color: .clear, location: 0.5),
-                            .init(color: .black.opacity(colorScheme == .light ? 0.22 : 0.45), location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 1
-                )
-            }
-            .allowsHitTesting(false)
-    }
-
-    /// Bezel plate plus the dark glass window sunk into it.
-    private var retroPanel: some View {
-        ZStack {
-            // Polished metal surround: a chrome-style sweep — bright where the
-            // light catches the top, darkening through the middle, then a faint
-            // reflected glow along the bottom edge, the way a buffed ring picks
-            // up light from below.
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Theme.transportButtonFill)
-                .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: Theme.readoutBezelHighlight, location: 0),
-                                    .init(color: .clear, location: 0.32),
-                                    .init(color: Theme.readoutBezelShadow, location: 0.82),
-                                    .init(color: Theme.readoutBezelReflection, location: 1)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(Theme.readoutStroke, lineWidth: 1)
-                }
-                .overlay {
-                    // Chamfer glint: a hairline just inside the frame that
-                    // catches light along its bottom edge, where the machined
-                    // ring turns down toward the glass.
-                    RoundedRectangle(cornerRadius: glassCornerRadius + 1, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [.clear, Theme.readoutBezelReflection],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1
-                        )
-                        .padding(bezelWidth - 1)
-                }
-                .shadow(color: Theme.readoutFrameShadow, radius: 2, y: 1)
-
-            // Glass window recessed into the bezel: an even inner shadow rings
-            // the whole well so the recess looks uniform.
-            RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
-                .fill(
-                    Theme.readoutGlass
-                        .shadow(.inner(color: Theme.readoutWellShadow, radius: 3, y: 1))
-                )
-                .overlay {
-                    // Backlight bloom: the electroluminescent panel behind the
-                    // LCD is brightest in the middle and falls off toward the
-                    // edges, so the glass reads as lit from within.
-                    if colorScheme == .light {
-                        RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
-                            .fill(
-                                EllipticalGradient(
-                                    colors: [.white.opacity(0.24), .clear],
-                                    center: .center,
-                                    startRadiusFraction: 0,
-                                    endRadiusFraction: 0.85
-                                )
-                            )
-                    }
-                }
-                .overlay {
-                    // Lip where the glass meets the bezel: dark top edge, light
-                    // bottom edge, so the window reads as sunk below the ring.
-                    RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [.black.opacity(0.45), .white.opacity(0.22)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1
-                        )
-                }
-                .padding(bezelWidth)
-        }
     }
 }
 
@@ -758,6 +549,117 @@ struct SevenSegmentDisplay: View {
             ))
         }
     }
+}
+
+// MARK: - A2 control bar
+
+/// The A2 control bar shared by playlist and compare (spec §3, §5): the
+/// transport row over the readout on one surface, then the one divider to
+/// the content below. Stretches to any window width: the side slots stay
+/// pinned to the 10 pt edge insets, the centre group stays centred (the side
+/// slots are equal), and the readout takes the remaining width.
+struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: View>: View {
+    let showsArtwork: Bool
+    @ViewBuilder let leading: Leading
+    @ViewBuilder let center: Center
+    @ViewBuilder let trailing: Trailing
+    @ViewBuilder let readout: Readout
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    leading
+                        .frame(width: ControlBarMetrics.sideSlotSize.width, height: ControlBarMetrics.sideSlotSize.height)
+                    Spacer(minLength: 0)
+                    HStack(spacing: ControlBarMetrics.centerSpacing) { center }
+                    Spacer(minLength: 0)
+                    trailing
+                        .frame(width: ControlBarMetrics.sideSlotSize.width, height: ControlBarMetrics.sideSlotSize.height)
+                }
+                // 10 pt under the cover; 24 pt under the titlebar overlay so
+                // the side buttons clear the window buttons and the toggle.
+                .padding(.top, TakesWindowPolicy.controlBarTopPadding(showsArtwork: showsArtwork))
+                readout
+                    .padding(.top, ControlBarMetrics.readoutTopSpacing)
+                    .padding(.bottom, ControlBarMetrics.readoutBottomPadding)
+            }
+            .padding(.horizontal, ControlBarMetrics.edgeInset)
+            // Raised deck: a light wash lifts the bar off the shared window
+            // material. Decorative, so it must not take clicks from the drag
+            // area behind it.
+            .background(Theme.controlBarLift.allowsHitTesting(false))
+            // The control bar doubles as the titlebar: clicks on empty bar
+            // space drag the window.
+            .background(WindowDragArea())
+            ControlBarDivider()
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The groove between the control bar and the content below (spec §3): a
+/// dark edge over a reflected light edge, as half-point lines so the
+/// divider keeps a 1 pt layout height. The only divider under the bar.
+struct ControlBarDivider: View {
+    static let height: CGFloat = 1
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Theme.transportDividerShadow)
+            Rectangle().fill(Theme.transportDividerHighlight)
+        }
+        .frame(height: Self.height)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Shuffle, Blind and Repeat (spec §5.1): a plain 20 pt icon in the
+/// secondary label colour, no circle, centred in the 30 × 40 pt side slot.
+/// Engaged, the glyph lights the way v2.9.0's engaged secondary buttons do
+/// (`Theme.primaryLitGlyph` with the secondary appearance's glow and bloom).
+struct ControlBarSideButtonStyle: ButtonStyle {
+    static let glyphSize: CGFloat = 20
+
+    var isOn = false
+
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.transportAppearance) private var transportAppearance
+
+    func makeBody(configuration: Configuration) -> some View {
+        let appearance = colorScheme == .dark ? transportAppearance.darkSecondary : transportAppearance.lightSecondary
+        let glow = isOn && isEnabled
+        return configuration.label
+            .font(.system(size: Self.glyphSize, weight: .medium))
+            .foregroundStyle(isOn ? AnyShapeStyle(Theme.primaryLitGlyph) : AnyShapeStyle(.secondary))
+            .shadow(color: glow ? Theme.primary.opacity(appearance.activeGlyphGlowOpacity) : .clear,
+                    radius: glow ? CGFloat(appearance.activeGlyphGlowRadius) : 0)
+            .shadow(color: glow ? Theme.primary.opacity(appearance.activeGlyphBloomOpacity) : .clear,
+                    radius: glow ? CGFloat(appearance.activeGlyphBloomRadius) : 0)
+            .frame(width: ControlBarMetrics.sideSlotSize.width,
+                   height: ControlBarMetrics.sideSlotSize.height)
+            .contentShape(Rectangle())
+            .opacity(isEnabled ? (configuration.isPressed ? 0.55 : 1) : 0.35)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// A2 control-bar metrics (spec §3, §5.1) and v2.9.0's transport button
+/// sizes.
+enum ControlBarMetrics {
+    static let edgeInset: CGFloat = 10
+    /// Shuffle/Blind and Repeat: chosen so Blind sits directly above
+    /// compare's 30 pt back button.
+    static let sideSlotSize = CGSize(width: 30, height: 40)
+    static let centerSpacing: CGFloat = 12
+    static let readoutTopSpacing: CGFloat = 10
+    static let readoutBottomPadding: CGFloat = 12
+    static let primaryDiameter: CGFloat = 56
+    static let primaryGlyphSize: CGFloat = 22
+    static let secondaryDiameter: CGFloat = 40
+    static let secondaryGlyphSize: CGFloat = 15
 }
 
 /// Debug panel (surfaced in an inspector via Debug ▸ Appearance Tuner) for

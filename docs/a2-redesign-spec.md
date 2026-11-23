@@ -264,11 +264,12 @@ Each is meant to fit one session and leave the app working.
 
 1. **Window shell and artwork.** *Done.* 360 pt window for both modes,
    artwork area, titlebar overlay, artwork toggle with persistence and
-   resizing. Embedded artwork loading. Until milestone 2, the pre-A2 control
-   bars stack their buttons above the readout below 640 pt wide.
-2. **Control bar.** New transport row layout, glass readout (playlist
-   two-line with LED meter; compare one-line with back button). Remove the
-   comparison navigation bar.
+   resizing. Embedded artwork loading.
+2. **Control bar.** *Done.* New transport row layout, glass readout
+   (playlist two-line with LED meter; compare one-line with back button).
+   Remove the comparison navigation bar. Also removed the Teenage
+   Engineering theme and the Retro readout frame, and dropped compare's
+   zoom controls until milestone 5 (§13).
 3. **Playlist rows.** Two-line rows, thumbnails, stacked art, version rows
    with tag names, middle truncation, hover Compare, missing-file overlay.
    Remove the header bar.
@@ -293,9 +294,45 @@ Update `AGENTS.md` (ownership, invariants, test map) as each milestone lands.
   New elements need light designs of their own: the frosted artwork-toggle
   chip, the lane info strip's fade, the stacked-thumbnail card edges, and
   the list's row tints.
-- **Teenage Engineering control-bar theme: out of scope.** A2 targets the
-  classic theme only. Leave `ControlBarTheme.teenageEngineering` as it is;
-  how it maps onto the A2 control bar is a later question.
+- **Teenage Engineering control-bar theme: removed** (milestone 2). A2 has
+  one control-bar look, so the theme, `ControlBarTheme`, its setting and
+  the Settings picker are gone. A stored `controlBarTheme` preference is
+  ignored. The theme is in git history (before commit "Remove the Teenage
+  Engineering control bar theme") if it is wanted again.
+- **Retro readout frame: removed** (milestone 2). The readouts use the Glass
+  frame only; `ReadoutStyle` and the "Readout frame" picker are gone, and a
+  stored `readoutStyle` preference is ignored.
+- **Readout titles** (milestone 2). Both readouts show a version's title tag,
+  falling back to its filename without the extension, uppercased. Playlist:
+  the playing (or current) version. Compare: the audible version, except in
+  Blind Listening Mode, where it shows `TRACK n` (the lane's position), as
+  the lanes and Now Playing do, so the readout can't reveal the version. The
+  playlist readout drops the pre-A2 readout's artist/album line and its small
+  artwork tile; the cover carries the artwork.
+- **Compare zoom controls: dropped until milestone 5.** The compare
+  transport row has no room for them. ⌘+/⌘−, Zoom to Selection and pinch
+  still zoom; the bottom bar brings the on-screen controls back.
+- **Esc leaves compare**, as the back button and ⌘[ do (§9). It goes through
+  the same focus-safe shortcut gate, so text fields keep Esc.
+- **Engaged side buttons** (Shuffle on, Blind on, Repeat not Off): the plain
+  glyph lights in `Theme.primaryLitGlyph` with the secondary appearance's
+  glow and bloom, the same treatment v2.9.0's engaged secondary buttons
+  use, still without a circle. Disabled: 35% opacity.
+- **LED meter:** 3 pt cells on a 4 pt pitch, 5 pt tall (about 78 cells in a
+  360 pt window), keeping `DotMatrixProgressBar`'s endcaps and dim unlit
+  cells. The lit run is drawn a step below full; the leading cell is
+  brightest (white-hot in dark, full ink in light). It has 3 pt of extra
+  hit area above and below. Playlist readout content: 20 pt line, 5 pt gap,
+  5 pt meter, 6 pt above and below.
+- **Divider:** the existing groove tokens (`Theme.transportDividerShadow`
+  over `transportDividerHighlight`) drawn as two half-point lines, 1 pt in
+  all, as the comparison section already drew it; the 1 pt + 1 pt in §3 is
+  the canvas's approximation. Compare's 5 pt shadow under the control bar is
+  gone, so the groove is the only edge there.
+- **Control-bar heights differ by mode.** The readouts are 42 and 30 pt, so
+  the compare bar is 12 pt shorter (119 vs 131 pt with artwork) and the
+  content below starts 12 pt higher in compare. The transport row and
+  everything above it stay put.
 - **Compare is unavailable for single-version items.** They show no
   disclosure chevron and no Compare pill.
 - **Long readout titles scroll.** In both readouts, a title wider than its

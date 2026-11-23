@@ -40,6 +40,18 @@ struct PlaylistPlaybackBoundaryTests {
         #expect(version.gainDB == -8)
     }
 
+    /// The compare readout names the audible version by its title tag.
+    @Test func loadedTrackCarriesDescriptiveTags() {
+        var version = makeVersion(offset: 0)
+        version.metadata.title = "Taxman (2009 Stereo Mix)"
+        version.metadata.artist = "The Beatles"
+        version.metadata.album = "Revolver"
+        let track = PlaylistPlaybackBoundary.loadedTrack(for: version)
+        #expect(track.title == "Taxman (2009 Stereo Mix)")
+        #expect(track.artist == "The Beatles")
+        #expect(track.album == "Revolver")
+    }
+
     @Test func enteringWithinSavedLoopKeepsLoopAndPausedState() {
         let version = makeVersion(offset: 5)
         var item = PlaylistItem(title: "Song", versions: [version], selectedVersionID: version.id)

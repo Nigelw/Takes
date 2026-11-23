@@ -1,168 +1,173 @@
 import AppKit
 import SwiftUI
 
-// MARK: - Now-playing panel
+// MARK: - A2 control-bar readouts
 
-/// The playlist transport's readout: a dot-matrix LCD in the manner of a 90s
-/// car-stereo head unit. Album artwork on the left when the file carries any,
-/// then two text lines (title; artist — album) and a third row with the
-/// elapsed time as small seven-segment digits (the comparison readout's
-/// numerals) and a segmented progress bar, all behind the same glass/bezel
-/// the comparison readout uses and at the same panel height. The panel fills
-/// whatever width it is given — the transport bar hands it a fixed width — and
-/// fits as many character cells per line as that width allows.
-///
-/// Text lines re-render only when their strings change (track navigation, or
-/// once per displayed second for the time). The bar's fill is Core
-/// Animation-driven between transport anchor events, so steady playback does
-/// no per-frame SwiftUI work.
-struct PlaylistNowPlayingReadout: View {
-    /// Shared with the comparison readout so the two transports match.
-    static let panelHeight: CGFloat = DigitalTimeReadout.panelHeight
-
-    struct NowPlaying: Equatable {
-        var title: String = ""
-        var artist: String?
-        var album: String?
+/// The title field's text in both A2 readouts (spec §5.2): the version's
+/// title tag, else its filename without the extension, uppercased for the
+/// dot-matrix face. In Blind Listening Mode the compare readout names the
+/// audible lane by position (`TRACK 2`), as the lanes and Now Playing do, so
+/// the readout can't reveal which version is audible.
+enum ControlBarReadoutTitle {
+    static func playlist(_ version: PlaylistVersion?) -> String {
+        guard let version else { return "" }
+        return text(tag: version.metadata.title, url: version.file.storedURL)
     }
 
-    let style: ReadoutStyle
-    let nowPlaying: NowPlaying
-    let artwork: NSImage?
-    let elapsed: String
+    static func comparison(_ session: ComparisonSession) -> String {
+        guard let index = session.activeTrackIndex else { return "" }
+        if session.isBlindListeningModeEnabled { return "TRACK \(index + 1)" }
+        let track = session.tracks[index].loadedTrack
+        return text(tag: track.title, url: track.url)
+    }
+
+    static func text(tag: String?, url: URL) -> String {
+        let tag = tag?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !tag.isEmpty { return tag.uppercased() }
+        let stem = url.deletingPathExtension().lastPathComponent
+        return (stem.isEmpty ? url.lastPathComponent : stem).uppercased()
+    }
+}
+
+/// Playlist readout, 42 pt, two lines (spec §5.2): elapsed time, a divider
+/// and the playing version's title, over an LED progress meter that is also
+/// the seek control.
+///
+/// Steady playback does no per-frame main-thread work: the elapsed digits are
+/// their own leaf and re-render once per displayed second
+/// (`playingReadoutText`), the title re-renders only when it changes and
+/// scrolls on Core Animation, and the meter steps on a discrete Core
+/// Animation keyframe per transport anchor event.
+struct PlaylistControlBarReadout: View {
+    static let height: CGFloat = 42
+    static let cornerRadius: CGFloat = 9
+    /// 3 pt cells on a 4 pt pitch: about 80 cells across the 340 pt
+    /// readout of a 360 pt window.
+    static let meterMetrics = DotMatrixMetrics(dotSize: 3, dotGap: 1, cellGap: 3)
+    static let meterHeight: CGFloat = 5
+    static let lineSpacing: CGFloat = 5
+    /// Extra hit area above and below the 5 pt meter, so it is easy to grab.
+    static let meterHitOutset: CGFloat = 3
+
     let controller: PlaybackController
+    let title: String
     let seek: (TimeInterval) -> Void
 
-    private let metrics = DotMatrixMetrics()
-    /// Whole points, so the second and third rows start on the pixel grid.
-    private let lineSpacing: CGFloat = 2
-    /// Height of the third row: the elapsed-time digits and the progress
-    /// bar. The clock is a seven-segment display, not dot-matrix text —
-    /// a 5×7 cell at these metrics is 20pt tall, too much for a secondary
-    /// field, and the segment renderer scales freely without any pixel
-    /// snapping to keep.
-    private let clockHeight: CGFloat = 10
-    /// Gap between the artwork square and the text block.
-    private let artworkSpacing: CGFloat = 9
-    /// Gap between the elapsed-time digits and the progress bar.
-    private let timeBarGap: CGFloat = 4
-    /// A small rounding on the artwork tile — not the panel's own bezel
-    /// radius (too heavy for a small square), just enough to soften the
-    /// corners.
-    private let artworkCornerRadius: CGFloat = 2
-    private var artworkShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: artworkCornerRadius, style: .continuous)
-    }
-    /// Progress bar/endcap height: a touch under the clock digits, so the
-    /// bar reads as sitting beside them rather than framing them. Whole
-    /// points, like everything else on the grid.
-    private var barHeight: CGFloat { clockHeight - 2 }
-
-    /// Height of the title/artist—album lines plus the elapsed-time/progress
-    /// row (the bar and its endcaps fit inside that row's height); the
-    /// artwork square matches this total, so with top-aligned children of
-    /// equal height, the artwork and the text block start and end at exactly
-    /// the same points.
-    private var contentHeight: CGFloat { metrics.lineHeight * 2 + lineSpacing * 2 + clockHeight }
-
-    /// Inset from the panel edge to the content, on the left/right and on
-    /// the top. Rounded down to a whole point so the first dot row sits on
-    /// the pixel grid at 1x; the spare point (when the panel's leftover space
-    /// is odd) goes below the content, where it is invisible.
-    private var padding: CGFloat { ((Self.panelHeight - contentHeight) / 2).rounded(.down) }
-
-    /// Cells per text line that fit in `panelWidth` after the glass insets
-    /// and, when present, the artwork square and its gap. `DotMatrixDisplay.fit`
-    /// truncates longer text with an ellipsis.
-    private func columns(forPanelWidth panelWidth: CGFloat) -> Int {
-        var available = panelWidth - padding * 2
-        if artwork != nil { available -= contentHeight + artworkSpacing }
-        // A line of n cells is n advances minus the trailing cell gap.
-        return max(Int(((available + metrics.cellGap) / metrics.cellAdvance).rounded(.down)), 1)
-    }
-
     var body: some View {
-        GeometryReader { proxy in
-            let columns = columns(forPanelWidth: proxy.size.width)
-            // The time row is pinned to the text lines' width so the progress
-            // bar ends flush with them.
-            let lineWidth = metrics.lineWidth(columns: columns)
-            // When both lines scroll, they share one loop period — the
-            // longer of the two lines' own natural periods — so a shorter
-            // line holds at its end-of-cycle position and waits rather than
-            // looping ahead of a slower sibling. A line that fits, or is the
-            // only one overflowing, is unaffected (`nil` lets it use its own
-            // natural period).
-            let sharedPeriod = Self.sharedMarqueePeriod(
-                texts: [nowPlaying.title, secondLine], columns: columns, metrics: metrics
-            )
-
-            // Explicit `.top`, not the default `.center`: the artwork and the
-            // text block are built to the same height (`contentHeight`), so
-            // top-aligning them also aligns their bottoms — the elapsed-time
-            // row's bottom lands exactly on the artwork's bottom — without
-            // depending on that equality being coincidentally invisible under
-            // `.center` too.
-            HStack(alignment: .top, spacing: artworkSpacing) {
-                if let artwork {
-                    Image(nsImage: artwork)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: contentHeight, height: contentHeight)
-                        .clipShape(artworkShape)
-                        .overlay {
-                            artworkShape.strokeBorder(.black.opacity(0.35), lineWidth: 0.5)
-                        }
-                        .accessibilityHidden(true)
-                }
-                VStack(alignment: .leading, spacing: lineSpacing) {
-                    DotMatrixMarqueeText(text: nowPlaying.title, columns: columns, metrics: metrics, sharedPeriod: sharedPeriod)
-                    DotMatrixMarqueeText(text: secondLine, columns: columns, metrics: metrics, sharedPeriod: sharedPeriod)
-                    HStack(spacing: timeBarGap) {
-                        SevenSegmentDisplay(text: elapsed, digitHeight: clockHeight)
-                        DotMatrixProgressBar(controller: controller, seek: seek, metrics: metrics, barHeight: barHeight)
-                    }
-                    .frame(width: lineWidth, height: clockHeight)
-                }
-            }
-            // Pinned to the top-leading corner by a whole-point inset rather
-            // than centered, so the first dot row can never land half a
-            // pixel off the grid at 1x when the panel's leftover space is odd.
-            .padding(.top, padding)
-            .padding(.horizontal, padding)
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+        // 20 + 5 + 5 = 30 pt of content, 6 pt above and below: whole points,
+        // so the first dot row sits on the pixel grid.
+        VStack(alignment: .leading, spacing: Self.lineSpacing) {
+            ControlBarReadoutLine(controller: controller, title: title)
+            DotMatrixProgressBar(controller: controller, seek: seek, metrics: Self.meterMetrics,
+                                 barHeight: Self.meterHeight)
+                .frame(height: Self.meterHeight + Self.meterHitOutset * 2)
+                .padding(.vertical, -Self.meterHitOutset)
         }
-        .frame(height: Self.panelHeight)
-        .readoutPanelChrome(style: style)
+        .padding(.horizontal, ControlBarReadoutLine.horizontalInset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: Self.height)
+        .readoutGlass(cornerRadius: Self.cornerRadius)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Now Playing")
-        .accessibilityValue(accessibilityDescription)
     }
+}
 
-    // MARK: Line composition
+/// Compare readout, 30 pt, one line, with the back button on its left (spec
+/// §5.2). Shows the audible version, so it follows Switch Track.
+struct CompareControlBarReadout: View {
+    static let height: CGFloat = 30
+    static let cornerRadius: CGFloat = 7
+    static let backButtonSpacing: CGFloat = 8
 
-    /// `artist — album` when both are tagged; whichever is present alone
-    /// otherwise; blank when neither is.
-    private var secondLine: String {
-        let parts = [nowPlaying.artist, nowPlaying.album]
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return parts.joined(separator: " \u{2014} ")
+    let controller: PlaybackController
+    let back: () -> Void
+
+    var body: some View {
+        HStack(spacing: Self.backButtonSpacing) {
+            Button(action: back) { Image(systemName: "chevron.left") }
+                .buttonStyle(CircleTransportButtonStyle(
+                    kind: .secondary,
+                    diameter: Self.height,
+                    glyphSize: 13,
+                    cornerRadius: Self.cornerRadius
+                ))
+                .help("Back to Playlist")
+                .accessibilityLabel("Back to Playlist")
+            ControlBarReadoutLine(controller: controller, title: ControlBarReadoutTitle.comparison(controller.session))
+                .padding(.horizontal, ControlBarReadoutLine.horizontalInset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: Self.height)
+                .readoutGlass(cornerRadius: Self.cornerRadius)
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Now Playing")
+        }
     }
+}
 
-    private var accessibilityDescription: String {
-        var parts = [nowPlaying.title]
-        if !secondLine.isEmpty { parts.append(secondLine) }
-        parts.append("\(elapsed) elapsed")
-        return parts.joined(separator: ", ")
+/// One readout line: seven-segment elapsed time, a faint divider, then the
+/// title in the dot-matrix face, scrolling when it overflows.
+struct ControlBarReadoutLine: View {
+    static let horizontalInset: CGFloat = 10
+    static let digitHeight: CGFloat = 14
+    static let spacing: CGFloat = 9
+
+    let controller: PlaybackController
+    let title: String
+
+    var body: some View {
+        HStack(spacing: Self.spacing) {
+            ControlBarElapsedDigits(controller: controller, digitHeight: Self.digitHeight)
+            Rectangle()
+                .fill(Theme.readoutGlow.opacity(0.25))
+                .frame(width: 1, height: Self.digitHeight)
+                .accessibilityHidden(true)
+            ControlBarReadoutTitleField(title: title)
+        }
+        .frame(height: DotMatrixMetrics().lineHeight)
+        // Informational: clicks fall through to the window drag area, so
+        // the readout isn't a dead spot in the titlebar.
+        .allowsHitTesting(false)
     }
+}
 
-    /// The longest natural loop period among `texts` that actually overflow
-    /// `columns`, so sibling marquee lines can be told to loop in lockstep.
-    /// `nil` when none of them overflow (nothing to synchronize).
-    private static func sharedMarqueePeriod(texts: [String], columns: Int, metrics: DotMatrixMetrics) -> CFTimeInterval? {
-        let periods = texts.compactMap { DotMatrixMarqueeView.naturalTiming(text: $0, columns: columns, metrics: metrics)?.period }
-        return periods.max()
+/// The elapsed-time digits, isolated so the once-per-second text change
+/// re-renders only this leaf. While playing the text comes from
+/// `playingReadoutText`, which changes only when the displayed second rolls
+/// over; while paused it derives from `transportPosition`, written only at
+/// anchor events.
+private struct ControlBarElapsedDigits: View {
+    let controller: PlaybackController
+    let digitHeight: CGFloat
+
+    var body: some View {
+        let elapsed = controller.session.isPlaying
+            ? controller.playingReadoutText
+            : controller.session.transportPosition.formattedSignedTimestamp
+        SevenSegmentDisplay(text: elapsed, digitHeight: digitHeight)
+            .accessibilityElement()
+            .accessibilityLabel("Elapsed Time")
+            .accessibilityValue(elapsed)
+    }
+}
+
+/// The title takes whatever width the line leaves it, as whole character
+/// cells; a title wider than that scrolls (`DotMatrixMarqueeText`).
+private struct ControlBarReadoutTitleField: View {
+    let title: String
+    private let metrics = DotMatrixMetrics()
+    @State private var columns = 1
+
+    var body: some View {
+        DotMatrixMarqueeText(text: title, columns: columns, metrics: metrics)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: Int.self) { proxy in
+                // A line of n cells is n advances minus the trailing cell gap.
+                max(Int(((proxy.size.width + metrics.cellGap) / metrics.cellAdvance).rounded(.down)), 1)
+            } action: { columns = $0 }
+            .accessibilityElement()
+            .accessibilityLabel("Title")
+            .accessibilityValue(title)
     }
 }
 
@@ -496,7 +501,7 @@ struct DotMatrixMarqueeText: View {
     let columns: Int
     var metrics = DotMatrixMetrics()
     /// A loop period shared with a sibling marquee line (e.g. the title and
-    /// artist—album lines in `PlaylistNowPlayingReadout`), so both lines
+    /// artist—album lines of a two-line readout), so both lines
     /// start their pause/scroll cycles in lockstep instead of drifting.
     /// `nil` lets this line use its own natural period.
     var sharedPeriod: CFTimeInterval?
@@ -607,7 +612,7 @@ final class DotMatrixMarqueeView: NSView {
 
     /// The natural timing this line's own content needs to scroll once
     /// through at `scrollSpeed`, independent of any view instance — usable
-    /// both here and by a parent view (e.g. `PlaylistNowPlayingReadout`)
+    /// both here and by a parent view
     /// computing a shared period across sibling lines. `nil` when `text`
     /// doesn't overflow `columns` at all, i.e. no marquee is needed.
     ///
@@ -777,6 +782,10 @@ final class DotMatrixProgressView: NSView {
     private let caps = CAShapeLayer()
     private let track = CALayer()
     private let fill = CALayer()
+    /// The leading lit element, drawn brighter than the rest of the run
+    /// (spec §5.2). One element slot wide, right-anchored at the fill's edge
+    /// and stepped by the same discrete keyframes, inside the same mask.
+    private let head = CALayer()
     private let blocks = CAShapeLayer()
     private var metrics = DotMatrixMetrics()
     private var barHeight: CGFloat = 0
@@ -793,7 +802,9 @@ final class DotMatrixProgressView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         fill.anchorPoint = CGPoint(x: 0, y: 0.5)
+        head.anchorPoint = CGPoint(x: 1, y: 0.5)
         track.addSublayer(fill)
+        track.addSublayer(head)
         track.mask = blocks
         layer?.addSublayer(rail)
         layer?.addSublayer(caps)
@@ -857,8 +868,14 @@ final class DotMatrixProgressView: NSView {
         rail.path = geometry.offSegments
         caps.path = geometry.caps
         applyHoverStyle(glow: glow)
-        fill.backgroundColor = glow.cgColor
+        // Dark: the run glows a step below full and the head runs white-hot.
+        // Light (dark ink on the backlit LCD): the run is a touch faded and
+        // the head carries the full ink.
+        let isDark = colorScheme == .dark
+        fill.backgroundColor = glow.withAlphaComponent(isDark ? 0.78 : 0.72).cgColor
+        head.backgroundColor = (isDark ? glow.blended(withFraction: 0.55, of: .white) ?? glow : glow).cgColor
         fill.removeAnimation(forKey: "progress")
+        head.removeAnimation(forKey: "progress")
 
         // A real bar graph lights whole elements only. The fill's width is
         // quantized to element boundaries (its edge always sits in a gap, so
@@ -870,6 +887,8 @@ final class DotMatrixProgressView: NSView {
         let lit = geometry.litCount(fraction: fraction)
         fill.position = CGPoint(x: 0, y: height / 2)
         fill.bounds = CGRect(x: 0, y: 0, width: geometry.fillWidth(litCount: lit), height: height)
+        head.bounds = CGRect(x: 0, y: 0, width: geometry.headWidth, height: height)
+        head.position = CGPoint(x: geometry.fillWidth(litCount: lit), y: height / 2)
         if playing && duration > current && lit < elementCount {
             let remaining = duration - current
             var values: [CGFloat] = []
@@ -889,6 +908,13 @@ final class DotMatrixProgressView: NSView {
             animation.duration = remaining
             animation.fillMode = .forwards; animation.isRemovedOnCompletion = false
             fill.add(animation, forKey: "progress")
+            let headAnimation = CAKeyframeAnimation(keyPath: "position.x")
+            headAnimation.values = values
+            headAnimation.keyTimes = keyTimes
+            headAnimation.calculationMode = .discrete
+            headAnimation.duration = remaining
+            headAnimation.fillMode = .forwards; headAnimation.isRemovedOnCompletion = false
+            head.add(headAnimation, forKey: "progress")
         }
         CATransaction.commit()
     }
@@ -907,6 +933,11 @@ final class DotMatrixProgressView: NSView {
         var litRightEdges: [CGFloat]
         var gap: CGFloat
         var frameHeight: CGFloat
+        /// Width of the head layer: one block plus a gap, so right-anchored
+        /// at `fillWidth(litCount:)` it covers the leading element only (the
+        /// caps sit two gaps off the row, so it never reaches the block next
+        /// to a cap).
+        var headWidth: CGFloat
 
         /// How many whole elements are lit at `fraction` of the duration:
         /// the bar only ever shows completed elements, so this floors.
@@ -976,7 +1007,7 @@ final class DotMatrixProgressView: NSView {
         let regionWidth = regionEnd - regionStart
         guard regionWidth >= blockWidth else {
             return BarGeometry(litMask: litMask, offSegments: offSegments, caps: caps, litRightEdges: litRightEdges,
-                               gap: gap, frameHeight: frameHeight)
+                               gap: gap, frameHeight: frameHeight, headWidth: blockWidth + gap)
         }
         let capRadius = min(cornerRadius, capWidth / 2)
         let leftCap = CGRect(x: 0, y: 0, width: capWidth, height: frameHeight)
@@ -1002,7 +1033,7 @@ final class DotMatrixProgressView: NSView {
         litMask.addRoundedRect(in: rightCap, cornerWidth: capRadius, cornerHeight: capRadius)
         litRightEdges.append(rightCap.maxX)
         return BarGeometry(litMask: litMask, offSegments: offSegments, caps: caps, litRightEdges: litRightEdges,
-                           gap: gap, frameHeight: frameHeight)
+                           gap: gap, frameHeight: frameHeight, headWidth: blockWidth + gap)
     }
 
     // MARK: Hover affordance
@@ -1056,92 +1087,50 @@ final class DotMatrixProgressView: NSView {
 // MARK: - Panel chrome
 
 extension View {
-    /// The transport readout's glass and bezel treatment, matching the
-    /// comparison-mode time readout so both panels read as the same hardware.
-    func readoutPanelChrome(style: ReadoutStyle) -> some View {
-        modifier(ReadoutPanelChrome(style: style))
+    /// v2.9.0's Glass readout frame (its `ReadoutStyle.glass`), sized for any
+    /// panel: a convex tile on the control-bar surface with no bezel. The
+    /// corner radius scales with the panel height (11 at 56, 9 at 42, 7 at 30).
+    func readoutGlass(cornerRadius: CGFloat) -> some View {
+        modifier(ReadoutGlassChrome(cornerRadius: cornerRadius))
     }
 }
 
-/// Bezel/glass chrome shared by readout panels. Mirrors the treatments in
-/// `DigitalTimeReadout`, sized for a panel of any width and height.
-private struct ReadoutPanelChrome: ViewModifier {
-    let style: ReadoutStyle
+private struct ReadoutGlassChrome: ViewModifier {
+    let cornerRadius: CGFloat
 
     @Environment(\.colorScheme) private var colorScheme
 
-    private static let cornerRadius: CGFloat = 10
-    /// Width of the raised bezel ring the glass window is sunk into.
-    private static let bezelWidth: CGFloat = 4
-    /// Corner radius of the LCD glass window inside the bezel. Also the
-    /// radius of anything drawn on the glass as a physical inset — the
-    /// artwork tile — so the two shapes never drift apart.
-    static let glassCornerRadius: CGFloat = cornerRadius - bezelWidth
-    /// Corner radius of the convex glass tile.
-    private static let convexCornerRadius: CGFloat = 11
-
-    private var cornerRadius: CGFloat { Self.cornerRadius }
-    private var bezelWidth: CGFloat { Self.bezelWidth }
-    private var glassCornerRadius: CGFloat { Self.glassCornerRadius }
-    private var convexCornerRadius: CGFloat { Self.convexCornerRadius }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: cornerRadius, style: .continuous) }
 
     func body(content: Content) -> some View {
         content
-            .background {
-                switch style {
-                case .retro: retroPanel
-                case .glass: convexGlassPanel
-                }
-            }
-            .overlay {
-                switch style {
-                case .retro: retroSheen
-                case .glass: convexGlassLight
-                }
-            }
+            .background { glassPanel }
+            .overlay { glassLight }
     }
 
-    /// Backlight bloom: the electroluminescent panel behind the light-mode LCD
-    /// is brightest in the middle and falls off toward the edges.
-    private var backlightBloom: EllipticalGradient {
-        EllipticalGradient(
-            colors: [.white.opacity(0.24), .clear],
-            center: .center,
-            startRadiusFraction: 0,
-            endRadiusFraction: 0.85
-        )
-    }
-
-    private var retroSheen: some View {
-        RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
-            .fill(
-                LinearGradient(
-                    stops: [
-                        .init(color: .white.opacity(0.08), location: 0),
-                        .init(color: .white.opacity(0.02), location: 0.35),
-                        .init(color: .clear, location: 0.5)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .padding(bezelWidth)
-            .allowsHitTesting(false)
-    }
-
-    private var convexGlassPanel: some View {
-        let shape = RoundedRectangle(cornerRadius: convexCornerRadius, style: .continuous)
-        return shape
+    /// The tile itself: the glass and, in light mode, the backlit LCD's
+    /// bloom, brightest at the center.
+    private var glassPanel: some View {
+        shape
             .fill(Theme.readoutGlass)
             .overlay {
-                if colorScheme == .light { shape.fill(backlightBloom) }
+                if colorScheme == .light {
+                    shape.fill(EllipticalGradient(
+                        colors: [.white.opacity(0.24), .clear],
+                        center: .center,
+                        startRadiusFraction: 0,
+                        endRadiusFraction: 0.85
+                    ))
+                }
             }
             .allowsHitTesting(false)
     }
 
-    private var convexGlassLight: some View {
-        let shape = RoundedRectangle(cornerRadius: convexCornerRadius, style: .continuous)
-        return shape
+    /// The tile's lighting, drawn over the content since the glass sits above
+    /// it: a domed specular bloom high on the tile, a dark rim where the dome
+    /// curves away, and a lit top edge over a shadowed bottom edge.
+    private var glassLight: some View {
+        shape
             .fill(
                 EllipticalGradient(
                     stops: [
@@ -1172,65 +1161,5 @@ private struct ReadoutPanelChrome: ViewModifier {
                 )
             }
             .allowsHitTesting(false)
-    }
-
-    private var retroPanel: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Theme.transportButtonFill)
-                .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: Theme.readoutBezelHighlight, location: 0),
-                                    .init(color: .clear, location: 0.32),
-                                    .init(color: Theme.readoutBezelShadow, location: 0.82),
-                                    .init(color: Theme.readoutBezelReflection, location: 1)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(Theme.readoutStroke, lineWidth: 1)
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: glassCornerRadius + 1, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [.clear, Theme.readoutBezelReflection],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1
-                        )
-                        .padding(bezelWidth - 1)
-                }
-                .shadow(color: Theme.readoutFrameShadow, radius: 2, y: 1)
-
-            RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
-                .fill(Theme.readoutGlass.shadow(.inner(color: Theme.readoutWellShadow, radius: 3, y: 1)))
-                .overlay {
-                    if colorScheme == .light {
-                        RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous).fill(backlightBloom)
-                    }
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [.black.opacity(0.45), .white.opacity(0.22)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1
-                        )
-                }
-                .padding(bezelWidth)
-        }
-        .allowsHitTesting(false)
     }
 }

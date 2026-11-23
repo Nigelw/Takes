@@ -33,12 +33,6 @@ private struct GeneralSettingsView: View {
                     Text(AppearanceTheme.light.title).tag(AppearanceTheme.light)
                     Text(AppearanceTheme.dark.title).tag(AppearanceTheme.dark)
                 }
-
-                Picker("Readout frame", selection: $settings.readoutStyle) {
-                    ForEach(ReadoutStyle.allCases) { style in
-                        Text(style.title).tag(style)
-                    }
-                }
             } header: {
                 Text("Appearance")
             }

@@ -26,29 +26,6 @@ enum AppearanceTheme: String, CaseIterable, Identifiable {
     }
 }
 
-/// Visual treatment for the transport time readout.
-enum ReadoutStyle: String, CaseIterable, Identifiable {
-    static let allCases: [ReadoutStyle] = [.glass, .retro]
-
-    /// A convex glass tile resting directly on the control bar: no bezel, a
-    /// domed highlight where the glass catches the light, edges dipping just
-    /// below the surrounding surface.
-    case glass
-
-    /// Seven-segment LED/LCD display behind dark glass, styled like an 80s rack
-    /// unit's counter — glowing digits in dark mode, an amber-backlit LCD in light.
-    case retro
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .retro: return "Retro"
-        case .glass: return "Glass"
-        }
-    }
-}
-
 /// Whether playlist imports group tracks using title, artist, filename, and duration.
 enum AutomaticGroupingMode: String, CaseIterable, Identifiable {
     case off
@@ -95,7 +72,6 @@ final class AppSettings: ObservableObject {
     nonisolated static let offsetStepRange = 1...10_000
     nonisolated static let alignTracksOnOpenDefault = false
     nonisolated static let appearanceThemeDefault: AppearanceTheme = .system
-    nonisolated static let readoutStyleDefault: ReadoutStyle = .glass
     nonisolated static let automaticGroupingModeDefault: AutomaticGroupingMode = .automatic
     nonisolated static let showsArtworkDefault = true
 
@@ -103,7 +79,6 @@ final class AppSettings: ObservableObject {
     nonisolated static let offsetLargeStepKey = "offsetLargeNudgeStep"
     nonisolated static let alignTracksOnOpenKey = "alignTracksOnOpen"
     nonisolated static let appearanceThemeKey = "appearanceTheme"
-    nonisolated static let readoutStyleKey = "readoutStyle"
     nonisolated static let automaticGroupingModeKey = "automaticGroupingMode"
     nonisolated static let showsArtworkKey = "showsArtwork"
     nonisolated static let appearanceThemeOverrideArgument = "--appearance-theme"
@@ -142,11 +117,6 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(appearanceTheme.rawValue, forKey: Self.appearanceThemeKey) }
     }
 
-    /// The transport readout's visual style. Persisted.
-    @Published var readoutStyle: ReadoutStyle {
-        didSet { defaults.set(readoutStyle.rawValue, forKey: Self.readoutStyleKey) }
-    }
-
     /// Whether playlist imports group tracks from descriptive metadata.
     @Published var automaticGroupingMode: AutomaticGroupingMode {
         didSet { defaults.set(automaticGroupingMode.rawValue, forKey: Self.automaticGroupingModeKey) }
@@ -183,7 +153,6 @@ final class AppSettings: ObservableObject {
         offsetLargeStep = Self.storedOffsetLargeStep(defaults)
         alignTracksOnOpen = Self.storedAlignTracksOnOpen(defaults)
         appearanceTheme = Self.appearanceThemeOverride(arguments: arguments) ?? Self.storedAppearanceTheme(defaults)
-        readoutStyle = Self.storedReadoutStyle(defaults)
         automaticGroupingMode = Self.storedAutomaticGroupingMode(defaults)
         showsArtwork = Self.storedShowsArtwork(defaults)
     }
@@ -203,7 +172,6 @@ final class AppSettings: ObservableObject {
         offsetLargeStep = Self.offsetLargeStepDefault
         alignTracksOnOpen = Self.alignTracksOnOpenDefault
         appearanceTheme = Self.appearanceThemeDefault
-        readoutStyle = Self.readoutStyleDefault
         automaticGroupingMode = Self.automaticGroupingModeDefault
         transportAppearance = TransportAppearance()
         indexBadgeAppearance = IndexBadgeAppearance()
@@ -214,7 +182,6 @@ final class AppSettings: ObservableObject {
             && offsetLargeStep == Self.offsetLargeStepDefault
             && alignTracksOnOpen == Self.alignTracksOnOpenDefault
             && appearanceTheme == Self.appearanceThemeDefault
-            && readoutStyle == Self.readoutStyleDefault
             && automaticGroupingMode == Self.automaticGroupingModeDefault
             && transportAppearance == TransportAppearance()
             && indexBadgeAppearance == IndexBadgeAppearance()
@@ -238,10 +205,6 @@ final class AppSettings: ObservableObject {
 
     nonisolated static func storedAppearanceTheme(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> AppearanceTheme {
         defaults.string(forKey: appearanceThemeKey).flatMap(AppearanceTheme.init(rawValue:)) ?? appearanceThemeDefault
-    }
-
-    nonisolated static func storedReadoutStyle(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> ReadoutStyle {
-        defaults.string(forKey: readoutStyleKey).flatMap(ReadoutStyle.init(rawValue:)) ?? readoutStyleDefault
     }
 
     nonisolated static func storedShowsArtwork(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> Bool {

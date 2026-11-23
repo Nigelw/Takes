@@ -910,14 +910,6 @@ private struct CanShowActiveTrackInFinderKey: FocusedValueKey {
     typealias Value = Bool
 }
 
-private struct TransportReadoutWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 180
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 private struct TrackInfoColumnResizeHandleView: NSViewRepresentable {
     let sectionWidth: CGFloat
     @Binding var columnWidth: Double
@@ -1016,7 +1008,6 @@ struct ContentView: View {
     var controller: PlaybackController { coordinator.controller }
     @Environment(\.undoManager) private var undoManager
     @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var zoomHaptics: ZoomHapticsController
     private let usesTemporaryDefaultWindowLayout: Bool
 
     @ObservedObject private var openFileCommandState: OpenFileCommandState
@@ -1068,10 +1059,6 @@ struct ContentView: View {
     /// re-laying-out. Written from the container via an equality-guarded
     /// `.onChange`; see `LaneViewport` for why it can't be a row input.
     @State private var laneViewportStore = LaneViewportStore()
-    @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
-    /// Below `TakesWindowPolicy.wideControlBarMinimumWidth` the control bar
-    /// stacks its buttons over the readout. Interim until milestone 2.
-    @State private var controlBarIsNarrow = true
     @State private var controlBarHeight: CGFloat = TakesWindowPolicy.controlBarReservedHeight
     @State private var trackInfoColumnWidth: Double
     @State private var showsAlignmentAttentionPopover = false
@@ -1220,34 +1207,12 @@ struct ContentView: View {
     private var contentStack: some View {
         VStack(alignment: .leading, spacing: 0) {
             controlBar
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 10) {
-                Button { Task { await coordinator.backToPlaylist() } } label: {
-                    Label("Back to Playlist", systemImage: "chevron.left")
-                }
-                .buttonStyle(.borderless)
-                Text(coordinator.workspace.items.first { $0.id == coordinator.mode.itemID }?.title ?? "Comparison")
-                    .font(.headline).lineLimit(1)
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .frame(height: TakesWindowPolicy.comparisonNavigationHeight)
             trackTimelineSection
                 .frame(maxHeight: .infinity)
                 // Recess the complete timeline section—including its header
-                // and ruler—beneath the lighter transport surface.
+                // and ruler—beneath the lighter transport surface. The
+                // control bar's groove is the only divider between them.
                 .background(Theme.timelineWellShade)
-                // Restore the transport shadow using the fixed-column
-                // shadow's exact color and 5pt fade extent.
-                .overlay(alignment: .top) {
-                    LinearGradient(
-                        colors: [Theme.frozenColumnShadow, .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: Self.frozenSurfaceShadowExtent)
-                    .allowsHitTesting(false)
-                }
         }
     }
 
@@ -1276,107 +1241,25 @@ struct ContentView: View {
         .allowsHitTesting(false)
     }
 
+    /// Compare control bar (spec §5): Blind · Play · Switch Track · Repeat
+    /// over the one-line readout with the back button.
     private var controlBar: some View {
-        Group {
-            if controlBarIsNarrow { narrowControlBarContent } else { wideControlBarContent }
+        ControlBarLayout(showsArtwork: settings.showsArtwork) {
+            blindListeningButton
+        } center: {
+            playButton
+            switchTrackButton
+        } trailing: {
+            repeatButton
+        } readout: {
+            CompareControlBarReadout(controller: controller) {
+                Task { await coordinator.backToPlaylist() }
+            }
         }
-        .padding(.top, TakesWindowPolicy.controlBarTopPadding(showsArtwork: settings.showsArtwork))
-        .padding(.bottom, 16)
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-            let narrow = size.width < TakesWindowPolicy.wideControlBarMinimumWidth
-            if narrow != controlBarIsNarrow { controlBarIsNarrow = narrow }
-            if abs(size.height - controlBarHeight) > 0.5 { controlBarHeight = size.height }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            if abs(height - controlBarHeight) > 0.5 { controlBarHeight = height }
         }
-        // Raised deck: a light wash lifts the bar off the shared window
-        // material, pairing with `timelineWellShade` below the divider.
-        // Purely decorative, so it must not intercept clicks — otherwise it
-        // swallows the mouseDown before the WindowDragArea behind it can drag.
-        .background(Theme.controlBarLift.allowsHitTesting(false))
-        // The control bar is the titlebar: any click on empty bar space
-        // (not claimed by a control above) drags the window.
-        .background(WindowDragArea())
         .componentDebugLabel("Control Bar", enabled: settings.showsComponentDebugLabels)
-    }
-
-    /// While playing the text comes from `playingReadoutText`, which changes
-    /// only when the displayed second rolls over; while paused it derives from
-    /// `transportPosition`, whose writes are then only user seeks. (A
-    /// TimelineView here kept the window's display-link layout cycle running
-    /// at full refresh for the whole duration of playback.)
-    private var transportReadout: some View {
-        DigitalTimeReadout(
-            style: settings.readoutStyle,
-            elapsed: controller.session.isPlaying
-                ? controller.playingReadoutText
-                : controller.session.transportPosition.formattedSignedTimestamp
-        )
-        // Purely informational, so let clicks fall through to the window
-        // drag area — the readout shouldn't be a dead spot in the titlebar.
-        .allowsHitTesting(false)
-    }
-
-    /// Interim 360 pt layout: buttons on one row, the readout below.
-    private var narrowControlBarContent: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 0) {
-                playButton
-                switchTrackButton
-                    .padding(.leading, 12)
-                Spacer(minLength: 8)
-                repeatButton
-                blindListeningButton
-                    .padding(.leading, 8)
-                zoomControls
-                    .padding(.leading, 8)
-            }
-            transportReadout
-                .frame(maxWidth: .infinity)
-        }
-        .padding(.horizontal, 10)
-    }
-
-    private var wideControlBarContent: some View {
-        GeometryReader { proxy in
-            let sideRegionWidth = max((proxy.size.width - transportReadoutWidth) / 2, 0)
-
-            ZStack {
-                HStack(spacing: 12) {
-                    playButton
-                    switchTrackButton
-                }
-                .frame(width: sideRegionWidth, alignment: .center)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                // Pinned to the true window center, independent of the side clusters.
-                transportReadout
-                    .background {
-                        GeometryReader { readoutProxy in
-                            Color.clear.preference(
-                                key: TransportReadoutWidthKey.self,
-                                value: readoutProxy.size.width
-                            )
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    repeatButton
-                    blindListeningButton
-                        .padding(.leading, 8)
-                    Spacer(minLength: 8)
-                    zoomControls
-                }
-                .padding(.trailing, 18)
-                .frame(width: sideRegionWidth, alignment: .trailing)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-        .frame(height: DigitalTimeReadout.panelHeight)
-        .onPreferenceChange(TransportReadoutWidthKey.self) { width in
-            guard width > 0, abs(width - transportReadoutWidth) > 0.5 else { return }
-            transportReadoutWidth = width
-        }
     }
 
     private var playButton: some View {
@@ -1387,8 +1270,8 @@ struct ContentView: View {
         }
         .buttonStyle(CircleTransportButtonStyle(
             kind: .primary,
-            diameter: DigitalTimeReadout.panelHeight,
-            glyphSize: 22,
+            diameter: ControlBarMetrics.primaryDiameter,
+            glyphSize: ControlBarMetrics.primaryGlyphSize,
             pressedGlyphOffset: 1.5
         ))
         .disabled(!controller.session.isPlayable)
@@ -1407,65 +1290,12 @@ struct ContentView: View {
         } label: {
             Image(systemName: "arrow.trianglehead.swap")
         }
-        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: 40, glyphSize: 15))
+        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter,
+                                                glyphSize: ControlBarMetrics.secondaryGlyphSize))
         .disabled(!controller.session.canSwitchPlayback)
         .help("Switch Track")
         .accessibilityLabel("Switch Track")
         .componentDebugLabel("Switch Track", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private var zoomControls: some View {
-        let contentSpan = controller.session.duration
-        let enabled = controller.canZoomTimeline
-        return HStack(spacing: 8) {
-            Button {
-                zoomHaptics.syncZoomProgress(zoomProgress)
-                controller.stepZoom(zoomingIn: false)
-                zoomHaptics.updateZoomProgress(zoomProgress)
-            } label: {
-                Image(systemName: "minus.magnifyingglass")
-            }
-            .buttonStyle(.borderless)
-            .disabled(!enabled)
-            .help("Zoom out")
-            .accessibilityLabel("Zoom Out")
-
-            Slider(
-                value: Binding(
-                    get: {
-                        TimelineViewport.sliderValue(
-                            visibleSpan: max(controller.visibleSpan, 0.001),
-                            contentSpan: contentSpan
-                        )
-                    },
-                    set: { value in
-                        zoomHaptics.syncZoomProgress(zoomProgress)
-                        controller.zoomVisibleSpan(
-                            to: TimelineViewport.visibleSpan(sliderValue: value, contentSpan: contentSpan)
-                        )
-                        zoomHaptics.updateZoomProgress(zoomProgress)
-                    }
-                ),
-                in: 0...1
-            )
-            .controlSize(.small)
-            .frame(width: 56)
-            .disabled(!enabled)
-            .accessibilityLabel("Timeline Zoom")
-
-            Button {
-                zoomHaptics.syncZoomProgress(zoomProgress)
-                controller.stepZoom(zoomingIn: true)
-                zoomHaptics.updateZoomProgress(zoomProgress)
-            } label: {
-                Image(systemName: "plus.magnifyingglass")
-            }
-            .buttonStyle(.borderless)
-            .disabled(!enabled)
-            .help("Zoom in")
-            .accessibilityLabel("Zoom In")
-        }
-        .componentDebugLabel("Zoom Controls", enabled: settings.showsComponentDebugLabels)
     }
 
     private var repeatButton: some View {
@@ -1475,7 +1305,7 @@ struct ContentView: View {
         } label: {
             Image(systemName: Self.repeatSymbol(for: mode))
         }
-        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: mode != .off, diameter: 40, glyphSize: 15))
+        .buttonStyle(ControlBarSideButtonStyle(isOn: mode != .off))
         .disabled(!controller.session.isPlayable)
         .help(Self.repeatHelp(for: mode))
         .accessibilityLabel("Repeat")
@@ -1596,13 +1426,15 @@ struct ContentView: View {
             controller.toggleBlindListeningMode()
         } label: {
             if isOn {
+                // The custom symbol sits high in its box; nudged down by the
+                // same proportion as at v2.9.0's 15 pt.
                 Image("BlindListening")
-                    .offset(y: 2.5)
+                    .offset(y: 2.5 * ControlBarSideButtonStyle.glyphSize / 15)
             } else {
                 Image(systemName: "eye")
             }
         }
-        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: isOn, diameter: 40, glyphSize: 15))
+        .buttonStyle(ControlBarSideButtonStyle(isOn: isOn))
         .disabled(!controller.session.canToggleBlindListeningMode)
         .help("Blind Listening Mode")
         .accessibilityLabel("Blind Listening Mode")
@@ -2716,13 +2548,6 @@ struct ContentView: View {
         if NSCursor.current !== cursor {
             cursor.set()
         }
-    }
-
-    private var zoomProgress: Double {
-        TimelineViewport.sliderValue(
-            visibleSpan: max(controller.visibleSpan, 0.001),
-            contentSpan: controller.session.duration
-        )
     }
 
     private func handleTimelineScroll(_ visibleStart: TimeInterval) {

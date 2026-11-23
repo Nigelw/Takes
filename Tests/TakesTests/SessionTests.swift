@@ -25,16 +25,82 @@ struct SessionTests {
         #expect(settings.automaticGroupingMode == .automatic)
     }
 
-    /// The control bar theme setting was removed with the Teenage Engineering
-    /// theme; preferences that still hold it must load as defaults.
+    /// The control bar theme and readout frame settings were removed with
+    /// the Teenage Engineering theme and the Retro frame; preferences that
+    /// still hold them must load as defaults.
     @MainActor
     @Test
-    func retiredControlBarThemePreferenceLoadsAsDefaults() {
+    func retiredControlBarPreferencesLoadAsDefaults() {
         let defaults = InMemoryAppSettingsDefaults()
         defaults.set("teenageEngineering", forKey: "controlBarTheme")
+        defaults.set("retro", forKey: "readoutStyle")
         let settings = AppSettings(defaults: defaults)
 
         #expect(settings.settingsAreDefault)
+    }
+
+    @Test
+    func playlistReadoutTitleUsesTheVersionTagThenItsFilename() {
+        var version = PlaylistVersion(
+            file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/01 Taxman (Mono).flac")),
+            metadata: PlaylistMetadata(title: "Taxman (1967 Mono Mix)", displayName: "Display Name")
+        )
+        #expect(ControlBarReadoutTitle.playlist(version) == "TAXMAN (1967 MONO MIX)")
+
+        version.metadata.title = "  "
+        #expect(ControlBarReadoutTitle.playlist(version) == "01 TAXMAN (MONO)")
+
+        version.metadata.title = nil
+        #expect(ControlBarReadoutTitle.playlist(version) == "01 TAXMAN (MONO)")
+        #expect(ControlBarReadoutTitle.playlist(nil) == "")
+    }
+
+    @Test
+    func compareReadoutTitleFollowsTheAudibleVersionAndHidesItWhenBlind() {
+        func track(_ name: String, title: String?) -> SessionTrack {
+            SessionTrack(loadedTrack: LoadedTrack(
+                url: URL(fileURLWithPath: "/tmp/\(name).wav"), displayName: name,
+                fileFormatDescription: "WAV", duration: 10, sampleRate: 44_100, channelCount: 2,
+                title: title
+            ))
+        }
+        let mono = track("mono", title: "Taxman (1967 Mono Mix)")
+        let stereo = track("stereo", title: nil)
+        var session = ComparisonSession(tracks: [mono, stereo], activeTrackID: mono.id)
+        #expect(ControlBarReadoutTitle.comparison(session) == "TAXMAN (1967 MONO MIX)")
+
+        session.activeTrackID = stereo.id
+        #expect(ControlBarReadoutTitle.comparison(session) == "STEREO")
+
+        session.isBlindListeningModeEnabled = true
+        #expect(ControlBarReadoutTitle.comparison(session) == "TRACK 2")
+
+        session.activeTrackID = nil
+        #expect(ControlBarReadoutTitle.comparison(session) == "")
+    }
+
+    @MainActor
+    @Test
+    func playlistMeterHasAboutEightyCellsAndItsHeadCoversOnlyTheLeadingOne() {
+        // A 360 pt window's readout (340 pt) less its 10 pt insets.
+        let geometry = DotMatrixProgressView.barGeometry(
+            width: 320, metrics: PlaylistControlBarReadout.meterMetrics,
+            barHeight: PlaylistControlBarReadout.meterHeight, scale: 2
+        )
+        let cells = geometry.litRightEdges.count - 2
+        #expect((75...85).contains(cells))
+        #expect(geometry.frameHeight == PlaylistControlBarReadout.meterHeight)
+
+        for lit in 1...geometry.litRightEdges.count {
+            let headRight = geometry.fillWidth(litCount: lit)
+            let headLeft = headRight - geometry.headWidth
+            #expect(headRight > geometry.litRightEdges[lit - 1])
+            if lit >= 2 { #expect(headLeft >= geometry.litRightEdges[lit - 2]) }
+            if lit < geometry.litRightEdges.count {
+                // The next element starts more than a gap past this one's edge.
+                #expect(headRight < geometry.litRightEdges[lit - 1] + geometry.gap)
+            }
+        }
     }
 
     @Test

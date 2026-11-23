@@ -51,9 +51,20 @@ Key ownership:
   A2 default/minimum sizes, the artwork toggle's resize, frame clamping), and
   Debug menu wiring.
 - `WorkspaceView.swift`: playlist/comparison navigation, shared import routing,
-  startup restoration ordering, playlist transport, keyboard focus handling,
-  and the window chrome both modes share: the cover above the control bar and
-  the titlebar artwork toggle.
+  startup restoration ordering, the playlist control bar
+  (`PlaylistTransportView`), keyboard focus handling (including Esc leaving
+  compare), and the window chrome both modes share: the cover above the
+  control bar and the titlebar artwork toggle.
+- `TransportControls.swift`: the A2 control bar both modes share
+  (`ControlBarLayout`: transport row, readout slot, divider;
+  `ControlBarMetrics`; `ControlBarSideButtonStyle` for Shuffle/Blind/Repeat;
+  `ControlBarDivider`), v2.9.0's `CircleTransportButtonStyle` (with a
+  rounded-square option for compare's back button), `SevenSegmentDisplay`,
+  window drag/background helpers, and the Debug Appearance Tuner.
+- `DotMatrixReadout.swift`: the A2 readouts (`PlaylistControlBarReadout`,
+  `CompareControlBarReadout`, their title rules in `ControlBarReadoutTitle`),
+  the dot-matrix text and marquee, the seekable LED meter
+  (`DotMatrixProgressBar`), and the Glass frame (`readoutGlass`).
 - `CoverArtwork.swift`: `PlaylistArtworkStore` (in-memory, downsampled,
   bounded embedded-artwork cache), the 360 pt cover view, and the artwork
   toggle with its custom sleeve glyph.
@@ -62,8 +73,8 @@ Key ownership:
 - `PlaylistOutlineView.swift`: the playlist table — an `NSOutlineView` wrapped
   in `NSViewRepresentable` (items with versions as children), its cells,
   context menu, inline rename, keyboard handling, and row drag and drop.
-- `ContentView.swift`: comparison waveform/timeline UI, drag-and-drop,
-  loop gestures, and offset controls.
+- `ContentView.swift`: the compare control bar's buttons, comparison
+  waveform/timeline UI, drag-and-drop, loop gestures, and offset controls.
 - `AppSettings.swift` and `SettingsView.swift`: persisted user preferences
   (including `showsArtwork`, the titlebar toggle's state) and the Settings
   window.
@@ -197,9 +208,26 @@ These are here to prevent parallel implementations and subtle regressions:
   item's playback version, not the audible one.
 - Artwork is in-memory only (no disk caches), loaded only for the version on
   display, downsampled to 720 px and capped at `PlaylistArtworkStore.capacity`
-  decoded images. One store instance is shared by the cover and the readout.
-- Until A2 milestone 2 lands, both control bars fall back to a stacked
-  layout (buttons over readout) below `wideControlBarMinimumWidth` (640 pt).
+  decoded images. Only the cover shows artwork; the readouts carry none.
+- Both modes build their control bar from one `ControlBarLayout` (A2 §5):
+  side slots of 30 × 40 pt pinned to the 10 pt insets, the centre group
+  centred with 12 pt gaps, the readout taking the remaining width, then the
+  one `ControlBarDivider`. It stretches to any width of 360 pt or more; do not
+  reintroduce width-dependent layouts. Side buttons are plain icons
+  (`ControlBarSideButtonStyle`); centre buttons are v2.9.0's
+  `CircleTransportButtonStyle` (Play 56/22, secondary 40/15). Previous/Next
+  are playlist-only. There is one readout frame, v2.9.0's Glass
+  (`readoutGlass`); the Teenage Engineering theme and the Retro frame were
+  removed, and their stored preferences are simply not read.
+- Readout titles come from `ControlBarReadoutTitle`: the version's title tag,
+  else its filename without the extension, uppercased. Playlist shows the
+  playing (or current) version; compare shows the audible version and, in
+  Blind Listening Mode, `TRACK n` so it never reveals which version is
+  audible. `PlaylistPlaybackBoundary.loadedTrack(for:)` carries the tags for
+  this. Long titles scroll (`DotMatrixMarqueeText`).
+- Compare leaves through the readout's back button, Esc, or ⌘[. The compare
+  control bar has no zoom controls until the A2 bottom bar (milestone 5);
+  ⌘+/⌘− and pinch still zoom.
 
 Performance-architecture invariants (established by the perf effort; breaking
 these reintroduces the exact regressions it fixed):
@@ -210,6 +238,12 @@ these reintroduces the exact regressions it fixed):
   reintroduce async or cached rasterized-image (`NSImage`) waveform rendering —
   that caused blank/stale lanes during zoom and scroll. Off-screen lanes are
   culled via `isRenderable`; waveform data is in-memory only.
+- **The control-bar readouts do no per-frame work.** Elapsed digits are an
+  isolated leaf (`ControlBarElapsedDigits`) that re-renders once per displayed
+  second from `playingReadoutText`; nothing else in the control bar reads it.
+  The LED meter's fill and brighter head step on discrete
+  `CAKeyframeAnimation`s armed per transport anchor event; titles scroll on
+  Core Animation only when they overflow.
 - **Continuous on-screen motion must use Core Animation, never SwiftUI
   `TimelineView(.animation)` or `withAnimation`** — both burn main-thread CPU
   per frame on macOS. The playhead is CALayer-driven (one `CABasicAnimation`
@@ -248,13 +282,16 @@ these reintroduces the exact regressions it fixed):
 - `PlaylistWorkspaceTests.swift`: playlist value encoding/validation, stable
   ownership, canonical duplicates, and atomic organization operations.
 - `PlaylistPlaybackBoundaryTests.swift`: signed position conversion, session
-  identity, loop entry, playlist gain isolation, and blind-order-safe capture.
+  identity, loop entry, playlist gain isolation, blind-order-safe capture, and
+  descriptive tags reaching comparison tracks.
 - `TransportMappingTests.swift`: transport math and range behavior, plus
   loop-wrap anchor math and gapless pre-queue segment mapping.
 - `SessionTests.swift`: higher-level state, import behavior, Music/Finder
   selection handling, numeric control stepping, blind listening, the A2 window
   policy (sizes, minimums, artwork-toggle frames, clamping), the persisted
-  artwork setting, and other non-UI logic.
+  artwork setting, retired control-bar preferences loading as defaults, the
+  A2 readout title rules (tag, filename, blind), the LED meter's cell count
+  and head geometry, and other non-UI logic.
 - `StreamingTrackImportTests.swift`: streaming metadata, yt-dlp resolution,
   download/import behavior, checksum parsing, and error handling.
 - `WaveformSourceTests.swift`: waveform generation and the peak pyramid
@@ -291,8 +328,8 @@ these reintroduces the exact regressions it fixed):
   isn't duplicated or redone.
 - [docs/a2-redesign-spec.md](docs/a2-redesign-spec.md): the A2 compact
   cover-column redesign (360 pt window, artwork toggle, glass readout,
-  two-line playlist rows, compact compare). Milestone 1 (window shell and
-  artwork) is done; 2–5 are not started. Read it before working on any of
+  two-line playlist rows, compact compare). Milestones 1 (window shell and
+  artwork) and 2 (control bar) are done; 3–5 are not started. Read it before working on any of
   its milestones.
 - [docs/comparative-quality-analysis.md](docs/comparative-quality-analysis.md):
   the multi-track "which of these is the better copy?" feature — design,

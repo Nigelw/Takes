@@ -178,36 +178,10 @@ enum Theme {
         dark: (0.220, 0.831, 0.902)   // #38D4E6
     )
 
-    /// Inner shadow of the readout's recessed glass well. Softer on the pale
-    /// LCD pane, deep on the dark LED glass.
-    static let readoutWellShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.65 : 0.28)
-    })
-
     /// Soft recessed inner-shadow edge of the readout.
     static let readoutShadow = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.isDark
             ? NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.64)
             : NSColor(srgbRed: 96 / 255, green: 104 / 255, blue: 125 / 255, alpha: 0.28)
-    })
-
-    /// Outer hairline around the readout panel.
-    static let readoutStroke = whiteAlpha(light: 0.76, dark: 0.08)
-
-    /// Bright top edge of the raised bezel ring around the readout glass.
-    static let readoutBezelHighlight = whiteAlpha(light: 0.65, dark: 0.14)
-
-    /// Shadowed bottom edge of the bezel ring.
-    static let readoutBezelShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.45 : 0.16)
-    })
-
-    /// Faint reflected light along the bezel's bottom edge — the glint that
-    /// makes the ring read as polished rather than matte.
-    static let readoutBezelReflection = whiteAlpha(light: 0.55, dark: 0.10)
-
-    /// Soft drop shadow seating the readout panel on the control bar.
-    static let readoutFrameShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.5 : 0.14)
     })
 }

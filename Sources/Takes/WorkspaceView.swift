@@ -18,8 +18,8 @@ struct WorkspaceView: View {
     @State private var externalOpenTask: Task<Void, Never>?
     @State private var isDropTargeted = false
     @State private var retainedPlaylistSize = TakesWindowPolicy.defaultSize(showsArtwork: true)
-    /// Process-lifetime artwork cache shared by the cover and the readout;
-    /// loads only the version on display.
+    /// Process-lifetime artwork cache for the cover; loads only the version
+    /// on display.
     @State private var artworkStore = PlaylistArtworkStore()
     /// Vertical centre of the window buttons, measured from the window's top
     /// edge, so the artwork toggle lines up with them.
@@ -316,7 +316,7 @@ struct WorkspaceView: View {
 
     private var playlistSurface: some View {
         VStack(spacing: 0) {
-            PlaylistTransportView(coordinator: coordinator, artworkStore: artworkStore)
+            PlaylistTransportView(coordinator: coordinator)
             if let summary = coordinator.importSummaryMessage {
                 HStack(spacing: 8) {
                     Text(summary).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
@@ -491,6 +491,10 @@ struct WorkspaceView: View {
                   GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: mainWindow.firstResponder) else { return false }
             let flags = event.modifierFlags.intersection([.command, .shift, .control, .option])
             if isComparison {
+                // Esc leaves compare, like the readout's back button (§9).
+                if event.keyCode == 53 && flags.isEmpty {
+                    Task { await coordinator.backToPlaylist() }; return true
+                }
                 if let key = TrackNumberHotkey.hotkey(forKeyCode: event.keyCode, modifierFlags: flags), controller.canSelectTrackForHotkey(key) {
                     controller.selectTrackForHotkey(key); return true
                 }
@@ -519,130 +523,47 @@ struct WorkspaceView: View {
     }
 }
 
+/// Playlist control bar (spec §5): Shuffle · Previous · Play · Next ·
+/// Repeat over the two-line readout.
 private struct PlaylistTransportView: View {
     let coordinator: PlaylistCoordinator
-    let artworkStore: PlaylistArtworkStore
     @EnvironmentObject private var settings: AppSettings
-    /// Below `TakesWindowPolicy.wideControlBarMinimumWidth` the clusters sit
-    /// on one row above the readout instead of flanking it. Interim layout
-    /// for the 360 pt window until the A2 control bar (milestone 2).
-    @State private var isNarrow = true
     private var controller: PlaybackController { coordinator.controller }
 
-    // MARK: Layout constants
-
-    private static let secondaryButtonDiameter: CGFloat = 40
-    private static let primaryButtonDiameter: CGFloat = DigitalTimeReadout.panelHeight
-    private static let clusterSpacing: CGFloat = 8
-    /// Previous, Play, Next.
-    private static let leftClusterWidth: CGFloat =
-        secondaryButtonDiameter + clusterSpacing + primaryButtonDiameter + clusterSpacing + secondaryButtonDiameter
-    /// Shuffle, Repeat.
-    private static let rightClusterWidth: CGFloat = secondaryButtonDiameter + clusterSpacing + secondaryButtonDiameter
-    /// Breathing room on each side of a cluster within its region.
-    private static let sideClusterMargin: CGFloat = 24
-    /// Both side regions share one width, so the wider cluster sets it. Fixed
-    /// regardless of window size: this is the space the button clusters need,
-    /// not a function of how wide the readout ends up.
-    private static let requiredSideRegionWidth: CGFloat = max(leftClusterWidth, rightClusterWidth) + sideClusterMargin * 2
-    /// The readout's width at the wide layout's minimum width — a floor, not a cap.
-    private static let minimumReadoutWidth: CGFloat = TakesWindowPolicy.wideControlBarMinimumWidth - requiredSideRegionWidth * 2
-    private static let narrowEdgeInset: CGFloat = 10
-
     var body: some View {
-        Group {
-            if isNarrow { narrowLayout } else { wideLayout }
-        }
-        .padding(.top, TakesWindowPolicy.controlBarTopPadding(showsArtwork: settings.showsArtwork))
-        .padding(.bottom, 16)
-        .onGeometryChange(for: Bool.self) { proxy in
-            proxy.size.width < TakesWindowPolicy.wideControlBarMinimumWidth
-        } action: { narrow in
-            isNarrow = narrow
-        }
-        .background(Theme.controlBarLift.allowsHitTesting(false))
-        .background(WindowDragArea())
-        .task(id: currentVersion?.id) {
-            if let currentVersion { artworkStore.load(for: currentVersion) }
-        }
-    }
-
-    private var narrowLayout: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: Self.clusterSpacing) {
-                transportCluster
-                Spacer(minLength: Self.clusterSpacing)
-                modeCluster
-            }
-            readout
-                .frame(height: PlaylistNowPlayingReadout.panelHeight)
-        }
-        .padding(.horizontal, Self.narrowEdgeInset)
-    }
-
-    private var wideLayout: some View {
-        GeometryReader { proxy in
-            // The side regions never grow past what the clusters need, so all
-            // extra window width goes to the readout — it widens with the
-            // window but can never encroach on either cluster.
-            let readoutWidth = max(proxy.size.width - Self.requiredSideRegionWidth * 2, Self.minimumReadoutWidth)
-
-            ZStack {
-                transportCluster
-                    .frame(width: Self.requiredSideRegionWidth, alignment: .center)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                // Pinned to the true window center, independent of the side clusters.
-                readout
-                    .frame(width: readoutWidth)
-                    .frame(maxWidth: .infinity, alignment: .center)
-
-                modeCluster
-                    .frame(width: Self.requiredSideRegionWidth, alignment: .center)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-        .frame(height: PlaylistNowPlayingReadout.panelHeight)
-    }
-
-    /// Previous, Play, Next.
-    private var transportCluster: some View {
-        HStack(spacing: Self.clusterSpacing) {
-            Button { coordinator.previous() } label: { Image(systemName: "backward.end.fill") }
-                .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: Self.secondaryButtonDiameter, glyphSize: 15))
-                .disabled(!coordinator.canPrevious).accessibilityLabel("Previous Item")
-            Button { coordinator.togglePlayback() } label: { Image(systemName: coordinator.isPlaying ? "pause.fill" : "play.fill") }
-                .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: Self.primaryButtonDiameter, glyphSize: 22, pressedGlyphOffset: 1.5))
-                .disabled(!coordinator.canPlay).accessibilityLabel(coordinator.isPlaying ? "Pause" : "Play")
-            Button { coordinator.next() } label: { Image(systemName: "forward.end.fill") }
-                .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: Self.secondaryButtonDiameter, glyphSize: 15))
-                .disabled(!coordinator.canNext).accessibilityLabel("Next Item")
-        }
-    }
-
-    /// Shuffle, Repeat.
-    private var modeCluster: some View {
-        HStack(spacing: Self.clusterSpacing) {
+        ControlBarLayout(showsArtwork: settings.showsArtwork) {
             Button { coordinator.toggleShuffle() } label: { Image(systemName: "shuffle") }
-                .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.isShuffleEnabled, diameter: Self.secondaryButtonDiameter, glyphSize: 15))
+                .buttonStyle(ControlBarSideButtonStyle(isOn: coordinator.workspace.isShuffleEnabled))
+                .help("Shuffle")
                 .accessibilityLabel("Shuffle").accessibilityValue(coordinator.workspace.isShuffleEnabled ? "On" : "Off")
+        } center: {
+            Button { coordinator.previous() } label: { Image(systemName: "backward.end.fill") }
+                .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter,
+                                                        glyphSize: ControlBarMetrics.secondaryGlyphSize))
+                .disabled(!coordinator.canPrevious).help("Previous Item").accessibilityLabel("Previous Item")
+            Button { coordinator.togglePlayback() } label: { Image(systemName: coordinator.isPlaying ? "pause.fill" : "play.fill") }
+                .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: ControlBarMetrics.primaryDiameter,
+                                                        glyphSize: ControlBarMetrics.primaryGlyphSize, pressedGlyphOffset: 1.5))
+                .disabled(!coordinator.canPlay).help(coordinator.isPlaying ? "Pause" : "Play")
+                .accessibilityLabel(coordinator.isPlaying ? "Pause" : "Play")
+            Button { coordinator.next() } label: { Image(systemName: "forward.end.fill") }
+                .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter,
+                                                        glyphSize: ControlBarMetrics.secondaryGlyphSize))
+                .disabled(!coordinator.canNext).help("Next Item").accessibilityLabel("Next Item")
+        } trailing: {
             Button { coordinator.cyclePlaylistRepeatMode() } label: {
                 Image(systemName: coordinator.workspace.playlistRepeatMode == .one ? "repeat.1" : "repeat")
             }
-            .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: coordinator.workspace.playlistRepeatMode != .off, diameter: Self.secondaryButtonDiameter, glyphSize: 15))
+            .buttonStyle(ControlBarSideButtonStyle(isOn: coordinator.workspace.playlistRepeatMode != .off))
+            .help("Repeat")
             .accessibilityLabel("Repeat").accessibilityValue(coordinator.workspace.playlistRepeatMode.rawValue.capitalized)
+        } readout: {
+            PlaylistControlBarReadout(
+                controller: controller,
+                title: ControlBarReadoutTitle.playlist(currentVersion),
+                seek: coordinator.seek
+            )
         }
-    }
-
-    private var readout: some View {
-        PlaylistNowPlayingReadout(
-            style: settings.readoutStyle,
-            nowPlaying: nowPlaying,
-            artwork: artworkStore.artwork(for: currentVersion?.id),
-            elapsed: elapsedText,
-            controller: controller,
-            seek: coordinator.seek
-        )
     }
 
     /// The version the transport is showing: the current one, else the
@@ -650,22 +571,6 @@ private struct PlaylistTransportView: View {
     private var currentVersion: PlaylistVersion? {
         guard let item = coordinator.workspace.items.first(where: { $0.id == coordinator.currentItemID }) else { return nil }
         return item.versions.first { $0.id == coordinator.currentVersionID } ?? item.selectedVersion
-    }
-
-    /// Same fallbacks as the playlist rows: the item title (already derived
-    /// from tags or the filename), tag artist/album when present.
-    private var nowPlaying: PlaylistNowPlayingReadout.NowPlaying {
-        guard let item = coordinator.workspace.items.first(where: { $0.id == coordinator.currentItemID }) else {
-            return PlaylistNowPlayingReadout.NowPlaying()
-        }
-        let metadata = currentVersion?.metadata
-        return PlaylistNowPlayingReadout.NowPlaying(title: item.title, artist: metadata?.artist, album: metadata?.album)
-    }
-
-    /// While playing, `playingReadoutText` changes once per displayed second
-    /// and is the only thing that re-renders the readout's text lines.
-    private var elapsedText: String {
-        coordinator.isPlaying ? controller.playingReadoutText : controller.session.transportPosition.formattedSignedTimestamp
     }
 }
 

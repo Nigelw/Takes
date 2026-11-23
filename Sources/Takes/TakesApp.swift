@@ -392,7 +392,6 @@ enum TakesWindowPolicy {
 
     // MARK: Comparison metrics (pre-A2 layout, replaced in milestone 4)
 
-    static let comparisonNavigationHeight: CGFloat = 32
     static let trackInfoColumnWidthKey = "trackInfoColumnWidth"
     static let defaultTrackInfoColumnWidth: CGFloat = 240
     static let minimumTrackInfoColumnWidth: CGFloat = defaultTrackInfoColumnWidth - 10
@@ -400,12 +399,10 @@ enum TakesWindowPolicy {
     static let trackRowHeight: CGFloat = 96
     static let trackTimelineDividerHeight: CGFloat = 1
     static let trackTimelineHeaderHeight: CGFloat = 34
-    // Play button / readout (56) + vertical padding (20 top + 16 bottom,
-    // optically shifted 2pt below true center).
-    static let controlBarReservedHeight: CGFloat = 92
-    /// Below this width the pre-A2 control bars stack their buttons over the
-    /// readout instead of flanking it. Interim until milestone 2.
-    static let wideControlBarMinimumWidth: CGFloat = 640
+    /// The compare control bar's height with the artwork shown (10 + 56 +
+    /// 10 + 30 + 12 + 1 divider): the import highlight's starting inset
+    /// until the bar's measured height arrives.
+    static let controlBarReservedHeight: CGFloat = 119
 
     static func trackTimelineHeight(displayingTrackRows rowCount: Int) -> CGFloat {
         let rowCount = max(rowCount, 1)
