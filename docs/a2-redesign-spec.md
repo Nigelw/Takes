@@ -280,7 +280,6 @@ Update `AGENTS.md` (ownership, invariants, test map) as each milestone lands.
 ## 12. Open questions
 
 - Window resizability (§2).
-- Long readout titles: confirm scrolling (marquee) versus truncation.
 - What the version check (§6) does when the playback version's file is
   missing.
 
@@ -298,5 +297,10 @@ Update `AGENTS.md` (ownership, invariants, test map) as each milestone lands.
   how it maps onto the A2 control bar is a later question.
 - **Compare is unavailable for single-version items.** They show no
   disclosure chevron and no Compare pill.
+- **Long readout titles scroll.** In both readouts, a title wider than its
+  space scrolls as a marquee (pause, scroll, repeat) rather than truncating.
+  Use the existing `DotMatrixMarqueeText` / `DotMatrixMarqueeDisplay`, which
+  only animate lines that actually overflow. The compare readout is narrower,
+  so it scrolls more often.
 - **Double-click plays, on every row.** It does not open compare, even for
   multi-version items; the Compare pill is the way in.
