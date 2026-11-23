@@ -57,10 +57,10 @@ Key ownership:
   window chrome both modes share: the cover above the control bar and the
   titlebar artwork toggle.
 - `TransportControls.swift`: the A2 control bar both modes share
-  (`ControlBarLayout`: transport row, readout slot, divider;
+  (`ControlBarLayout`: transport row, readout slot (playlist only), divider;
   `ControlBarMetrics`; `ControlBarSideButtonStyle` for Shuffle/Blind/Repeat;
-  `ControlBarDivider`), v2.9.0's `CircleTransportButtonStyle` (with a
-  rounded-square option for compare's back button), `SevenSegmentDisplay`,
+  `ControlBarDivider`), v2.9.0's `CircleTransportButtonStyle`,
+  `SevenSegmentDisplay`,
   window drag/background helpers, and the Debug Appearance Tuner.
 - `BottomBar.swift`: the A2 bottom bar both modes share (A2 §7):
   `BottomBarLayout` and `BottomBarMetrics`, the +/− segmented control
@@ -70,10 +70,12 @@ Key ownership:
   popover and `AlignmentOfferText`, and the zoom leaf `CompareZoomControl`),
   and each bar's enablement (`PlaylistBottomBarState`,
   `CompareBottomBarState`).
-- `DotMatrixReadout.swift`: the A2 readouts (`PlaylistControlBarReadout`,
-  `CompareControlBarReadout`, their title rules in `ControlBarReadoutTitle`),
-  the dot-matrix text and marquee, the seekable LED meter
-  (`DotMatrixProgressBar`), and the Glass frame (`readoutGlass`).
+- `DotMatrixReadout.swift`: the playlist readout
+  (`PlaylistControlBarReadout`, its title rule in `ControlBarReadoutTitle`),
+  the elapsed-time leaf both modes use (`ControlBarElapsedDigits`), the
+  compare title bar's framed time (`CompareTitleBarTime`), the dot-matrix
+  text and marquee, the seekable LED meter (`DotMatrixProgressBar`), and the
+  Glass frame (`readoutGlass`).
 - `CoverArtwork.swift`: `PlaylistArtworkStore` (in-memory, downsampled,
   bounded embedded-artwork caches: the cover, and the playlist rows'
   thumbnails), the 360 pt cover view, and the artwork toggle with its custom
@@ -90,9 +92,13 @@ Key ownership:
   visible-row thumbnail requests, context menu, inline rename, keyboard
   handling, and row drag and drop. Row colors are `PlaylistRowPalette` in
   `Theme.swift`.
-- `ContentView.swift`: the compare control bar's buttons and the compact
-  compare area (A2 §8): ruler and lane sizing (`CompareLaneLayout`), the
-  26 pt ruler (`TimelineHeaderRulerView`, `TimelineRulerMetrics`), the
+- `ContentView.swift`: the compare control bar's buttons, the compare title
+  bar (`CompareTitleBar`: `CompareTitleBarMetrics`, the take count and
+  `CompareTitleBarText`, the centring `CompareTitleBarRow`, and
+  `CompareDoneButtonStyle`; [docs/a2-compare-title-bar-spec.md](docs/a2-compare-title-bar-spec.md)),
+  and the compact compare area (A2 §8): ruler and lane sizing
+  (`CompareLaneLayout`), the 26 pt ruler (`TimelineHeaderRulerView`,
+  `TimelineRulerMetrics`), the
   playhead (`PlayheadGeometry`, `TimelinePlayheadVisual`), the full-width
   lanes (`TrackRowView` → `LaneView` → `WaveformLaneView`), their info
   strips (`LaneStripView`, `LaneOffsetField`, `LaneStripText`, the strip's
@@ -257,9 +263,9 @@ These are here to prevent parallel implementations and subtle regressions:
   normal text editing behavior.
 - One main window serves both modes (A2). It opens 360 pt wide (760 tall with
   artwork, 414 without) and is user-resizable down to
-  `TakesWindowPolicy.minimumSize(showsArtwork:)`: 360 × 632 with the
-  artwork, 360 × 286 without (the compare control bar, the ruler, one whole
-  lane and the bottom bar; `minimumHeightWithoutArtwork`). Mode switches and
+  `TakesWindowPolicy.minimumSize(showsArtwork:)`: 360 × 622 with the
+  artwork, 360 × 276 without (the compare control bar, its title bar, the
+  ruler, one whole lane and the bottom bar; `minimumHeightWithoutArtwork`). Mode switches and
   track counts never resize it; the artwork toggle is the only automatic resize
   (±`artworkCollapseHeight`, 346 pt, top edge fixed, clamped on screen). Its
   frame autosaves as `main.a2`; do not reintroduce per-mode frames.
@@ -290,24 +296,35 @@ These are here to prevent parallel implementations and subtle regressions:
   centred midway between its window edge and the playlist's Previous · Play
   · Next group (`ControlBarTransportRow`,
   `ControlBarMetrics.sideButtonCenterX`), at the same place in compare even
-  though its centre group is narrower; the readout inside the 10 pt insets;
-  then the one `ControlBarDivider`. It stretches to any width of 360 pt or more; do not
+  though its centre group is narrower; in playlist mode the readout inside
+  the 10 pt insets; then the one `ControlBarDivider`. Compare has no readout
+  (`ControlBarLayout`'s readout-less init): its bar ends 10 pt under the
+  transport row (`ControlBarMetrics.transportRowBottomPadding`), 54 pt
+  shorter than the playlist's (77 vs 131 pt with the artwork), and the
+  transport row doesn't move between modes. It stretches to any width of
+  360 pt or more; do not
   reintroduce width-dependent layouts. Side buttons are plain icons
   (`ControlBarSideButtonStyle`); centre buttons are v2.9.0's
   `CircleTransportButtonStyle` (Play 56/22, secondary 40/15). Previous/Next
   are playlist-only. There is one readout frame, v2.9.0's Glass
   (`readoutGlass`); the Teenage Engineering theme and the Retro frame were
   removed, and their stored preferences are simply not read.
-- Readout titles come from `ControlBarReadoutTitle`: the version's title tag,
-  else its filename without the extension, uppercased. Playlist shows the
-  playing (or current) version; compare shows the audible version and, in
-  Blind Listening Mode, `TRACK n` so it never reveals which version is
-  audible. `PlaylistPlaybackBoundary.loadedTrack(for:)` carries the tags for
-  this. Long titles scroll (`DotMatrixMarqueeText`). The title field takes
+- The readout title comes from `ControlBarReadoutTitle.playlist`: the
+  playing (or current) version's title tag, else its filename without the
+  extension, uppercased. Compare shows no version title in its control bar
+  or title bar; the active lane and the cover carry the audible version.
+  Long titles scroll (`DotMatrixMarqueeText`). The title field takes
   its width from the line, never from its text (the cells draw in an
   overlay); sized by its cells it could only grow, and a launch-time layout at
   a restored wider frame left the readout wider than the window.
-- Compare leaves through the readout's back button, Esc, or ⌘[. Zoom's
+- Compare's title bar (32 pt, between the control bar's divider and the
+  ruler, on the well with no line to the ruler) shows `N takes` (`1 take`,
+  `CompareTitleBarText`, unchanged when blind) on the left, the elapsed
+  time in a 24 pt Glass frame centred in the window
+  (`CompareTitleBarRow` gives both sides equal widths), and Done on the
+  right. Compare leaves through Done, Esc, or ⌘[ — all
+  `PlaylistCoordinator.backToPlaylist`, so the audible version becomes the
+  playback version. Zoom's
   on-screen control is in the bottom bar (magnifier − · slider · magnifier
   +, no Fit); ⌘+/⌘−, Zoom to Selection, Zoom to Fit and pinch also zoom.
 - Compare has no track-info column (A2 §8). Below the control bar's divider:
@@ -368,9 +385,11 @@ these reintroduces the exact regressions it fixed):
   reintroduce async or cached rasterized-image (`NSImage`) waveform rendering —
   that caused blank/stale lanes during zoom and scroll. Off-screen lanes are
   culled via `isRenderable`; waveform data is in-memory only.
-- **The control-bar readouts do no per-frame work.** Elapsed digits are an
-  isolated leaf (`ControlBarElapsedDigits`) that re-renders once per displayed
-  second from `playingReadoutText`; nothing else in the control bar reads it.
+- **The readouts do no per-frame work.** Elapsed digits are an isolated
+  leaf (`ControlBarElapsedDigits`, in the playlist readout and the compare
+  title bar) that re-renders once per displayed second from
+  `playingReadoutText`; nothing else in the control bar or the title bar
+  reads it or the transport position.
   The LED meter's fill and brighter head step on discrete
   `CAKeyframeAnimation`s armed per transport anchor event; titles scroll on
   Core Animation only when they overflow.
@@ -428,7 +447,9 @@ these reintroduces the exact regressions it fixed):
   selection handling, numeric control stepping, blind listening, the A2 window
   policy (sizes, minimums, artwork-toggle frames, clamping), the persisted
   artwork setting, retired control-bar preferences loading as defaults, the
-  A2 readout title rules (tag, filename, blind), the LED meter's cell count
+  A2 readout title rule (tag, filename), the compare control bar's height
+  and the title bar (its geometry, centring and take-count text), the
+  ruler labels clearing the playhead grabber, the LED meter's cell count
   and head geometry, the control bar's side-button placement, the cover
   rule (`CoverVersionRule`), the A2 playlist row metrics and version names, the
   thumbnail cache (visible-only queue, concurrency bound, capacity, cover
@@ -479,6 +500,9 @@ these reintroduces the exact regressions it fixed):
   milestones are done: 1 (window shell and artwork), 2 (control bar),
   3 (playlist rows), 4 (compact compare) and 5 (bottom bars). Read it, and
   its §13 decisions, before changing any of them.
+  [docs/a2-compare-title-bar-spec.md](docs/a2-compare-title-bar-spec.md)
+  (done) replaced compare's readout row with the title bar; it overrides
+  §5.2 and §9's back button.
 - [docs/comparative-quality-analysis.md](docs/comparative-quality-analysis.md):
   the multi-track "which of these is the better copy?" feature — design,
   milestones, tuning findings, and limitations. Read it before touching

@@ -199,9 +199,6 @@ extension EnvironmentValues {
 /// - `.primary` is the filled indigo call-to-action (Play/Pause).
 /// - `.secondary` is a subtle bordered circle; when `isOn` it adopts the
 ///   primary tint to read as an engaged toggle.
-///
-/// `cornerRadius` swaps the circle for a rounded square of side `diameter`
-/// with the same fill, bevel and inset: compare's back button (§5.2).
 struct CircleTransportButtonStyle: ButtonStyle {
     enum Kind {
         case primary
@@ -213,7 +210,6 @@ struct CircleTransportButtonStyle: ButtonStyle {
     var diameter: CGFloat
     var glyphSize: CGFloat
     var pressedGlyphOffset: CGFloat = 0.75
-    var cornerRadius: CGFloat? = nil
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.colorScheme) private var colorScheme
@@ -234,8 +230,7 @@ struct CircleTransportButtonStyle: ButtonStyle {
     /// A circular-style rounded rectangle with radius `diameter / 2` is
     /// exactly v2.9.0's `Circle` on the square button frame.
     private var shape: RoundedRectangle {
-        if let cornerRadius { return RoundedRectangle(cornerRadius: cornerRadius, style: .continuous) }
-        return RoundedRectangle(cornerRadius: diameter / 2, style: .circular)
+        RoundedRectangle(cornerRadius: diameter / 2, style: .circular)
     }
 
     func makeBody(configuration: Configuration) -> some View {
@@ -554,17 +549,21 @@ struct SevenSegmentDisplay: View {
 // MARK: - A2 control bar
 
 /// The A2 control bar shared by playlist and compare (spec §3, §5): the
-/// transport row over the readout on one surface, then the one divider to
-/// the content below. Stretches to any window width: the centre group stays
-/// centred, the side buttons sit midway between the window edges and the
-/// playlist's centre group (`ControlBarTransportRow`), and the readout takes
-/// the width inside the 10 pt edge insets.
+/// transport row, over the readout in playlist mode, on one surface, then
+/// the one divider to the content below. Stretches to any window width: the
+/// centre group stays centred, the side buttons sit midway between the
+/// window edges and the playlist's centre group (`ControlBarTransportRow`),
+/// and the readout takes the width inside the 10 pt edge insets. Compare has
+/// no readout (its title bar sits below the divider), so its bar ends 10 pt
+/// under the transport row.
 struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: View>: View {
     let showsArtwork: Bool
     @ViewBuilder let leading: Leading
     @ViewBuilder let center: Center
     @ViewBuilder let trailing: Trailing
     @ViewBuilder let readout: Readout
+
+    private var hasReadout: Bool { Readout.self != EmptyView.self }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -579,10 +578,13 @@ struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: Vi
                 // 10 pt under the cover; 24 pt under the titlebar overlay so
                 // the side buttons clear the window buttons and the toggle.
                 .padding(.top, TakesWindowPolicy.controlBarTopPadding(showsArtwork: showsArtwork))
-                readout
-                    .padding(.horizontal, ControlBarMetrics.edgeInset)
-                    .padding(.top, ControlBarMetrics.readoutTopSpacing)
-                    .padding(.bottom, ControlBarMetrics.readoutBottomPadding)
+                .padding(.bottom, hasReadout ? 0 : ControlBarMetrics.transportRowBottomPadding)
+                if hasReadout {
+                    readout
+                        .padding(.horizontal, ControlBarMetrics.edgeInset)
+                        .padding(.top, ControlBarMetrics.readoutTopSpacing)
+                        .padding(.bottom, ControlBarMetrics.readoutBottomPadding)
+                }
             }
             // Raised deck: a light wash lifts the bar off the shared window
             // material. Decorative, so it must not take clicks from the drag
@@ -594,6 +596,21 @@ struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: Vi
             ControlBarDivider()
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+extension ControlBarLayout where Readout == EmptyView {
+    /// A control bar with no readout: compare's (A2 compare title-bar
+    /// variant), whose elapsed time is in the title bar below the divider.
+    init(
+        showsArtwork: Bool,
+        @ViewBuilder leading: () -> Leading,
+        @ViewBuilder center: () -> Center,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.init(showsArtwork: showsArtwork, leading: leading, center: center, trailing: trailing) {
+            EmptyView()
+        }
     }
 }
 
@@ -677,8 +694,13 @@ enum ControlBarMetrics {
     /// Shuffle/Blind and Repeat: a 20 pt glyph's hit area.
     static let sideSlotSize = CGSize(width: 30, height: 40)
     static let centerSpacing: CGFloat = 12
+    /// Playlist only: the gap from the transport row to the readout, and
+    /// from the readout to the divider.
     static let readoutTopSpacing: CGFloat = 10
     static let readoutBottomPadding: CGFloat = 12
+    /// Compare only: the bar ends this far under the transport row (no
+    /// readout), the same gap the playlist leaves above its readout.
+    static let transportRowBottomPadding: CGFloat = readoutTopSpacing
     static let primaryDiameter: CGFloat = 56
     static let primaryGlyphSize: CGFloat = 22
     static let secondaryDiameter: CGFloat = 40

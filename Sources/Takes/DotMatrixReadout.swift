@@ -3,22 +3,14 @@ import SwiftUI
 
 // MARK: - A2 control-bar readouts
 
-/// The title field's text in both A2 readouts (spec §5.2): the version's
-/// title tag, else its filename without the extension, uppercased for the
-/// dot-matrix face. In Blind Listening Mode the compare readout names the
-/// audible lane by position (`TRACK 2`), as the lanes and Now Playing do, so
-/// the readout can't reveal which version is audible.
+/// The playlist readout's title (spec §5.2): the version's title tag, else
+/// its filename without the extension, uppercased for the dot-matrix face.
+/// Compare has no readout title: its title bar shows the take count, and the
+/// active lane and the cover carry the audible version.
 enum ControlBarReadoutTitle {
     static func playlist(_ version: PlaylistVersion?) -> String {
         guard let version else { return "" }
         return text(tag: version.metadata.title, url: version.file.storedURL)
-    }
-
-    static func comparison(_ session: ComparisonSession) -> String {
-        guard let index = session.activeTrackIndex else { return "" }
-        if session.isBlindListeningModeEnabled { return "TRACK \(index + 1)" }
-        let track = session.tracks[index].loadedTrack
-        return text(tag: track.title, url: track.url)
     }
 
     static func text(tag: String?, url: URL) -> String {
@@ -77,45 +69,30 @@ struct PlaylistControlBarReadout: View {
     }
 }
 
-/// Compare readout, 30 pt, one line, with the back button on its left (spec
-/// §5.2). Shows the audible version, so it follows Switch Track.
-struct CompareControlBarReadout: View {
-    static let height: CGFloat = 30
-    static let cornerRadius: CGFloat = 7
-    static let backButtonSpacing: CGFloat = 8
-    /// Whole-point inset to the title line (8 pt above, the spare point
-    /// below), so the first dot row sits on the pixel grid.
-    static var contentTopInset: CGFloat { ((height - ControlBarReadoutLine.height) / 2).rounded(.down) }
+/// The compare title bar's elapsed time (A2 compare title-bar variant
+/// §2.2): the seven-segment digits in a 24 pt Glass frame, as wide as its
+/// content. The digits are `ControlBarElapsedDigits`, the isolated leaf that
+/// re-renders once per displayed second; this frame reads nothing from the
+/// controller itself.
+struct CompareTitleBarTime: View {
+    static let height: CGFloat = 24
+    static let cornerRadius: CGFloat = 6
+    static let horizontalPadding: CGFloat = 9
 
     let controller: PlaybackController
-    let back: () -> Void
 
     var body: some View {
-        HStack(spacing: Self.backButtonSpacing) {
-            Button(action: back) { Image(systemName: "chevron.left") }
-                .buttonStyle(CircleTransportButtonStyle(
-                    kind: .secondary,
-                    diameter: Self.height,
-                    glyphSize: 13,
-                    cornerRadius: Self.cornerRadius
-                ))
-                .help("Back to Playlist")
-                .accessibilityLabel("Back to Playlist")
-            ControlBarReadoutLine(controller: controller, title: ControlBarReadoutTitle.comparison(controller.session))
-                .padding(.horizontal, ControlBarReadoutLine.horizontalInset)
-                .padding(.top, Self.contentTopInset)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .frame(height: Self.height)
-                .readoutGlass(cornerRadius: Self.cornerRadius)
-                .allowsHitTesting(false)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("Now Playing")
-        }
+        ControlBarElapsedDigits(controller: controller, digitHeight: ControlBarReadoutLine.digitHeight)
+            .padding(.horizontal, Self.horizontalPadding)
+            .frame(height: Self.height)
+            .readoutGlass(cornerRadius: Self.cornerRadius)
+            // Informational, as the readouts are.
+            .allowsHitTesting(false)
     }
 }
 
-/// One readout line: seven-segment elapsed time, a faint divider, then the
-/// title in the dot-matrix face, scrolling when it overflows.
+/// The playlist readout's line: seven-segment elapsed time, a faint divider,
+/// then the title in the dot-matrix face, scrolling when it overflows.
 struct ControlBarReadoutLine: View {
     static let horizontalInset: CGFloat = 10
     static let digitHeight: CGFloat = 14
@@ -151,8 +128,10 @@ struct ControlBarReadoutLine: View {
 /// re-renders only this leaf. While playing the text comes from
 /// `playingReadoutText`, which changes only when the displayed second rolls
 /// over; while paused it derives from `transportPosition`, written only at
-/// anchor events.
-private struct ControlBarElapsedDigits: View {
+/// anchor events. Shared by the playlist readout and the compare title bar;
+/// nothing else in either reads `playingReadoutText` or the transport
+/// position.
+struct ControlBarElapsedDigits: View {
     let controller: PlaybackController
     let digitHeight: CGFloat
 

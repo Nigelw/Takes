@@ -250,13 +250,169 @@ enum CompareLaneLayout {
     static var stripFrameHeight: CGFloat { waveformBand().minY }
 }
 
+// MARK: - Compare title bar
+
+/// The compare title bar (A2 compare title-bar variant §2): 32 pt between
+/// the control bar's divider and the ruler, on the well with no line to the
+/// ruler. The take count on the left, the elapsed time centred in the
+/// window, Done on the right.
+///
+/// The bar's own body reads nothing from the controller. The count and the
+/// time are leaves: the count re-renders when the session changes, the time
+/// (`ControlBarElapsedDigits`) once per displayed second.
+struct CompareTitleBar: View {
+    let controller: PlaybackController
+    let done: () -> Void
+
+    var body: some View {
+        CompareTitleBarRow {
+            CompareTakeCount(controller: controller)
+            CompareTitleBarTime(controller: controller)
+            Button("Done", action: done)
+                .buttonStyle(CompareDoneButtonStyle())
+                .help("Back to Playlist")
+                .accessibilityLabel("Back to Playlist")
+        }
+        .padding(.horizontal, CompareTitleBarMetrics.edgeInset)
+        .frame(height: CompareTitleBarMetrics.height)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+enum CompareTitleBarMetrics {
+    static let height: CGFloat = 32
+    static let edgeInset: CGFloat = 10
+}
+
+enum CompareTitleBarText {
+    /// `3 takes`; `1 take` (removal can leave compare with one version).
+    /// Unchanged in Blind Listening Mode: the count reveals nothing.
+    static func takeCount(_ count: Int) -> String {
+        count == 1 ? "1 take" : "\(count) takes"
+    }
+}
+
+/// The take count: one style, 12 pt medium secondary, tail-truncated if it
+/// ever meets the time.
+private struct CompareTakeCount: View {
+    let controller: PlaybackController
+
+    var body: some View {
+        Text(CompareTitleBarText.takeCount(controller.displayedTrackRowCount))
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+}
+
+/// The title bar's three columns: the centre at its natural width, centred
+/// in the bar whatever the sides hold; the sides each get the equal width
+/// left beside it, the first leading-aligned and the last trailing-aligned.
+/// Expects three subviews.
+struct CompareTitleBarRow: Layout {
+    static let columnSpacing: CGFloat = 8
+
+    /// The width each side column may take beside a centre of `centerWidth`.
+    static func sideWidth(barWidth: CGFloat, centerWidth: CGFloat) -> CGFloat {
+        max((barWidth - centerWidth) / 2 - columnSpacing, 0)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        return CGSize(
+            width: proposal.width ?? sizes.reduce(0) { $0 + $1.width } + Self.columnSpacing * 2,
+            height: proposal.height ?? sizes.map(\.height).max() ?? 0
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 3 else { return }
+        let center = subviews[1].sizeThatFits(.unspecified)
+        let side = ProposedViewSize(
+            width: Self.sideWidth(barWidth: bounds.width, centerWidth: center.width),
+            height: bounds.height
+        )
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: side)
+        subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: .unspecified)
+        subviews[2].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: side)
+    }
+}
+
+/// Done (§2.3): a rectangular button, not a pill. 22 pt tall, 5 pt radius,
+/// 12 pt horizontal padding, 12 pt semibold white on the primary fill (the
+/// light primary in light appearance), with a faint top highlight and a
+/// small drop shadow, the canvas's values. Built by hand because
+/// `.borderedProminent` follows the system accent and sizes differently.
+struct CompareDoneButtonStyle: ButtonStyle {
+    static let height: CGFloat = 22
+    static let cornerRadius: CGFloat = 5
+    static let horizontalPadding: CGFloat = 12
+
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        return configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, Self.horizontalPadding)
+            .frame(height: Self.height)
+            .background {
+                shape
+                    .fill(Theme.primary)
+                    // Canvas: inset 0 0.5px 0 rgba(255,255,255,0.3).
+                    .overlay {
+                        shape.strokeBorder(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .white.opacity(0.3), location: 0),
+                                    .init(color: .clear, location: 0.12)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.5
+                        )
+                    }
+                    .overlay {
+                        if configuration.isPressed { shape.fill(.black.opacity(0.18)) }
+                    }
+                    // Canvas: 0 0.5px 1.5px rgba(0,0,0,0.5); lighter on the
+                    // pale light-appearance well.
+                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.5 : 0.25), radius: 0.75, y: 0.5)
+            }
+            .contentShape(shape)
+            .opacity(isEnabled ? 1 : 0.5)
+    }
+}
+
 /// The ruler's notches and labels (A2 §8, v2.9.0's arrangement at 26 pt):
-/// notches hang from the bottom edge, labels sit near the top, 4 pt right of
-/// their notch (`TimelineHeaderLabelLayout.leading`).
+/// notches hang from the bottom edge, labels sit at the top, 4 pt right of
+/// their notch (`TimelineHeaderLabelLayout.leading`). The labels' 10 pt line
+/// ends at least 1 pt above the playhead grabber's top (A2 compare title-bar
+/// variant §3), so the grabber never covers a label.
 enum TimelineRulerMetrics {
     static let majorTickHeight: CGFloat = 11
     static let minorTickHeight: CGFloat = 5
-    static let labelTopInset: CGFloat = 3
+    static let labelTopInset: CGFloat = 0
+    static let labelFontSize: CGFloat = 10
+    /// The label's line: its frame height, tighter than the type's natural
+    /// line height, as on the canvas (10 pt type on a 10 pt line).
+    static let labelHeight: CGFloat = 10
+    static var labelFont: Font { .system(size: labelFontSize).monospacedDigit() }
+
+    /// The glyph band of a label, in ruler coordinates: the font's natural
+    /// line centred on the `labelHeight` line, from the cap height down to
+    /// the baseline (the labels are digits and colons: no descenders).
+    static func labelGlyphBand(font: NSFont = .systemFont(ofSize: labelFontSize)) -> ClosedRange<CGFloat> {
+        let naturalLine = font.ascender - font.descender + font.leading
+        let baseline = labelTopInset + (labelHeight - naturalLine) / 2 + font.ascender
+        return (baseline - font.capHeight)...baseline
+    }
 
     /// A 1 pt notch at `x`, hanging from the ruler's bottom edge.
     static func tickFrame(x: CGFloat, height: CGFloat, rulerHeight: CGFloat = CompareLaneLayout.rulerHeight) -> CGRect {
@@ -1106,13 +1262,19 @@ struct ContentView: View {
     private var contentStack: some View {
         VStack(alignment: .leading, spacing: 0) {
             controlBar
-            trackTimelineSection
-                .frame(maxHeight: .infinity)
-                // Recess the complete timeline section—ruler and lanes—
-                // beneath the lighter transport surface. The control bar's
-                // groove is the only divider between them: the ruler has no
-                // top border (A2 §3).
-                .background(Theme.timelineWellShade)
+            VStack(spacing: 0) {
+                CompareTitleBar(controller: controller) {
+                    Task { await coordinator.backToPlaylist() }
+                }
+                .componentDebugLabel("Title Bar", enabled: settings.showsComponentDebugLabels)
+                trackTimelineSection
+                    .frame(maxHeight: .infinity)
+            }
+            // Recess the title bar, ruler and lanes beneath the lighter
+            // transport surface. The control bar's groove is the only divider
+            // between them: no line between the title bar and the ruler, and
+            // the ruler has no top border (A2 §3), so the two read as one band.
+            .background(Theme.timelineWellShade)
             // Below the lanes, which it shortens; the lanes keep their fixed
             // height and scroll (A2 §7).
             CompareBottomBar(coordinator: coordinator, openFiles: openFileCommandState)
@@ -1124,7 +1286,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Color.clear
                 .frame(
-                    height: controlBarHeight
+                    height: controlBarHeight + CompareTitleBarMetrics.height
                         + (controller.displayedTrackRowCount == 0 ? 0 : CompareLaneLayout.seatBottom)
                 )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
@@ -1135,8 +1297,9 @@ struct ContentView: View {
         .allowsHitTesting(false)
     }
 
-    /// Compare control bar (spec §5): Blind · Play · Switch Track · Repeat
-    /// over the one-line readout with the back button.
+    /// Compare control bar (spec §5.1): Blind · Play · Switch Track · Repeat,
+    /// with no readout. The elapsed time and Done are in the title bar below
+    /// the divider (A2 compare title-bar variant).
     private var controlBar: some View {
         ControlBarLayout(showsArtwork: settings.showsArtwork) {
             blindListeningButton
@@ -1145,10 +1308,6 @@ struct ContentView: View {
             switchTrackButton
         } trailing: {
             repeatButton
-        } readout: {
-            CompareControlBarReadout(controller: controller) {
-                Task { await coordinator.backToPlaylist() }
-            }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
             if abs(height - controlBarHeight) > 0.5 { controlBarHeight = height }
@@ -3567,8 +3726,8 @@ private struct TimelineHeaderRulerView: View {
     var headerHeight: CGFloat
 
     // Ruler notches hang from the bottom edge toward the lanes (A2 §8): major
-    // (labeled) notches 11 pt, minor 5 pt. Labels sit 3 pt from the top, 4 pt
-    // right of their notch. Geometry lives in `TimelineRulerMetrics`.
+    // (labeled) notches 11 pt, minor 5 pt. Labels sit at the top, on a 10 pt
+    // line clear of the playhead grabber, 4 pt right of their notch. Geometry lives in `TimelineRulerMetrics`.
     private var tickColor: Color { Theme.timelineRulerTick }
 
     var body: some View {
@@ -3597,10 +3756,12 @@ private struct TimelineHeaderRulerView: View {
 
             if ruler.majorTicks.isEmpty {
                 Text("00:00")
-                    .font(.caption.monospacedDigit())
+                    .font(TimelineRulerMetrics.labelFont)
                     .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .frame(height: TimelineRulerMetrics.labelHeight)
                     .padding(.leading, 8)
-                    .frame(maxHeight: .infinity, alignment: .center)
+                    .padding(.top, TimelineRulerMetrics.labelTopInset)
             } else {
                 if showMinorTicks {
                     ForEach(ruler.minorTicks, id: \.self) { tickTime in
@@ -3639,11 +3800,17 @@ private struct TimelineHeaderRulerView: View {
         return ZStack(alignment: .topLeading) {
             if let labelOrigin = TimelineRulerMetrics.labelOrigin(tickX: tickX, rulerWidth: width) {
                 Text(marker.label)
-                    .font(.caption.monospacedDigit())
+                    .font(TimelineRulerMetrics.labelFont)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .frame(width: labelWidth, alignment: .leading)
+                    // Natural height, so the short line below doesn't shrink
+                    // the type through the scale factor.
+                    .fixedSize(horizontal: false, vertical: true)
+                    // A 10 pt line, as the canvas draws it: the 10 pt type's
+                    // natural line (about 12 pt) is centred on it, which puts
+                    // the glyphs between 1.5 and 8.6 pt from the ruler's top.
+                    .frame(width: labelWidth, height: TimelineRulerMetrics.labelHeight, alignment: .leading)
                     .offset(x: labelOrigin.x, y: labelOrigin.y)
             }
 

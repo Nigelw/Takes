@@ -55,30 +55,6 @@ struct SessionTests {
         #expect(ControlBarReadoutTitle.playlist(nil) == "")
     }
 
-    @Test
-    func compareReadoutTitleFollowsTheAudibleVersionAndHidesItWhenBlind() {
-        func track(_ name: String, title: String?) -> SessionTrack {
-            SessionTrack(loadedTrack: LoadedTrack(
-                url: URL(fileURLWithPath: "/tmp/\(name).wav"), displayName: name,
-                fileFormatDescription: "WAV", duration: 10, sampleRate: 44_100, channelCount: 2,
-                title: title
-            ))
-        }
-        let mono = track("mono", title: "Taxman (1967 Mono Mix)")
-        let stereo = track("stereo", title: nil)
-        var session = ComparisonSession(tracks: [mono, stereo], activeTrackID: mono.id)
-        #expect(ControlBarReadoutTitle.comparison(session) == "TAXMAN (1967 MONO MIX)")
-
-        session.activeTrackID = stereo.id
-        #expect(ControlBarReadoutTitle.comparison(session) == "STEREO")
-
-        session.isBlindListeningModeEnabled = true
-        #expect(ControlBarReadoutTitle.comparison(session) == "TRACK 2")
-
-        session.activeTrackID = nil
-        #expect(ControlBarReadoutTitle.comparison(session) == "")
-    }
-
     @MainActor
     @Test
     func playlistVersionTitleFollowsAppearanceAfterConfiguration() throws {
@@ -99,8 +75,8 @@ struct SessionTests {
     }
 
     /// The title face sits just under the elapsed digits (canvas: 16 px
-    /// Doto beside 14 pt digits), and both readouts start their first dot
-    /// row on a whole point.
+    /// Doto beside 14 pt digits), and the playlist readout starts its first
+    /// dot row on a whole point.
     @Test
     func readoutTitleFaceMatchesTheDigitsAndSitsOnThePixelGrid() {
         let metrics = ControlBarReadoutLine.titleMetrics
@@ -108,11 +84,78 @@ struct SessionTests {
         #expect(metrics.lineHeight < ControlBarReadoutLine.digitHeight)
         #expect(metrics.cellAdvance == 11)
 
-        for inset in [PlaylistControlBarReadout.contentTopInset, CompareControlBarReadout.contentTopInset] {
-            #expect(inset == inset.rounded())
-        }
-        #expect(PlaylistControlBarReadout.contentTopInset == 9)
-        #expect(CompareControlBarReadout.contentTopInset == 8)
+        let inset = PlaylistControlBarReadout.contentTopInset
+        #expect(inset == inset.rounded())
+        #expect(inset == 9)
+    }
+
+    // MARK: A2 compare title bar
+
+    /// Compare's control bar ends 10 pt under the transport row (no
+    /// readout), so it is 54 pt shorter than the playlist's, whose readout
+    /// keeps 10 + 42 + 12 pt below the row.
+    @MainActor
+    @Test
+    func compareControlBarEndsUnderTheTransportRow() {
+        let transportRow = ControlBarMetrics.primaryDiameter
+        #expect(ControlBarMetrics.transportRowBottomPadding == 10)
+        #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: true)
+            == TakesWindowPolicy.controlBarTopPadding(showsArtwork: true) + transportRow
+                + ControlBarMetrics.transportRowBottomPadding + ControlBarDivider.height)
+        #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: true) == 77)
+        #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: false) == 91)
+
+        let playlistBelowRow = ControlBarMetrics.readoutTopSpacing + PlaylistControlBarReadout.height
+            + ControlBarMetrics.readoutBottomPadding
+        #expect(playlistBelowRow == 64)
+        #expect(playlistBelowRow - ControlBarMetrics.transportRowBottomPadding == 54)
+    }
+
+    /// Below the divider, the 32 pt title bar replaces the 30 pt readout and
+    /// its 12 pt gap above the divider, so the ruler starts 10 pt higher.
+    @MainActor
+    @Test
+    func compareTitleBarGeometry() {
+        #expect(CompareTitleBarMetrics.height == 32)
+        #expect(CompareTitleBarMetrics.edgeInset == 10)
+        #expect(CompareTitleBarTime.height == 24)
+        #expect(CompareTitleBarTime.cornerRadius == 6)
+        #expect(CompareTitleBarTime.horizontalPadding == 9)
+        #expect(CompareDoneButtonStyle.height == 22)
+        #expect(CompareDoneButtonStyle.cornerRadius == 5)
+        #expect(CompareDoneButtonStyle.horizontalPadding == 12)
+        // The old row (10 + 30 pt readout + 12) gives way to 10 above the
+        // divider and the title bar below it: the ruler starts 10 pt higher.
+        let oldBelowRow = ControlBarMetrics.readoutTopSpacing + 30 + ControlBarMetrics.readoutBottomPadding
+        #expect(oldBelowRow - (ControlBarMetrics.transportRowBottomPadding + CompareTitleBarMetrics.height) == 10)
+
+        // The centre column stays centred: both sides get the same width.
+        let side = CompareTitleBarRow.sideWidth(barWidth: 340, centerWidth: 60)
+        #expect(side == 140 - CompareTitleBarRow.columnSpacing)
+        #expect(side * 2 + 60 + CompareTitleBarRow.columnSpacing * 2 == 340)
+        #expect(CompareTitleBarRow.sideWidth(barWidth: 40, centerWidth: 60) == 0)
+    }
+
+    @Test
+    func compareTakeCountIsSingularForOneTake() {
+        #expect(CompareTitleBarText.takeCount(1) == "1 take")
+        #expect(CompareTitleBarText.takeCount(2) == "2 takes")
+        #expect(CompareTitleBarText.takeCount(32) == "32 takes")
+    }
+
+    /// The ruler labels end at least 1 pt above the playhead grabber's top
+    /// (11 pt below the ruler's top), by their line and by their glyphs.
+    @Test
+    func rulerLabelsClearThePlayheadGrabber() {
+        let grabberTop = CompareLaneLayout.seatBottom - PlayheadGeometry.handleHeight
+        #expect(grabberTop == 11)
+        #expect(TimelineRulerMetrics.labelTopInset == 0)
+        #expect(TimelineRulerMetrics.labelTopInset + TimelineRulerMetrics.labelHeight
+            <= CompareLaneLayout.seatBottom - 16 - 1)
+
+        let glyphs = TimelineRulerMetrics.labelGlyphBand()
+        #expect(glyphs.lowerBound >= 0)
+        #expect(glyphs.upperBound <= grabberTop - 1)
     }
 
     @MainActor
@@ -2205,7 +2248,7 @@ struct SessionTests {
         let minor = TimelineRulerMetrics.tickFrame(x: 52, height: TimelineRulerMetrics.minorTickHeight)
         #expect(minor == CGRect(x: 52, y: 21, width: 1, height: 5))
 
-        #expect(TimelineRulerMetrics.labelOrigin(tickX: 40, rulerWidth: 360) == CGPoint(x: 44, y: 3))
+        #expect(TimelineRulerMetrics.labelOrigin(tickX: 40, rulerWidth: 360) == CGPoint(x: 44, y: 0))
         // A label whose start runs past the ruler isn't drawn.
         #expect(TimelineRulerMetrics.labelOrigin(tickX: 357, rulerWidth: 360) == nil)
     }
@@ -2437,23 +2480,25 @@ struct SessionTests {
 
     @Test
     func windowMinimumHeightHoldsTheBarsAndOneWholeLane() {
-        // Compare control bar under the titlebar, ruler, one lane, bottom bar.
-        #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: true) == 119)
-        #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: false) == 133)
+        // Compare control bar under the titlebar, title bar, ruler, one lane,
+        // bottom bar.
+        #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: false) == 91)
         #expect(BottomBarMetrics.height == 30)
-        #expect(TakesWindowPolicy.minimumHeightWithoutArtwork == 286)
-        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: false) == 286)
-        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: true) == 632)
+        #expect(TakesWindowPolicy.minimumHeightWithoutArtwork == 276)
+        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: false) == 276)
+        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: true) == 622)
 
         for showsArtwork in [true, false] {
             let lanes = { (windowHeight: CGFloat) in
                 (windowHeight - (showsArtwork ? TakesWindowPolicy.artworkHeight : 0)
                     - TakesWindowPolicy.compareControlBarHeight(showsArtwork: showsArtwork)
+                    - CompareTitleBarMetrics.height
                     - CompareLaneLayout.seatBottom - BottomBarMetrics.height) / CompareLaneLayout.laneStep
             }
-            // Exactly one lane at the minimum; two and a third by default.
+            // Exactly one lane at the minimum; about two and a half (234 pt)
+            // by default.
             #expect(lanes(TakesWindowPolicy.minimumHeight(showsArtwork: showsArtwork)) == 1)
-            #expect(abs(lanes(TakesWindowPolicy.defaultHeight(showsArtwork: showsArtwork)) - 7.0 / 3) < 0.0001)
+            #expect(lanes(TakesWindowPolicy.defaultHeight(showsArtwork: showsArtwork)) == 234.0 / 96)
         }
     }
 

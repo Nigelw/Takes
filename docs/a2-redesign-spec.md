@@ -317,7 +317,9 @@ None open. The version check for a missing file was decided in milestone 3
 - **Retro readout frame: removed** (milestone 2). The readouts use the Glass
   frame only; `ReadoutStyle` and the "Readout frame" picker are gone, and a
   stored `readoutStyle` preference is ignored.
-- **Readout titles** (milestone 2). Both readouts show a version's title tag,
+- **Readout titles** (milestone 2; compare's removed by the compare
+  title-bar variant, below, which leaves the playlist rule only). Both
+  readouts show a version's title tag,
   falling back to its filename without the extension, uppercased. Playlist:
   the playing (or current) version. Compare: the audible version, except in
   Blind Listening Mode, where it shows `TRACK n` (the lane's position), as
@@ -328,7 +330,8 @@ None open. The version check for a missing file was decided in milestone 3
   transport row has no room for them, so they moved to the bottom bar's
   right side (see "Bottom-bar zoom" below). ⌘+/⌘−, Zoom to Selection, Zoom
   to Fit and pinch zoom as well.
-- **Esc leaves compare**, as the back button and ⌘[ do (§9). It goes through
+- **Esc leaves compare**, as the back button (now the title bar's Done)
+  and ⌘[ do (§9). It goes through
   the same focus-safe shortcut gate, so text fields keep Esc.
 - **Side-button placement** (milestone 4 review). Shuffle/Blind and Repeat
   are each centred midway between their window edge and the playlist's
@@ -356,9 +359,13 @@ None open. The version check for a missing file was decided in milestone 3
   all, as the comparison section already drew it; the 1 pt + 1 pt in §3 is
   the canvas's approximation. Compare's 5 pt shadow under the control bar is
   gone, so the groove is the only edge there.
-- **Control-bar heights differ by mode.** The readouts are 42 and 30 pt, so
-  the compare bar is 12 pt shorter (119 vs 131 pt with artwork) and the
-  content below starts 12 pt higher in compare. The transport row and
+- **Control-bar heights differ by mode.** Milestone 2: the readouts were
+  42 and 30 pt, so the compare bar was 12 pt shorter (119 vs 131 pt with
+  artwork). Since the compare title-bar variant (below) compare has no
+  readout: its bar ends 10 pt under the transport row, 54 pt shorter than
+  the playlist's (77 vs 131 pt with artwork, 91 vs 145 under the
+  titlebar), and its 32 pt title bar sits below the divider, so the ruler
+  starts 10 pt higher than with the readout. The transport row and
   everything above it stay put.
 - **Compare is unavailable for single-version items.** They show no
   disclosure chevron and no Compare pill.
@@ -368,11 +375,13 @@ None open. The version check for a missing file was decided in milestone 3
   only animate lines that actually overflow. The compare readout is narrower,
   so it scrolls more often.
 - **The window is resizable in both directions** (§2). Defaults are the §2
-  sizes. Minimum width 360; minimum height 286 below the cover (632 with
-  artwork, 286 without; `TakesWindowPolicy.minimumHeightWithoutArtwork`),
-  settled in milestone 5: the compare control bar (133 pt under the
-  titlebar), the ruler (27), one whole lane (96) and the bottom bar (30), so
-  compare always shows its controls and one lane. The playlist's control bar
+  sizes. Minimum width 360; minimum height 276 below the cover (622 with
+  artwork, 276 without; `TakesWindowPolicy.minimumHeightWithoutArtwork`):
+  the compare control bar (91 pt under the titlebar), its title bar (32),
+  the ruler (27), one whole lane (96) and the bottom bar (30), so compare
+  always shows its controls and one lane. Milestone 5 settled the rule at
+  286 (a 133 pt control bar with the readout and no title bar); the
+  compare title-bar variant kept the rule, which lowered it to 276. The playlist's control bar
   is 12 pt taller, leaving its list two rows and part of a third. Milestones
   1–4 used a provisional 300. Mode switches never resize. The artwork
   toggle changes the height by exactly 346 pt, keeping any extra height the
@@ -439,7 +448,8 @@ None open. The version check for a missing file was decided in milestone 3
   height five versions shared in a 986 pt window with the artwork shown.
   Lanes never resize with the window or the version count; those that don't
   fit scroll, and fewer leave the well empty below. In the default 760 pt
-  window two and a third lanes show (two and a half before milestone 5's
+  window about two and a half lanes show (two and a third with the compare
+  readout row, before the title-bar variant; two and a half before milestone 5's
   bottom bar). The first build gave lanes equal shares of the space
   (74 pt for three in the default window, 64 pt minimum), which resized
   every lane, and redrew every waveform, whenever a version was added or
@@ -552,3 +562,21 @@ None open. The version check for a missing file was decided in milestone 3
   Zoom to Fit and pinch all move one value. The pre-A2 haptic tick at each
   quarter of the range is kept. All three disable when the timeline is too
   short to zoom.
+- **Compare title bar instead of the readout** (after milestone 5; see
+  [a2-compare-title-bar-spec.md](a2-compare-title-bar-spec.md), which
+  overrides §5.2's compare readout and §9's back button). The compare
+  control bar is the transport row alone, ending 10 pt under it; the
+  readout, its back button and its scrolling title are gone, and so is the
+  compare readout title rule (`TRACK n` when blind). A 32 pt title bar
+  sits between the divider and the ruler, on the well with no line to the
+  ruler: `N takes` (`1 take`) on the left in 12 pt medium secondary, the
+  elapsed time in a 24 pt Glass frame centred in the window, and a
+  rectangular Done (22 pt, 5 pt radius, primary fill) on the right. Done
+  leaves compare as the back button did (the audible version becomes the
+  playback version); Esc and ⌘[ are unchanged. The control bars now differ
+  by 54 pt (see "Control-bar heights differ by mode"); the window minimum
+  drops 10 pt to 276/622 (see "The window is resizable"). The ruler labels
+  moved to the top of the ruler on a 10 pt line (`labelTopInset` 0, was 3),
+  so they end at least 1 pt above the playhead grabber. The title bar shows
+  whether or not the artwork is (the spec's first open question); the take
+  count has no tooltip or menu (its second).

@@ -353,12 +353,14 @@ enum TakesWindowPolicy {
     static let artworkCollapseHeight = artworkHeight
         - (controlBarTopPaddingUnderTitlebar - controlBarTopPaddingBelowArtwork)
     static let defaultHeightWithArtwork: CGFloat = 760
-    /// Room below the cover at the minimum height (A2 milestone 5, §13): the
-    /// compare control bar, the ruler, one whole lane and the bottom bar
-    /// (133 + 27 + 96 + 30 = 286 pt). The playlist's control bar is 12 pt
-    /// taller, which leaves its list two rows and part of a third.
+    /// Room below the cover at the minimum height (A2 milestone 5, §13, and
+    /// the compare title-bar variant): the compare control bar, its title
+    /// bar, the ruler, one whole lane and the bottom bar (91 + 32 + 27 + 96
+    /// + 30 = 276 pt). The playlist's control bar is 54 pt taller, which
+    /// leaves its list two rows and part of a third.
     static let minimumHeightWithoutArtwork: CGFloat = compareControlBarHeight(showsArtwork: false)
-        + CompareLaneLayout.seatBottom + CompareLaneLayout.laneStep + BottomBarMetrics.height
+        + CompareTitleBarMetrics.height + CompareLaneLayout.seatBottom + CompareLaneLayout.laneStep
+        + BottomBarMetrics.height
 
     static func controlBarTopPadding(showsArtwork: Bool) -> CGFloat {
         showsArtwork ? controlBarTopPaddingBelowArtwork : controlBarTopPaddingUnderTitlebar
@@ -395,12 +397,12 @@ enum TakesWindowPolicy {
     // MARK: Comparison
 
     /// The compare control bar's height with the artwork shown (10 + 56 +
-    /// 10 + 30 + 12 + 1 divider): the import highlight's starting inset
-    /// until the bar's measured height arrives. The ruler and lanes below it
-    /// are sized by `CompareLaneLayout`.
-    static let controlBarReservedHeight: CGFloat = 119
+    /// 10 + 1 divider; no readout): the import highlight's starting inset
+    /// until the bar's measured height arrives. The title bar, ruler and
+    /// lanes below it are sized by `CompareTitleBarMetrics` and `CompareLaneLayout`.
+    static let controlBarReservedHeight: CGFloat = 77
 
-    /// The compare control bar's height: 119 pt under the cover, 133 under
+    /// The compare control bar's height: 77 pt under the cover, 91 under
     /// the titlebar, whose overlay adds 14 pt of top padding.
     static func compareControlBarHeight(showsArtwork: Bool) -> CGFloat {
         controlBarReservedHeight - controlBarTopPaddingBelowArtwork + controlBarTopPadding(showsArtwork: showsArtwork)
