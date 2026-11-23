@@ -330,7 +330,7 @@ struct WorkspaceView: View {
                 .padding(.vertical, 8)
                 .background(.thinMaterial)
             }
-            PlaylistView(coordinator: coordinator, presentation: presentation, openFiles: openFiles)
+            PlaylistView(coordinator: coordinator, presentation: presentation, openFiles: openFiles, artworkStore: artworkStore)
         }
     }
 

@@ -581,8 +581,8 @@ final class PlaylistCoordinator {
     }
 
     /// Enter the current item's comparison view. The playing item preserves
-    /// file time and version; another item begins at its timeline start while
-    /// retaining the current playing/paused state.
+    /// file time, version, and playing state; another item begins paused at
+    /// its timeline start.
     func enterComparison(itemID: PlaylistItem.ID) async {
         guard workspace.items.contains(where: { $0.id == itemID }) else {
             reportError(PlaylistWorkspaceError.itemNotFound(itemID).localizedDescription)
@@ -604,11 +604,13 @@ final class PlaylistCoordinator {
             reportError(PlaylistWorkspaceError.emptyItem(itemID).localizedDescription)
             return
         }
+        // Entering compare never starts an item (A2 spec §9): another item's
+        // playback stops, and only the item already playing keeps going.
         let snapshot = PlaybackSnapshot(
             itemID: itemID,
             versionID: versionID,
             filePosition: sameItem ? oldSnapshot.filePosition : 0,
-            isPlaying: oldSnapshot.isPlaying
+            isPlaying: sameItem && oldSnapshot.isPlaying
         )
         await activateComparison(
             itemID: itemID,

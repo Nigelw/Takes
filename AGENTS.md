@@ -66,13 +66,19 @@ Key ownership:
   the dot-matrix text and marquee, the seekable LED meter
   (`DotMatrixProgressBar`), and the Glass frame (`readoutGlass`).
 - `CoverArtwork.swift`: `PlaylistArtworkStore` (in-memory, downsampled,
-  bounded embedded-artwork cache), the 360 pt cover view, and the artwork
-  toggle with its custom sleeve glyph.
-- `PlaylistView.swift`: playlist header bar, selection/expansion presentation
-  state, and the selection-aware organization commands (`PlaylistCommandContext`).
+  bounded embedded-artwork caches: the cover, and the playlist rows'
+  thumbnails), the 360 pt cover view, and the artwork toggle with its custom
+  sleeve glyph.
+- `PlaylistView.swift`: the playlist list's SwiftUI host (empty state, no
+  header bar), selection/expansion presentation state, the Playlist menu, and
+  the selection-aware organization commands (`PlaylistCommandContext`).
 - `PlaylistOutlineView.swift`: the playlist table — an `NSOutlineView` wrapped
-  in `NSViewRepresentable` (items with versions as children), its cells,
-  context menu, inline rename, keyboard handling, and row drag and drop.
+  in `NSViewRepresentable` (items with versions as children), the A2 rows
+  (`PlaylistRowMetrics`, `PlaylistRowView`, `PlaylistItemCellView`,
+  `PlaylistVersionCellView`, the thumbnail, chevron and Compare pill views),
+  visible-row thumbnail requests, context menu, inline rename, keyboard
+  handling, and row drag and drop. Row colors are `PlaylistRowPalette` in
+  `Theme.swift`.
 - `ContentView.swift`: the compare control bar's buttons, comparison
   waveform/timeline UI, drag-and-drop, loop gestures, and offset controls.
 - `AppSettings.swift` and `SettingsView.swift`: persisted user preferences
@@ -193,6 +199,27 @@ These are here to prevent parallel implementations and subtle regressions:
   metadata match or appends.
 - Context-menu commands act on the selection when opened on a selected row and
   on the clicked row alone otherwise (`PlaylistCommandContext.rows`).
+- The playlist table (A2 §6) is one full-width column with no header.
+  AppKit's disclosure triangle and indentation are suppressed
+  (`frameOfOutlineCell`, `frameOfCell`); item rows (46 pt) draw their own
+  chevron in an always-reserved 12 pt slot, only on multi-version items.
+  `PlaylistRowView` draws every background (selection, now-playing tint,
+  hover, the drop-on-item ring) inside the 10 pt edge inset with a 6 pt
+  radius; the geometry lives in `PlaylistRowMetrics`. Item and version
+  titles truncate in the middle; artist lines at the tail.
+- Version rows (30 pt) are named by their title tag, else the filename
+  without its extension (`PlaylistRowText.versionName`). A plain click on a
+  version row makes it the playback version; a missing file shows a warning
+  triangle in place of the check and its click opens Locate. Double-click
+  plays on every row. The hover Compare pill (multi-version items only) and
+  the context menu's Compare are the ways into compare from a row.
+- Entering compare never starts an item: another item's playback stops, and
+  only the item already playing keeps playing
+  (`PlaylistCoordinator.enterComparison`).
+- The playlist has no header bar. Until milestone 5's bottom bar, imports are
+  in the File menu (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M), Remove is Delete and the context
+  menu, and the organization commands are in the context menu and the
+  Playlist menu; keep each reachable from one of those.
 - Keep global shortcuts focus-safe; active numeric text fields should retain
   normal text editing behavior.
 - One main window serves both modes (A2). It opens 360 pt wide (760 tall with
@@ -206,9 +233,19 @@ These are here to prevent parallel implementations and subtle regressions:
   their top padding from `TakesWindowPolicy.controlBarTopPadding(showsArtwork:)`
   (10 under the cover, 24 under the titlebar). In compare the cover shows the
   item's playback version, not the audible one.
-- Artwork is in-memory only (no disk caches), loaded only for the version on
-  display, downsampled to 720 px and capped at `PlaylistArtworkStore.capacity`
-  decoded images. Only the cover shows artwork; the readouts carry none.
+- Artwork is in-memory only (no disk caches); the readouts carry none. The
+  cover loads only the version on display, downsampled to 720 px, capped at
+  `PlaylistArtworkStore.capacity` decoded images. Playlist item rows show a
+  34 pt thumbnail of their playback version from a separate bounded cache
+  (`thumbnailPixelSize` 68 px, `thumbnailCapacity`, at most
+  `maximumConcurrentThumbnailLoads` decodes at once). The outline controller
+  requests thumbnails only for item rows inside the visible rect
+  (`requestVisibleThumbnails`, coalesced per run-loop turn on scroll/resize/
+  reload), and each request replaces the queue, so rows scrolled away before
+  their turn — and rows AppKit prepares off screen — are never decoded. A
+  version whose cover is decoded (or decoding) is scaled from that image
+  instead of reading its file again. Finished thumbnails are pushed into the
+  visible cell (`onThumbnailLoaded`), never by reloading the table.
 - Both modes build their control bar from one `ControlBarLayout` (A2 §5):
   side slots of 30 × 40 pt pinned to the 10 pt insets, the centre group
   centred with 12 pt gaps, the readout taking the remaining width, then the
@@ -271,7 +308,8 @@ these reintroduces the exact regressions it fixed):
 
 - `PlaylistCoordinatorTests.swift`: traversal, import destinations, organization,
   Undo, missing-file repair/advancement, 100-item/32-version runtime isolation,
-  automatic-grouping transactions/cancellation, and workspace/runtime integration.
+  automatic-grouping transactions/cancellation, entering compare without
+  starting another item, and workspace/runtime integration.
 - `PlaylistRuntimeTests.swift`: runtime replacement, stable IDs, stale imports,
   teardown, preparation failure, and natural-end callbacks.
 - `PlaylistWorkspaceStoreTests.swift`: snapshot round trips, recovery protection,
@@ -291,7 +329,9 @@ these reintroduces the exact regressions it fixed):
   policy (sizes, minimums, artwork-toggle frames, clamping), the persisted
   artwork setting, retired control-bar preferences loading as defaults, the
   A2 readout title rules (tag, filename, blind), the LED meter's cell count
-  and head geometry, and other non-UI logic.
+  and head geometry, the A2 playlist row metrics and version names, the
+  thumbnail cache (visible-only queue, concurrency bound, capacity, cover
+  reuse), and other non-UI logic.
 - `StreamingTrackImportTests.swift`: streaming metadata, yt-dlp resolution,
   download/import behavior, checksum parsing, and error handling.
 - `WaveformSourceTests.swift`: waveform generation and the peak pyramid
@@ -329,7 +369,8 @@ these reintroduces the exact regressions it fixed):
 - [docs/a2-redesign-spec.md](docs/a2-redesign-spec.md): the A2 compact
   cover-column redesign (360 pt window, artwork toggle, glass readout,
   two-line playlist rows, compact compare). Milestones 1 (window shell and
-  artwork) and 2 (control bar) are done; 3–5 are not started. Read it before working on any of
+  artwork), 2 (control bar) and 3 (playlist rows) are done; 4–5 are not
+  started. Read it before working on any of
   its milestones.
 - [docs/comparative-quality-analysis.md](docs/comparative-quality-analysis.md):
   the multi-track "which of these is the better copy?" feature — design,

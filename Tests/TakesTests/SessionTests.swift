@@ -2127,6 +2127,147 @@ struct SessionTests {
         #expect(ContentView.renderableRowRange(contentMinY: 0, viewportHeight: 0, rowStep: 100) == 0...Int.max)
     }
 
+    // MARK: A2 playlist rows (milestone 3)
+
+    @Test
+    func playlistRowMetricsAlignThumbnailsChecksAndTitles() {
+        typealias M = PlaylistRowMetrics
+        #expect(M.itemHeight == 46)
+        #expect(M.versionHeight == 30)
+        // Chevron slot at 14, thumbnail (and the version check column) at 32,
+        // titles of both row kinds at 76 — the canvas's arrangement.
+        #expect(M.disclosureX == 14)
+        #expect(M.thumbnailX == 32)
+        #expect(M.titleX == 76)
+        // Highlights keep the 10 pt edge inset at any window width.
+        for width: CGFloat in [360, 520, 900] {
+            let rect = M.highlightRect(in: NSRect(x: 0, y: 0, width: width, height: M.itemHeight))
+            #expect(rect.minX == 10)
+            #expect(rect.maxX == width - 10)
+            #expect(M.trailingX(rowWidth: width) == width - 18)
+        }
+        // The far stacked card's strip reaches 4 pt above and right of the tile.
+        #expect(PlaylistThumbnailView.stackExtent == 4)
+    }
+
+    @Test
+    func playlistVersionNamesUseTheTitleTagThenTheFilenameStem() {
+        func version(title: String?, file: String) -> PlaylistVersion {
+            PlaylistVersion(
+                file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/\(file)")),
+                metadata: PlaylistMetadata(title: title, fileFormatDescription: "FLAC", displayName: file)
+            )
+        }
+        #expect(PlaylistRowText.versionName(version(title: "Eleanor Rigby (2009 Stereo Mix)", file: "02 eleanor.flac"))
+            == "Eleanor Rigby (2009 Stereo Mix)")
+        #expect(PlaylistRowText.versionName(version(title: "  ", file: "02 eleanor.flac")) == "02 eleanor")
+        #expect(PlaylistRowText.versionName(version(title: nil, file: "take.final.wav")) == "take.final")
+        #expect(PlaylistRowText.formatName(version(title: nil, file: "a.flac").metadata) == "FLAC")
+        #expect(PlaylistRowText.missingWarning(missing: 0, of: 3) == nil)
+        #expect(PlaylistRowText.missingWarning(missing: 1, of: 1) == "The file for this item can’t be found.")
+        #expect(PlaylistRowText.missingWarning(missing: 2, of: 3) == "2 of 3 files can’t be found.")
+    }
+
+    @MainActor
+    @Test
+    func thumbnailsLoadOnlyForTheLatestVisibleRowsTwoAtATime() async throws {
+        let gate = ThumbnailLoadGate()
+        let store = PlaylistArtworkStore { url, size in await gate.load(url, size: size) }
+        var loaded: [UUID] = []
+        store.onThumbnailLoaded = { loaded.append($0) }
+        let rows = (0..<6).map { (id: UUID(), url: URL(fileURLWithPath: "/tmp/thumb-\($0).m4a")) }
+
+        store.requestThumbnails(rows)
+        try await waitUntil { await gate.callCount == 2 }
+        #expect(store.thumbnailLoadsInFlight == PlaylistArtworkStore.maximumConcurrentThumbnailLoads)
+        // Scrolled: only the last row is still visible. Rows 2–4 are never read.
+        store.requestThumbnails([rows[5]])
+        await gate.releaseAll()
+        try await waitUntil { loaded.count == 3 }
+        let calls = await gate.calls
+        #expect(calls.count == 3)
+        #expect(Set(calls.map(\.url)) == [rows[0].url, rows[1].url, rows[5].url])
+        #expect(await gate.calls.allSatisfy { $0.size == PlaylistArtworkStore.thumbnailPixelSize })
+        #expect(store.thumbnail(for: rows[3].id, url: rows[3].url) == .unknown)
+        guard case let .image(image) = store.thumbnail(for: rows[5].id, url: rows[5].url) else {
+            Issue.record("Expected a thumbnail")
+            return
+        }
+        #expect(image.size.width == CGFloat(PlaylistArtworkStore.thumbnailPixelSize))
+        // A relocated file is a different thumbnail.
+        #expect(store.thumbnail(for: rows[5].id, url: URL(fileURLWithPath: "/tmp/elsewhere.m4a")) == .unknown)
+    }
+
+    @MainActor
+    @Test
+    func thumbnailCacheIsBoundedAndKeepsMisses() async throws {
+        let store = PlaylistArtworkStore { url, size in
+            url.lastPathComponent.hasPrefix("none") ? nil : Self.makeImage(side: size)
+        }
+        var loaded = 0
+        store.onThumbnailLoaded = { _ in loaded += 1 }
+        let miss = (id: UUID(), url: URL(fileURLWithPath: "/tmp/none.m4a"))
+        let rows = (0...PlaylistArtworkStore.thumbnailCapacity).map { (id: UUID(), url: URL(fileURLWithPath: "/tmp/art-\($0).m4a")) }
+        store.requestThumbnails([miss] + rows)
+        try await waitUntil { loaded == rows.count + 1 }
+        // One over capacity: exactly one of the earliest images was evicted.
+        let evicted = rows.indices.filter { store.thumbnail(for: rows[$0].id, url: rows[$0].url) == .unknown }
+        #expect(evicted.count == 1)
+        #expect(evicted.allSatisfy { $0 < 2 })
+        #expect(store.thumbnail(for: miss.id, url: miss.url) == PlaylistArtworkStore.Thumbnail.none)
+        if case .image = store.thumbnail(for: rows[rows.count - 1].id, url: rows[rows.count - 1].url) {} else {
+            Issue.record("The most recent thumbnail should be cached")
+        }
+    }
+
+    @MainActor
+    @Test
+    func thumbnailReusesTheCoverDecodeOfTheSameVersion() async throws {
+        let url = try makeTemporaryAudioFile(name: "cover.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let gate = ThumbnailLoadGate()
+        let store = PlaylistArtworkStore { url, size in await gate.load(url, size: size) }
+        var loaded: [UUID] = []
+        store.onThumbnailLoaded = { loaded.append($0) }
+        let version = PlaylistVersion(
+            file: PlaylistWorkspaceStore.makeFileReference(for: url),
+            metadata: PlaylistMetadata(fileFormatDescription: "WAV", displayName: url.lastPathComponent)
+        )
+
+        // Asked for while the cover is still decoding: it waits for it.
+        store.load(for: version)
+        try await waitUntil { await gate.callCount == 1 }
+        store.requestThumbnails([(version.id, url)])
+        await gate.releaseAll()
+        try await waitUntil { loaded == [version.id] }
+        #expect(await gate.calls.map(\.size) == [PlaylistArtworkStore.maximumPixelSize])
+        #expect(store.artwork(for: version.id) != nil)
+        guard case let .image(image) = store.thumbnail(for: version.id, url: url) else {
+            Issue.record("Expected a thumbnail scaled from the cover")
+            return
+        }
+        #expect(image.size.width == CGFloat(PlaylistArtworkStore.thumbnailPixelSize))
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: @MainActor () async -> Bool) async throws {
+        for _ in 0..<400 {
+            if await condition() { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("Timed out waiting for condition")
+    }
+
+    fileprivate static func makeImage(side: Int) -> CGImage? {
+        let context = CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        context?.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context?.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        return context?.makeImage()
+    }
+
     private func makeTrack(name: String) -> LoadedTrack {
         LoadedTrack(
             url: URL(fileURLWithPath: "/tmp/\(name)"),
@@ -2151,6 +2292,28 @@ struct SessionTests {
         buffer.frameLength = 44_100
         try file.write(from: buffer)
         return url
+    }
+}
+
+/// Holds thumbnail and cover loads until released, recording each call.
+private actor ThumbnailLoadGate {
+    private(set) var calls: [(url: URL, size: Int)] = []
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var isOpen = false
+
+    var callCount: Int { calls.count }
+
+    func load(_ url: URL, size: Int) async -> CGImage? {
+        calls.append((url, size))
+        if !isOpen { await withCheckedContinuation { waiting.append($0) } }
+        return SessionTests.makeImage(side: size)
+    }
+
+    /// Releases every waiting load, and lets later ones through.
+    func releaseAll() {
+        isOpen = true
+        waiting.forEach { $0.resume() }
+        waiting.removeAll()
     }
 }
 

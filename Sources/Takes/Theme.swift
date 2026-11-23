@@ -185,3 +185,60 @@ enum Theme {
             : NSColor(srgbRed: 96 / 255, green: 104 / 255, blue: 125 / 255, alpha: 0.28)
     })
 }
+
+/// Playlist row colors (A2 spec §6). `NSColor`s because the playlist table is
+/// AppKit. Dark values come from the design canvas; light values are their
+/// counterparts on the pale list (§13): stacked-card edges step toward the
+/// background instead of away from it, and tints use the light primary.
+enum PlaylistRowPalette {
+    private static func dynamic(
+        light: (r: Double, g: Double, b: Double, a: Double),
+        dark: (r: Double, g: Double, b: Double, a: Double)
+    ) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let c = appearance.isDark ? dark : light
+            return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a)
+        }
+    }
+
+    // `Theme.primary`: #6C63E9 light, #8F87F5 dark.
+    private static let primaryLight = (r: 0.424, g: 0.388, b: 0.914)
+    private static let primaryDark = (r: 0.561, g: 0.529, b: 0.961)
+
+    private static func primary(lightAlpha: Double, darkAlpha: Double) -> NSColor {
+        dynamic(
+            light: (primaryLight.r, primaryLight.g, primaryLight.b, lightAlpha),
+            dark: (primaryDark.r, primaryDark.g, primaryDark.b, darkAlpha)
+        )
+    }
+
+    /// Behind the now-playing item row.
+    static let nowPlayingFill = primary(lightAlpha: 0.12, darkAlpha: 0.14)
+    /// The now-playing item's title: a light primary tint in dark, a deep
+    /// one in light so it keeps its contrast on the tinted row.
+    static let nowPlayingTitle = dynamic(light: (0.310, 0.275, 0.784, 1), dark: (0.769, 0.749, 1.0, 1))
+    /// Behind the hovered row.
+    static let hoverFill = dynamic(light: (0, 0, 0, 0.04), dark: (1, 1, 1, 0.05))
+    /// Drop-on-item target: a tinted fill inside a 2 pt primary ring.
+    static let dropTargetFill = primary(lightAlpha: 0.14, darkAlpha: 0.18)
+    static let dropTargetRing = primary(lightAlpha: 1, darkAlpha: 1)
+
+    /// Thumbnail tile without artwork, and its music-note glyph.
+    static let thumbnailFill = dynamic(light: (0.863, 0.863, 0.882, 1), dark: (0.227, 0.227, 0.243, 1))
+    static let thumbnailGlyph = dynamic(light: (0.612, 0.612, 0.639, 1), dark: (0.467, 0.467, 0.490, 1))
+    /// Stacked-card edges behind a multi-version item's thumbnail: the near
+    /// card (3, −3) and the far card (6, −6).
+    static let stackNearEdge = dynamic(light: (0.725, 0.725, 0.753, 1), dark: (0.353, 0.353, 0.376, 1))
+    static let stackFarEdge = dynamic(light: (0.835, 0.835, 0.855, 1), dark: (0.243, 0.243, 0.263, 1))
+    /// Scrim over a thumbnail carrying the speaker or warning glyph.
+    static let playingScrim = NSColor.black.withAlphaComponent(0.45)
+    static let missingScrim = NSColor.black.withAlphaComponent(0.5)
+
+    /// The hover Compare pill.
+    static let comparePillFill = primary(lightAlpha: 0.14, darkAlpha: 0.2)
+    static let comparePillText = nowPlayingTitle
+
+    /// Warning triangle: yellow with a dark mark, in both appearances.
+    static let warningFill = NSColor(srgbRed: 0.957, green: 0.773, blue: 0.141, alpha: 1)
+    static let warningMark = NSColor(srgbRed: 0.227, green: 0.173, blue: 0, alpha: 1)
+}

@@ -172,42 +172,19 @@ struct PlaylistCommands: Commands {
     }
 }
 
+/// The playlist list (A2 §6). There is no header bar: imports live in the
+/// File menu, and the organization commands in the context menu and the
+/// Playlist menu (the bottom bar's `…` menu joins them in milestone 5).
 struct PlaylistView: View {
     let coordinator: PlaylistCoordinator
     @ObservedObject var presentation: PlaylistPresentationState
     @ObservedObject var openFiles: OpenFileCommandState
+    let artworkStore: PlaylistArtworkStore
     @Environment(\.undoManager) private var undoManager
-
-    private var commands: PlaylistCommandContext {
-        .init(coordinator: coordinator, presentation: presentation, undoManager: undoManager)
-    }
 
     var body: some View {
         let items = coordinator.workspace.items
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                ImportActionSplitButton(dropdownItems: ImportActionMenuItem.dropdownItems) { action in
-                    switch action {
-                    case .open: openFiles.presentOpenDialog()
-                    case .streamingURL: openFiles.presentStreamingURLPrompt()
-                    case .finderSelection: openFiles.openFinderSelection()
-                    case .musicSelection: openFiles.openAppleMusicSelection()
-                    }
-                }
-                .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
-                Spacer()
-                Text(items.count == 1 ? "1 item" : "\(items.count) items")
-                    .foregroundStyle(.secondary).font(.caption)
-                Button("Group and Compare") { commands.group(compare: true) }
-                    .disabled(!commands.canGroup)
-                Menu {
-                    organizationMenu
-                } label: { Image(systemName: "ellipsis.circle") }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .accessibilityLabel("Playlist Actions")
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            Divider()
+        Group {
             if items.isEmpty {
                 ContentUnavailableView {
                     Label("Your Playlist", systemImage: "music.note.list")
@@ -225,6 +202,7 @@ struct PlaylistView: View {
                     currentItemID: coordinator.currentItemID,
                     isPlaying: coordinator.isPlaying,
                     isActive: coordinator.mode == .playlist,
+                    artworkStore: artworkStore,
                     undoManager: undoManager
                 )
             }
@@ -234,19 +212,4 @@ struct PlaylistView: View {
             presentation.prune(in: coordinator.workspace)
         }
     }
-
-    @ViewBuilder private var organizationMenu: some View {
-        Button("Group as Versions") { commands.group(compare: false) }.disabled(!commands.canGroup)
-        Button("Group and Compare") { commands.group(compare: true) }.disabled(!commands.canGroup)
-        Button("Rename…") { presentation.renamingItemID = commands.itemIDs.first }.disabled(commands.itemIDs.count != 1)
-        Button("Separate Versions") { commands.separate() }.disabled(!commands.canSeparate)
-        Divider()
-        Button("Move Up") { commands.moveSelection(direction: -1) }.disabled(commands.itemIDs.isEmpty)
-        Button("Move Down") { commands.moveSelection(direction: 1) }.disabled(commands.itemIDs.isEmpty)
-        Button("Remove") { commands.remove() }.disabled(!commands.canRemove)
-        Button("Clear Playlist") { coordinator.clearPlaylist(undoManager: undoManager) }
-            .disabled(items.isEmpty)
-    }
-
-    private var items: [PlaylistItem] { coordinator.workspace.items }
 }

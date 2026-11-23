@@ -270,9 +270,10 @@ Each is meant to fit one session and leave the app working.
    Remove the comparison navigation bar. Also removed the Teenage
    Engineering theme and the Retro readout frame, and dropped compare's
    zoom controls until milestone 5 (§13).
-3. **Playlist rows.** Two-line rows, thumbnails, stacked art, version rows
-   with tag names, middle truncation, hover Compare, missing-file overlay.
-   Remove the header bar.
+3. **Playlist rows.** *Done.* Two-line rows, thumbnails, stacked art,
+   version rows with tag names, middle truncation, hover Compare,
+   missing-file overlay. Removed the header bar, the version-count badge and
+   the column headers. Entering compare no longer starts another item (§13).
 4. **Compact compare.** Drop the info column, overlaid lane info, 26 pt
    ruler, playhead seating, lane sizing and scrolling.
 5. **Bottom bars.** Small-control bars for both modes; move organisation
@@ -282,8 +283,8 @@ Update `AGENTS.md` (ownership, invariants, test map) as each milestone lands.
 
 ## 12. Open questions
 
-- What the version check (§6) does when the playback version's file is
-  missing.
+None open. The version check for a missing file was decided in milestone 3
+(§13).
 
 ## 13. Decisions
 
@@ -365,3 +366,36 @@ Update `AGENTS.md` (ownership, invariants, test map) as each milestone lands.
   Switch Track doesn't swap the cover.
 - **Double-click plays, on every row.** It does not open compare, even for
   multi-version items; the Compare pill is the way in.
+- **Missing version file** (milestone 3, was §12). A version row whose file
+  is missing shows a yellow warning triangle in the 34 pt check column in
+  place of the check, even when it is the playback version, and a dimmed
+  title. Clicking it opens Locate File… rather than switching playback to a
+  file that can't play. An item row shows the triangle over its darkened
+  thumbnail when any of its files is missing (the tooltip counts them) and
+  dims its title when its playback version's file is missing.
+- **Entering compare never starts an item** (milestone 3, §9). Another
+  item's playback stops and compare opens paused; the item already playing
+  keeps playing. This applies to every way in: the Compare pill, the context
+  menu, and Group and Compare.
+- **Row thumbnails** (milestone 3). Item rows show their playback version's
+  embedded artwork, decoded only for rows inside the visible rect, 68 px,
+  in memory, from a bounded cache separate from the cover's; a version whose
+  cover is decoded is scaled from it. See `AGENTS.md` for the rule.
+- **Version rows** (milestone 3). Name: the title tag, else the filename
+  without its extension (the readout's rule, not uppercased). The format
+  column shows the container alone (FLAC, MP3); sample rate, bit rate and the
+  filename are in the row's tooltip. Only a plain click changes the playback
+  version; ⌘- and ⇧-clicks only select. Rows being dragged stay in place,
+  dimmed, until the drop lands.
+- **Item rows without an artist tag** show the title alone, vertically
+  centred.
+- **Compare pill on hover only**, not on the selected row. Keyboard and
+  VoiceOver users reach compare through the context menu.
+- **Light row values.** Now-playing tint: light primary at 12% with a deep
+  primary title (#4F46C8); hover: black 4%; drop target: primary 14% inside
+  a 2 pt primary ring; thumbnail tile #DCDCE1 with a #9C9CA3 note; stacked
+  edges step toward the background (near #B9B9C0, far #D5D5DA). Dark values
+  are the canvas's. All live in `PlaylistRowPalette`.
+- **No item count until milestone 5.** The header bar's `N items` label is
+  gone with the bar; the bottom bar's `6 items · 19:35` brings it back. Its
+  commands remain in the context menu, the Playlist menu and the File menu.

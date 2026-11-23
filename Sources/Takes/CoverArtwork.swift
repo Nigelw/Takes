@@ -4,20 +4,46 @@ import SwiftUI
 
 // MARK: - Artwork store
 
-/// In-memory embedded-artwork cache for the cover and the now-playing readout,
-/// keyed by stable version ID. Like `WaveformStore`, it is process-lifetime
-/// runtime state: nothing is persisted or written to disk, and artwork is
-/// loaded only for the version on display, never for the whole playlist.
+/// In-memory embedded-artwork caches, keyed by stable version ID: one for
+/// the cover and one for the playlist rows' thumbnails. Like
+/// `WaveformStore`, they are process-lifetime runtime state: nothing is
+/// persisted or written to disk.
 ///
-/// Images are downsampled to `maximumPixelSize` on load so one cover costs a
-/// couple of megabytes however large the embedded file is, and at most
-/// `capacity` decoded images are kept (least recently shown first out).
+/// Cover: loaded only for the version on display, downsampled to
+/// `maximumPixelSize`, at most `capacity` decoded images (least recently
+/// shown first out). SwiftUI observes it.
+///
+/// Thumbnails: loaded only for item rows the playlist table reports as
+/// visible (`requestThumbnails(_:)` replaces the queue, so rows scrolled
+/// away before their turn are never decoded), at most
+/// `maximumConcurrentThumbnailLoads` at a time, downsampled to
+/// `thumbnailPixelSize`, at most `thumbnailCapacity` decoded images. A
+/// version whose cover is decoded, or decoding, is scaled down from that
+/// image instead of reading the file again. Not observed: the table is
+/// told through `onThumbnailLoaded`.
 @MainActor
 @Observable
 final class PlaylistArtworkStore {
     /// Twice the 360 pt cover, for Retina.
     nonisolated static let maximumPixelSize = 720
     static let capacity = 12
+    /// Twice the 34 pt row thumbnail, for Retina.
+    nonisolated static let thumbnailPixelSize = 68
+    /// About 18 KB each, so a few megabytes at most; covers a 100-item
+    /// playlist scrolled end to end.
+    static let thumbnailCapacity = 160
+    static let maximumConcurrentThumbnailLoads = 2
+
+    /// Reads a file's embedded artwork, downsampled to the given pixel size.
+    typealias ArtworkLoader = @Sendable (URL, Int) async -> CGImage?
+
+    enum Thumbnail: Equatable {
+        /// Not loaded yet (or loaded for a different file).
+        case unknown
+        /// Loaded; the file has no artwork.
+        case none
+        case image(NSImage)
+    }
 
     /// `.some(nil)` records a finished load that found no art, so it is not
     /// retried every time the version is shown again. Misses cost nothing and
@@ -26,6 +52,28 @@ final class PlaylistArtworkStore {
     @ObservationIgnored private var inFlight: Set<PlaylistVersion.ID> = []
     /// Versions holding a decoded image, least recently requested first.
     @ObservationIgnored private var recency: [PlaylistVersion.ID] = []
+
+    private struct ThumbnailEntry {
+        let url: URL
+        let image: NSImage?
+    }
+
+    @ObservationIgnored private let loadArtwork: ArtworkLoader
+    @ObservationIgnored private var thumbnails: [PlaylistVersion.ID: ThumbnailEntry] = [:]
+    @ObservationIgnored private var thumbnailRecency: [PlaylistVersion.ID] = []
+    @ObservationIgnored private var thumbnailQueue: [(id: PlaylistVersion.ID, url: URL)] = []
+    @ObservationIgnored private var thumbnailsLoading: [PlaylistVersion.ID: URL] = [:]
+    /// Thumbnails waiting on the same version's cover decode.
+    @ObservationIgnored private var thumbnailsAwaitingCover: [PlaylistVersion.ID: URL] = [:]
+    /// Called on the main actor when a thumbnail finishes loading, with or
+    /// without art.
+    @ObservationIgnored var onThumbnailLoaded: ((PlaylistVersion.ID) -> Void)?
+
+    init(loadArtwork: @escaping ArtworkLoader = { url, size in await PlaylistArtworkStore.embeddedArtwork(for: url, maximumPixelSize: size) }) {
+        self.loadArtwork = loadArtwork
+    }
+
+    // MARK: Cover
 
     /// Cached artwork, or `nil` until `load(for:)` resolves (or when the
     /// file has none).
@@ -48,12 +96,14 @@ final class PlaylistArtworkStore {
             return
         }
         inFlight.insert(id)
+        let loadArtwork = loadArtwork
         Task { [weak self] in
-            let image = await Self.downsampledArtwork(for: url)
+            let image = await loadArtwork(url, Self.maximumPixelSize)
             guard let self else { return }
             self.inFlight.remove(id)
             self.images[id] = .some(image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) })
             if image != nil { self.markRecent(id) }
+            self.coverFinished(id, image: image)
         }
     }
 
@@ -66,7 +116,85 @@ final class PlaylistArtworkStore {
         }
     }
 
-    nonisolated private static func downsampledArtwork(for url: URL) async -> CGImage? {
+    // MARK: Thumbnails
+
+    /// The cached thumbnail for this version's file. Marks it recently used.
+    func thumbnail(for versionID: PlaylistVersion.ID, url: URL) -> Thumbnail {
+        guard let entry = thumbnails[versionID], entry.url == url else { return .unknown }
+        guard let image = entry.image else { return .none }
+        markThumbnailRecent(versionID)
+        return .image(image)
+    }
+
+    /// Replaces the pending queue with these versions (the visible rows, in
+    /// display order) and starts loading. Requests from rows no longer
+    /// visible are dropped; loads already running finish and are cached.
+    func requestThumbnails(_ requests: [(id: PlaylistVersion.ID, url: URL)]) {
+        thumbnailQueue = requests.filter { thumbnails[$0.id]?.url != $0.url }
+        pumpThumbnails()
+    }
+
+    /// Number of thumbnails currently being read or scaled. For tests.
+    var thumbnailLoadsInFlight: Int { thumbnailsLoading.count }
+
+    private func pumpThumbnails() {
+        while thumbnailsLoading.count < Self.maximumConcurrentThumbnailLoads, !thumbnailQueue.isEmpty {
+            let (id, url) = thumbnailQueue.removeFirst()
+            guard thumbnails[id]?.url != url, thumbnailsLoading[id] == nil, thumbnailsAwaitingCover[id] == nil else { continue }
+            if case let .some(.some(cover)) = images[id],
+               let cgImage = cover.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                startThumbnail(id, url) { Self.scaled(cgImage, maximumPixelSize: Self.thumbnailPixelSize) }
+            } else if inFlight.contains(id) {
+                thumbnailsAwaitingCover[id] = url
+            } else {
+                let loadArtwork = loadArtwork
+                startThumbnail(id, url) { await loadArtwork(url, Self.thumbnailPixelSize) }
+            }
+        }
+    }
+
+    private func startThumbnail(_ id: PlaylistVersion.ID, _ url: URL, _ work: @escaping @Sendable () async -> CGImage?) {
+        thumbnailsLoading[id] = url
+        Task { [weak self] in
+            let image = await Task.detached(priority: .utility) { await work() }.value
+            guard let self else { return }
+            self.thumbnailsLoading[id] = nil
+            self.storeThumbnail(id, url: url, image: image)
+            self.pumpThumbnails()
+        }
+    }
+
+    private func coverFinished(_ id: PlaylistVersion.ID, image: CGImage?) {
+        guard let url = thumbnailsAwaitingCover.removeValue(forKey: id) else { return }
+        if let image {
+            startThumbnail(id, url) { Self.scaled(image, maximumPixelSize: Self.thumbnailPixelSize) }
+        } else {
+            // The cover found no art (or no file); read the file once at
+            // thumbnail size rather than trusting a miss recorded elsewhere.
+            thumbnailQueue.insert((id, url), at: 0)
+            pumpThumbnails()
+        }
+    }
+
+    private func storeThumbnail(_ id: PlaylistVersion.ID, url: URL, image: CGImage?) {
+        let nsImage = image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+        thumbnails[id] = ThumbnailEntry(url: url, image: nsImage)
+        if nsImage != nil { markThumbnailRecent(id) }
+        onThumbnailLoaded?(id)
+    }
+
+    private func markThumbnailRecent(_ id: PlaylistVersion.ID) {
+        if thumbnailRecency.last == id { return }
+        thumbnailRecency.removeAll { $0 == id }
+        thumbnailRecency.append(id)
+        while thumbnailRecency.count > Self.thumbnailCapacity {
+            thumbnails[thumbnailRecency.removeFirst()] = nil
+        }
+    }
+
+    // MARK: Decoding
+
+    nonisolated static func embeddedArtwork(for url: URL, maximumPixelSize: Int) async -> CGImage? {
         guard let data = await AudioFileLoader.embeddedArtworkData(for: url),
               let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let options: [CFString: Any] = [
@@ -76,6 +204,24 @@ final class PlaylistArtworkStore {
             kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
         ]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    /// Scales an already-decoded image down so its longer side is
+    /// `maximumPixelSize`, keeping its aspect ratio.
+    nonisolated static func scaled(_ image: CGImage, maximumPixelSize: Int) -> CGImage? {
+        let longest = max(image.width, image.height)
+        guard longest > maximumPixelSize else { return image }
+        let scale = CGFloat(maximumPixelSize) / CGFloat(longest)
+        let width = max(1, Int((CGFloat(image.width) * scale).rounded()))
+        let height = max(1, Int((CGFloat(image.height) * scale).rounded()))
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
     }
 }
 

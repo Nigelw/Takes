@@ -791,6 +791,40 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.controller.runtimeTrackCount == 3)
     }
 
+    /// A2 §9: entering compare never starts an item. Another item's playback
+    /// stops; the item already playing keeps playing.
+    @MainActor
+    @Test
+    func enteringComparisonStartsNoOtherItemButKeepsTheSameItemPlaying() async throws {
+        let urls = try ["playing.wav", "compare-a.wav", "compare-b.wav"].map { try makeTemporaryAudioFile(name: $0) }
+        defer { for url in urls { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) } }
+        let playingItem = PlaylistItem(title: "Playing", versions: [makePlaylistVersion(url: urls[0], title: "Playing")])
+        let compareItem = PlaylistItem(
+            title: "Compare",
+            versions: [makePlaylistVersion(url: urls[1], title: "Compare"), makePlaylistVersion(url: urls[2], title: "Compare")]
+        )
+        let loader = CoordinatorTestAudioLoader(tracks: Dictionary(uniqueKeysWithValues: urls.map { ($0, makeLoadedTrack(for: $0)) }))
+        let coordinator = PlaylistCoordinator(
+            workspace: PlaylistWorkspace(items: [playingItem, compareItem]),
+            controller: PlaybackController(loader: loader),
+            loader: loader
+        )
+        defer { coordinator.pause() }
+
+        await coordinator.playItem(id: playingItem.id)
+        #expect(coordinator.isPlaying)
+        await coordinator.enterComparison(itemID: compareItem.id)
+        #expect(coordinator.mode == .comparison(itemID: compareItem.id))
+        #expect(!coordinator.isPlaying)
+
+        await coordinator.backToPlaylist()
+        await coordinator.playItem(id: compareItem.id)
+        #expect(coordinator.isPlaying)
+        await coordinator.enterComparison(itemID: compareItem.id)
+        #expect(coordinator.mode == .comparison(itemID: compareItem.id))
+        #expect(coordinator.isPlaying)
+    }
+
     private func makeVersion(_ name: String, id: UUID = UUID()) -> PlaylistVersion {
         PlaylistVersion(
             id: id,

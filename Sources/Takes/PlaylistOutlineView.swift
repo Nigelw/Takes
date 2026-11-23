@@ -21,10 +21,11 @@ struct PlaylistOutline: NSViewRepresentable {
     let currentItemID: UUID?
     let isPlaying: Bool
     let isActive: Bool
+    let artworkStore: PlaylistArtworkStore
     let undoManager: UndoManager?
 
     func makeCoordinator() -> PlaylistOutlineController {
-        PlaylistOutlineController(playlist: playlist, presentation: presentation)
+        PlaylistOutlineController(playlist: playlist, presentation: presentation, artworkStore: artworkStore)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -51,12 +52,48 @@ final class PlaylistNode: NSObject {
 }
 
 private enum PlaylistColumn {
-    static let title = NSUserInterfaceItemIdentifier("title")
-    static let artist = NSUserInterfaceItemIdentifier("artist")
-    static let album = NSUserInterfaceItemIdentifier("album")
-    static let format = NSUserInterfaceItemIdentifier("format")
-    static let time = NSUserInterfaceItemIdentifier("time")
-    static let actions = NSUserInterfaceItemIdentifier("actions")
+    /// The table's one column; rows lay out their own content (A2 §6).
+    static let row = NSUserInterfaceItemIdentifier("row")
+}
+
+/// Row geometry (A2 spec §3, §6), in points from the table's leading edge.
+/// Row highlights sit inside the 10 pt edge inset; item thumbnails and
+/// version checks share one 34 pt column, and item and version titles start
+/// at the same x.
+enum PlaylistRowMetrics {
+    static let itemHeight: CGFloat = 46
+    static let versionHeight: CGFloat = 30
+    /// Top and bottom inset of the list inside its scroll view.
+    static let listVerticalInset: CGFloat = 6
+    /// Edge inset of every row background and the selection highlight.
+    static let edgeInset: CGFloat = 10
+    static let highlightRadius: CGFloat = 6
+    /// Content padding inside the highlight.
+    static let leadingPadding: CGFloat = 4
+    static let trailingPadding: CGFloat = 8
+    static let gap: CGFloat = 10
+    /// Always reserved, so thumbnails align whether or not a row has versions.
+    static let disclosureWidth: CGFloat = 12
+    /// The chevron slot overlaps the gap after it by this much (canvas).
+    static let disclosureOverlap: CGFloat = 4
+    static let thumbnailSide: CGFloat = 34
+    static let thumbnailRadius: CGFloat = 4
+    /// Up-and-right offsets of the stacked-card edges on multi-version items.
+    static let stackOffsets: [CGFloat] = [3, 6]
+    static let durationMinimumWidth: CGFloat = 30
+    static let comparePillHeight: CGFloat = 22
+    static let comparePillPadding: CGFloat = 9
+
+    static var disclosureX: CGFloat { edgeInset + leadingPadding }
+    /// The thumbnail on item rows; the playback-version check column on
+    /// version rows.
+    static var thumbnailX: CGFloat { disclosureX + disclosureWidth - disclosureOverlap + gap }
+    static var titleX: CGFloat { thumbnailX + thumbnailSide + gap }
+    static func trailingX(rowWidth: CGFloat) -> CGFloat { rowWidth - edgeInset - trailingPadding }
+    /// Row highlight and background rect.
+    static func highlightRect(in bounds: NSRect) -> NSRect {
+        bounds.insetBy(dx: edgeInset, dy: 0)
+    }
 }
 
 enum PlaylistRowText {
@@ -69,7 +106,7 @@ enum PlaylistRowText {
     }
 
     /// The details that distinguish versions of one song: container, sample
-    /// rate, and bit rate.
+    /// rate, and bit rate. Shown in the version row's tooltip.
     static func format(_ metadata: PlaylistMetadata) -> String {
         var parts: [String] = []
         if !metadata.fileFormatDescription.isEmpty { parts.append(metadata.fileFormatDescription) }
@@ -84,8 +121,30 @@ enum PlaylistRowText {
         return parts.joined(separator: " · ")
     }
 
+    /// The version row's format column: the container alone (FLAC, MP3).
+    static func formatName(_ metadata: PlaylistMetadata) -> String {
+        metadata.fileFormatDescription
+    }
+
+    /// A version's name: its title tag, else its filename without the
+    /// extension (A2 §6) — the readout's rule, without the uppercasing.
     static func versionName(_ version: PlaylistVersion) -> String {
-        version.metadata.displayName.isEmpty ? version.file.storedURL.lastPathComponent : version.metadata.displayName
+        let tag = version.metadata.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !tag.isEmpty { return tag }
+        let url = version.file.storedURL
+        let stem = url.deletingPathExtension().lastPathComponent
+        return stem.isEmpty ? url.lastPathComponent : stem
+    }
+
+    /// The item row's second line: the artist tag, or nothing.
+    static func artist(_ version: PlaylistVersion?) -> String {
+        version?.metadata.artist?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    /// Tooltip on an item row's warning overlay.
+    static func missingWarning(missing: Int, of total: Int) -> String? {
+        guard missing > 0 else { return nil }
+        return total == 1 ? "The file for this item can’t be found." : "\(missing) of \(total) files can’t be found."
     }
 }
 
@@ -96,6 +155,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     NSTextFieldDelegate, NSMenuDelegate {
     private let playlist: PlaylistCoordinator
     private let presentation: PlaylistPresentationState
+    private let artworkStore: PlaylistArtworkStore
     var undoManager: UndoManager?
 
     private var outlineView: PlaylistNSOutlineView!
@@ -114,10 +174,14 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private var draggedNodes: [PlaylistNode] = []
     private var editingItemID: UUID?
     private var needsContentReload = false
+    private var thumbnailRequestScheduled = false
 
-    init(playlist: PlaylistCoordinator, presentation: PlaylistPresentationState) {
+    init(playlist: PlaylistCoordinator, presentation: PlaylistPresentationState, artworkStore: PlaylistArtworkStore) {
         self.playlist = playlist
         self.presentation = presentation
+        self.artworkStore = artworkStore
+        super.init()
+        artworkStore.onThumbnailLoaded = { [weak self] id in self?.thumbnailLoaded(id) }
     }
 
     // MARK: Setup
@@ -125,49 +189,35 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     func makeScrollView() -> NSScrollView {
         let outline = PlaylistNSOutlineView()
         outline.controller = self
-        outline.style = .inset
+        outline.style = .plain
+        outline.headerView = nil
         outline.rowSizeStyle = .custom
-        outline.rowHeight = 24
-        outline.indentationPerLevel = 16
-        outline.intercellSpacing = NSSize(width: 10, height: 0)
+        outline.rowHeight = PlaylistRowMetrics.itemHeight
+        outline.indentationPerLevel = 0
+        outline.intercellSpacing = .zero
         outline.backgroundColor = .clear
         outline.gridStyleMask = []
+        outline.selectionHighlightStyle = .regular
         outline.allowsMultipleSelection = true
         outline.allowsEmptySelection = true
         outline.allowsColumnReordering = false
+        outline.allowsColumnResizing = false
         outline.allowsTypeSelect = true
         outline.autoresizesOutlineColumn = false
-        outline.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        outline.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         outline.setAccessibilityLabel("Playlist")
 
-        func column(
-            _ id: NSUserInterfaceItemIdentifier, _ title: String, width: CGFloat, min: CGFloat, max: CGFloat = 2000,
-            resizing: NSTableColumn.ResizingOptions, alignment: NSTextAlignment = .left
-        ) -> NSTableColumn {
-            let column = NSTableColumn(identifier: id)
-            column.title = title
-            column.width = width
-            column.minWidth = min
-            column.maxWidth = max
-            column.resizingMask = resizing
-            column.headerCell.alignment = alignment
-            outline.addTableColumn(column)
-            return column
-        }
-        let flexible: NSTableColumn.ResizingOptions = [.autoresizingMask, .userResizingMask]
-        let title = column(PlaylistColumn.title, "Title", width: 210, min: 160, resizing: flexible)
-        _ = column(PlaylistColumn.artist, "Artist", width: 100, min: 60, resizing: flexible)
-        _ = column(PlaylistColumn.album, "Album", width: 100, min: 60, resizing: flexible)
-        _ = column(PlaylistColumn.format, "Format", width: 110, min: 50, resizing: flexible)
-        _ = column(PlaylistColumn.time, "Time", width: 46, min: 46, max: 64, resizing: [], alignment: .right)
-        _ = column(PlaylistColumn.actions, "", width: 70, min: 70, max: 70, resizing: [])
-        outline.outlineTableColumn = title
-        outline.autosaveName = "TakesPlaylistColumns"
-        outline.autosaveTableColumns = true
+        let column = NSTableColumn(identifier: PlaylistColumn.row)
+        column.resizingMask = .autoresizingMask
+        column.minWidth = 100
+        column.maxWidth = .greatestFiniteMagnitude
+        outline.addTableColumn(column)
+        outline.outlineTableColumn = column
 
         outline.dataSource = self
         outline.delegate = self
         outline.target = self
+        outline.action = #selector(rowClicked)
         outline.doubleAction = #selector(rowDoubleClicked)
         outline.registerForDraggedTypes([PlaylistItemDrag.pasteboardType])
         outline.setDraggingSourceOperationMask(.move, forLocal: true)
@@ -185,7 +235,12 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsets(
+            top: PlaylistRowMetrics.listVerticalInset, left: 0, bottom: PlaylistRowMetrics.listVerticalInset, right: 0
+        )
         scrollView.contentView.postsBoundsChangedNotifications = true
+        scrollView.contentView.postsFrameChangedNotifications = true
         outlineView = outline
 
         let center = NotificationCenter.default
@@ -194,13 +249,20 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             name: NSView.boundsDidChangeNotification, object: scrollView.contentView
         )
         center.addObserver(
+            self, selector: #selector(clipViewBoundsChanged),
+            name: NSView.frameDidChangeNotification, object: scrollView.contentView
+        )
+        center.addObserver(
             self, selector: #selector(windowBecameKey(_:)),
             name: NSWindow.didBecomeKeyNotification, object: nil
         )
         return scrollView
     }
 
-    @objc private func clipViewBoundsChanged() { refreshHover() }
+    @objc private func clipViewBoundsChanged() {
+        refreshHover()
+        scheduleThumbnailRequest()
+    }
 
     /// Files can appear or disappear while Takes is in the background.
     @objc private func windowBecameKey(_ notification: Notification) {
@@ -225,8 +287,8 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
         if structureChanged {
             if !hasLoaded {
-                // Fit the columns to the window once the scroll view has a size.
-                DispatchQueue.main.async { [weak self] in self?.outlineView.sizeToFit() }
+                // Fit the column to the window once the scroll view has a size.
+                DispatchQueue.main.async { [weak self] in self?.outlineView.sizeLastColumnToFit() }
             }
             hasLoaded = true
             if editingItemID != nil { finishRename(commit: false) }
@@ -241,6 +303,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         }
         applyExpansion()
         applySelection()
+        if structureChanged || contentChanged { scheduleThumbnailRequest() }
         if becameActive { focusOutline() }
         if let id = presentation.renamingItemID, editingItemID != id {
             DispatchQueue.main.async { [weak self] in self?.beginRename(id) }
@@ -363,8 +426,12 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     // MARK: Delegate
 
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        (item as? PlaylistNode)?.versionID == nil ? PlaylistRowMetrics.itemHeight : PlaylistRowMetrics.versionHeight
+    }
+
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-        let id = NSUserInterfaceItemIdentifier("row")
+        let id = NSUserInterfaceItemIdentifier("rowView")
         if let reused = outlineView.makeView(withIdentifier: id, owner: nil) as? PlaylistRowView { return reused }
         let rowView = PlaylistRowView()
         rowView.identifier = id
@@ -372,98 +439,144 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     }
 
     func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int) {
-        (rowView as? PlaylistRowView)?.updateActions()
+        guard let rowView = rowView as? PlaylistRowView, let node = outlineView.item(atRow: row) as? PlaylistNode else { return }
+        configureRowView(rowView, node: node)
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
-        guard let column = tableColumn?.identifier, let node = item as? PlaylistNode else { return nil }
-        switch column {
-        case PlaylistColumn.title:
-            let cell = reuse(column) { PlaylistTitleCellView(identifier: column) }
-            configureTitle(cell, node: node)
-            return cell
-        case PlaylistColumn.actions:
-            let cell = reuse(column) { PlaylistActionCellView(identifier: column) }
-            configureActions(cell, node: node)
-            return cell
-        default:
-            let isTime = column == PlaylistColumn.time
-            let cell = reuse(column) { PlaylistTextCellView(identifier: column, alignment: isTime ? .right : .left, monospacedDigits: isTime) }
-            cell.label.stringValue = text(for: column, node: node)
-            return cell
+        guard let node = item as? PlaylistNode else { return nil }
+        let view: NSView
+        switch node.rowID {
+        case let .item(id):
+            let cell = reuse(PlaylistItemCellView.reuseIdentifier) { PlaylistItemCellView() }
+            configureItem(cell, itemID: id)
+            view = cell
+        case let .version(id):
+            let cell = reuse(PlaylistVersionCellView.reuseIdentifier) { PlaylistVersionCellView() }
+            configureVersion(cell, versionID: id)
+            view = cell
         }
+        let row = outlineView.row(forItem: node)
+        if row >= 0, let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false) as? PlaylistRowView {
+            configureRowView(rowView, node: node)
+        }
+        return view
     }
 
     private func reuse<Cell: NSView>(_ id: NSUserInterfaceItemIdentifier, make: () -> Cell) -> Cell {
         (outlineView.makeView(withIdentifier: id, owner: nil) as? Cell) ?? make()
     }
 
-    private func text(for column: NSUserInterfaceItemIdentifier, node: PlaylistNode) -> String {
-        guard let (_, version) = representedVersion(node.rowID) else { return "" }
-        let isItem = node.itemID != nil
-        switch column {
-        case PlaylistColumn.artist: return isItem ? version.metadata.artist ?? "" : ""
-        case PlaylistColumn.album: return isItem ? version.metadata.album ?? "" : ""
-        case PlaylistColumn.format:
-            return availableURL(for: version) == nil && !isItem ? "File not found" : PlaylistRowText.format(version.metadata)
-        case PlaylistColumn.time: return PlaylistRowText.duration(version.metadata.duration)
-        default: return ""
-        }
+    private func configureRowView(_ rowView: PlaylistRowView, node: PlaylistNode) {
+        rowView.isNowPlaying = node.itemID != nil && node.itemID == currentItemID
+        rowView.alphaValue = draggedNodes.contains(node) ? 0.3 : 1
     }
 
-    private func configureTitle(_ cell: PlaylistTitleCellView, node: PlaylistNode) {
+    private func configureItem(_ cell: PlaylistItemCellView, itemID id: UUID) {
+        guard let item = itemsByID[id] else { return }
+        let version = item.selectedVersion ?? item.versions.first
+        let versionURL = version.flatMap { availableURL(for: $0) }
+        let missingCount = item.versions.filter { availableURL(for: $0) == nil }.count
+        let node = node(.item(id))
         cell.titleField.delegate = self
-        switch node.rowID {
-        case let .item(id):
-            guard let item = itemsByID[id] else { return }
-            let selectedMissing = (item.selectedVersion ?? item.versions.first).map { availableURL(for: $0) == nil } ?? false
-            let missingCount = item.versions.filter { availableURL(for: $0) == nil }.count
-            let indicator: PlaylistTitleCellView.Indicator = currentItemID == id ? .nowPlaying(isPlaying: isPlaying) : .none
-            let warning: String? = missingCount == 0 ? nil
-                : item.versions.count == 1 ? "The file for this item can’t be found."
-                : "\(missingCount) of \(item.versions.count) files can’t be found."
-            cell.configure(
-                title: item.title, indicator: indicator, versionCount: item.versions.count,
-                warning: warning, isDimmed: selectedMissing, toolTip: nil
-            )
-            cell.onIndicator = nil
-        case let .version(id):
-            guard let (item, version) = version(id) else { return }
-            let missing = availableURL(for: version) == nil
-            cell.configure(
-                title: PlaylistRowText.versionName(version),
-                indicator: .playbackVersion(isSelected: item.selectedVersionID == id),
-                versionCount: 0, warning: missing ? "This file can’t be found." : nil, isDimmed: missing,
-                toolTip: version.file.storedURL.path
-            )
-            cell.onIndicator = { [weak self] in
-                guard let self else { return }
-                Task { await self.playlist.selectPlaybackVersion(id, in: item.id) }
-            }
+        cell.configure(PlaylistItemCellView.Content(
+            title: item.title,
+            artist: PlaylistRowText.artist(version),
+            duration: version.map { PlaylistRowText.duration($0.metadata.duration) } ?? "",
+            hasVersions: item.versions.count > 1,
+            isExpanded: outlineView.isItemExpanded(node),
+            nowPlaying: currentItemID == id ? (isPlaying ? .playing : .paused) : nil,
+            warning: PlaylistRowText.missingWarning(missing: missingCount, of: item.versions.count),
+            isDimmed: version != nil && versionURL == nil,
+            thumbnail: thumbnailImage(version: version, url: versionURL)
+        ))
+        cell.onDisclosure = { [weak self, weak node] in
+            guard let self, let node else { return }
+            self.toggleExpansion(node)
+        }
+        cell.onCompare = { [weak self] in self?.compare(itemID: id) }
+        let row = outlineView.row(forItem: node)
+        cell.isHovered = row >= 0
+            && (outlineView.rowView(atRow: row, makeIfNecessary: false) as? PlaylistRowView)?.isHovered == true
+    }
+
+    private func configureVersion(_ cell: PlaylistVersionCellView, versionID id: UUID) {
+        guard let (item, version) = version(id) else { return }
+        let missing = availableURL(for: version) == nil
+        let state: PlaylistVersionCellView.Mark = missing ? .missing : item.selectedVersionID == id ? .playback : .none
+        cell.configure(
+            title: PlaylistRowText.versionName(version),
+            format: PlaylistRowText.formatName(version.metadata),
+            duration: PlaylistRowText.duration(version.metadata.duration),
+            mark: state,
+            toolTip: [version.file.storedURL.lastPathComponent, PlaylistRowText.format(version.metadata)]
+                .filter { !$0.isEmpty }.joined(separator: "\n")
+        )
+    }
+
+    private func toggleExpansion(_ node: PlaylistNode) {
+        guard outlineView.isExpandable(node) else { return }
+        if outlineView.isItemExpanded(node) {
+            outlineView.animator().collapseItem(node)
+        } else {
+            outlineView.animator().expandItem(node)
         }
     }
 
-    private func configureActions(_ cell: PlaylistActionCellView, node: PlaylistNode) {
-        switch node.rowID {
-        case let .item(id):
-            cell.kind = (itemsByID[id]?.versions.count ?? 0) > 1 ? .compare : .none
-            cell.onCompare = { [weak self] in self?.compare(itemID: id) }
-        case .version:
-            cell.kind = .more
-            cell.onMore = { [weak self, weak node] button in
-                guard let self, let node else { return }
-                let menu = NSMenu()
-                menu.autoenablesItems = false
-                self.menuItems(for: self.targetRows(for: node)).forEach(menu.addItem)
-                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
-            }
-        }
+    /// Rotates an item row's chevron after its expansion changed.
+    private func updateDisclosure(for node: PlaylistNode?, animated: Bool) {
+        guard let node else { return }
         let row = outlineView.row(forItem: node)
-        if row >= 0, let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false) as? PlaylistRowView {
-            cell.actionsVisible = rowView.showsActions
-        } else {
-            cell.actionsVisible = false
+        guard row >= 0, let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? PlaylistItemCellView else { return }
+        cell.setExpanded(outlineView.isItemExpanded(node), animated: animated)
+    }
+
+    // MARK: Thumbnails
+
+    /// The item row's thumbnail for its playback version, if decoded.
+    private func thumbnailImage(version: PlaylistVersion?, url: URL?) -> NSImage? {
+        guard let version, let url, case let .image(image) = artworkStore.thumbnail(for: version.id, url: url) else { return nil }
+        return image
+    }
+
+    /// Coalesces requests to once per run-loop turn: scrolling posts many
+    /// bounds changes per frame.
+    private func scheduleThumbnailRequest() {
+        guard !thumbnailRequestScheduled else { return }
+        thumbnailRequestScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.thumbnailRequestScheduled = false
+            self.requestVisibleThumbnails()
         }
+    }
+
+    /// Asks for thumbnails of the item rows inside the visible rect, and
+    /// only those: rows AppKit prepares off screen are never decoded.
+    private func requestVisibleThumbnails() {
+        guard hasLoaded, outlineView.window != nil else { return }
+        let visible = outlineView.rows(in: outlineView.visibleRect)
+        guard visible.length > 0 else {
+            artworkStore.requestThumbnails([])
+            return
+        }
+        var requests: [(id: PlaylistVersion.ID, url: URL)] = []
+        for row in visible.location..<NSMaxRange(visible) {
+            guard let id = (outlineView.item(atRow: row) as? PlaylistNode)?.itemID, let item = itemsByID[id],
+                  let version = item.selectedVersion ?? item.versions.first,
+                  let url = availableURL(for: version) else { continue }
+            requests.append((version.id, url))
+        }
+        artworkStore.requestThumbnails(requests)
+    }
+
+    private func thumbnailLoaded(_ versionID: UUID) {
+        guard hasLoaded, let itemID = ownerByVersionID[versionID], let item = itemsByID[itemID],
+              (item.selectedVersion ?? item.versions.first)?.id == versionID,
+              let node = nodes[.item(itemID)], case let row = outlineView.row(forItem: node), row >= 0,
+              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? PlaylistItemCellView,
+              let version = item.versions.first(where: { $0.id == versionID }) else { return }
+        cell.setThumbnail(thumbnailImage(version: version, url: availableURL(for: version)))
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -473,12 +586,18 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {
-        guard !isApplying, let id = (notification.userInfo?["NSObject"] as? PlaylistNode)?.itemID else { return }
+        let node = notification.userInfo?["NSObject"] as? PlaylistNode
+        updateDisclosure(for: node, animated: !isApplying)
+        scheduleThumbnailRequest()
+        guard !isApplying, let id = node?.itemID else { return }
         presentation.expanded.insert(id)
     }
 
     func outlineViewItemDidCollapse(_ notification: Notification) {
-        guard !isApplying, let id = (notification.userInfo?["NSObject"] as? PlaylistNode)?.itemID else { return }
+        let node = notification.userInfo?["NSObject"] as? PlaylistNode
+        updateDisclosure(for: node, animated: !isApplying)
+        scheduleThumbnailRequest()
+        guard !isApplying, let id = node?.itemID else { return }
         presentation.expanded.remove(id)
     }
 
@@ -500,6 +619,23 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     }
 
     // MARK: Actions
+
+    /// A plain click on a version row makes it the item's playback version
+    /// (A2 §6); a missing file asks to be located instead. Clicks that extend
+    /// the selection only select.
+    @objc private func rowClicked() {
+        let row = outlineView.clickedRow
+        guard row >= 0, let event = NSApp.currentEvent, event.clickCount == 1,
+              event.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty,
+              let id = (outlineView.item(atRow: row) as? PlaylistNode)?.versionID,
+              let (item, version) = version(id) else { return }
+        guard availableURL(for: version) != nil else {
+            presentation.locateVersionID = id
+            return
+        }
+        guard item.selectedVersionID != id else { return }
+        Task { await playlist.selectPlaybackVersion(id, in: item.id) }
+    }
 
     @objc private func rowDoubleClicked() {
         let row = outlineView.clickedRow
@@ -655,8 +791,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             return
         }
         outlineView.scrollRowToVisible(row)
-        let column = outlineView.column(withIdentifier: PlaylistColumn.title)
-        guard let cell = outlineView.view(atColumn: column, row: row, makeIfNecessary: true) as? PlaylistTitleCellView else {
+        guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: true) as? PlaylistItemCellView else {
             presentation.renamingItemID = nil
             return
         }
@@ -672,7 +807,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         let original = itemsByID[itemID]?.title ?? ""
         if let field {
             let title = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            (field.superview?.superview as? PlaylistTitleCellView ?? field.superview as? PlaylistTitleCellView)?.setEditing(false)
+            (field.superview as? PlaylistItemCellView)?.setEditing(false)
             if commit, !title.isEmpty, title != original {
                 playlist.renameItem(itemID, to: title, undoManager: undoManager)
             } else {
@@ -719,6 +854,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         willBeginAt screenPoint: NSPoint, forItems draggedItems: [Any]
     ) {
         draggedNodes = draggedItems.compactMap { $0 as? PlaylistNode }
+        updateDragSourceRows()
     }
 
     func outlineView(
@@ -726,6 +862,16 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         endedAt screenPoint: NSPoint, operation: NSDragOperation
     ) {
         draggedNodes = []
+        updateDragSourceRows()
+    }
+
+    /// Rows being dragged stay in place, dimmed, until the drop lands.
+    private func updateDragSourceRows() {
+        let dragged = Set(draggedNodes.map(ObjectIdentifier.init))
+        outlineView.enumerateAvailableRowViews { rowView, row in
+            guard let node = self.outlineView.item(atRow: row) as? PlaylistNode else { return }
+            rowView.alphaValue = dragged.contains(ObjectIdentifier(node)) ? 0.3 : 1
+        }
     }
 
     // MARK: Drop destination
@@ -890,6 +1036,18 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 final class PlaylistNSOutlineView: NSOutlineView {
     weak var controller: PlaylistOutlineController?
 
+    /// Rows draw their own chevron in a reserved slot (A2 §6), so AppKit's
+    /// disclosure triangle and its indentation are suppressed: every cell
+    /// spans the full row.
+    override func frameOfOutlineCell(atRow row: Int) -> NSRect { .zero }
+
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        let rowRect = rect(ofRow: row)
+        guard column >= 0, column < numberOfColumns else { return rowRect }
+        let columnRect = rect(ofColumn: column)
+        return NSRect(x: columnRect.minX, y: rowRect.minY, width: columnRect.width, height: rowRect.height)
+    }
+
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection([.command, .shift, .control, .option])
         switch event.keyCode {
@@ -922,29 +1080,63 @@ final class PlaylistNSOutlineView: NSOutlineView {
     }
 }
 
-/// Tracks hover so row actions appear only on the hovered or selected row.
+/// Draws every row background inside the 10 pt edge inset with a 6 pt
+/// radius (A2 §3, §6): selection, the now-playing tint, hover, and the
+/// drop-on-item ring. Tracks hover for the Compare pill.
 final class PlaylistRowView: NSTableRowView {
     private var hoverArea: NSTrackingArea?
 
     var isHovered = false {
-        didSet { if isHovered != oldValue { updateActions() } }
-    }
-
-    override var isSelected: Bool {
-        didSet { if isSelected != oldValue { updateActions() } }
-    }
-
-    var showsActions: Bool { isHovered || isSelected }
-
-    func updateActions() {
-        for column in 0..<numberOfColumns {
-            (view(atColumn: column) as? PlaylistActionCellView)?.actionsVisible = showsActions
+        didSet {
+            guard isHovered != oldValue else { return }
+            needsDisplay = true
+            (view(atColumn: 0) as? PlaylistItemCellView)?.isHovered = isHovered
         }
+    }
+
+    var isNowPlaying = false {
+        didSet { if isNowPlaying != oldValue { needsDisplay = true } }
+    }
+
+    private var highlightPath: NSBezierPath {
+        let radius = PlaylistRowMetrics.highlightRadius
+        return NSBezierPath(roundedRect: PlaylistRowMetrics.highlightRect(in: bounds), xRadius: radius, yRadius: radius)
+    }
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        guard !isSelected else { return }
+        if isNowPlaying {
+            PlaylistRowPalette.nowPlayingFill.setFill()
+            highlightPath.fill()
+        }
+        if isHovered {
+            PlaylistRowPalette.hoverFill.setFill()
+            highlightPath.fill()
+        }
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        let color: NSColor = isEmphasized ? .selectedContentBackgroundColor : .unemphasizedSelectedContentBackgroundColor
+        color.setFill()
+        highlightPath.fill()
+    }
+
+    override func drawDraggingDestinationFeedback(in dirtyRect: NSRect) {
+        let radius = PlaylistRowMetrics.highlightRadius
+        let rect = PlaylistRowMetrics.highlightRect(in: bounds)
+        PlaylistRowPalette.dropTargetFill.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+        let ring = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: radius - 1, yRadius: radius - 1)
+        ring.lineWidth = 2
+        PlaylistRowPalette.dropTargetRing.setStroke()
+        ring.stroke()
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         isHovered = false
+        isNowPlaying = false
+        alphaValue = 1
     }
 
     override func updateTrackingAreas() {
@@ -961,127 +1153,149 @@ final class PlaylistRowView: NSTableRowView {
 
 // MARK: - Cells
 
-final class PlaylistTextCellView: NSTableCellView {
-    let label = NSTextField(labelWithString: "")
-
-    init(identifier: NSUserInterfaceItemIdentifier, alignment: NSTextAlignment, monospacedDigits: Bool) {
-        super.init(frame: .zero)
-        self.identifier = identifier
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.alignment = alignment
-        label.lineBreakMode = .byTruncatingTail
-        label.allowsExpansionToolTips = true
-        label.textColor = .secondaryLabelColor
-        label.font = monospacedDigits
-            ? .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-            : .systemFont(ofSize: NSFont.systemFontSize)
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        addSubview(label)
-        textField = label
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor)
-        ])
+private extension NSTextField {
+    static func playlistLabel(font: NSFont, truncation: NSLineBreakMode, alignment: NSTextAlignment = .left) -> NSTextField {
+        let field = NSTextField(labelWithString: "")
+        field.font = font
+        field.alignment = alignment
+        field.lineBreakMode = truncation
+        field.usesSingleLineMode = true
+        field.maximumNumberOfLines = 1
+        field.cell?.truncatesLastVisibleLine = true
+        field.allowsExpansionToolTips = true
+        return field
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    /// Single-line height for the field's font.
+    var lineHeight: CGFloat {
+        let saved = stringValue
+        stringValue = "Ag"
+        defer { stringValue = saved }
+        return ceil(intrinsicContentSize.height)
+    }
+
+    var fittingTextWidth: CGFloat { ceil(intrinsicContentSize.width) }
 }
 
-final class PlaylistTitleCellView: NSTableCellView {
-    enum Indicator: Equatable {
-        case none
-        case nowPlaying(isPlaying: Bool)
-        case playbackVersion(isSelected: Bool)
+private enum PlaylistGlyph {
+    static func symbol(_ name: String, size: CGFloat, weight: NSFont.Weight = .regular, label: String? = nil) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: label)?
+            .withSymbolConfiguration(.init(pointSize: size, weight: weight))
     }
 
-    let titleField = NSTextField(labelWithString: "")
-    var onIndicator: (() -> Void)?
+    static func warning(size: CGFloat) -> NSImage? {
+        NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "File not found")?
+            .withSymbolConfiguration(
+                NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
+                    .applying(.init(paletteColors: [PlaylistRowPalette.warningMark, PlaylistRowPalette.warningFill]))
+            )
+    }
+}
 
-    private let indicatorButton = NSButton()
-    private let badge = PlaylistCountBadge()
-    private let warningView = NSImageView()
-    private let stack = NSStackView()
-    private var fillConstraint: NSLayoutConstraint!
-    private var indicator = Indicator.none
-    private var isDimmed = false
-    private var versionCount = 0
+/// Item row, 46 pt (A2 §6): chevron slot, thumbnail, title over artist, the
+/// hover Compare pill, and the duration.
+final class PlaylistItemCellView: NSTableCellView {
+    static let reuseIdentifier = NSUserInterfaceItemIdentifier("item")
 
-    init(identifier: NSUserInterfaceItemIdentifier) {
+    enum NowPlaying: Equatable { case playing, paused }
+
+    struct Content {
+        var title: String
+        var artist: String
+        var duration: String
+        var hasVersions: Bool
+        var isExpanded: Bool
+        var nowPlaying: NowPlaying?
+        /// Tooltip of the warning overlay; nil when every file is present.
+        var warning: String?
+        /// The playback version's file is missing.
+        var isDimmed: Bool
+        var thumbnail: NSImage?
+    }
+
+    let titleField = NSTextField.playlistLabel(font: .systemFont(ofSize: 13, weight: .semibold), truncation: .byTruncatingMiddle)
+    private let artistField = NSTextField.playlistLabel(font: .systemFont(ofSize: 11), truncation: .byTruncatingTail)
+    private let durationField = NSTextField.playlistLabel(
+        font: .monospacedDigitSystemFont(ofSize: 12, weight: .regular), truncation: .byClipping, alignment: .right
+    )
+    private let disclosure = PlaylistDisclosureButton()
+    private let thumbnail = PlaylistThumbnailView()
+    private let comparePill = PlaylistComparePill()
+    private let titleHeight: CGFloat
+    private let artistHeight: CGFloat
+    private var content = Content(
+        title: "", artist: "", duration: "", hasVersions: false, isExpanded: false,
+        nowPlaying: nil, warning: nil, isDimmed: false, thumbnail: nil
+    )
+    private var isEditingTitle = false
+
+    var onDisclosure: (() -> Void)?
+    var onCompare: (() -> Void)?
+
+    var isHovered = false {
+        didSet { if isHovered != oldValue { updatePill() } }
+    }
+
+    override var isFlipped: Bool { true }
+
+    init() {
+        titleHeight = titleField.lineHeight
+        artistHeight = artistField.lineHeight
         super.init(frame: .zero)
-        self.identifier = identifier
-
-        indicatorButton.translatesAutoresizingMaskIntoConstraints = false
-        indicatorButton.isBordered = false
-        indicatorButton.imagePosition = .imageOnly
-        indicatorButton.imageScaling = .scaleNone
-        indicatorButton.title = ""
-        indicatorButton.target = self
-        indicatorButton.action = #selector(indicatorPressed)
-        indicatorButton.refusesFirstResponder = true
-        addSubview(indicatorButton)
-
-        titleField.lineBreakMode = .byTruncatingTail
-        titleField.allowsExpansionToolTips = true
-        titleField.font = .systemFont(ofSize: NSFont.systemFontSize)
+        identifier = Self.reuseIdentifier
         titleField.cell?.sendsActionOnEndEditing = true
-        titleField.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textField = titleField
-
-        warningView.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "File not found")
-        warningView.symbolConfiguration = .init(pointSize: 11, weight: .regular)
-        warningView.setContentCompressionResistancePriority(.required, for: .horizontal)
-        badge.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 6
-        stack.setViews([titleField, badge, warningView], in: .leading)
-        addSubview(stack)
-
-        fillConstraint = stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2)
-        NSLayoutConstraint.activate([
-            indicatorButton.leadingAnchor.constraint(equalTo: leadingAnchor),
-            indicatorButton.widthAnchor.constraint(equalToConstant: 20),
-            indicatorButton.topAnchor.constraint(equalTo: topAnchor),
-            indicatorButton.bottomAnchor.constraint(equalTo: bottomAnchor),
-            stack.leadingAnchor.constraint(equalTo: indicatorButton.trailingAnchor, constant: 2),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -2),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor)
-        ])
+        disclosure.action = { [weak self] in self?.onDisclosure?() }
+        comparePill.target = self
+        comparePill.action = #selector(comparePressed)
+        for view in [disclosure, thumbnail, titleField, artistField, comparePill, durationField] as [NSView] {
+            addSubview(view)
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(
-        title: String, indicator: Indicator, versionCount: Int, warning: String?, isDimmed: Bool, toolTip: String?
-    ) {
+    func configure(_ content: Content) {
         if titleField.isEditable { setEditing(false) }
-        titleField.stringValue = title
-        titleField.toolTip = toolTip
-        self.indicator = indicator
-        self.isDimmed = isDimmed
-        self.versionCount = versionCount
-        badge.count = versionCount
-        badge.isHidden = versionCount < 2
-        badge.setAccessibilityLabel("\(versionCount) versions")
-        warningView.isHidden = warning == nil
-        warningView.toolTip = warning
+        self.content = content
+        titleField.stringValue = content.title
+        artistField.stringValue = content.artist
+        artistField.isHidden = content.artist.isEmpty
+        durationField.stringValue = content.duration
+        disclosure.isHidden = !content.hasVersions
+        disclosure.setExpanded(content.isExpanded, animated: false)
+        thumbnail.configure(
+            image: content.thumbnail, isStacked: content.hasVersions,
+            status: content.warning.map { .missing($0) } ?? content.nowPlaying.map { $0 == .playing ? .playing : .paused } ?? .none
+        )
+        updatePill()
         applyStyle()
+        needsLayout = true
     }
 
-    /// While renaming, the title field fills the column so the editor is not
-    /// confined to the width of the old title.
+    func setThumbnail(_ image: NSImage?) {
+        content.thumbnail = image
+        thumbnail.image = image
+    }
+
+    func setExpanded(_ expanded: Bool, animated: Bool) {
+        content.isExpanded = expanded
+        disclosure.setExpanded(expanded, animated: animated)
+    }
+
+    /// While renaming, the title field takes the space up to the duration.
     func setEditing(_ editing: Bool) {
+        isEditingTitle = editing
         titleField.isEditable = editing
         titleField.isSelectable = editing
-        titleField.setContentHuggingPriority(editing ? .init(1) : .defaultHigh, for: .horizontal)
-        fillConstraint.isActive = editing
-        badge.isHidden = editing || versionCount < 2
+        updatePill()
+        needsLayout = true
+    }
+
+    private func updatePill() {
+        comparePill.isHidden = !(isHovered && content.hasVersions && !isEditingTitle)
+        needsLayout = true
     }
 
     override var backgroundStyle: NSView.BackgroundStyle {
@@ -1090,141 +1304,381 @@ final class PlaylistTitleCellView: NSTableCellView {
 
     private func applyStyle() {
         let emphasized = backgroundStyle == .emphasized
-        titleField.textColor = isDimmed ? .tertiaryLabelColor : .labelColor
-        badge.isEmphasized = emphasized
-        warningView.contentTintColor = emphasized ? .alternateSelectedControlTextColor : .systemYellow
-
-        let symbol: String?
-        let label: String
-        switch indicator {
-        case .none:
-            symbol = nil
-            label = ""
-        case let .nowPlaying(isPlaying):
-            symbol = isPlaying ? "speaker.wave.2.fill" : "speaker.fill"
-            label = isPlaying ? "Playing" : "Current"
-            indicatorButton.contentTintColor = emphasized ? .alternateSelectedControlTextColor : NSColor(Theme.primary)
-        case let .playbackVersion(isSelected):
-            symbol = isSelected ? "checkmark.circle.fill" : "circle"
-            label = isSelected ? "Used for playback" : "Use for playback"
-            indicatorButton.contentTintColor = emphasized ? .alternateSelectedControlTextColor : .secondaryLabelColor
-        }
-        indicatorButton.image = symbol.flatMap {
-            NSImage(systemSymbolName: $0, accessibilityDescription: label)?
-                .withSymbolConfiguration(.init(pointSize: 11, weight: .regular))
-        }
-        indicatorButton.setAccessibilityLabel(label)
-        if case .playbackVersion = indicator {
-            indicatorButton.isEnabled = true
-            indicatorButton.setAccessibilityElement(true)
+        let selectedText = NSColor.alternateSelectedControlTextColor
+        if emphasized {
+            titleField.textColor = content.isDimmed ? selectedText.withAlphaComponent(0.6) : selectedText
+            artistField.textColor = selectedText.withAlphaComponent(0.75)
+            durationField.textColor = selectedText.withAlphaComponent(0.75)
         } else {
-            // A status glyph, not a control: clicks fall through to the row.
-            indicatorButton.isEnabled = false
-            indicatorButton.setAccessibilityElement(symbol != nil)
+            titleField.textColor = content.isDimmed ? .tertiaryLabelColor
+                : content.nowPlaying != nil ? PlaylistRowPalette.nowPlayingTitle : .labelColor
+            artistField.textColor = .secondaryLabelColor
+            durationField.textColor = .secondaryLabelColor
         }
-        (indicatorButton.cell as? NSButtonCell)?.imageDimsWhenDisabled = false
+        disclosure.isEmphasized = emphasized
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        let hit = super.hitTest(point)
-        if hit === indicatorButton, !indicatorButton.isEnabled { return self }
-        return hit
+    override func layout() {
+        super.layout()
+        typealias M = PlaylistRowMetrics
+        let height = bounds.height
+        disclosure.frame = NSRect(x: M.disclosureX, y: (height - 20) / 2, width: M.disclosureWidth, height: 20)
+        let thumbnailSize = PlaylistThumbnailView.size
+        thumbnail.frame = NSRect(
+            x: M.thumbnailX, y: (height - M.thumbnailSide) / 2 - PlaylistThumbnailView.stackExtent,
+            width: thumbnailSize.width, height: thumbnailSize.height
+        )
+
+        let trailing = M.trailingX(rowWidth: bounds.width)
+        let durationWidth = max(M.durationMinimumWidth, durationField.fittingTextWidth)
+        let durationX = trailing - durationWidth
+        durationField.frame = NSRect(x: durationX, y: (height - titleHeight) / 2, width: durationWidth, height: titleHeight)
+
+        var textRight = durationX - M.gap
+        if !comparePill.isHidden {
+            let pillWidth = comparePill.preferredWidth
+            let pillX = durationX - M.gap - pillWidth
+            comparePill.frame = NSRect(x: pillX, y: (height - M.comparePillHeight) / 2, width: pillWidth, height: M.comparePillHeight)
+            textRight = pillX - M.gap
+        }
+        let textWidth = max(0, textRight - M.titleX)
+        if artistField.isHidden || isEditingTitle {
+            titleField.frame = NSRect(x: M.titleX, y: (height - titleHeight) / 2, width: textWidth, height: titleHeight)
+            artistField.frame = .zero
+        } else {
+            let top = ((height - titleHeight - 1 - artistHeight) / 2).rounded()
+            titleField.frame = NSRect(x: M.titleX, y: top, width: textWidth, height: titleHeight)
+            artistField.frame = NSRect(x: M.titleX, y: top + titleHeight + 1, width: textWidth, height: artistHeight)
+        }
+        artistField.isHidden = content.artist.isEmpty || isEditingTitle
     }
 
-    @objc private func indicatorPressed() { onIndicator?() }
+    @objc private func comparePressed() { onCompare?() }
 }
 
-/// Capsule showing how many versions an item holds.
-final class PlaylistCountBadge: NSView {
-    var count = 0 {
-        didSet {
-            guard count != oldValue else { return }
-            invalidateIntrinsicContentSize()
-            needsDisplay = true
-        }
-    }
+/// Version row, 30 pt (A2 §6): the playback-version check in the thumbnail
+/// column (a warning triangle in its place when the file is missing, §12),
+/// the version's title tag, its format, and its duration.
+final class PlaylistVersionCellView: NSTableCellView {
+    static let reuseIdentifier = NSUserInterfaceItemIdentifier("version")
 
-    var isEmphasized = false {
-        didSet { if isEmphasized != oldValue { needsDisplay = true } }
-    }
+    enum Mark: Equatable { case none, playback, missing }
 
-    private static let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
+    private let titleField = NSTextField.playlistLabel(font: .systemFont(ofSize: 12), truncation: .byTruncatingMiddle)
+    private let formatField = NSTextField.playlistLabel(font: .systemFont(ofSize: 11), truncation: .byClipping)
+    private let durationField = NSTextField.playlistLabel(
+        font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular), truncation: .byClipping, alignment: .right
+    )
+    private let markView = NSImageView()
+    private let titleHeight: CGFloat
+    private let detailHeight: CGFloat
+    private var mark = Mark.none
 
-    private var text: NSAttributedString {
-        NSAttributedString(string: "\(count)", attributes: [
-            .font: Self.font,
-            .foregroundColor: isEmphasized ? NSColor.alternateSelectedControlTextColor : NSColor.secondaryLabelColor
-        ])
-    }
+    override var isFlipped: Bool { true }
 
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: max(18, ceil(text.size().width) + 10), height: 15)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let fill = isEmphasized ? NSColor.white.withAlphaComponent(0.25) : NSColor.labelColor.withAlphaComponent(0.1)
-        fill.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
-        let text = text
-        let size = text.size()
-        text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
-    }
-}
-
-/// Trailing per-row actions, shown only while the row is hovered or selected.
-final class PlaylistActionCellView: NSTableCellView {
-    enum Kind { case none, compare, more }
-
-    var kind = Kind.none { didSet { refresh() } }
-    var actionsVisible = false { didSet { refresh() } }
-    var onCompare: (() -> Void)?
-    var onMore: ((NSButton) -> Void)?
-
-    private let compareButton = NSButton(title: "Compare", target: nil, action: nil)
-    private let moreButton = NSButton()
-
-    init(identifier: NSUserInterfaceItemIdentifier) {
+    init() {
+        titleHeight = titleField.lineHeight
+        detailHeight = durationField.lineHeight
         super.init(frame: .zero)
-        self.identifier = identifier
-
-        compareButton.bezelStyle = .inline
-        compareButton.controlSize = .small
-        compareButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
-        compareButton.target = self
-        compareButton.action = #selector(comparePressed)
-
-        moreButton.isBordered = false
-        moreButton.imagePosition = .imageOnly
-        moreButton.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "Version Actions")
-        moreButton.target = self
-        moreButton.action = #selector(morePressed)
-
-        for button in [compareButton, moreButton] {
-            button.translatesAutoresizingMaskIntoConstraints = false
-            button.refusesFirstResponder = true
-            addSubview(button)
-            NSLayoutConstraint.activate([
-                button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
-                button.centerYAnchor.constraint(equalTo: centerYAnchor)
-            ])
-        }
-        NSLayoutConstraint.activate([
-            moreButton.widthAnchor.constraint(equalToConstant: 24),
-            moreButton.heightAnchor.constraint(equalToConstant: 20)
-        ])
-        refresh()
+        identifier = Self.reuseIdentifier
+        textField = titleField
+        markView.imageScaling = .scaleNone
+        for view in [markView, titleField, formatField, durationField] as [NSView] { addSubview(view) }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private func refresh() {
-        compareButton.isHidden = !(kind == .compare && actionsVisible)
-        moreButton.isHidden = !(kind == .more && actionsVisible)
+    func configure(title: String, format: String, duration: String, mark: Mark, toolTip: String) {
+        titleField.stringValue = title
+        titleField.toolTip = toolTip
+        formatField.stringValue = format
+        durationField.stringValue = duration
+        self.mark = mark
+        switch mark {
+        case .none:
+            markView.image = nil
+            markView.toolTip = nil
+        case .playback:
+            markView.image = PlaylistGlyph.symbol("checkmark.circle.fill", size: 12, label: "Playback version")
+            markView.toolTip = "Playback version"
+        case .missing:
+            markView.image = PlaylistGlyph.warning(size: 12)
+            markView.toolTip = "This file can’t be found."
+        }
+        markView.setAccessibilityElement(mark != .none)
+        applyStyle()
+        needsLayout = true
     }
 
-    @objc private func comparePressed() { onCompare?() }
-    @objc private func morePressed() { onMore?(moreButton) }
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applyStyle() }
+    }
+
+    private func applyStyle() {
+        let emphasized = backgroundStyle == .emphasized
+        let selectedText = NSColor.alternateSelectedControlTextColor
+        let dimmed = mark == .missing
+        if emphasized {
+            titleField.textColor = dimmed ? selectedText.withAlphaComponent(0.6) : selectedText
+            formatField.textColor = selectedText.withAlphaComponent(0.75)
+            durationField.textColor = selectedText.withAlphaComponent(0.75)
+        } else {
+            titleField.textColor = dimmed ? .tertiaryLabelColor : NSColor.labelColor.withAlphaComponent(0.85)
+            formatField.textColor = .secondaryLabelColor
+            durationField.textColor = .secondaryLabelColor
+        }
+        if mark == .playback { markView.contentTintColor = emphasized ? selectedText : .secondaryLabelColor }
+    }
+
+    override func layout() {
+        super.layout()
+        typealias M = PlaylistRowMetrics
+        let height = bounds.height
+        markView.frame = NSRect(x: M.thumbnailX, y: 0, width: M.thumbnailSide, height: height)
+        let trailing = M.trailingX(rowWidth: bounds.width)
+        let durationWidth = max(M.durationMinimumWidth, durationField.fittingTextWidth)
+        let durationX = trailing - durationWidth
+        durationField.frame = NSRect(x: durationX, y: (height - detailHeight) / 2, width: durationWidth, height: detailHeight)
+        var textRight = durationX - M.gap
+        if !formatField.stringValue.isEmpty {
+            let formatWidth = formatField.fittingTextWidth
+            formatField.frame = NSRect(x: textRight - formatWidth, y: (height - detailHeight) / 2, width: formatWidth, height: detailHeight)
+            textRight -= formatWidth + M.gap
+        } else {
+            formatField.frame = .zero
+        }
+        titleField.frame = NSRect(x: M.titleX, y: (height - titleHeight) / 2, width: max(0, textRight - M.titleX), height: titleHeight)
+    }
+}
+
+/// The item row's chevron, in its always-reserved 12 pt slot. Rotates to
+/// point down while the item is expanded.
+final class PlaylistDisclosureButton: NSView {
+    var action: (() -> Void)?
+    var isEmphasized = false { didSet { if isEmphasized != oldValue { updateTint() } } }
+
+    private let chevron = NSImageView()
+    private var isExpanded = false
+
+    override init(frame: NSRect) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 12, height: 20))
+        wantsLayer = true
+        chevron.image = PlaylistGlyph.symbol("chevron.right", size: 9, weight: .bold)
+        chevron.imageScaling = .scaleNone
+        chevron.wantsLayer = true
+        chevron.frame = NSRect(x: 0, y: 4, width: 12, height: 12)
+        addSubview(chevron)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.disclosureTriangle)
+        updateTint()
+        updateLabel()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func setExpanded(_ expanded: Bool, animated: Bool) {
+        guard expanded != isExpanded || chevron.frameCenterRotation != (expanded ? -90 : 0) else { return }
+        isExpanded = expanded
+        let angle: CGFloat = expanded ? -90 : 0
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.18
+                chevron.animator().frameCenterRotation = angle
+            }
+        } else {
+            chevron.frameCenterRotation = angle
+        }
+        updateLabel()
+    }
+
+    private func updateTint() {
+        chevron.contentTintColor = isEmphasized ? .alternateSelectedControlTextColor : .secondaryLabelColor
+    }
+
+    private func updateLabel() {
+        setAccessibilityLabel(isExpanded ? "Hide Versions" : "Show Versions")
+        setAccessibilityValue(isExpanded ? 1 : 0)
+    }
+
+    override func mouseDown(with event: NSEvent) { action?() }
+    override func accessibilityPerformPress() -> Bool {
+        action?()
+        return true
+    }
+}
+
+/// The item row's 34 pt thumbnail: artwork (or a music-note tile), the
+/// stacked-card edges of a multi-version item, and the now-playing or
+/// missing-file overlay. Laid out flipped; the stack edges extend
+/// `stackExtent` above and to the right of the tile.
+final class PlaylistThumbnailView: NSView {
+    enum Status: Equatable {
+        case none, playing, paused
+        case missing(String)
+    }
+
+    static let stackExtent: CGFloat = PlaylistRowMetrics.stackOffsets.last.map { $0 - 2 } ?? 0
+    static var size: NSSize {
+        NSSize(width: PlaylistRowMetrics.thumbnailSide + stackExtent, height: PlaylistRowMetrics.thumbnailSide + stackExtent)
+    }
+
+    var image: NSImage? {
+        didSet {
+            tile.contentsImage = image
+            noteGlyph.isHidden = image != nil
+        }
+    }
+
+    private let farEdge = PlaylistFillView()
+    private let nearEdge = PlaylistFillView()
+    private let tile = PlaylistFillView()
+    private let noteGlyph = NSImageView()
+    private let scrim = PlaylistFillView()
+    private let statusGlyph = NSImageView()
+
+    override var isFlipped: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: NSRect(origin: .zero, size: Self.size))
+        typealias M = PlaylistRowMetrics
+        let side = M.thumbnailSide
+        let tileRect = NSRect(x: 0, y: Self.stackExtent, width: side, height: side)
+        // Each card is the tile shrunk by 1 pt per step and shifted up and
+        // right, so a 2 pt strip of it shows past the card in front.
+        for (index, (edge, color)) in [(nearEdge, PlaylistRowPalette.stackNearEdge), (farEdge, PlaylistRowPalette.stackFarEdge)].enumerated() {
+            let inset = CGFloat(index + 1)
+            let offset = M.stackOffsets[index]
+            edge.frame = tileRect.insetBy(dx: inset, dy: inset).offsetBy(dx: offset, dy: -offset)
+            edge.fillColor = color
+            edge.cornerRadius = M.thumbnailRadius - inset
+        }
+        tile.frame = tileRect
+        tile.fillColor = PlaylistRowPalette.thumbnailFill
+        tile.cornerRadius = M.thumbnailRadius
+        noteGlyph.image = PlaylistGlyph.symbol("music.note", size: 15)
+        noteGlyph.contentTintColor = PlaylistRowPalette.thumbnailGlyph
+        noteGlyph.imageScaling = .scaleNone
+        noteGlyph.frame = tile.bounds
+        tile.addSubview(noteGlyph)
+        scrim.frame = tile.bounds
+        tile.addSubview(scrim)
+        statusGlyph.imageScaling = .scaleNone
+        statusGlyph.frame = tile.bounds
+        tile.addSubview(statusGlyph)
+        for view in [farEdge, nearEdge, tile] { addSubview(view) }
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func configure(image: NSImage?, isStacked: Bool, status: Status) {
+        self.image = image
+        nearEdge.isHidden = !isStacked
+        farEdge.isHidden = !isStacked
+        switch status {
+        case .none:
+            scrim.isHidden = true
+            statusGlyph.image = nil
+            statusGlyph.toolTip = nil
+        case .playing, .paused:
+            scrim.isHidden = false
+            scrim.fillColor = PlaylistRowPalette.playingScrim
+            let playing = status == .playing
+            statusGlyph.image = PlaylistGlyph.symbol(playing ? "speaker.wave.2.fill" : "speaker.fill", size: 13,
+                                                     label: playing ? "Playing" : "Current")
+            statusGlyph.contentTintColor = .white
+            statusGlyph.toolTip = nil
+        case let .missing(warning):
+            scrim.isHidden = false
+            scrim.fillColor = PlaylistRowPalette.missingScrim
+            statusGlyph.image = PlaylistGlyph.warning(size: 16)
+            statusGlyph.toolTip = warning
+        }
+        statusGlyph.setAccessibilityElement(statusGlyph.image != nil)
+    }
+}
+
+/// A layer-backed rectangle whose dynamic fill color resolves for the
+/// view's appearance, optionally showing an image (aspect fill).
+final class PlaylistFillView: NSView {
+    var fillColor: NSColor = .clear { didSet { needsDisplay = true } }
+    var cornerRadius: CGFloat = 0 { didSet { needsDisplay = true } }
+    var contentsImage: NSImage? { didSet { if contentsImage !== oldValue { needsDisplay = true } } }
+
+    override var isFlipped: Bool { true }
+    override var wantsUpdateLayer: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func updateLayer() {
+        guard let layer else { return }
+        var color: CGColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance { color = fillColor.cgColor }
+        layer.backgroundColor = color
+        layer.cornerRadius = cornerRadius
+        layer.masksToBounds = cornerRadius > 0
+        layer.contentsGravity = .resizeAspectFill
+        layer.contents = contentsImage?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// The hover Compare pill on multi-version items (A2 §6). Opens compare
+/// without starting playback.
+final class PlaylistComparePill: NSButton {
+    private static let font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        title = "Compare"
+        isBordered = false
+        refusesFirstResponder = true
+        focusRingType = .none
+        toolTip = "Compare Versions"
+        setAccessibilityLabel("Compare Versions")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private var label: NSAttributedString {
+        NSAttributedString(string: "Compare", attributes: [.font: Self.font, .foregroundColor: PlaylistRowPalette.comparePillText])
+    }
+
+    var preferredWidth: CGFloat { ceil(label.size().width) + 2 * PlaylistRowMetrics.comparePillPadding }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: preferredWidth, height: PlaylistRowMetrics.comparePillHeight)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let radius = bounds.height / 2
+        PlaylistRowPalette.comparePillFill.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+        if isHighlighted {
+            PlaylistRowPalette.comparePillFill.setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+        }
+        let text = label
+        let size = text.size()
+        text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
+    }
 }
 
 private final class ClosureMenuItem: NSMenuItem {
