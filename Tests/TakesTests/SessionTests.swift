@@ -25,6 +25,18 @@ struct SessionTests {
         #expect(settings.automaticGroupingMode == .automatic)
     }
 
+    /// The control bar theme setting was removed with the Teenage Engineering
+    /// theme; preferences that still hold it must load as defaults.
+    @MainActor
+    @Test
+    func retiredControlBarThemePreferenceLoadsAsDefaults() {
+        let defaults = InMemoryAppSettingsDefaults()
+        defaults.set("teenageEngineering", forKey: "controlBarTheme")
+        let settings = AppSettings(defaults: defaults)
+
+        #expect(settings.settingsAreDefault)
+    }
+
     @Test
     func betaBuildsAreExcludedByDefault() {
         let defaults = InMemoryAppSettingsDefaults()

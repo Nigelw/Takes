@@ -49,25 +49,6 @@ enum ReadoutStyle: String, CaseIterable, Identifiable {
     }
 }
 
-/// Overall visual theme for the control bar (transport buttons and readout).
-enum ControlBarTheme: String, CaseIterable, Identifiable {
-    /// The shipped glass/LED transport look.
-    case classic
-
-    /// A playful, chunky hardware-panel look inspired by Teenage Engineering
-    /// products: cream/black panels, exposed screws, a bold accent color.
-    case teenageEngineering
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .classic: return "Classic"
-        case .teenageEngineering: return "Teenage Engineering"
-        }
-    }
-}
-
 /// Whether playlist imports group tracks using title, artist, filename, and duration.
 enum AutomaticGroupingMode: String, CaseIterable, Identifiable {
     case off
@@ -115,7 +96,6 @@ final class AppSettings: ObservableObject {
     nonisolated static let alignTracksOnOpenDefault = false
     nonisolated static let appearanceThemeDefault: AppearanceTheme = .system
     nonisolated static let readoutStyleDefault: ReadoutStyle = .glass
-    nonisolated static let controlBarThemeDefault: ControlBarTheme = .classic
     nonisolated static let automaticGroupingModeDefault: AutomaticGroupingMode = .automatic
     nonisolated static let showsArtworkDefault = true
 
@@ -124,7 +104,6 @@ final class AppSettings: ObservableObject {
     nonisolated static let alignTracksOnOpenKey = "alignTracksOnOpen"
     nonisolated static let appearanceThemeKey = "appearanceTheme"
     nonisolated static let readoutStyleKey = "readoutStyle"
-    nonisolated static let controlBarThemeKey = "controlBarTheme"
     nonisolated static let automaticGroupingModeKey = "automaticGroupingMode"
     nonisolated static let showsArtworkKey = "showsArtwork"
     nonisolated static let appearanceThemeOverrideArgument = "--appearance-theme"
@@ -168,11 +147,6 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(readoutStyle.rawValue, forKey: Self.readoutStyleKey) }
     }
 
-    /// The control bar's overall visual theme (buttons and readout). Persisted.
-    @Published var controlBarTheme: ControlBarTheme {
-        didSet { defaults.set(controlBarTheme.rawValue, forKey: Self.controlBarThemeKey) }
-    }
-
     /// Whether playlist imports group tracks from descriptive metadata.
     @Published var automaticGroupingMode: AutomaticGroupingMode {
         didSet { defaults.set(automaticGroupingMode.rawValue, forKey: Self.automaticGroupingModeKey) }
@@ -210,7 +184,6 @@ final class AppSettings: ObservableObject {
         alignTracksOnOpen = Self.storedAlignTracksOnOpen(defaults)
         appearanceTheme = Self.appearanceThemeOverride(arguments: arguments) ?? Self.storedAppearanceTheme(defaults)
         readoutStyle = Self.storedReadoutStyle(defaults)
-        controlBarTheme = Self.storedControlBarTheme(defaults)
         automaticGroupingMode = Self.storedAutomaticGroupingMode(defaults)
         showsArtwork = Self.storedShowsArtwork(defaults)
     }
@@ -231,7 +204,6 @@ final class AppSettings: ObservableObject {
         alignTracksOnOpen = Self.alignTracksOnOpenDefault
         appearanceTheme = Self.appearanceThemeDefault
         readoutStyle = Self.readoutStyleDefault
-        controlBarTheme = Self.controlBarThemeDefault
         automaticGroupingMode = Self.automaticGroupingModeDefault
         transportAppearance = TransportAppearance()
         indexBadgeAppearance = IndexBadgeAppearance()
@@ -243,7 +215,6 @@ final class AppSettings: ObservableObject {
             && alignTracksOnOpen == Self.alignTracksOnOpenDefault
             && appearanceTheme == Self.appearanceThemeDefault
             && readoutStyle == Self.readoutStyleDefault
-            && controlBarTheme == Self.controlBarThemeDefault
             && automaticGroupingMode == Self.automaticGroupingModeDefault
             && transportAppearance == TransportAppearance()
             && indexBadgeAppearance == IndexBadgeAppearance()
@@ -271,10 +242,6 @@ final class AppSettings: ObservableObject {
 
     nonisolated static func storedReadoutStyle(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> ReadoutStyle {
         defaults.string(forKey: readoutStyleKey).flatMap(ReadoutStyle.init(rawValue:)) ?? readoutStyleDefault
-    }
-
-    nonisolated static func storedControlBarTheme(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> ControlBarTheme {
-        defaults.string(forKey: controlBarThemeKey).flatMap(ControlBarTheme.init(rawValue:)) ?? controlBarThemeDefault
     }
 
     nonisolated static func storedShowsArtwork(_ defaults: AppSettingsDefaults = UserDefaults.standard) -> Bool {

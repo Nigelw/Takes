@@ -39,12 +39,6 @@ private struct GeneralSettingsView: View {
                         Text(style.title).tag(style)
                     }
                 }
-
-                Picker("Control bar theme", selection: $settings.controlBarTheme) {
-                    ForEach(ControlBarTheme.allCases) { theme in
-                        Text(theme.title).tag(theme)
-                    }
-                }
             } header: {
                 Text("Appearance")
             }

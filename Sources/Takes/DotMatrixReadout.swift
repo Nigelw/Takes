@@ -32,11 +32,6 @@ struct PlaylistNowPlayingReadout: View {
     let elapsed: String
     let controller: PlaybackController
     let seek: (TimeInterval) -> Void
-    /// Workspace/version state the Teenage Engineering theme's dashboard
-    /// column mirrors as indicator tiles. Ignored by the classic theme.
-    var status: TeenageEngineeringDisplayStatus? = nil
-
-    @Environment(\.controlBarTheme) private var controlBarTheme
 
     private let metrics = DotMatrixMetrics()
     /// Whole points, so the second and third rows start on the pixel grid.
@@ -82,29 +77,13 @@ struct PlaylistNowPlayingReadout: View {
     private func columns(forPanelWidth panelWidth: CGFloat) -> Int {
         var available = panelWidth - padding * 2
         if artwork != nil { available -= contentHeight + artworkSpacing }
-        // The TE plate's nameplate/grille strip sits beside the display
-        // window; the text lines stop before it, and before the dashboard
-        // column when the panel is wide enough to carry one.
-        if controlBarTheme == .teenageEngineering { available -= TeenageEngineeringReadoutLayout.stripWidth }
-        if showsDashboard(forPanelWidth: panelWidth) {
-            available -= TeenageEngineeringNowPlayingDashboard.width + TeenageEngineeringNowPlayingDashboard.gap
-        }
         // A line of n cells is n advances minus the trailing cell gap.
         return max(Int(((available + metrics.cellGap) / metrics.cellAdvance).rounded(.down)), 1)
-    }
-
-    /// The TE dashboard column (time digits, file marks, mode tags) takes
-    /// the trailing end of the window; it also carries the elapsed time, so
-    /// the bottom text row is then the progress bar alone.
-    private func showsDashboard(forPanelWidth panelWidth: CGFloat) -> Bool {
-        controlBarTheme == .teenageEngineering && status != nil
-            && panelWidth >= TeenageEngineeringNowPlayingDashboard.minimumPanelWidth
     }
 
     var body: some View {
         GeometryReader { proxy in
             let columns = columns(forPanelWidth: proxy.size.width)
-            let showsDashboard = showsDashboard(forPanelWidth: proxy.size.width)
             // The time row is pinned to the text lines' width so the progress
             // bar ends flush with them.
             let lineWidth = metrics.lineWidth(columns: columns)
@@ -140,17 +119,10 @@ struct PlaylistNowPlayingReadout: View {
                     DotMatrixMarqueeText(text: nowPlaying.title, columns: columns, metrics: metrics, sharedPeriod: sharedPeriod)
                     DotMatrixMarqueeText(text: secondLine, columns: columns, metrics: metrics, sharedPeriod: sharedPeriod)
                     HStack(spacing: timeBarGap) {
-                        if !showsDashboard {
-                            SevenSegmentDisplay(text: elapsed, digitHeight: clockHeight)
-                        }
+                        SevenSegmentDisplay(text: elapsed, digitHeight: clockHeight)
                         DotMatrixProgressBar(controller: controller, seek: seek, metrics: metrics, barHeight: barHeight)
                     }
                     .frame(width: lineWidth, height: clockHeight)
-                }
-                if showsDashboard, let status {
-                    Spacer(minLength: 0)
-                    TeenageEngineeringNowPlayingDashboard(elapsed: elapsed, status: status)
-                        .padding(.trailing, TeenageEngineeringReadoutLayout.stripWidth)
                 }
             }
             // Pinned to the top-leading corner by a whole-point inset rather
@@ -239,9 +211,6 @@ struct DotMatrixDisplay: View {
     /// Light mode renders as an LCD (dark ink pixels that cast a soft shadow
     /// onto the pale glass), dark mode as an LED matrix (glowing pixels).
     @Environment(\.colorScheme) private var colorScheme
-    /// The Teenage Engineering theme prints the pixels flat in the panel's
-    /// ink (no glow, no shadow); the cell layout is shared.
-    @Environment(\.controlBarTheme) private var controlBarTheme
 
     /// Extra canvas margin so the glow blur can trail off instead of being
     /// clipped at the layout edge; trimmed back out with negative padding.
@@ -253,7 +222,7 @@ struct DotMatrixDisplay: View {
         let glyphs = Array(Self.fit(text, columns: columns))
         Canvas { context, _ in
             Self.draw(glyphs: glyphs, columns: columns, metrics: metrics, colorScheme: colorScheme,
-                      theme: controlBarTheme, bleed: bleed, into: context)
+                      bleed: bleed, into: context)
         }
         .frame(width: intrinsicWidth + bleed * 2, height: metrics.lineHeight + bleed * 2)
         .padding(-bleed)
@@ -266,7 +235,7 @@ struct DotMatrixDisplay: View {
     /// static `Canvas` above and the marquee's offscreen bitmap rendering, so
     /// both paths draw pixels identically.
     static func draw(glyphs: [Character], columns: Int, metrics: DotMatrixMetrics, colorScheme: ColorScheme,
-                      theme: ControlBarTheme = .classic, bleed: CGFloat, into context: GraphicsContext) {
+                      bleed: CGFloat, into context: GraphicsContext) {
         var context = context
         context.translateBy(x: bleed, y: bleed)
 
@@ -298,11 +267,9 @@ struct DotMatrixDisplay: View {
         // light-mode brown/orange even when rendering for dark mode. Forcing
         // resolution through `performAsCurrentDrawingAppearance` here makes
         // both call sites correct explicitly, not by accident of context.
-        let glowColor = resolvedGlowColor(for: colorScheme, theme: theme)
+        let glowColor = resolvedGlowColor(for: colorScheme)
 
-        if theme == .teenageEngineering {
-            // Flat print: the ink alone, no bloom and no shadow.
-        } else if colorScheme == .dark {
+        if colorScheme == .dark {
             // LED: a soft halo of the pixel color under the crisp fill.
             var glow = context
             glow.addFilter(.blur(radius: metrics.dotSize * 1.1))
@@ -334,9 +301,7 @@ struct DotMatrixDisplay: View {
     /// (light-mode) color intermittently. `usingColorSpace(_:)` forces
     /// immediate resolution against the appearance active *right now* and
     /// returns a plain concrete color that can no longer re-resolve later.
-    private static func resolvedGlowColor(for colorScheme: ColorScheme, theme: ControlBarTheme) -> Color {
-        // The TE palette is already concrete per scheme; nothing to resolve.
-        if theme == .teenageEngineering { return TeenageEngineeringPalette.displayInk(for: colorScheme) }
+    private static func resolvedGlowColor(for colorScheme: ColorScheme) -> Color {
         let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua) ?? NSAppearance(named: .aqua)!
         var resolved = NSColor.controlAccentColor
         appearance.performAsCurrentDrawingAppearance {
@@ -352,7 +317,6 @@ struct DotMatrixDisplay: View {
     /// fails (e.g. off-main-thread misuse); callers should skip animating
     /// rather than crash.
     static func renderedBitmap(text: String, metrics: DotMatrixMetrics, colorScheme: ColorScheme,
-                                theme: ControlBarTheme = .classic,
                                 bleed: CGFloat, scale: CGFloat) -> (image: CGImage, width: CGFloat, height: CGFloat)? {
         let glyphs = Array(text)
         let columns = glyphs.count
@@ -360,7 +324,7 @@ struct DotMatrixDisplay: View {
         let height = metrics.lineHeight + bleed * 2
         let content = Canvas { context, _ in
             Self.draw(glyphs: glyphs, columns: columns, metrics: metrics, colorScheme: colorScheme,
-                      theme: theme, bleed: bleed, into: context)
+                      bleed: bleed, into: context)
         }
         .frame(width: width, height: height)
         let renderer = ImageRenderer(content: content)
@@ -572,8 +536,7 @@ struct DotMatrixMarqueeDisplay: NSViewRepresentable {
     func makeNSView(context: Context) -> DotMatrixMarqueeView { DotMatrixMarqueeView() }
     func updateNSView(_ view: DotMatrixMarqueeView, context: Context) {
         view.configure(text: text, columns: columns, metrics: metrics, sharedPeriod: sharedPeriod,
-                       reduceMotion: context.environment.accessibilityReduceMotion,
-                       theme: context.environment.controlBarTheme)
+                       reduceMotion: context.environment.accessibilityReduceMotion)
     }
 }
 
@@ -584,7 +547,6 @@ final class DotMatrixMarqueeView: NSView {
     private var metrics = DotMatrixMetrics()
     private var sharedPeriod: CFTimeInterval?
     private var reduceMotion = false
-    private var theme: ControlBarTheme = .classic
 
     /// Pixels/second the text travels. Slow, legible, LCD-marquee pace.
     private static let scrollSpeed: CGFloat = 32
@@ -606,11 +568,11 @@ final class DotMatrixMarqueeView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func configure(text: String, columns: Int, metrics: DotMatrixMetrics, sharedPeriod: CFTimeInterval?,
-                   reduceMotion: Bool, theme: ControlBarTheme = .classic) {
+                   reduceMotion: Bool) {
         let unchanged = text == self.text && columns == self.columns && metrics == self.metrics
-            && sharedPeriod == self.sharedPeriod && reduceMotion == self.reduceMotion && theme == self.theme
+            && sharedPeriod == self.sharedPeriod && reduceMotion == self.reduceMotion
         self.text = text; self.columns = columns; self.metrics = metrics
-        self.sharedPeriod = sharedPeriod; self.reduceMotion = reduceMotion; self.theme = theme
+        self.sharedPeriod = sharedPeriod; self.reduceMotion = reduceMotion
         guard !unchanged else { return }
         redraw()
     }
@@ -718,7 +680,7 @@ final class DotMatrixMarqueeView: NSView {
             // shrank) — render the plain fitted text with no animation.
             let displayText = DotMatrixDisplay.fit(text, columns: columns)
             guard let (image, bitmapWidth, bitmapHeight) = DotMatrixDisplay.renderedBitmap(
-                text: displayText, metrics: metrics, colorScheme: colorScheme, theme: theme, bleed: bleed, scale: scale
+                text: displayText, metrics: metrics, colorScheme: colorScheme, bleed: bleed, scale: scale
             ) else { return }
             CATransaction.begin(); CATransaction.setDisableActions(true)
             content.contentsScale = scale
@@ -740,7 +702,7 @@ final class DotMatrixMarqueeView: NSView {
         let baseText = DotMatrixDisplay.fold(text)
         let doubledText = baseText + Self.separator + baseText
         guard let (image, bitmapWidth, bitmapHeight) = DotMatrixDisplay.renderedBitmap(
-            text: doubledText, metrics: metrics, colorScheme: colorScheme, theme: theme, bleed: bleed, scale: scale
+            text: doubledText, metrics: metrics, colorScheme: colorScheme, bleed: bleed, scale: scale
         ) else { return }
 
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -801,7 +763,7 @@ struct DotMatrixProgressBar: NSViewRepresentable {
         _ = controller.session.transportPosition
         view.configure(position: controller.displayTransportPosition(), duration: controller.session.duration,
                        playing: controller.session.isPlaying, metrics: metrics, barHeight: barHeight,
-                       theme: context.environment.controlBarTheme, seek: seek)
+                       seek: seek)
     }
 }
 
@@ -818,7 +780,6 @@ final class DotMatrixProgressView: NSView {
     private let blocks = CAShapeLayer()
     private var metrics = DotMatrixMetrics()
     private var barHeight: CGFloat = 0
-    private var theme: ControlBarTheme = .classic
     private var duration: TimeInterval = 0
     private var position: TimeInterval = 0
     private var playing = false
@@ -844,10 +805,10 @@ final class DotMatrixProgressView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func configure(position: TimeInterval, duration: TimeInterval, playing: Bool,
-                   metrics: DotMatrixMetrics, barHeight: CGFloat, theme: ControlBarTheme = .classic,
+                   metrics: DotMatrixMetrics, barHeight: CGFloat,
                    seek: @escaping (TimeInterval) -> Void) {
         self.position = position; self.duration = duration; self.playing = playing
-        self.metrics = metrics; self.barHeight = barHeight; self.theme = theme
+        self.metrics = metrics; self.barHeight = barHeight
         self.anchorTime = CACurrentMediaTime(); self.seek = seek
         setAccessibilityEnabled(duration > 0)
         redraw()
@@ -869,10 +830,6 @@ final class DotMatrixProgressView: NSView {
     /// wrong appearance later (this is what let the bar intermittently
     /// render dark mode's cyan while the window was in light mode).
     private var glowColor: NSColor {
-        if theme == .teenageEngineering {
-            // The TE ink is already concrete per scheme.
-            return TeenageEngineeringPalette.displayInkNSColor(for: colorScheme)
-        }
         var color = NSColor.controlAccentColor
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let dynamic = NSColor(Theme.readoutGlow)
@@ -1112,7 +1069,6 @@ private struct ReadoutPanelChrome: ViewModifier {
     let style: ReadoutStyle
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.controlBarTheme) private var controlBarTheme
 
     private static let cornerRadius: CGFloat = 10
     /// Width of the raised bezel ring the glass window is sunk into.
@@ -1132,25 +1088,15 @@ private struct ReadoutPanelChrome: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background {
-                switch controlBarTheme {
-                case .classic:
-                    switch style {
-                    case .retro: retroPanel
-                    case .glass: convexGlassPanel
-                    }
-                case .teenageEngineering:
-                    TeenageEngineeringReadoutBackground()
+                switch style {
+                case .retro: retroPanel
+                case .glass: convexGlassPanel
                 }
             }
             .overlay {
-                switch controlBarTheme {
-                case .classic:
-                    switch style {
-                    case .retro: retroSheen
-                    case .glass: convexGlassLight
-                    }
-                case .teenageEngineering:
-                    TeenageEngineeringReadoutOverlay()
+                switch style {
+                case .retro: retroSheen
+                case .glass: convexGlassLight
                 }
             }
     }
