@@ -222,12 +222,13 @@ final class PlaylistArtworkStore {
 // MARK: - Cover
 
 /// The 360 pt full-bleed cover at the top of the main window (A2 spec §4).
-/// No text overlay. A faint top shade keeps the window buttons legible over
-/// bright art. When the window is wider than the cover, the square stays
+/// A faint top shade appears with the window buttons to keep them legible
+/// over bright art. When the window is wider than the cover, the square stays
 /// 360 pt and centred over a blurred fill of the same image. Pressing on the
 /// cover drags the window, as the control bar does.
 struct ArtworkCoverView: View {
     let image: NSImage?
+    let showsTitlebarControls: Bool
 
     private static let side = TakesWindowPolicy.artworkHeight
     private static let topShadeHeight: CGFloat = 40
@@ -252,9 +253,11 @@ struct ArtworkCoverView: View {
                         .aspectRatio(contentMode: .fill)
                         .frame(width: Self.side, height: Self.side)
                         .clipped()
-                    LinearGradient(colors: [.black.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)
-                        .frame(height: Self.topShadeHeight)
-                        .frame(maxHeight: .infinity, alignment: .top)
+                    if showsTitlebarControls {
+                        LinearGradient(colors: [.black.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)
+                            .frame(height: Self.topShadeHeight)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                    }
                 } else {
                     Image(systemName: "music.note")
                         .font(.system(size: 72, weight: .light))

@@ -3623,11 +3623,12 @@ struct LaneOffsetField: View {
 /// tracking area, and never takes a click, so it can sit over controls —
 /// an AppKit text field among them, where SwiftUI hover is unreliable —
 /// without stealing their events.
-private struct HoverSensor: NSViewRepresentable {
+struct HoverSensor: NSViewRepresentable {
+    var trackingActivity: NSTrackingArea.Options = .activeInKeyWindow
     var onHover: (Bool) -> Void
 
     func makeNSView(context: Context) -> HoverSensorView {
-        HoverSensorView()
+        HoverSensorView(trackingActivity: trackingActivity)
     }
 
     func updateNSView(_ view: HoverSensorView, context: Context) {
@@ -3637,6 +3638,15 @@ private struct HoverSensor: NSViewRepresentable {
     final class HoverSensorView: NSView {
         var onHover: ((Bool) -> Void)?
         private var isInside = false
+        private let trackingActivity: NSTrackingArea.Options
+
+        init(trackingActivity: NSTrackingArea.Options) {
+            self.trackingActivity = trackingActivity
+            super.init(frame: .zero)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -3645,7 +3655,7 @@ private struct HoverSensor: NSViewRepresentable {
             trackingAreas.forEach(removeTrackingArea)
             addTrackingArea(NSTrackingArea(
                 rect: .zero,
-                options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                options: [.mouseEnteredAndExited, trackingActivity, .inVisibleRect],
                 owner: self
             ))
         }

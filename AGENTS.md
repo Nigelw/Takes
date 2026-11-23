@@ -270,8 +270,11 @@ These are here to prevent parallel implementations and subtle regressions:
   (±`artworkCollapseHeight`, 346 pt, top edge fixed, clamped on screen). Its
   frame autosaves as `main.a2`; do not reintroduce per-mode frames.
 - The cover and artwork toggle live in `WorkspaceView`, above both modes'
-  control bars, so entering compare never moves them. The control bars take
-  their top padding from `TakesWindowPolicy.controlBarTopPadding(showsArtwork:)`
+  control bars, so entering compare never moves them. While the cover is
+  shown, its AppKit hover sensor reveals the toggle and window buttons, with
+  a shade behind them over the image. With the cover hidden, the controls stay
+  visible. The control bars take their top padding from
+  `TakesWindowPolicy.controlBarTopPadding(showsArtwork:)`
   (10 under the cover, 24 under the titlebar). The cover's version comes from
   `CoverVersionRule`: in compare it follows the audible version, except in
   Blind Listening Mode, where it stays on the item's playback version so it

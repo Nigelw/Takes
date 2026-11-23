@@ -299,6 +299,10 @@ struct DotMatrixDisplay: View {
             shade.addFilter(.blur(radius: metrics.dotSize * 0.3))
             shade.fill(lit, with: .color(.black.opacity(0.30)))
         }
+        // A translucent rim adds weight between dots. Paint the opaque
+        // squares last so their edges still land on the original grid.
+        context.stroke(lit, with: .color(glowColor.opacity(colorScheme == .dark ? 0.35 : 0.28)),
+                       lineWidth: metrics.dotGap)
         context.fill(lit, with: .color(glowColor))
     }
 

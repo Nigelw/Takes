@@ -68,8 +68,11 @@ must therefore stretch horizontally as well as vertically.
 ## 4. Titlebar and artwork
 
 - Artwork: full-bleed 360 × 360 square, no text overlay. A faint top shade
-  (`black 35%` → clear over 40 pt) keeps the window buttons legible.
+  (`black 35%` → clear over 40 pt) keeps the window buttons legible on hover.
 - Window buttons at their standard position (10 pt in).
+- While the cover is shown, the window buttons and the artwork toggle appear
+  only when the pointer is over the cover area, including its placeholder.
+  Both are always visible with the cover hidden.
 - **Artwork toggle**, top right, 10 pt from the edge, vertically centred on
   the window buttons. 26 × 22 pt hit area, 16 pt glyph.
   - Glyph: an album sleeve (rounded rectangle) with a record sliding out of
@@ -82,7 +85,8 @@ must therefore stretch horizontally as well as vertically.
     hairline, small drop shadow.
   - **Off = artwork hidden.** Plain grey glyph (secondary label colour), no
     chip, in the titlebar overlay.
-  - Accessibility: "Hide Artwork" / "Show Artwork", toggle trait.
+  - Accessibility: "Hide Artwork" / "Show Artwork", toggle trait. The cover
+    also has a "Hide Artwork" action when the button is out of view.
 - Persist the state in `AppSettings` (new key). It applies to both modes.
 
 ## 5. Control bar

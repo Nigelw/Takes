@@ -25,6 +25,7 @@ struct WorkspaceView: View {
     /// Vertical centre of the window buttons, measured from the window's top
     /// edge, so the artwork toggle lines up with them.
     @State private var titlebarButtonCenterY: CGFloat = 14
+    @State private var artworkIsHovered = false
     @State private var mainWindowIsKey = true
     @State private var textInputIsFocused = false
     /// The version whose cover is on screen: `coverVersion` once its artwork
@@ -34,6 +35,7 @@ struct WorkspaceView: View {
 
     private var controller: PlaybackController { coordinator.controller }
     private var isComparison: Bool { coordinator.mode.itemID != nil }
+    private var showsTitlebarControls: Bool { !settings.showsArtwork || artworkIsHovered }
     private var commandContext: PlaylistCommandContext {
         .init(coordinator: coordinator, presentation: presentation, undoManager: undoManager)
     }
@@ -135,6 +137,7 @@ struct WorkspaceView: View {
                 if state.versionID == nil || state.isResolved { shownCoverVersionID = state.versionID }
             }
             .onChange(of: settings.showsArtwork) { _, showsArtwork in
+                if !showsArtwork { artworkIsHovered = false }
                 guard let mainWindow else { return }
                 let previousFrame = frameBeforeArtworkToggle ?? mainWindow.frame
                 frameBeforeArtworkToggle = nil
@@ -143,6 +146,9 @@ struct WorkspaceView: View {
                 Task { @MainActor in
                     TakesWindowPolicy.applyArtworkVisibility(showsArtwork, to: mainWindow, from: previousFrame)
                 }
+            }
+            .onChange(of: showsTitlebarControls) { _, showsControls in
+                if let mainWindow { updateWindowButtons(in: mainWindow, visible: showsControls) }
             }
             .onChange(of: settings.appearanceTheme, initial: true) { _, theme in NSApp.appearance = theme.nsAppearance }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
@@ -176,17 +182,16 @@ struct WorkspaceView: View {
             // The overlay has its own safe area, so it must ignore the
             // titlebar inset too, or the toggle lands below the titlebar.
             .overlay {
-                ArtworkToggleButton(showsArtwork: Binding(
-                    get: { settings.showsArtwork },
-                    set: { showsArtwork in
-                        frameBeforeArtworkToggle = mainWindow?.frame
-                        settings.showsArtwork = showsArtwork
-                    }
-                ))
+                if showsTitlebarControls {
+                    ArtworkToggleButton(showsArtwork: Binding(
+                        get: { settings.showsArtwork },
+                        set: { setArtworkVisibility($0) }
+                    ))
                     .padding(.trailing, 10)
                     .padding(.top, max(titlebarButtonCenterY - ArtworkToggleButton.size.height / 2, 0))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .ignoresSafeArea(.container, edges: .top)
+                }
             }
             .overlay {
                 if !mainWindowIsKey { InactiveWindowInteractionShield(window: mainWindow).ignoresSafeArea() }
@@ -261,7 +266,12 @@ struct WorkspaceView: View {
             // Shared by both modes: entering compare swaps only what is below
             // the control bar, never the cover.
             if settings.showsArtwork {
-                ArtworkCoverView(image: artworkStore.artwork(for: shownCoverVersionID))
+                ArtworkCoverView(
+                    image: artworkStore.artwork(for: shownCoverVersionID),
+                    showsTitlebarControls: showsTitlebarControls
+                )
+                .overlay(HoverSensor(trackingActivity: .activeAlways) { artworkIsHovered = $0 })
+                .accessibilityAction(named: Text("Hide Artwork")) { setArtworkVisibility(false) }
             }
             if let error = persistence.errorMessage {
                 HStack(alignment: .top, spacing: 12) {
@@ -433,6 +443,11 @@ struct WorkspaceView: View {
         return true
     }
 
+    private func setArtworkVisibility(_ showsArtwork: Bool) {
+        frameBeforeArtworkToggle = mainWindow?.frame
+        settings.showsArtwork = showsArtwork
+    }
+
     private func configureWindow(_ window: NSWindow) {
         mainWindow = window
         mainWindowIsKey = window.isKeyWindow
@@ -446,6 +461,13 @@ struct WorkspaceView: View {
         measureTitlebarButtons(in: window)
         // The titlebar may not be laid out at its final size yet.
         DispatchQueue.main.async { measureTitlebarButtons(in: window) }
+        updateWindowButtons(in: window, visible: showsTitlebarControls)
+    }
+
+    private func updateWindowButtons(in window: NSWindow, visible: Bool) {
+        for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(type)?.isHidden = !visible
+        }
     }
 
     /// Centre of the close button measured inside its titlebar container,
