@@ -723,13 +723,17 @@ private struct TrackListDropDelegate: DropDelegate {
 struct LaneStripMenuActions {
     var isBlind: Bool
     var hasOffset: Bool
+    /// The version's file can't be found: Locate File… replaces nothing, it
+    /// is added, and Reveal in Finder turns off.
+    var isMissing = false
     var remove: () -> Void
     var revealInFinder: () -> Void
     var resetOffset: () -> Void
+    var locate: () -> Void = {}
 
     /// Reveal in Finder would show the file's name, so blind listening turns
-    /// it off.
-    var canRevealInFinder: Bool { !isBlind }
+    /// it off; a missing file has nothing to reveal.
+    var canRevealInFinder: Bool { !isBlind && !isMissing }
 }
 
 /// AppKit-backed drag source for a lane. SwiftUI's `onDrag` can't express a
@@ -783,6 +787,9 @@ final class DragSourceNSView: NSView, NSDraggingSource {
         menu.autoenablesItems = false
         menu.addItem(ClosureMenuItem(title: "Remove Version", action: actions.remove))
         menu.addItem(.separator())
+        if actions.isMissing {
+            menu.addItem(ClosureMenuItem(title: "Locate File…", action: actions.locate))
+        }
         menu.addItem(ClosureMenuItem(
             title: "Reveal in Finder",
             isEnabled: actions.canRevealInFinder,
@@ -1141,6 +1148,9 @@ extension FocusedValues {
 struct ContentView: View {
     let coordinator: PlaylistCoordinator
     private let importProviders: ([NSItemProvider]) -> Bool
+    /// Opens the Locate dialog for a missing version (the playlist's, so
+    /// both modes share one dialog).
+    private let locateVersion: (PlaylistVersion.ID) -> Void
     var controller: PlaybackController { coordinator.controller }
     @Environment(\.undoManager) private var undoManager
     @EnvironmentObject private var settings: AppSettings
@@ -1235,11 +1245,13 @@ struct ContentView: View {
     init(
         coordinator: PlaylistCoordinator,
         openFileCommandState: OpenFileCommandState,
-        importProviders: @escaping ([NSItemProvider]) -> Bool
+        importProviders: @escaping ([NSItemProvider]) -> Bool,
+        locateVersion: @escaping (PlaylistVersion.ID) -> Void = { _ in }
     ) {
         self.coordinator = coordinator
         self.openFileCommandState = openFileCommandState
         self.importProviders = importProviders
+        self.locateVersion = locateVersion
     }
 
     var body: some View {
@@ -1830,6 +1842,7 @@ struct ContentView: View {
             waveform: isBlind ? nil : waveformStore.waveform(for: sessionTrack.id),
             isActive: controller.session.activeTrackID == sessionTrack.id,
             isBlind: isBlind,
+            isMissing: sessionTrack.loadedTrack.isMissing,
             isRenderable: renderableRows.contains(index),
             laneHeight: laneHeight,
             wideWidth: wideWidth,
@@ -1856,6 +1869,7 @@ struct ContentView: View {
             offsetMs: offsetMs,
             isActive: controller.session.activeTrackID == trackID,
             isBlind: isBlind,
+            isMissing: track.isMissing,
             isOffsetFocused: focusedOffsetTrackID == trackID,
             offsetConfiguration: settings.offsetConfiguration,
             indexBadgeAppearance: settings.indexBadgeAppearance,
@@ -1863,9 +1877,11 @@ struct ContentView: View {
             menuActions: LaneStripMenuActions(
                 isBlind: isBlind,
                 hasOffset: offsetMs != 0,
+                isMissing: track.isMissing,
                 remove: { _ = coordinator.removeVersion(trackID, undoManager: undoManager) },
                 revealInFinder: { NSWorkspace.shared.activateFileViewerSelecting([track.url]) },
-                resetOffset: { coordinator.setOffset(trackID, seconds: 0) }
+                resetOffset: { coordinator.setOffset(trackID, seconds: 0) },
+                locate: { locateVersion(trackID) }
             ),
             onSelect: { controller.selectActiveTrack(trackID) },
             onSetOffsetMs: { coordinator.setOffset(trackID, seconds: Double($0) / 1000) },
@@ -2519,6 +2535,9 @@ private struct ReorderPlacement: ViewModifier {
 /// format is the container, sample rate and bit rate. Blind Listening Mode
 /// shows `Track n` and no format, as the pre-A2 info column did.
 enum LaneStripText {
+    /// Shown in place of the format when the version's file can't be found.
+    static let missingFile = "File Not Found"
+
     static func name(for track: LoadedTrack, index: Int, isBlind: Bool) -> String {
         isBlind ? "Track \(index + 1)" : PlaylistRowText.versionName(tag: track.title, url: track.url)
     }
@@ -3334,6 +3353,7 @@ private struct TrackRowView: View, Equatable {
     var waveform: Waveform?
     var isActive: Bool
     var isBlind: Bool
+    var isMissing: Bool
     /// Whether this lane may rasterize (it intersects the vertical viewport
     /// ± overscan). Culled lanes draw nothing.
     var isRenderable: Bool
@@ -3357,6 +3377,7 @@ private struct TrackRowView: View, Equatable {
             && lhs.waveform == rhs.waveform
             && lhs.isActive == rhs.isActive
             && lhs.isBlind == rhs.isBlind
+            && lhs.isMissing == rhs.isMissing
             && lhs.isRenderable == rhs.isRenderable
             && lhs.laneHeight == rhs.laneHeight
             && lhs.wideWidth == rhs.wideWidth
@@ -3375,6 +3396,7 @@ private struct TrackRowView: View, Equatable {
             waveform: waveform,
             isActive: isActive,
             isBlind: isBlind,
+            isMissing: isMissing,
             isRenderable: isRenderable,
             trackStart: trackStart,
             trackDuration: trackDuration,
@@ -3412,6 +3434,7 @@ private struct LaneStripView: View, Equatable {
     var offsetMs: Int
     var isActive: Bool
     var isBlind: Bool
+    var isMissing: Bool
     var isOffsetFocused: Bool
     var offsetConfiguration: NumericControlConfiguration
     var indexBadgeAppearance: IndexBadgeAppearance
@@ -3442,6 +3465,7 @@ private struct LaneStripView: View, Equatable {
             && lhs.offsetMs == rhs.offsetMs
             && lhs.isActive == rhs.isActive
             && lhs.isBlind == rhs.isBlind
+            && lhs.isMissing == rhs.isMissing
             && lhs.isOffsetFocused == rhs.isOffsetFocused
             && lhs.offsetConfiguration == rhs.offsetConfiguration
             && lhs.indexBadgeAppearance == rhs.indexBadgeAppearance
@@ -3498,7 +3522,14 @@ private struct LaneStripView: View, Equatable {
                 .truncationMode(.middle)
                 .layoutPriority(1)
 
-            if !format.isEmpty {
+            if isMissing {
+                // In place of the format, blind or not: the lane is silent.
+                Label(LaneStripText.missingFile, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: Self.formatFontSize))
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(Color(nsColor: PlaylistRowPalette.warningFill))
+                    .lineLimit(1)
+            } else if !format.isEmpty {
                 Text(format)
                     .font(.system(size: Self.formatFontSize))
                     .foregroundStyle(.secondary)
@@ -3693,10 +3724,13 @@ final class LaneViewportStore {
 /// is zoomed to fit). Lines one point in from the edge draw as usual, and the
 /// transparent strip reveals the surface below, active-lane tint included.
 private struct TimelineLeadingEdgeMask: View {
+    /// The masked strip at the leading edge.
+    static let width: CGFloat = 1
+
     var body: some View {
         HStack(spacing: 0) {
             Color.clear
-                .frame(width: 1)
+                .frame(width: Self.width)
             Color.white
         }
     }
@@ -3720,6 +3754,7 @@ private struct LaneView: View {
     var waveform: Waveform?
     var isActive: Bool
     var isBlind: Bool
+    var isMissing: Bool
     var isRenderable: Bool
     var trackStart: TimeInterval
     var trackDuration: TimeInterval
@@ -3743,6 +3778,7 @@ private struct LaneView: View {
                     height: laneHeight,
                     waveform: waveform,
                     isBlindListening: isBlind,
+                    isMissing: isMissing,
                     isActive: isActive,
                     isRenderable: isRenderable,
                     trackStart: trackStart,
@@ -4135,6 +4171,9 @@ private struct WaveformLaneView: View, Equatable {
     /// generation starts.
     var waveform: Waveform?
     var isBlindListening: Bool
+    /// The file can't be found: the track's extent shows the error state
+    /// in place of a waveform, blind or not (the lane is silent either way).
+    var isMissing: Bool
     var isActive: Bool
     /// Whether the lane intersects the vertical viewport (± overscan) and may
     /// kick renders; culled lanes keep showing their last image.
@@ -4166,7 +4205,11 @@ private struct WaveformLaneView: View, Equatable {
                     .accessibilityHidden(true)
             }
 
-            if isBlindListening {
+            if isMissing {
+                missingExtent
+                    .frame(width: width, height: band.height)
+                    .offset(y: band.minY)
+            } else if isBlindListening {
                 blindHatch
                     .frame(width: width, height: band.height)
                     .offset(y: band.minY)
@@ -4254,6 +4297,28 @@ private struct WaveformLaneView: View, Equatable {
         }
     }
 
+    /// The missing-file error state: the track's extent as a faint warning
+    /// band with a dashed outline, so the lane keeps its place on the
+    /// timeline. Static Canvas drawing, like the waveform.
+    private var missingExtent: some View {
+        Canvas { context, size in
+            guard isRenderable, let extent = LaneWaveformRenderer.trackExtent(
+                width: size.width, trackStart: trackStart, trackDuration: trackDuration,
+                visibleStart: visibleStart, visibleSpan: visibleSpan
+            ) else { return }
+            // The stroke sits inside the extent, and the start clears the
+            // lane's masked first point (`TimelineLeadingEdgeMask`), so a
+            // track starting at 0:00 keeps its left edge.
+            let startX = extent.lowerBound + TimelineLeadingEdgeMask.width + 0.5
+            let rect = CGRect(x: startX, y: 0.5, width: max(extent.upperBound - 0.5 - startX, 0), height: size.height - 1)
+            let band = Path(roundedRect: rect, cornerRadius: 4)
+            let color = Color(nsColor: PlaylistRowPalette.warningFill)
+            context.fill(band, with: .color(color.opacity(isActive ? 0.16 : 0.10)))
+            context.stroke(band, with: .color(color.opacity(0.6)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+        }
+        .accessibilityLabel("File not found")
+    }
+
     /// Base tint for the masked-lane treatments: the same active/inactive
     /// distinction as the real envelope, muted further so the lane reads as a
     /// placeholder rather than data.
@@ -4303,6 +4368,21 @@ private struct WaveformLaneView: View, Equatable {
 /// a `Canvas`'s `GraphicsContext` during the frame's render pass (WP-7 — no
 /// async pipeline, no cached `NSImage`).
 enum LaneWaveformRenderer {
+    /// The x range a track covers in a lane `width` wide showing
+    /// `visibleStart ..< visibleStart + visibleSpan`, clamped a point past
+    /// each edge; `nil` when it is off screen.
+    static func trackExtent(
+        width: CGFloat, trackStart: TimeInterval, trackDuration: TimeInterval,
+        visibleStart: TimeInterval, visibleSpan: TimeInterval
+    ) -> ClosedRange<CGFloat>? {
+        guard width > 0, visibleSpan > 0, trackDuration > 0 else { return nil }
+        let scale = Double(width) / visibleSpan
+        let start = CGFloat((trackStart - visibleStart) * scale)
+        let end = CGFloat((trackStart + trackDuration - visibleStart) * scale)
+        guard end > 0, start < width else { return nil }
+        return max(start, -1)...min(end, width + 1)
+    }
+
     #if DEBUG
     private static let renderLog = Logger(subsystem: "com.nigelwarren.Takes", category: "waveform-render")
     #endif

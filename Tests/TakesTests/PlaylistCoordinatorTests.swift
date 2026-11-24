@@ -759,7 +759,7 @@ struct PlaylistCoordinatorTests {
 
     @MainActor
     @Test
-    func groupAndCompareWithAMissingFileKeepsPlaybackWithTheNewOwner() async throws {
+    func groupAndCompareWithAMissingFileOpensCompareAndKeepsPlayback() async throws {
         let url = try makeTemporaryAudioFile(name: "playing.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let version = makePlaylistVersion(url: url, title: "Playing")
@@ -772,11 +772,15 @@ struct PlaylistCoordinatorTests {
 
         let group = await coordinator.groupItems([missing.id, playing.id], compare: true)
         #expect(group == missing.id)
-        #expect(coordinator.mode == .playlist)
+        // Compare opens; the missing version is a silent lane, and the
+        // playing version stays audible.
+        #expect(coordinator.mode == .comparison(itemID: missing.id))
         #expect(coordinator.runtimeContext?.itemID == missing.id)
         #expect(coordinator.controller.session.activeTrackID == version.id)
+        #expect(coordinator.controller.session.tracks.map(\.loadedTrack.isMissing) == [true, false])
+        #expect(coordinator.controller.runtimeTrackCount == 1)
         #expect(coordinator.isPlaying)
-        #expect(coordinator.errorMessage != nil)
+        #expect(coordinator.errorMessage == nil)
     }
 
     @MainActor
@@ -887,18 +891,19 @@ struct PlaylistCoordinatorTests {
     }
 
     @MainActor
-    @Test func missingComparisonFileLeavesPlaylistAvailableForRepair() async throws {
+    @Test func missingComparisonFileRestoresCompareWithAnErrorLane() async throws {
         let version = makeVersion("unavailable.wav")
         let item = PlaylistItem(title: "Unavailable", versions: [version])
         let saved = PlaylistWorkspace(items: [item], activeView: .comparison(itemID: item.id),
                                       listeningState: .init(itemID: item.id, versionID: version.id, filePosition: 1))
         let coordinator = PlaylistCoordinator()
         try await coordinator.restoreWorkspace(saved)
-        #expect(coordinator.mode == .playlist)
-        #expect(coordinator.workspace.activeView == .playlist)
-        #expect(coordinator.workspace.listeningState == saved.listeningState)
-        #expect(coordinator.runtimeContext == nil)
-        #expect(coordinator.errorMessage != nil)
+        #expect(coordinator.mode == .comparison(itemID: item.id))
+        #expect(coordinator.controller.session.tracks.map(\.loadedTrack.isMissing) == [true])
+        #expect(coordinator.controller.runtimeTrackCount == 0)
+        // Nothing to play until the file is located.
+        #expect(!coordinator.controller.session.isPlayable)
+        #expect(coordinator.errorMessage == nil)
     }
 
     @MainActor

@@ -200,8 +200,23 @@ These are here to prevent parallel implementations and subtle regressions:
 - Save comparison edits by stable version ID; playlist playback ignores their
   gain, offset, loop, and blind ordering. Mode transitions translate file time.
   Read the transport and active offset from the same runtime when handing off.
-  Back and failed Compare restoration return to the playlist so missing files
-  remain repairable.
+  Back, and a Compare restoration that fails for a reason other than a
+  missing file, return to the playlist. Missing files never block compare
+  (next item).
+- Compare opens with missing files. `materializedComparisonItem` returns
+  the missing version IDs; `activateComparison` marks their tracks
+  `LoadedTrack.isMissing` and starts on the first available version when the
+  incoming one is missing. A missing track keeps its lane (from stored
+  metadata) but gets no audio nodes (`replaceRuntimeSession` skips it), no
+  waveform decode (`WaveformStore.sync`), and no alignment; it is silent
+  like a track out of range, and `ComparisonSession.isPlayable` needs at
+  least one available track. Its lane draws the error state
+  (`WaveformLaneView.missingExtent`: the track's extent as a dashed warning
+  band, blind or not), its strip shows `File Not Found` in place of the
+  format, and the strip menu adds Locate File… (the playlist's Locate
+  dialog, through `ContentView.locateVersion`) and disables Reveal in
+  Finder. Locating any version of the compared item rebuilds compare
+  (`locateFile`), keeping the audible version.
 - Restore before draining external-open events and always restore paused.
   Failed recovery blocks automatic saves; successful streaming downloads stay
   in workspace storage so navigation, quit, and Undo cannot delete them.
@@ -252,7 +267,8 @@ These are here to prevent parallel implementations and subtle regressions:
   version row makes it the playback version; a missing file shows a warning
   triangle in place of the check and its click opens Locate. Double-click
   plays on every row. The hover Compare pill (multi-version items only) and
-  the context menu's Compare are the ways into compare from a row.
+  the context menu's Compare are the ways into compare from a row; neither
+  asks to locate missing files first.
 - Entering compare never starts an item: another item's playback stops, and
   only the item already playing keeps playing
   (`PlaylistCoordinator.enterComparison`).
@@ -262,6 +278,10 @@ These are here to prevent parallel implementations and subtle regressions:
   `N tracks · m:ss` summary (one track per item). The File menu (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M), Delete, the
   context menu and the Playlist menu keep every one of those commands; the
   bar is another way in, not a replacement.
+- Help ▸ Debug ▸ Reset Window Size (`WorkspaceView.resetWindowSize`) turns
+  the artwork on and sets the minimum width and the mode's height: the
+  playlist's default (760 pt, then stored as its height) or compare's fit
+  to its lanes; top-left kept (`frameResettingSize(currentFrame:height:)`).
 - Keep global shortcuts focus-safe; active numeric text fields should retain
   normal text editing behavior.
 - One main window serves both modes (A2). It opens 360 pt wide (760 tall with
@@ -481,7 +501,8 @@ these reintroduces the exact regressions it fixed):
 - `PlaylistCoordinatorTests.swift`: traversal, import destinations, organization,
   Undo, missing-file repair/advancement, 100-item/32-version runtime isolation,
   automatic-grouping transactions/cancellation, entering compare without
-  starting another item, and workspace/runtime integration.
+  starting another item, compare opening (and restoring) with missing
+  versions as error lanes, and workspace/runtime integration.
 - `PlaylistRuntimeTests.swift`: runtime replacement, stable IDs, stale imports,
   teardown, preparation failure, and natural-end callbacks.
 - `PlaylistWorkspaceStoreTests.swift`: snapshot round trips, recovery protection,
@@ -501,7 +522,9 @@ these reintroduces the exact regressions it fixed):
   selection handling, numeric control stepping, blind listening, the A2 window
   policy (sizes, minimums, artwork-toggle frames, clamping, fitting
   heights and the grow/shrink rules for added and removed tracks, the stored
-  playlist height, and compare sizing to its lanes on entry), the persisted
+  playlist height, compare sizing to its lanes on entry, and the debug
+  reset frame), missing versions as silent lanes and their error band's
+  extent, the persisted
   artwork setting, retired control-bar preferences loading as defaults, the
   A2 readout title rule (tag, filename), the compare control bar's height
   and the info bar (its geometry, centring and take-count text), the

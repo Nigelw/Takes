@@ -272,7 +272,9 @@ final class PlaybackController {
         var didBeginCommit = false
         var preparingURL: URL?
         do {
-            for sessionTrack in newSession.tracks {
+            // A missing version keeps its lane but gets no audio nodes, so
+            // it is silent like a track out of range.
+            for sessionTrack in newSession.tracks where !sessionTrack.loadedTrack.isMissing {
                 preparingURL = sessionTrack.loadedTrack.url
                 try Task.checkCancellation()
                 let file = try loader.makeAudioFile(from: sessionTrack.loadedTrack.url)
@@ -1172,7 +1174,11 @@ final class PlaybackController {
     /// indeterminate spinner). Tracks with no confident match keep their offsets
     /// and surface the tempo-analysis offer.
     func autoAlignTracks() {
-        guard !isAligning, session.canSwitchPlayback, let anchor = session.activeTrack else { return }
+        guard !isAligning, session.canSwitchPlayback, let anchor = session.activeTrack,
+              !anchor.loadedTrack.isMissing else { return }
+        // Missing versions have no audio to align.
+        let others = session.tracks.filter { $0.id != anchor.id && !$0.loadedTrack.isMissing }
+        guard !others.isEmpty else { return }
 
         let generation = runtimeGeneration
         let operationContext = runtimeContext
@@ -1191,7 +1197,7 @@ final class PlaybackController {
                 currentOffsetSeconds: anchorTrack.offsetSeconds
             ),
             anchorPlayheadFileTime: playheadFileTime,
-            others: session.tracks.filter { $0.id != anchor.id }.map { track in
+            others: others.map { track in
                 TrackAligner.Source(
                     id: track.id,
                     url: track.loadedTrack.url,
@@ -1287,11 +1293,13 @@ final class PlaybackController {
         guard let offer = tempoAnalysisOffer else { return }
         tempoAnalysisOffer = nil
 
-        guard !isAligning, let anchor = session.activeTrack else { return }
+        guard !isAligning, let anchor = session.activeTrack, !anchor.loadedTrack.isMissing else { return }
         let generation = runtimeGeneration
         let operationContext = runtimeContext
         guard isCurrentRuntimeOperation(generation: generation, context: operationContext) else { return }
-        let targets = session.tracks.filter { offer.trackIDs.contains($0.id) && $0.id != anchor.id }
+        let targets = session.tracks.filter {
+            offer.trackIDs.contains($0.id) && $0.id != anchor.id && !$0.loadedTrack.isMissing
+        }
         guard !targets.isEmpty else { return }
 
         let anchorTrack = anchor.loadedTrack

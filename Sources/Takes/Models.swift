@@ -16,6 +16,11 @@ struct LoadedTrack: Equatable {
     var gainDB: Float = 0
     var offsetSeconds: TimeInterval = 0
 
+    /// The file can't be found. Compare still shows the version as a lane,
+    /// from its stored metadata, but loads no audio and draws no waveform;
+    /// the lane shows an error state instead and stays silent.
+    var isMissing = false
+
     /// Embedded descriptive tags, independent of the comparison's file label.
     var title: String?
     var artist: String?
@@ -153,7 +158,7 @@ struct ComparisonSession: Equatable {
     }
 
     var isPlayable: Bool {
-        !tracks.isEmpty && timelineEnd > timelineStart
+        tracks.contains { !$0.loadedTrack.isMissing } && timelineEnd > timelineStart
     }
 
     var canToggleBlindListeningMode: Bool {

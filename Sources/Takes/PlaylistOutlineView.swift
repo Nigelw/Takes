@@ -670,12 +670,10 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         Task { await playlist.playItem(id: item.id, versionID: version.id) }
     }
 
+    /// Compare opens even with missing files: their lanes show an error
+    /// state, and the lane strip's menu offers Locate File….
     private func compare(itemID: UUID) {
-        guard let item = itemsByID[itemID] else { return }
-        if let missing = item.versions.first(where: { availableURL(for: $0) == nil }) {
-            presentation.locateVersionID = missing.id
-            return
-        }
+        guard itemsByID[itemID] != nil else { return }
         Task { await playlist.enterComparison(itemID: itemID) }
     }
 

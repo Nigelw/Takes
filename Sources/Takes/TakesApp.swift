@@ -541,6 +541,16 @@ enum TakesWindowPolicy {
         )
     }
 
+    /// Help ▸ Debug ▸ Reset Window Size: the minimum width and `height`,
+    /// keeping the top-left corner. The caller turns the artwork on and
+    /// picks the mode's height (`WorkspaceView.resetWindowSize`).
+    static func frameResettingSize(currentFrame: CGRect, height: CGFloat, visibleFrame: CGRect) -> CGRect {
+        clampedFrame(
+            CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: minimumWidth, height: height),
+            visibleFrame: visibleFrame
+        )
+    }
+
     /// Default size, keeping the top-left corner.
     static func frameResettingSize(currentFrame: CGRect, showsArtwork: Bool, visibleFrame: CGRect) -> CGRect {
         let size = defaultSize(showsArtwork: showsArtwork)

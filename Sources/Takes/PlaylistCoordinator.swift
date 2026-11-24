@@ -1263,6 +1263,17 @@ final class PlaylistCoordinator {
                     await activatePlaylist(itemID: itemID, versionID: versionID, snapshot: snapshot)
                 }
             }
+            else if operationGeneration == navigationGeneration,
+                    let itemID = mode.itemID,
+                    candidate.items.first(where: { $0.id == itemID })?.versions.contains(where: { $0.id == versionID }) == true {
+                // Another version of the compared item: rebuild compare so its
+                // lane loads, keeping the audible version and the transport.
+                let snapshot = capturePlaybackSnapshot()
+                captureRuntimeEdits()
+                if let activeID = snapshot.versionID {
+                    await activateComparison(itemID: itemID, versionID: activeID, snapshot: snapshot)
+                }
+            }
         } catch {
             reportError(error.localizedDescription)
         }
@@ -1354,13 +1365,21 @@ final class PlaylistCoordinator {
         }
         let generation = beginNavigation()
         let context = PlaylistRuntimeContext(itemID: itemID)
-        guard let runtimeItem = materializedComparisonItem(item) else { return .failed }
+        let (runtimeItem, missingIDs) = materializedComparisonItem(item)
+        // A missing incoming version would start silent; begin on the first
+        // version whose file is there instead, when there is one.
+        let startingVersionID = missingIDs.contains(versionID)
+            ? runtimeItem.versions.first(where: { !missingIDs.contains($0.id) })?.id ?? versionID
+            : versionID
         var session = PlaylistPlaybackBoundary.session(
             for: runtimeItem,
-            incomingVersionID: versionID,
-            incomingFilePosition: startAtTimelineBeginning ? nil : snapshot.filePosition,
+            incomingVersionID: startingVersionID,
+            incomingFilePosition: startAtTimelineBeginning || startingVersionID != versionID ? nil : snapshot.filePosition,
             isPlaying: false
         )
+        for index in session.tracks.indices where missingIDs.contains(session.tracks[index].id) {
+            session.tracks[index].loadedTrack.isMissing = true
+        }
         if item.comparison.isBlindListeningModeEnabled {
             let incomingActiveID = session.activeTrackID
             session.tracks = PlaybackController.blindListeningOrder(
@@ -1391,7 +1410,7 @@ final class PlaylistCoordinator {
                     controller.scrollTimeline(toVisibleStart: start)
                 }
             }
-            if snapshot.isPlaying { controller.play() }
+            if snapshot.isPlaying, session.isPlayable { controller.play() }
             updateListeningStateFromRuntime()
             if autoAlignAfterActivation, controller.settings?.alignTracksOnOpen == true {
                 controller.autoAlignTracks()
@@ -2071,12 +2090,19 @@ final class PlaylistCoordinator {
         )
     }
 
-    private func materializedComparisonItem(_ item: PlaylistItem) -> PlaylistItem? {
+    /// The item with each version's file resolved, and the versions whose
+    /// files are missing. Missing versions keep their stored URL and still
+    /// become lanes (`LoadedTrack.isMissing`); compare opens regardless.
+    private func materializedComparisonItem(_ item: PlaylistItem) -> (item: PlaylistItem, missingIDs: Set<PlaylistVersion.ID>) {
         var materialized = item
+        var missingIDs = Set<PlaylistVersion.ID>()
         for index in materialized.versions.indices {
-            guard let url = resolvedURL(for: materialized.versions[index]) else { return nil }
-            materialized.versions[index].file.storedURL = url
+            if case let .available(url) = PlaylistWorkspaceStore.resolveFileReference(materialized.versions[index].file) {
+                materialized.versions[index].file.storedURL = url
+            } else {
+                missingIDs.insert(materialized.versions[index].id)
+            }
         }
-        return materialized
+        return (materialized, missingIDs)
     }
 }

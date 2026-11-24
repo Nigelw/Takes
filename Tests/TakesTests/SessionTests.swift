@@ -624,6 +624,36 @@ struct SessionTests {
         #expect(resetFrame.size == TakesWindowPolicy.defaultSize(showsArtwork: false))
     }
 
+    @Test
+    func debugResetSizeUsesTheMinimumWidthAndTheGivenHeight() {
+        let currentFrame = CGRect(x: 96, y: 100, width: 920, height: 700)
+        let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 1000)
+        let resetFrame = TakesWindowPolicy.frameResettingSize(
+            currentFrame: currentFrame, height: 760, visibleFrame: visibleFrame
+        )
+        #expect(resetFrame == CGRect(x: 96, y: 40, width: 360, height: 760))
+    }
+
+    @Test
+    func compareTreatsMissingVersionsAsSilentLanes() {
+        var missing = LoadedTrack(url: URL(fileURLWithPath: "/missing.flac"), displayName: "Missing",
+                                  fileFormatDescription: "FLAC", duration: 10, sampleRate: 44100, channelCount: 2)
+        missing.isMissing = true
+        let present = LoadedTrack(url: URL(fileURLWithPath: "/present.flac"), displayName: "Present",
+                                  fileFormatDescription: "FLAC", duration: 10, sampleRate: 44100, channelCount: 2)
+        var session = ComparisonSession(tracks: [SessionTrack(loadedTrack: missing)], timelineStart: 0, timelineEnd: 10)
+        #expect(!session.isPlayable)
+        session.tracks.append(SessionTrack(loadedTrack: present))
+        #expect(session.isPlayable)
+        // The error band covers the track's extent, clamped to the lane.
+        #expect(LaneWaveformRenderer.trackExtent(width: 200, trackStart: 0, trackDuration: 10,
+                                                 visibleStart: 0, visibleSpan: 20) == 0...100)
+        #expect(LaneWaveformRenderer.trackExtent(width: 200, trackStart: -5, trackDuration: 30,
+                                                 visibleStart: 0, visibleSpan: 20) == -1...201)
+        #expect(LaneWaveformRenderer.trackExtent(width: 200, trackStart: 30, trackDuration: 10,
+                                                 visibleStart: 0, visibleSpan: 20) == nil)
+    }
+
     @MainActor
     @Test
     func showsArtworkDefaultsOnPersistsAndSurvivesRestoreDefaults() {

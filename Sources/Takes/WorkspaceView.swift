@@ -33,6 +33,8 @@ struct WorkspaceView: View {
     /// has loaded or is known to be missing. Until then the previous cover
     /// stays up, so switching versions never flashes the placeholder.
     @State private var shownCoverVersionID: PlaylistVersion.ID?
+    /// The version the open Locate dialog is for, captured when it opens.
+    @State private var presentedLocateVersionID: PlaylistVersion.ID?
     /// Track count before the first of a run of adds or removes, while the
     /// resize that fits them is pending (`fitWindowToContent`).
     @State private var contentFitBaseline: Int?
@@ -152,6 +154,9 @@ struct WorkspaceView: View {
                 storePlaylistHeight()
             }
             .onChange(of: contentFitKey) { old, new in scheduleContentFit(from: old, to: new) }
+            .onChange(of: presentation.locateVersionID) { _, id in
+                if let id { presentedLocateVersionID = id }
+            }
             .onChange(of: isComparison) { wasComparison, isComparison in
                 switchModeHeight(from: wasComparison, to: isComparison)
             }
@@ -233,9 +238,14 @@ struct WorkspaceView: View {
             .sheet(isPresented: $openFiles.isPromptingForStreamingURL) { streamingSheet }
             .fileImporter(isPresented: Binding(
                 get: { presentation.locateVersionID != nil },
-                set: { if !$0 { /* The completion owns the captured version ID. */ } }
+                // Cancelling calls no completion, so dismissal must clear the
+                // request itself; otherwise the next Locate for the same
+                // version changes nothing and the dialog never opens again.
+                // The completion reads the ID captured when it opened.
+                set: { if !$0 { presentation.locateVersionID = nil } }
             ), allowedContentTypes: [.audio]) { result in
-                let versionID = presentation.locateVersionID
+                let versionID = presentedLocateVersionID
+                presentedLocateVersionID = nil
                 presentation.locateVersionID = nil
                 if case let .success(url) = result, let versionID {
                     Task { await coordinator.locateFile(versionID: versionID, url: url) }
@@ -264,10 +274,7 @@ struct WorkspaceView: View {
             .focusedSceneValue(\.canRemoveActiveTrack, isComparison ? controller.session.activeTrackID != nil : commandContext.canRemove)
             .focusedSceneValue(\.canClearTracks, !coordinator.workspace.items.isEmpty)
             .focusedSceneValue(\.canUseGlobalMenuShortcuts, canUseShortcuts)
-            .focusedSceneValue(\.mainWindowCommandState, MainWindowCommandState {
-                guard let mainWindow else { return }
-                TakesWindowPolicy.resetMainWindowSize(mainWindow, showsArtwork: settings.showsArtwork)
-            })
+            .focusedSceneValue(\.mainWindowCommandState, MainWindowCommandState { resetWindowSize() })
     }
 
     private var canUseShortcuts: Bool {
@@ -326,7 +333,8 @@ struct WorkspaceView: View {
                         ContentView(
                             coordinator: coordinator,
                             openFileCommandState: openFiles,
-                            importProviders: importProviders
+                            importProviders: importProviders,
+                            locateVersion: { presentation.locateVersionID = $0 }
                         )
                             .frame(width: proxy.size.width, height: proxy.size.height)
                             .transition(.opacity)
@@ -554,6 +562,24 @@ struct WorkspaceView: View {
         if let frame = modeFrame(for: mainWindow) {
             mainWindow.setFrame(frame, display: true, animate: !reduceMotion)
         }
+    }
+
+    /// Help ▸ Debug ▸ Reset Window Size: artwork on, the minimum width, and
+    /// the mode's height (the playlist's default, which it then remembers,
+    /// or compare's fit to its lanes).
+    private func resetWindowSize() {
+        guard let mainWindow, !mainWindow.styleMask.contains(.fullScreen) else { return }
+        artworkResize = nil
+        settings.showsArtwork = true
+        mainWindow.minSize = TakesWindowPolicy.minimumSize(showsArtwork: true)
+        let height = isComparison
+            ? TakesWindowPolicy.compareFittingHeight(laneCount: contentFitKey.trackCount, showsArtwork: true)
+            : TakesWindowPolicy.defaultHeight(showsArtwork: true)
+        let frame = TakesWindowPolicy.frameResettingSize(
+            currentFrame: mainWindow.frame, height: height, visibleFrame: TakesWindowPolicy.visibleFrame(for: mainWindow)
+        )
+        if frame != mainWindow.frame { mainWindow.setFrame(frame, display: true, animate: !reduceMotion) }
+        if !isComparison { TakesWindowPolicy.storePlaylistHeight(frame.height, showsArtwork: true) }
     }
 
     /// At launch the autosaved frame is whichever mode was on screen at

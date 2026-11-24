@@ -148,6 +148,12 @@ final class WaveformStore: ObservableObject {
         }
 
         for track in tracks {
+            // A missing file has nothing to decode; its lane shows an error
+            // state instead. Locating it rebuilds the runtime, which enqueues it.
+            if track.loadedTrack.isMissing {
+                if sourceIdentities[track.id] != nil || waveforms[track.id] != nil { cancel(id: track.id) }
+                continue
+            }
             let identity = WaveformSource.Identity(url: track.loadedTrack.url)
             if sourceIdentities[track.id] == identity {
                 continue
