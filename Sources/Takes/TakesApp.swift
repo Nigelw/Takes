@@ -343,6 +343,7 @@ enum TakesWindowPolicy {
     static let minimumWidth: CGFloat = 360
     /// Full-bleed square cover at the top of the window.
     static let artworkHeight: CGFloat = 360
+    static let artworkResizeDuration: TimeInterval = 0.24
     /// Control-bar top padding under the cover.
     static let controlBarTopPaddingBelowArtwork: CGFloat = 10
     /// Control-bar top padding when the titlebar overlays the bar, so the
@@ -352,6 +353,32 @@ enum TakesWindowPolicy {
     /// the extra padding the control bar gains under the titlebar (346 pt).
     static let artworkCollapseHeight = artworkHeight
         - (controlBarTopPaddingUnderTitlebar - controlBarTopPaddingBelowArtwork)
+
+    /// For a full toggle the window itself drives the reveal. When the screen
+    /// clamps its travel, the cover still needs to slide the full distance.
+    struct ArtworkResize: Equatable {
+        let shownFrame: CGRect
+        let hiddenFrame: CGRect
+        var showsArtwork: Bool
+
+        init(from frame: CGRect, showsArtwork: Bool, visibleFrame: CGRect) {
+            let target = frameTogglingArtwork(currentFrame: frame, showsArtwork: showsArtwork, visibleFrame: visibleFrame)
+            shownFrame = showsArtwork ? target : frame
+            hiddenFrame = showsArtwork ? frame : target
+            self.showsArtwork = showsArtwork
+        }
+
+        var targetFrame: CGRect { showsArtwork ? shownFrame : hiddenFrame }
+        var followsWindow: Bool {
+            abs(shownFrame.height - hiddenFrame.height - artworkCollapseHeight) < 1
+        }
+
+        func fraction(at windowHeight: CGFloat) -> CGFloat {
+            guard followsWindow else { return showsArtwork ? 1 : 0 }
+            let progress = (windowHeight - hiddenFrame.height) / (shownFrame.height - hiddenFrame.height)
+            return min(max(progress, 0), 1)
+        }
+    }
     static let defaultHeightWithArtwork: CGFloat = 760
     /// Room below the cover at the minimum height (A2 milestone 5, §13, and
     /// the compare title-bar variant): the compare control bar, its title
@@ -363,7 +390,11 @@ enum TakesWindowPolicy {
         + BottomBarMetrics.height
 
     static func controlBarTopPadding(showsArtwork: Bool) -> CGFloat {
-        showsArtwork ? controlBarTopPaddingBelowArtwork : controlBarTopPaddingUnderTitlebar
+        controlBarTopPadding(artworkFraction: showsArtwork ? 1 : 0)
+    }
+
+    static func controlBarTopPadding(artworkFraction: CGFloat) -> CGFloat {
+        controlBarTopPaddingUnderTitlebar + (controlBarTopPaddingBelowArtwork - controlBarTopPaddingUnderTitlebar) * artworkFraction
     }
 
     static func defaultHeight(showsArtwork: Bool) -> CGFloat {
@@ -505,19 +536,20 @@ enum TakesWindowPolicy {
         }
     }
 
-    /// Use the frame before SwiftUI's new minimum can grow the window.
     @MainActor
-    static func applyArtworkVisibility(
-        _ showsArtwork: Bool, to window: NSWindow, from previousFrame: CGRect, animate: Bool = true
-    ) {
-        window.minSize = minimumSize(showsArtwork: showsArtwork)
-        let frame = frameTogglingArtwork(
-            currentFrame: previousFrame,
-            showsArtwork: showsArtwork,
-            visibleFrame: visibleFrame(for: window)
-        )
-        guard frame != window.frame else { return }
-        window.setFrame(frame, display: true, animate: animate)
+    static func resizeForArtwork(_ window: NSWindow, to frame: CGRect, animate: Bool) async {
+        // Both the window and the hosting view must allow intermediate
+        // heights until the cover has finished opening.
+        window.minSize = minimumSize(showsArtwork: false)
+        if animate {
+            await NSAnimationContext.runAnimationGroup { context in
+                context.duration = artworkResizeDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                window.animator().setFrame(frame, display: true)
+            }
+        } else {
+            window.setFrame(frame, display: true)
+        }
     }
 
     @MainActor
@@ -532,7 +564,7 @@ enum TakesWindowPolicy {
     }
 
     @MainActor
-    private static func visibleFrame(for window: NSWindow) -> CGRect {
+    static func visibleFrame(for window: NSWindow) -> CGRect {
         window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
     }
 }

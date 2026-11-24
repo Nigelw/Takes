@@ -4,20 +4,12 @@ import SwiftUI
 // MARK: - A2 control-bar readouts
 
 /// The playlist readout's title (spec §5.2): the version's title tag, else
-/// its filename without the extension, uppercased for the dot-matrix face.
+/// its filename without the extension, preserving the source capitalization.
 /// Compare has no readout title: its title bar shows the take count, and the
 /// active lane and the cover carry the audible version.
 enum ControlBarReadoutTitle {
     static func playlist(_ version: PlaylistVersion?) -> String {
-        guard let version else { return "" }
-        return text(tag: version.metadata.title, url: version.file.storedURL)
-    }
-
-    static func text(tag: String?, url: URL) -> String {
-        let tag = tag?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !tag.isEmpty { return tag.uppercased() }
-        let stem = url.deletingPathExtension().lastPathComponent
-        return (stem.isEmpty ? url.lastPathComponent : stem).uppercased()
+        version.map(PlaylistRowText.versionName) ?? ""
     }
 }
 
@@ -67,7 +59,7 @@ struct PlaylistControlBarReadout: View {
         .padding(.top, Self.contentTopInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(height: Self.height)
-        .readoutGlass(cornerRadius: Self.cornerRadius)
+        .readoutGlass(cornerRadius: Self.cornerRadius, reflectionBehindContent: true)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Now Playing")
     }
@@ -282,13 +274,13 @@ struct DotMatrixDisplay: View {
         // light-mode brown/orange even when rendering for dark mode. Forcing
         // resolution through `performAsCurrentDrawingAppearance` here makes
         // both call sites correct explicitly, not by accident of context.
-        let glowColor = resolvedGlowColor(for: colorScheme)
+        let ink = colorScheme == .light ? Theme.lcdTitleInk : resolvedGlowColor(for: colorScheme)
 
         if colorScheme == .dark {
             // LED: a soft halo of the pixel color under the crisp fill.
             var glow = context
             glow.addFilter(.blur(radius: metrics.dotSize * 1.1))
-            glow.fill(lit, with: .color(glowColor.opacity(0.9)))
+            glow.fill(lit, with: .color(ink.opacity(0.9)))
         } else {
             // LCD: the ink layer floats just above the backlight, dropping
             // a tight shadow down-right onto the glass. Half a point: one
@@ -301,9 +293,9 @@ struct DotMatrixDisplay: View {
         }
         // A translucent rim adds weight between dots. Paint the opaque
         // squares last so their edges still land on the original grid.
-        context.stroke(lit, with: .color(glowColor.opacity(colorScheme == .dark ? 0.35 : 0.28)),
-                       lineWidth: metrics.dotGap)
-        context.fill(lit, with: .color(glowColor))
+        let rimOpacity = colorScheme == .light ? 0.44 : 0.35
+        context.stroke(lit, with: .color(ink.opacity(rimOpacity)), lineWidth: metrics.dotGap)
+        context.fill(lit, with: .color(ink))
     }
 
     /// Resolves `Theme.readoutGlow` to a concrete, non-dynamic `Color` forced
@@ -617,7 +609,45 @@ final class DotMatrixMarqueeView: NSView {
     /// re-rasterized at the real backing scale.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if let window {
+            let center = NotificationCenter.default
+            center.addObserver(self, selector: #selector(windowBecameKey(_:)), name: NSWindow.didBecomeKeyNotification, object: window)
+            center.addObserver(self, selector: #selector(windowResignedKey(_:)), name: NSWindow.didResignKeyNotification, object: window)
+        }
+        setMarqueePaused(window?.isKeyWindow != true)
         redraw()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if let window {
+            let center = NotificationCenter.default
+            center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: window)
+            center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    @objc private func windowBecameKey(_ notification: Notification) { setMarqueePaused(false) }
+    @objc private func windowResignedKey(_ notification: Notification) { setMarqueePaused(true) }
+
+    /// Freeze the bitmap's local clock so returning to the window continues
+    /// the same scroll, including any remaining pause before it starts.
+    private func setMarqueePaused(_ paused: Bool) {
+        guard paused != (content.speed == 0) else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if paused {
+            let localTime = content.convertTime(CACurrentMediaTime(), from: nil)
+            content.speed = 0
+            content.timeOffset = localTime
+        } else {
+            let pausedTime = content.timeOffset
+            content.speed = 1
+            content.timeOffset = 0
+            content.beginTime = 0
+            content.beginTime = content.convertTime(CACurrentMediaTime(), from: nil) - pausedTime
+        }
+        CATransaction.commit()
     }
 
     private var colorScheme: ColorScheme {
@@ -1215,13 +1245,14 @@ extension View {
     /// panel: a convex tile on the control-bar surface with no bezel. The
     /// corner radius scales with the panel height (11 at 56, 9 at 42 and 41,
     /// 7 at 30).
-    func readoutGlass(cornerRadius: CGFloat) -> some View {
-        modifier(ReadoutGlassChrome(cornerRadius: cornerRadius))
+    func readoutGlass(cornerRadius: CGFloat, reflectionBehindContent: Bool = false) -> some View {
+        modifier(ReadoutGlassChrome(cornerRadius: cornerRadius, reflectionBehindContent: reflectionBehindContent))
     }
 }
 
 private struct ReadoutGlassChrome: ViewModifier {
     let cornerRadius: CGFloat
+    let reflectionBehindContent: Bool
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -1229,8 +1260,10 @@ private struct ReadoutGlassChrome: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background { glassPanel }
-            .overlay { glassLight }
+            .background {
+                glassPanel.overlay { if reflectionBehindContent { glassLight } }
+            }
+            .overlay { if !reflectionBehindContent { glassLight } }
     }
 
     /// The tile itself: the glass and, in light mode, the backlit LCD's
@@ -1251,9 +1284,8 @@ private struct ReadoutGlassChrome: ViewModifier {
             .allowsHitTesting(false)
     }
 
-    /// The tile's lighting, drawn over the content since the glass sits above
-    /// it: a domed specular bloom high on the tile, a dark rim where the dome
-    /// curves away, and a lit top edge over a shadowed bottom edge.
+    /// A domed reflection and lit edges. The playlist draws its title,
+    /// clock and meter above this reflection in both appearances.
     private var glassLight: some View {
         shape
             .fill(

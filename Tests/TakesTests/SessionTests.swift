@@ -45,14 +45,41 @@ struct SessionTests {
             file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/01 Taxman (Mono).flac")),
             metadata: PlaylistMetadata(title: "Taxman (1967 Mono Mix)", displayName: "Display Name")
         )
-        #expect(ControlBarReadoutTitle.playlist(version) == "TAXMAN (1967 MONO MIX)")
+        #expect(ControlBarReadoutTitle.playlist(version) == "Taxman (1967 Mono Mix)")
 
         version.metadata.title = "  "
-        #expect(ControlBarReadoutTitle.playlist(version) == "01 TAXMAN (MONO)")
+        #expect(ControlBarReadoutTitle.playlist(version) == "01 Taxman (Mono)")
 
         version.metadata.title = nil
-        #expect(ControlBarReadoutTitle.playlist(version) == "01 TAXMAN (MONO)")
+        #expect(ControlBarReadoutTitle.playlist(version) == "01 Taxman (Mono)")
         #expect(ControlBarReadoutTitle.playlist(nil) == "")
+    }
+
+    @MainActor
+    @Test
+    func marqueeOnlyRunsOnItsOwnKeyWindowClock() throws {
+        let frame = NSRect(x: 0, y: 0, width: 120, height: 20)
+        let first = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+        let second = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+        let marquee = DotMatrixMarqueeView(frame: frame)
+        first.contentView = marquee
+        marquee.configure(text: "A long scrolling title", columns: 5, metrics: ControlBarReadoutLine.titleMetrics,
+                          sharedPeriod: nil, reduceMotion: false)
+        let bitmap = try #require(marquee.layer?.sublayers?.first { $0.animation(forKey: "marquee") != nil })
+        let center = NotificationCenter.default
+        #expect(bitmap.speed == 0)
+        center.post(name: NSWindow.didBecomeKeyNotification, object: second)
+        #expect(bitmap.speed == 0)
+        center.post(name: NSWindow.didBecomeKeyNotification, object: first)
+        #expect(bitmap.speed == 1)
+        center.post(name: NSWindow.didResignKeyNotification, object: first)
+        let now = CACurrentMediaTime()
+        #expect(bitmap.convertTime(now, from: nil) == bitmap.convertTime(now + 1, from: nil))
+        second.contentView = marquee
+        center.post(name: NSWindow.didBecomeKeyNotification, object: first)
+        #expect(bitmap.speed == 0)
+        center.post(name: NSWindow.didBecomeKeyNotification, object: second)
+        #expect(bitmap.speed == 1)
     }
 
     @MainActor
@@ -510,6 +537,35 @@ struct SessionTests {
             currentFrame: hidden, showsArtwork: true, visibleFrame: visibleFrame
         )
         #expect(shown == currentFrame)
+    }
+
+    @Test
+    func artworkRevealKeepsTransportAtTheSameDistanceFromTheWindowBottom() {
+        let screen = CGRect(x: 0, y: 0, width: 1200, height: 900)
+        let hidden = CGRect(x: 0, y: 486, width: 360, height: 414)
+        var resize = TakesWindowPolicy.ArtworkResize(from: hidden, showsArtwork: true, visibleFrame: screen)
+        #expect(resize.followsWindow)
+        for height: CGFloat in [414, 500, 587, 690, 760] {
+            let fraction = resize.fraction(at: height)
+            let transportTop = TakesWindowPolicy.artworkHeight * fraction + TakesWindowPolicy.controlBarTopPadding(artworkFraction: fraction)
+            #expect(abs(height - transportTop - 390) < 0.001)
+        }
+        resize.showsArtwork = false
+        #expect(resize.fraction(at: 587) == 0.5)
+        #expect(resize.targetFrame == hidden)
+    }
+
+    @Test
+    func artworkRevealStillTravelsFullyWhenTheWindowIsScreenClamped() {
+        let screen = CGRect(x: 0, y: 0, width: 1200, height: 700)
+        let hidden = CGRect(x: 0, y: 100, width: 360, height: 600)
+        var resize = TakesWindowPolicy.ArtworkResize(from: hidden, showsArtwork: true, visibleFrame: screen)
+        #expect(!resize.followsWindow)
+        #expect(resize.targetFrame.height == 700)
+        #expect(resize.fraction(at: 700) == 1)
+        resize.showsArtwork = false
+        #expect(resize.targetFrame == hidden)
+        #expect(resize.fraction(at: 600) == 0)
     }
 
     @Test

@@ -1339,7 +1339,7 @@ struct ContentView: View {
     /// with no readout. The elapsed time and Done are in the title bar below
     /// the divider (A2 compare title-bar variant).
     private var controlBar: some View {
-        ControlBarLayout(showsArtwork: settings.showsArtwork) {
+        ControlBarLayout {
             blindListeningButton
         } center: {
             playButton

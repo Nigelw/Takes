@@ -132,7 +132,7 @@ enum PlaylistRowText {
     }
 
     /// A version's name: its title tag, else its filename without the
-    /// extension (A2 §6) — the readout's rule, without the uppercasing.
+    /// extension (A2 §6). The playlist readout uses the same name.
     static func versionName(_ version: PlaylistVersion) -> String {
         versionName(tag: version.metadata.title, url: version.file.storedURL)
     }

@@ -269,6 +269,12 @@ These are here to prevent parallel implementations and subtle regressions:
   track counts never resize it; the artwork toggle is the only automatic resize
   (±`artworkCollapseHeight`, 346 pt, top edge fixed, clamped on screen). Its
   frame autosaves as `main.a2`; do not reintroduce per-mode frames.
+  Playlist and compare crossfade below the shared cover. Toggling artwork
+  slides the fixed-size cover down from the top or back up along the same
+  path while the window resizes. The cover and control-bar inset follow
+  the window's current height, keeping the transport at a fixed distance
+  from the bottom. A screen-clamped resize animates the remaining cover
+  travel. Both transitions respect Reduce Motion.
 - The cover and artwork toggle live in `WorkspaceView`, above both modes'
   control bars, so entering compare never moves them. While the cover is
   shown, its AppKit hover sensor reveals the toggle and window buttons, with
@@ -314,7 +320,7 @@ These are here to prevent parallel implementations and subtle regressions:
   removed, and their stored preferences are simply not read.
 - The readout title comes from `ControlBarReadoutTitle.playlist`: the
   playing (or current) version's title tag, else its filename without the
-  extension, uppercased. Compare shows no version title in its control bar
+  extension, preserving its capitalization. Compare shows no version title in its control bar
   or title bar; the active lane and the cover carry the audible version.
   Long titles scroll (`DotMatrixMarqueeText`). The title field takes
   its width from the line, never from its text (the cells draw in an
@@ -398,7 +404,8 @@ these reintroduces the exact regressions it fixed):
   The LED meter's fill and brighter head, and dark appearance's glow under
   them (pre-blurred images, never live layer shadows), step on discrete
   `CAKeyframeAnimation`s armed per transport anchor event; titles scroll on
-  Core Animation only when they overflow.
+  Core Animation only when they overflow. The marquee pauses its layer
+  clock when its window resigns key and resumes when it becomes key again.
 - **Continuous on-screen motion must use Core Animation, never SwiftUI
   `TimelineView(.animation)` or `withAnimation`** — both burn main-thread CPU
   per frame on macOS. The playhead is CALayer-driven: its grabber and its

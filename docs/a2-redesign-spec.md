@@ -130,8 +130,8 @@ below it to the divider.
 
 **Playlist readout, 41 pt tall, two lines** (42 on the canvas; see §13):
 1. Seven-segment elapsed time (`SevenSegmentDisplay`), a faint divider, then
-   the playing item's track title in the dot-matrix face, uppercase, e.g.
-   `TAXMAN (1967 MONO MIX)`. Long titles scroll (`DotMatrixMarqueeDisplay`).
+   the playing item's track title in the dot-matrix face with its original
+   capitalization, e.g. `Taxman (1967 Mono Mix)`. Long titles scroll (`DotMatrixMarqueeDisplay`).
 2. LED progress meter: a row of ~80 cells lit up to the playhead, the
    leading cell brightest. The existing `DotMatrixProgressBar` (seekable) is
    the natural basis.
@@ -327,7 +327,8 @@ None open. The version check for a missing file was decided in milestone 3
 - **Readout titles** (milestone 2; compare's removed by the compare
   title-bar variant, below, which leaves the playlist rule only). Both
   readouts show a version's title tag,
-  falling back to its filename without the extension, uppercased. Playlist:
+  falling back to its filename without the extension. The playlist preserves
+  the source capitalization. Playlist:
   the playing (or current) version. Compare: the audible version, except in
   Blind Listening Mode, where it shows `TRACK n` (the lane's position), as
   the lanes and Now Playing do, so the readout can't reveal the version. The
@@ -439,7 +440,7 @@ None open. The version check for a missing file was decided in milestone 3
   in memory, from a bounded cache separate from the cover's; a version whose
   cover is decoded is scaled from it. See `AGENTS.md` for the rule.
 - **Version rows** (milestone 3). Name: the title tag, else the filename
-  without its extension (the readout's rule, not uppercased). The format
+  without its extension (the readout's rule). The format
   column shows the container alone (FLAC, MP3); sample rate, bit rate and the
   filename are in the row's tooltip. Only a plain click changes the playback
   version; ⌘- and ⇧-clicks only select. Rows being dragged stay in place,

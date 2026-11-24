@@ -9,11 +9,12 @@ struct WorkspaceView: View {
     let usesTemporaryDefaultWindowLayout: Bool
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var presentation: PlaylistPresentationState
     @StateObject private var openFiles: OpenFileCommandState
     @State private var mainWindow: NSWindow?
     @State private var didConfigure = false
-    @State private var frameBeforeArtworkToggle: NSRect?
+    @State private var artworkResize: TakesWindowPolicy.ArtworkResize?
     @State private var didStart = false
     @State private var keyMonitor: KeyMonitor?
     @State private var externalOpenTask: Task<Void, Never>?
@@ -136,16 +137,12 @@ struct WorkspaceView: View {
             .onChange(of: coverState, initial: true) { _, state in
                 if state.versionID == nil || state.isResolved { shownCoverVersionID = state.versionID }
             }
-            .onChange(of: settings.showsArtwork) { _, showsArtwork in
-                if !showsArtwork { artworkIsHovered = false }
-                guard let mainWindow else { return }
-                let previousFrame = frameBeforeArtworkToggle ?? mainWindow.frame
-                frameBeforeArtworkToggle = nil
-                // Next run-loop turn, after SwiftUI has applied the new root
-                // minimum, so a shrink isn't held up by the old one.
-                Task { @MainActor in
-                    TakesWindowPolicy.applyArtworkVisibility(showsArtwork, to: mainWindow, from: previousFrame)
-                }
+            .task(id: artworkResize) {
+                guard let resize = artworkResize, let mainWindow else { return }
+                await TakesWindowPolicy.resizeForArtwork(mainWindow, to: resize.targetFrame, animate: !reduceMotion)
+                guard !Task.isCancelled, artworkResize == resize else { return }
+                mainWindow.minSize = TakesWindowPolicy.minimumSize(showsArtwork: settings.showsArtwork)
+                artworkResize = nil
             }
             .onChange(of: showsTitlebarControls) { _, showsControls in
                 if let mainWindow { updateWindowButtons(in: mainWindow, visible: showsControls) }
@@ -167,9 +164,12 @@ struct WorkspaceView: View {
     }
 
     private var windowContent: some View {
-        workspaceContent
+        GeometryReader { proxy in
+            let fraction = artworkResize?.fraction(at: proxy.size.height) ?? (settings.showsArtwork ? 1 : 0)
+            workspaceContent(artworkFraction: fraction)
+        }
             .frame(minWidth: TakesWindowPolicy.minimumWidth,
-                   minHeight: TakesWindowPolicy.rootViewMinimumHeight(showsArtwork: settings.showsArtwork))
+                   minHeight: TakesWindowPolicy.rootViewMinimumHeight(showsArtwork: artworkResize == nil && settings.showsArtwork))
             .ignoresSafeArea(.container, edges: .top)
             .environment(\.transportAppearance, settings.transportAppearance)
             .background(WindowBackground().ignoresSafeArea())
@@ -261,18 +261,27 @@ struct WorkspaceView: View {
             && !openFiles.isImportingTracks && presentation.renamingItemID == nil && presentation.locateVersionID == nil
     }
 
-    private var workspaceContent: some View {
-        VStack(spacing: 0) {
-            // Shared by both modes: entering compare swaps only what is below
-            // the control bar, never the cover.
-            if settings.showsArtwork {
-                ArtworkCoverView(
-                    image: artworkStore.artwork(for: shownCoverVersionID),
-                    showsTitlebarControls: showsTitlebarControls
-                )
-                .overlay(HoverSensor(trackingActivity: .activeAlways) { artworkIsHovered = $0 })
+    private func workspaceContent(artworkFraction: CGFloat) -> some View {
+        let coverHeight = TakesWindowPolicy.artworkHeight * artworkFraction
+        let animateClampedCover = artworkResize?.followsWindow == false && !reduceMotion
+        return VStack(spacing: 0) {
+            // Keep the same cover above the top edge when closed. Its bottom
+            // edge travels with the transport on both opening and closing.
+            ArtworkCoverView(image: artworkStore.artwork(for: shownCoverVersionID),
+                             showsTitlebarControls: showsTitlebarControls)
+                .geometryGroup()
+                .offset(y: coverHeight - TakesWindowPolicy.artworkHeight)
+                .frame(height: coverHeight, alignment: .top)
+                .clipped()
+                .overlay {
+                    if settings.showsArtwork {
+                        HoverSensor(trackingActivity: .activeAlways) { artworkIsHovered = $0 }
+                    }
+                }
+                .allowsHitTesting(settings.showsArtwork)
+                .contentShape(Rectangle())
+                .accessibilityHidden(!settings.showsArtwork)
                 .accessibilityAction(named: Text("Hide Artwork")) { setArtworkVisibility(false) }
-            }
             if let error = persistence.errorMessage {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "exclamationmark.triangle")
@@ -303,10 +312,14 @@ struct WorkspaceView: View {
                             importProviders: importProviders
                         )
                             .frame(width: proxy.size.width, height: proxy.size.height)
+                            .transition(.opacity)
+                            .zIndex(1)
                     }
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
                 .clipped()
+                .animation(reduceMotion || !persistence.restorationComplete ? nil : .easeInOut(duration: 0.20),
+                           value: isComparison)
                 .onChange(of: proxy.size, initial: true) { _, size in
                     if !isComparison && size.width > 0 && size.height > 0 { retainedPlaylistSize = size }
                 }
@@ -324,7 +337,11 @@ struct WorkspaceView: View {
                 }
             }
             .disabled(!persistence.restorationComplete)
+            .geometryGroup()
         }
+        .environment(\.controlBarTopPadding, TakesWindowPolicy.controlBarTopPadding(artworkFraction: artworkFraction))
+        .animation(animateClampedCover ? .easeInOut(duration: TakesWindowPolicy.artworkResizeDuration) : nil,
+                   value: settings.showsArtwork)
     }
 
     private var playlistSurface: some View {
@@ -444,7 +461,15 @@ struct WorkspaceView: View {
     }
 
     private func setArtworkVisibility(_ showsArtwork: Bool) {
-        frameBeforeArtworkToggle = mainWindow?.frame
+        guard settings.showsArtwork != showsArtwork else { return }
+        if artworkResize != nil {
+            // Keep both endpoints, including screen clamping, on reversal.
+            artworkResize?.showsArtwork = showsArtwork
+        } else if let mainWindow {
+            artworkResize = .init(from: mainWindow.frame, showsArtwork: showsArtwork,
+                                  visibleFrame: TakesWindowPolicy.visibleFrame(for: mainWindow))
+        }
+        if !showsArtwork { artworkIsHovered = false }
         settings.showsArtwork = showsArtwork
     }
 
@@ -584,11 +609,10 @@ private struct WorkspaceImports {
 /// Repeat over the two-line readout.
 private struct PlaylistTransportView: View {
     let coordinator: PlaylistCoordinator
-    @EnvironmentObject private var settings: AppSettings
     private var controller: PlaybackController { coordinator.controller }
 
     var body: some View {
-        ControlBarLayout(showsArtwork: settings.showsArtwork) {
+        ControlBarLayout {
             Button { coordinator.toggleShuffle() } label: { Image(systemName: "shuffle") }
                 .buttonStyle(ControlBarSideButtonStyle(isOn: coordinator.workspace.isShuffleEnabled))
                 .help("Shuffle")

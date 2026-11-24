@@ -213,6 +213,9 @@ enum Theme {
         dark: (0.220, 0.831, 0.902)   // #38D4E6
     )
 
+    /// Deeper brown for the playlist title's sparse dots on amber glass.
+    static let lcdTitleInk = Color(.sRGB, red: 48 / 255, green: 25 / 255, blue: 4 / 255)
+
     /// Soft recessed inner-shadow edge of the readout.
     static let readoutShadow = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.isDark

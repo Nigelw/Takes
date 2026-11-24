@@ -557,7 +557,7 @@ struct SevenSegmentDisplay: View {
 /// no readout (its title bar sits below the divider), so its bar ends 10 pt
 /// under the transport row.
 struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: View>: View {
-    let showsArtwork: Bool
+    @Environment(\.controlBarTopPadding) private var topPadding
     @ViewBuilder let leading: Leading
     @ViewBuilder let center: Center
     @ViewBuilder let trailing: Trailing
@@ -577,7 +577,7 @@ struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: Vi
                 }
                 // 10 pt under the cover; 24 pt under the titlebar overlay so
                 // the side buttons clear the window buttons and the toggle.
-                .padding(.top, TakesWindowPolicy.controlBarTopPadding(showsArtwork: showsArtwork))
+                .padding(.top, topPadding)
                 .padding(.bottom, hasReadout ? 0 : ControlBarMetrics.transportRowBottomPadding)
                 if hasReadout {
                     readout
@@ -599,16 +599,19 @@ struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: Vi
     }
 }
 
+extension EnvironmentValues {
+    @Entry var controlBarTopPadding: CGFloat = TakesWindowPolicy.controlBarTopPaddingBelowArtwork
+}
+
 extension ControlBarLayout where Readout == EmptyView {
     /// A control bar with no readout: compare's (A2 compare title-bar
     /// variant), whose elapsed time is in the title bar below the divider.
     init(
-        showsArtwork: Bool,
         @ViewBuilder leading: () -> Leading,
         @ViewBuilder center: () -> Center,
         @ViewBuilder trailing: () -> Trailing
     ) {
-        self.init(showsArtwork: showsArtwork, leading: leading, center: center, trailing: trailing) {
+        self.init(leading: leading, center: center, trailing: trailing) {
             EmptyView()
         }
     }
