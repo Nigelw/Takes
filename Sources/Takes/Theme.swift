@@ -46,6 +46,15 @@ enum Theme {
         dark: (0.855, 0.843, 1.0)     // #DAD7FF — near-white indigo core
     )
 
+    /// Lit glyph of an engaged side button (Shuffle, Blind, Repeat) and of
+    /// the titlebar artwork toggle (side-button lamps spec §3). Dark is
+    /// brighter than `primaryLitGlyph`, near-white over its three-layer glow;
+    /// light is `primary`, as before.
+    static let sideButtonLitGlyph = dynamic(
+        light: (0.424, 0.388, 0.914), // #6C63E9
+        dark: (0.957, 0.949, 1.0)     // #F4F2FF
+    )
+
     /// Accent for the playhead and the loop-selection highlight. Tied to the
     /// transport readout's display color (`readoutGlass`/`readoutGlow`): amber
     /// in light mode, LED cyan in dark. The light amber is deepened a touch

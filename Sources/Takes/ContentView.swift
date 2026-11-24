@@ -1427,10 +1427,7 @@ struct ContentView: View {
     }
 
     private static func repeatSymbol(for mode: RepeatMode) -> String {
-        switch mode {
-        case .off, .one: return "repeat"
-        case .switchAndRepeat: return "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill"
-        }
+        ControlBarRepeatSymbol.compare(mode)
     }
 
     private static func repeatModeName(for mode: RepeatMode) -> String {

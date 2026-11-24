@@ -98,7 +98,15 @@ tags stay as they are.
   icons" line, and the Test Map.
 - `a2-redesign-spec.md` §13 records the change (or links here).
 
-## 7. Open questions
+## 7. Decisions
 
-- Should the artwork toggle in the titlebar get the brighter dark glyph too?
-  This document leaves it unchanged; it has no lamp.
+- **The lamp was dropped** after it was built and reviewed in the app. §1,
+  the lamp rows of §2–3 and §5 no longer apply; the glyph colours and glows,
+  §4's repeat glyphs and the decisions below stand.
+
+- The artwork toggle takes the side buttons' lit glyph
+  (`Theme.sideButtonLitGlyph`) and glow too; it has no lamp.
+- The side buttons' values are their own `SideButtonAppearance`
+  (`TransportAppearance.lightSideButton`/`darkSideButton`) rather than the
+  secondary appearance's `activeGlyphGlow*`/`activeGlyphBloom*` fields,
+  which hold two layers and stay with the circle buttons.

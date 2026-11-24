@@ -307,14 +307,12 @@ private struct ArtworkToggleButtonStyle: ButtonStyle {
     @Environment(\.transportAppearance) private var transportAppearance
 
     func makeBody(configuration: Configuration) -> some View {
-        // The glow of an engaged secondary transport button (v2.9.0).
-        let glow = colorScheme == .dark ? transportAppearance.darkSecondary : transportAppearance.lightSecondary
+        // The lit side buttons' glyph and glow (side-button lamps spec §7:
+        // the toggle matches them).
+        let glow = transportAppearance.sideButton(for: colorScheme).glyphGlow
         return configuration.label
-            .foregroundStyle(isOn ? Theme.primaryLitGlyph : Color(nsColor: .secondaryLabelColor))
-            .shadow(color: isOn ? Theme.primary.opacity(glow.activeGlyphGlowOpacity) : .clear,
-                    radius: isOn ? glow.activeGlyphGlowRadius : 0)
-            .shadow(color: isOn ? Theme.primary.opacity(glow.activeGlyphBloomOpacity) : .clear,
-                    radius: isOn ? glow.activeGlyphBloomRadius : 0)
+            .foregroundStyle(isOn ? Theme.sideButtonLitGlyph : Color(nsColor: .secondaryLabelColor))
+            .sideButtonGlyphGlow(isOn ? glow : [])
             .frame(width: ArtworkToggleButton.size.width, height: ArtworkToggleButton.size.height)
             .background {
                 if isOn { chip }

@@ -180,6 +180,64 @@ struct TransportAppearance: Equatable {
         insetLightRadius: 0.75,
         insetLightY: 1.0
     )
+    /// Shuffle, Blind and Repeat.
+    var lightSideButton = SideButtonAppearance.light
+    var darkSideButton = SideButtonAppearance.dark
+}
+
+extension TransportAppearance {
+    /// The side buttons' treatment for a colour scheme.
+    func sideButton(for colorScheme: ColorScheme) -> SideButtonAppearance {
+        colorScheme == .dark ? darkSideButton : lightSideButton
+    }
+}
+
+/// One glow layer: a shadow of `color` at `opacity` with `radius`.
+struct GlowLayer: Equatable {
+    var color: Color
+    var opacity: Double
+    var radius: Double
+}
+
+/// Live-tunable glyph treatment for the side buttons (Shuffle, Blind,
+/// Repeat; side-button lamps spec §2–3, without the lamp), separate from the
+/// circle buttons' `TransportButtonAppearance`. The artwork toggle shares the
+/// lit glyph's glow. Colours are fixed; opacities and radii are tunable. The
+/// glow radii are SwiftUI shadow radii matched by eye to the canvas's CSS
+/// blur radii, not copied from them.
+struct SideButtonAppearance: Equatable {
+    /// Off glyph; nil is the hierarchical secondary label colour.
+    var offGlyph: Color?
+    /// The lit glyph's glow, innermost first. Light's third layer is off.
+    var glyphGlow: [GlowLayer]
+
+    static let dark = SideButtonAppearance(
+        offGlyph: Color(srgbHex: 0x86868C),
+        glyphGlow: [
+            GlowLayer(color: Color(srgbHex: 0xB0AAFF), opacity: 1.0, radius: 1.5),
+            GlowLayer(color: Theme.primary, opacity: 0.95, radius: 4.0),
+            GlowLayer(color: Theme.primary, opacity: 0.55, radius: 9.0),
+        ]
+    )
+
+    static let light = SideButtonAppearance(
+        offGlyph: nil,
+        glyphGlow: [
+            GlowLayer(color: Theme.primary, opacity: 0.50, radius: 3.0),
+            GlowLayer(color: Theme.primary, opacity: 0.30, radius: 7.0),
+            GlowLayer(color: Theme.primary, opacity: 0, radius: 0),
+        ]
+    )
+}
+
+extension Color {
+    /// An sRGB colour from a 0xRRGGBB literal.
+    init(srgbHex hex: UInt32) {
+        self.init(.sRGB,
+                  red: Double((hex >> 16) & 0xFF) / 255,
+                  green: Double((hex >> 8) & 0xFF) / 255,
+                  blue: Double(hex & 0xFF) / 255)
+    }
 }
 
 private struct TransportAppearanceKey: EnvironmentKey {
@@ -634,10 +692,10 @@ struct ControlBarDivider: View {
     }
 }
 
-/// Shuffle, Blind and Repeat (spec §5.1): a plain 20 pt icon in the
-/// secondary label colour, no circle, centred in the 30 × 40 pt side slot.
-/// Engaged, the glyph lights the way v2.9.0's engaged secondary buttons do
-/// (`Theme.primaryLitGlyph` with the secondary appearance's glow and bloom).
+/// Shuffle, Blind and Repeat (spec §5.1; side-button lamps spec §2–3, no
+/// lamp): a plain 20 pt icon, no circle, centred in the 30 × 40 pt side
+/// slot. Off, the glyph is the dimmed off colour; on, it lights
+/// (`Theme.sideButtonLitGlyph` with `SideButtonAppearance.glyphGlow`).
 struct ControlBarSideButtonStyle: ButtonStyle {
     static let glyphSize: CGFloat = 20
 
@@ -648,20 +706,53 @@ struct ControlBarSideButtonStyle: ButtonStyle {
     @Environment(\.transportAppearance) private var transportAppearance
 
     func makeBody(configuration: Configuration) -> some View {
-        let appearance = colorScheme == .dark ? transportAppearance.darkSecondary : transportAppearance.lightSecondary
+        let appearance = transportAppearance.sideButton(for: colorScheme)
         let glow = isOn && isEnabled
         return configuration.label
             .font(.system(size: Self.glyphSize, weight: .medium))
-            .foregroundStyle(isOn ? AnyShapeStyle(Theme.primaryLitGlyph) : AnyShapeStyle(.secondary))
-            .shadow(color: glow ? Theme.primary.opacity(appearance.activeGlyphGlowOpacity) : .clear,
-                    radius: glow ? CGFloat(appearance.activeGlyphGlowRadius) : 0)
-            .shadow(color: glow ? Theme.primary.opacity(appearance.activeGlyphBloomOpacity) : .clear,
-                    radius: glow ? CGFloat(appearance.activeGlyphBloomRadius) : 0)
+            .foregroundStyle(glyphStyle(appearance))
+            .sideButtonGlyphGlow(glow ? appearance.glyphGlow : [])
             .frame(width: ControlBarMetrics.sideSlotSize.width,
                    height: ControlBarMetrics.sideSlotSize.height)
             .contentShape(Rectangle())
             .opacity(isEnabled ? (configuration.isPressed ? 0.55 : 1) : 0.35)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    private func glyphStyle(_ appearance: SideButtonAppearance) -> AnyShapeStyle {
+        if isOn { return AnyShapeStyle(Theme.sideButtonLitGlyph) }
+        if let off = appearance.offGlyph { return AnyShapeStyle(off) }
+        return AnyShapeStyle(.secondary)
+    }
+}
+
+extension View {
+    /// The lit side-button glyph's glow layers (also the artwork toggle's).
+    /// Pass an empty array for none.
+    func sideButtonGlyphGlow(_ layers: [GlowLayer]) -> some View {
+        // A fixed number of shadow modifiers keeps the view's identity stable
+        // between on and off.
+        func layer(_ index: Int) -> GlowLayer? {
+            layers.indices.contains(index) ? layers[index] : nil
+        }
+        return self
+            .shadow(color: layer(0).map { $0.color.opacity($0.opacity) } ?? .clear, radius: layer(0)?.radius ?? 0)
+            .shadow(color: layer(1).map { $0.color.opacity($0.opacity) } ?? .clear, radius: layer(1)?.radius ?? 0)
+            .shadow(color: layer(2).map { $0.color.opacity($0.opacity) } ?? .clear, radius: layer(2)?.radius ?? 0)
+    }
+}
+
+/// The side buttons' glyphs that change with the repeat mode (side-button
+/// lamps spec §4): every lit Repeat names its mode.
+enum ControlBarRepeatSymbol {
+    nonisolated static let switchAndRepeat = "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill"
+
+    nonisolated static func compare(_ mode: RepeatMode) -> String {
+        switch mode {
+        case .off: return "repeat"
+        case .one: return "repeat.1"
+        case .switchAndRepeat: return switchAndRepeat
+        }
     }
 }
 
@@ -736,6 +827,10 @@ struct AppearanceTunerView: View {
                           defaults: TransportAppearance().darkPrimary, showFill: false)
             buttonSection("Secondary Buttons — Dark", $settings.transportAppearance.darkSecondary,
                           defaults: TransportAppearance().darkSecondary, showFill: true)
+            sideButtonSection("Side Buttons — Light", $settings.transportAppearance.lightSideButton,
+                              defaults: TransportAppearance().lightSideButton)
+            sideButtonSection("Side Buttons — Dark", $settings.transportAppearance.darkSideButton,
+                              defaults: TransportAppearance().darkSideButton)
             Section("Index Badge") {
                 tuner("Bevel width", value: badge.bevelWidth, in: 0...4, default: badgeDefaults.bevelWidth)
                 tuner("Bevel top", value: badge.bevelTopOpacity, in: 0...1, default: badgeDefaults.bevelTopOpacity)
@@ -788,6 +883,17 @@ struct AppearanceTunerView: View {
             tuner("Pressed inner shadow", value: b.pressedInnerShadowOpacity, in: 0...1, default: d.pressedInnerShadowOpacity)
             tuner("Pressed inner radius", value: b.pressedInnerShadowRadius, in: 0...8, default: d.pressedInnerShadowRadius)
             tuner("Pressed inner y", value: b.pressedInnerShadowY, in: -4...4, default: d.pressedInnerShadowY)
+        }
+    }
+
+    @ViewBuilder
+    private func sideButtonSection(_ title: String, _ b: Binding<SideButtonAppearance>,
+                                   defaults d: SideButtonAppearance) -> some View {
+        Section(title) {
+            ForEach(d.glyphGlow.indices, id: \.self) { i in
+                tuner("Glyph glow \(i + 1)", value: b.glyphGlow[i].opacity, in: 0...1, default: d.glyphGlow[i].opacity)
+                tuner("Glyph glow \(i + 1) radius", value: b.glyphGlow[i].radius, in: 0...16, default: d.glyphGlow[i].radius)
+            }
         }
     }
 

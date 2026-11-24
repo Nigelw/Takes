@@ -384,6 +384,16 @@ None open. The version check for a missing file was decided in milestone 3
   than the playlist's (79 vs 130 pt with artwork, 91 vs 142 under the
   titlebar). Its 32 pt title bar sits below the divider. The transport row
   and everything above it stay put when switching modes.
+- **Side buttons light brighter** (after milestone 5;
+  [a2-side-button-lamps-spec.md](a2-side-button-lamps-spec.md), §2–4 without
+  the lamp). The dark on-glyph is brighter (#F4F2FF, three glow layers) and
+  the dark off-glyph one step dimmer (#86868C); light is unchanged.
+  Compare's Repeat One now shows `repeat.1`, as the playlist does. The
+  spec's lens lamp under each glyph was built and then dropped: the lit
+  glyph alone marks the on state. The values live in their own
+  `SideButtonAppearance`, because the circle buttons' secondary glow fields
+  were also the artwork toggle's. The artwork toggle takes the new lit glyph
+  and glow too.
 - **Compare is unavailable for single-version items.** They show no
   disclosure chevron and no Compare pill.
 - **Long readout titles scroll.** In both readouts, a title wider than its

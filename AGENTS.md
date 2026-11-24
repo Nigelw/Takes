@@ -58,7 +58,8 @@ Key ownership:
   titlebar artwork toggle.
 - `TransportControls.swift`: the A2 control bar both modes share
   (`ControlBarLayout`: transport row, readout slot (playlist only), divider;
-  `ControlBarMetrics`; `ControlBarSideButtonStyle` for Shuffle/Blind/Repeat;
+  `ControlBarMetrics`; `ControlBarSideButtonStyle` for Shuffle/Blind/Repeat
+  (`SideButtonAppearance`) and `ControlBarRepeatSymbol`;
   `ControlBarDivider`), v2.9.0's `CircleTransportButtonStyle`,
   `SevenSegmentDisplay`,
   window drag/background helpers, and the Debug Appearance Tuner.
@@ -313,7 +314,15 @@ These are here to prevent parallel implementations and subtle regressions:
   transport row doesn't move between modes. It stretches to any width of
   360 pt or more; do not
   reintroduce width-dependent layouts. Side buttons are plain icons
-  (`ControlBarSideButtonStyle`); centre buttons are v2.9.0's
+  (`ControlBarSideButtonStyle`) with no lamp or other indicator: the lit
+  glyph is the on state. Their values are
+  `TransportAppearance.lightSideButton`/`darkSideButton`
+  (`SideButtonAppearance`, tunable in the Appearance Tuner), not the circle
+  buttons' secondary fields. The lit glyph is `Theme.sideButtonLitGlyph`
+  (#F4F2FF in dark, with three glow layers; the dark off glyph is
+  #86868C); the titlebar artwork toggle shares that glyph and glow. Repeat's
+  glyph names its mode in both modes (`repeat.1` for Repeat One; compare's
+  symbols are `ControlBarRepeatSymbol.compare`). Centre buttons are v2.9.0's
   `CircleTransportButtonStyle` (Play 56/22, secondary 40/15). Previous/Next
   are playlist-only. There is one readout frame, v2.9.0's Glass
   (`readoutGlass`); the Teenage Engineering theme and the Retro frame were
@@ -463,7 +472,7 @@ these reintroduces the exact regressions it fixed):
   A2 readout title rule (tag, filename), the compare control bar's height
   and the title bar (its geometry, centring and take-count text), the
   ruler labels' tops level with the major notches, the LED meter's cell count
-  (no endcaps), head geometry, unlit opacity and glow, the control bar's side-button placement, the cover
+  (no endcaps), head geometry, unlit opacity and glow, the control bar's side-button placement, the side buttons' appearance defaults, compare's repeat glyph per mode, the cover
   rule (`CoverVersionRule`), the A2 playlist row metrics and version names, the
   thumbnail cache (visible-only queue, concurrency bound, capacity, cover
   reuse), the A2 compact compare geometry (ruler and seat, the fixed lane

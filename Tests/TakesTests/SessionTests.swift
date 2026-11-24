@@ -2340,6 +2340,25 @@ struct SessionTests {
     }
 
     @Test
+    func compareRepeatGlyphNamesEachMode() {
+        #expect(ControlBarRepeatSymbol.compare(.off) == "repeat")
+        #expect(ControlBarRepeatSymbol.compare(.one) == "repeat.1")
+        #expect(ControlBarRepeatSymbol.compare(.switchAndRepeat)
+            == "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill")
+    }
+
+    @Test
+    func sideButtonAppearanceDefaultsMatchTheSpec() {
+        let appearance = TransportAppearance()
+        #expect(appearance.darkSideButton.glyphGlow.count == 3)
+        #expect(appearance.lightSideButton.glyphGlow.count == 3)
+        #expect(appearance.lightSideButton.glyphGlow[2].opacity == 0)
+        #expect(appearance.lightSideButton.offGlyph == nil)
+        #expect(appearance.sideButton(for: .dark) == appearance.darkSideButton)
+        #expect(appearance.sideButton(for: .light) == appearance.lightSideButton)
+    }
+
+    @Test
     func compareCoverFollowsTheAudibleVersionUnlessBlind() {
         func version(_ file: String) -> PlaylistVersion {
             PlaylistVersion(
