@@ -575,7 +575,7 @@ struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: Vi
                     trailing
                         .frame(width: ControlBarMetrics.sideSlotSize.width, height: ControlBarMetrics.sideSlotSize.height)
                 }
-                // 10 pt under the cover; 24 pt under the titlebar overlay so
+                // 12 pt under the cover; 24 pt under the titlebar overlay so
                 // the side buttons clear the window buttons and the toggle.
                 .padding(.top, topPadding)
                 .padding(.bottom, hasReadout ? 0 : ControlBarMetrics.transportRowBottomPadding)
@@ -621,7 +621,7 @@ extension ControlBarLayout where Readout == EmptyView {
 /// dark edge over a reflected light edge, as half-point lines so the
 /// divider keeps a 1 pt layout height. The only divider under the bar.
 struct ControlBarDivider: View {
-    static let height: CGFloat = 1
+    nonisolated static let height: CGFloat = 1
 
     var body: some View {
         VStack(spacing: 0) {
@@ -700,10 +700,9 @@ enum ControlBarMetrics {
     /// Playlist only: the gap from the transport row to the readout, and
     /// from the readout to the divider.
     static let readoutTopSpacing: CGFloat = 10
-    static let readoutBottomPadding: CGFloat = 12
-    /// Compare only: the bar ends this far under the transport row (no
-    /// readout), the same gap the playlist leaves above its readout.
-    static let transportRowBottomPadding: CGFloat = readoutTopSpacing
+    static let readoutBottomPadding: CGFloat = 10
+    /// Compare only: the gap from the transport row to the divider.
+    static let transportRowBottomPadding: CGFloat = 10
     static let primaryDiameter: CGFloat = 56
     static let primaryGlyphSize: CGFloat = 22
     static let secondaryDiameter: CGFloat = 40

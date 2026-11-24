@@ -142,8 +142,8 @@ struct SessionTests {
     // MARK: A2 compare title bar
 
     /// Compare's control bar ends 10 pt under the transport row (no
-    /// readout), so it is 53 pt shorter than the playlist's, whose readout
-    /// keeps 10 + 41 + 12 pt below the row.
+    /// readout), so it is 51 pt shorter than the playlist's, whose readout
+    /// keeps 10 + 41 + 10 pt below the row.
     @MainActor
     @Test
     func compareControlBarEndsUnderTheTransportRow() {
@@ -152,13 +152,15 @@ struct SessionTests {
         #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: true)
             == TakesWindowPolicy.controlBarTopPadding(showsArtwork: true) + transportRow
                 + ControlBarMetrics.transportRowBottomPadding + ControlBarDivider.height)
-        #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: true) == 77)
+        #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: true) == 79)
         #expect(TakesWindowPolicy.compareControlBarHeight(showsArtwork: false) == 91)
 
+        #expect(ControlBarMetrics.readoutTopSpacing == 10)
+        #expect(ControlBarMetrics.readoutBottomPadding == 10)
         let playlistBelowRow = ControlBarMetrics.readoutTopSpacing + PlaylistControlBarReadout.height
             + ControlBarMetrics.readoutBottomPadding
-        #expect(playlistBelowRow == 63)
-        #expect(playlistBelowRow - ControlBarMetrics.transportRowBottomPadding == 53)
+        #expect(playlistBelowRow == 61)
+        #expect(playlistBelowRow - ControlBarMetrics.transportRowBottomPadding == 51)
     }
 
     /// Below the divider, the 32 pt title bar replaces the 30 pt readout and
@@ -176,7 +178,7 @@ struct SessionTests {
         #expect(CompareDoneButtonStyle.horizontalPadding == 12)
         // The old row (10 + 30 pt readout + 12) gives way to 10 above the
         // divider and the title bar below it: the ruler starts 10 pt higher.
-        let oldBelowRow = ControlBarMetrics.readoutTopSpacing + 30 + ControlBarMetrics.readoutBottomPadding
+        let oldBelowRow: CGFloat = 10 + 30 + 12
         #expect(oldBelowRow - (ControlBarMetrics.transportRowBottomPadding + CompareTitleBarMetrics.height) == 10)
 
         // The centre column stays centred: both sides get the same width.
@@ -488,9 +490,9 @@ struct SessionTests {
     @Test
     func windowPolicyUsesTheA2SizesInBothArtworkStates() {
         #expect(TakesWindowPolicy.defaultSize(showsArtwork: true) == CGSize(width: 360, height: 760))
-        #expect(TakesWindowPolicy.defaultSize(showsArtwork: false) == CGSize(width: 360, height: 414))
-        #expect(TakesWindowPolicy.artworkCollapseHeight == 346)
-        #expect(TakesWindowPolicy.controlBarTopPadding(showsArtwork: true) == 10)
+        #expect(TakesWindowPolicy.defaultSize(showsArtwork: false) == CGSize(width: 360, height: 412))
+        #expect(TakesWindowPolicy.artworkCollapseHeight == 348)
+        #expect(TakesWindowPolicy.controlBarTopPadding(showsArtwork: true) == 12)
         #expect(TakesWindowPolicy.controlBarTopPadding(showsArtwork: false) == 24)
     }
 
@@ -542,16 +544,16 @@ struct SessionTests {
     @Test
     func artworkRevealKeepsTransportAtTheSameDistanceFromTheWindowBottom() {
         let screen = CGRect(x: 0, y: 0, width: 1200, height: 900)
-        let hidden = CGRect(x: 0, y: 486, width: 360, height: 414)
+        let hidden = CGRect(x: 0, y: 488, width: 360, height: 412)
         var resize = TakesWindowPolicy.ArtworkResize(from: hidden, showsArtwork: true, visibleFrame: screen)
         #expect(resize.followsWindow)
-        for height: CGFloat in [414, 500, 587, 690, 760] {
+        for height: CGFloat in [412, 500, 586, 690, 760] {
             let fraction = resize.fraction(at: height)
             let transportTop = TakesWindowPolicy.artworkHeight * fraction + TakesWindowPolicy.controlBarTopPadding(artworkFraction: fraction)
-            #expect(abs(height - transportTop - 390) < 0.001)
+            #expect(abs(height - transportTop - 388) < 0.001)
         }
         resize.showsArtwork = false
-        #expect(resize.fraction(at: 587) == 0.5)
+        #expect(resize.fraction(at: 586) == 0.5)
         #expect(resize.targetFrame == hidden)
     }
 
@@ -571,7 +573,7 @@ struct SessionTests {
     @Test
     func windowPolicyShowingArtworkNearTheScreenBottomMovesUpOnlyAsFarAsNeeded() {
         let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 860)
-        let currentFrame = CGRect(x: 96, y: 100, width: 360, height: 414)
+        let currentFrame = CGRect(origin: CGPoint(x: 96, y: 100), size: TakesWindowPolicy.defaultSize(showsArtwork: false))
 
         let shown = TakesWindowPolicy.frameTogglingArtwork(
             currentFrame: currentFrame, showsArtwork: true, visibleFrame: visibleFrame
@@ -585,7 +587,7 @@ struct SessionTests {
     @Test
     func windowPolicyCapsAFrameTallerThanTheScreen() {
         let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 600)
-        let currentFrame = CGRect(x: 96, y: 200, width: 360, height: 414)
+        let currentFrame = CGRect(origin: CGPoint(x: 96, y: 200), size: TakesWindowPolicy.defaultSize(showsArtwork: false))
 
         let shown = TakesWindowPolicy.frameTogglingArtwork(
             currentFrame: currentFrame, showsArtwork: true, visibleFrame: visibleFrame
@@ -2607,7 +2609,7 @@ struct SessionTests {
         #expect(BottomBarMetrics.height == 30)
         #expect(TakesWindowPolicy.minimumHeightWithoutArtwork == 271)
         #expect(TakesWindowPolicy.minimumHeight(showsArtwork: false) == 271)
-        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: true) == 617)
+        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: true) == 619)
 
         for showsArtwork in [true, false] {
             let lanes = { (windowHeight: CGFloat) in
@@ -2616,10 +2618,10 @@ struct SessionTests {
                     - CompareTitleBarMetrics.height
                     - CompareLaneLayout.seatBottom - BottomBarMetrics.height) / CompareLaneLayout.laneStep
             }
-            // Exactly one lane at the minimum; about two and a half (239 pt)
+            // Exactly one lane at the minimum; about two and a half (237 pt)
             // by default.
             #expect(lanes(TakesWindowPolicy.minimumHeight(showsArtwork: showsArtwork)) == 1)
-            #expect(lanes(TakesWindowPolicy.defaultHeight(showsArtwork: showsArtwork)) == 239.0 / 96)
+            #expect(lanes(TakesWindowPolicy.defaultHeight(showsArtwork: showsArtwork)) == 237.0 / 96)
         }
     }
 

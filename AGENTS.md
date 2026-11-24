@@ -262,12 +262,12 @@ These are here to prevent parallel implementations and subtle regressions:
 - Keep global shortcuts focus-safe; active numeric text fields should retain
   normal text editing behavior.
 - One main window serves both modes (A2). It opens 360 pt wide (760 tall with
-  artwork, 414 without) and is user-resizable down to
-  `TakesWindowPolicy.minimumSize(showsArtwork:)`: 360 × 617 with the
+  artwork, 412 without) and is user-resizable down to
+  `TakesWindowPolicy.minimumSize(showsArtwork:)`: 360 × 619 with the
   artwork, 360 × 271 without (the compare control bar, its title bar, the
   ruler, one whole lane and the bottom bar; `minimumHeightWithoutArtwork`). Mode switches and
   track counts never resize it; the artwork toggle is the only automatic resize
-  (±`artworkCollapseHeight`, 346 pt, top edge fixed, clamped on screen). Its
+  (±`artworkCollapseHeight`, 348 pt, top edge fixed, clamped on screen). Its
   frame autosaves as `main.a2`; do not reintroduce per-mode frames.
   Playlist and compare crossfade below the shared cover. Toggling artwork
   slides the fixed-size cover down from the top or back up along the same
@@ -281,7 +281,7 @@ These are here to prevent parallel implementations and subtle regressions:
   a shade behind them over the image. With the cover hidden, the controls stay
   visible. The control bars take their top padding from
   `TakesWindowPolicy.controlBarTopPadding(showsArtwork:)`
-  (10 under the cover, 24 under the titlebar). The cover's version comes from
+  (12 under the cover, 24 under the titlebar). The cover's version comes from
   `CoverVersionRule`: in compare it follows the audible version, except in
   Blind Listening Mode, where it stays on the item's playback version so it
   can't reveal which version is audible. The previous cover stays up until
@@ -308,8 +308,8 @@ These are here to prevent parallel implementations and subtle regressions:
   though its centre group is narrower; in playlist mode the readout inside
   the 10 pt insets; then the one `ControlBarDivider`. Compare has no readout
   (`ControlBarLayout`'s readout-less init): its bar ends 10 pt under the
-  transport row (`ControlBarMetrics.transportRowBottomPadding`), 53 pt
-  shorter than the playlist's (77 vs 130 pt with the artwork), and the
+  transport row (`ControlBarMetrics.transportRowBottomPadding`), 51 pt
+  shorter than the playlist's (79 vs 130 pt with the artwork), and the
   transport row doesn't move between modes. It stretches to any width of
   360 pt or more; do not
   reintroduce width-dependent layouts. Side buttons are plain icons

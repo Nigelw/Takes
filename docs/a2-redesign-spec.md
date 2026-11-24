@@ -34,15 +34,15 @@ One narrow window, 360 pt wide, in both modes.
 | | Width | Height (default content) |
 |---|---|---|
 | Playlist, artwork shown | 360 | 760 |
-| Playlist, artwork hidden | 360 | 414 |
+| Playlist, artwork hidden | 360 | 412 |
 | Compare, artwork shown | 360 | 760 |
-| Compare, artwork hidden | 360 | 414 |
+| Compare, artwork hidden | 360 | 412 |
 
 - Width is the same in both modes; mode switches never resize horizontally.
 - Hiding the artwork removes the 360 pt cover. The titlebar then overlays the
   top of the control bar (as v2.9.0's control bar already does), and the
-  control bar's top padding grows from 10 to 24 pt so Shuffle and Repeat clear
-  the window buttons. Net: the window shrinks by 346 pt.
+  control bar's top padding grows from 12 to 24 pt so Shuffle and Repeat clear
+  the window buttons. The window shrinks by 348 pt.
 - The window's top edge stays put when it shrinks or grows (grow and shrink
   downward), as `WorkspaceView.setPlaylistFrame` does today.
 - This replaces the current playlist/comparison size policy:
@@ -113,12 +113,12 @@ centred.
   - Previous, Next, Switch Track: `.secondary`, 40 pt, 15 pt glyph.
   - The inset bevel (rim light top → dark bottom, gloss, dark shadow above,
     light lip below) is the existing style; no drop shadows.
-- Vertical padding: 10 pt above the row (24 pt when artwork is hidden),
+- Vertical padding: 12 pt above the row (24 pt when artwork is hidden),
   10 pt between the row and the readout.
 
 ### 5.2 Readout
 
-Sits on the control-bar surface (no separate band), 10 pt side inset, 12 pt
+Sits on the control-bar surface (no separate band), 10 pt side inset, 10 pt
 below it to the divider.
 
 - Frame: **v2.9.0 Glass style** (`ReadoutStyle.glass`, the convex tile in
@@ -380,11 +380,10 @@ None open. The version check for a missing file was decided in milestone 3
 - **Control-bar heights differ by mode.** Milestone 2: the readouts were
   42 and 30 pt, so the compare bar was 12 pt shorter (119 vs 131 pt with
   artwork). Since the compare title-bar variant (below) compare has no
-  readout: its bar ends 10 pt under the transport row, 53 pt shorter than
-  the playlist's (77 vs 130 pt with artwork, 91 vs 144 under the
-  titlebar; 54 pt while the playlist readout was 42 pt), and its 32 pt title bar sits below the divider, so the ruler
-  starts 10 pt higher than with the readout. The transport row and
-  everything above it stay put.
+  readout. Its bar ends 10 pt under the transport row and is 51 pt shorter
+  than the playlist's (79 vs 130 pt with artwork, 91 vs 142 under the
+  titlebar). Its 32 pt title bar sits below the divider. The transport row
+  and everything above it stay put when switching modes.
 - **Compare is unavailable for single-version items.** They show no
   disclosure chevron and no Compare pill.
 - **Long readout titles scroll.** In both readouts, a title wider than its
@@ -393,17 +392,17 @@ None open. The version check for a missing file was decided in milestone 3
   only animate lines that actually overflow. The compare readout is narrower,
   so it scrolls more often.
 - **The window is resizable in both directions** (§2). Defaults are the §2
-  sizes. Minimum width 360; minimum height 271 below the cover (617 with
-  artwork, 271 without; `TakesWindowPolicy.minimumHeightWithoutArtwork`):
-  the compare control bar (91 pt under the titlebar), its title bar (32),
+  sizes. Minimum width is 360 pt. Minimum height is 619 pt with artwork and
+  271 pt without (`TakesWindowPolicy.minimumHeightWithoutArtwork`). It fits
+  the compare control bar (79 pt below the cover, 91 pt under the titlebar), its title bar (32),
   the ruler (22 with its border), one whole lane (96) and the bottom bar
   (30), so compare always shows its controls and one lane. Milestone 5
   settled the rule at 286 (a 133 pt control bar with the readout, no title
   bar and a 27 pt ruler); the compare title-bar variant kept the rule,
-  which lowered it to 271. The playlist's control bar
-  is 12 pt taller, leaving its list two rows and part of a third. Milestones
+  which lowered it to 271 without artwork. The playlist's control bar
+  is 51 pt taller, leaving room for two list rows and part of a third. Milestones
   1–4 used a provisional 300. Mode switches never resize. The artwork
-  toggle changes the height by exactly 346 pt, keeping any extra height the
+  toggle changes the height by exactly 348 pt, keeping any extra height the
   user added; a window that would run off the bottom of the screen moves up
   only as far as needed.
 - **Cover in a wider window:** the cover area stays 360 pt tall; the square
@@ -593,14 +592,13 @@ None open. The version check for a missing file was decided in milestone 3
   elapsed time in a 24 pt Glass frame centred in the window, and a
   rectangular Done (22 pt, 5 pt radius, primary fill) on the right. Done
   leaves compare as the back button did (the audible version becomes the
-  playback version); Esc and ⌘[ are unchanged. The control bars now differ
-  by 54 pt (see "Control-bar heights differ by mode"). The notches went
+  playback version); Esc and ⌘[ are unchanged. The notches went
   back to v2.9.0's heights (major 19 pt, minor 8, were 11 and 5), and the
   ruler shrank from 26 to 21 pt: the labels moved down so their digits'
   tops are level with the major notches' tops, 2 pt from the ruler's top.
   The playhead grabber now overlaps the labels; that was accepted, and it
   replaces the title-bar spec's §3 rule (labels 1 pt clear of the
-  grabber). With the 10 pt from the title bar, the window minimum drops
-  15 pt to 271/617 (see "The window is resizable"). The title bar shows
+  grabber). The window minimum is documented under "The window is resizable".
+  The title bar shows
   whether or not the artwork is (the spec's first open question); the take
   count has no tooltip or menu (its second).
