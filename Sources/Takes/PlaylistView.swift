@@ -23,10 +23,11 @@ final class PlaylistPresentationState: ObservableObject {
     }
 
     func prune(in workspace: PlaylistWorkspace) {
-        let valid = Set(workspace.items.map { PlaylistRowID.item($0.id) }
-            + workspace.allVersions.map { PlaylistRowID.version($0.id) })
-        selection.formIntersection(valid)
-        expanded.formIntersection(Set(workspace.items.map(\.id)))
+        let remainingExpansion = expanded.intersection(workspace.items.map(\.id))
+        if expanded != remainingExpansion { expanded = remainingExpansion }
+        let visible = Set(visibleRows(in: workspace))
+        let remainingSelection = selection.intersection(visible)
+        if selection != remainingSelection { selection = remainingSelection }
     }
 }
 
@@ -53,27 +54,25 @@ struct PlaylistCommandContext {
             .flatMap(\.versions).filter { rows.contains(.version($0.id)) }.map(\.id)
     }
 
-    /// Grouping needs a destination item; loose versions selected alongside
-    /// it are moved into the group.
-    var canGroup: Bool { !itemIDs.isEmpty && itemIDs.count + versionIDs.count > 1 }
-    var canRemove: Bool { !itemIDs.isEmpty || !versionIDs.isEmpty }
-    var canSeparate: Bool {
-        coordinator.workspace.items.contains { item in
-            item.versions.count > 1 && (itemIDs.contains(item.id)
-                || item.versions.contains { versionIDs.contains($0.id) })
-        }
+    private var groupSources: (items: [UUID], versions: [UUID])? {
+        let items = itemIDs
+        guard !items.isEmpty else { return nil }
+        let versions = versionIDs
+        guard items.count + versions.count > 1 else { return nil }
+        return (items, versions)
     }
 
-    func group(compare: Bool) {
-        let ids = itemIDs
-        let looseVersions = versionIDs
-        Task {
-            guard let destination = await coordinator.groupItems(
-                ids, looseVersionIDs: looseVersions, compare: compare, undoManager: undoManager
-            ) else { return }
-            presentation.selection = [.item(destination)]
-            presentation.expanded.insert(destination)
-        }
+    var canGroup: Bool { groupSources != nil }
+    var canRemove: Bool { !itemIDs.isEmpty || !versionIDs.isEmpty }
+    var canSeparate: Bool { !versionsToSeparate.isEmpty }
+
+    func group() {
+        guard let sources = groupSources,
+              let destination = coordinator.groupItems(
+                sources.items, looseVersionIDs: sources.versions, undoManager: undoManager
+              ) else { return }
+        presentation.selection = [.item(destination)]
+        presentation.expanded.insert(destination)
     }
 
     func remove() {
@@ -91,14 +90,27 @@ struct PlaylistCommandContext {
         }
     }
 
-    func separate() {
+    private var versionsToSeparate: [UUID] {
         let selectedItems = Set(itemIDs)
         let selectedVersions = Set(versionIDs)
-        let ids = coordinator.workspace.items.flatMap { item -> [UUID] in
+        return coordinator.workspace.items.flatMap { item -> [UUID] in
             guard item.versions.count > 1 else { return [] }
             return item.versions.filter { selectedItems.contains(item.id) || selectedVersions.contains($0.id) }.map(\.id)
         }
-        guard coordinator.separateVersions(ids, placement: .adjacent, undoManager: undoManager) != nil else { return }
+    }
+
+    func separate() {
+        let versions = versionsToSeparate
+        guard !versions.isEmpty else { return }
+        let ids = Set(versions)
+        let selectedItems = Set(itemIDs)
+        guard coordinator.separateVersions(versions, placement: .adjacent, undoManager: undoManager) != nil else { return }
+        presentation.selection = Set(coordinator.workspace.items.compactMap { item in
+            guard item.versions.count == 1,
+                  selectedItems.contains(item.id) || item.versions.contains(where: { ids.contains($0.id) })
+            else { return nil }
+            return .item(item.id)
+        })
         presentation.prune(in: coordinator.workspace)
     }
 
@@ -136,17 +148,65 @@ struct PlaylistCommandContext {
         presentation.locateVersionID = locateVersionID
     }
 
-    func moveSelection(direction: Int) {
-        var order = coordinator.workspace.items.map(\.id)
-        let selected = Set(itemIDs)
-        guard !selected.isEmpty else { return }
+    enum MoveDirection: Int { case up = -1, down = 1 }
+
+    private struct Move {
+        var items: [UUID]?
+        var versions: [UUID: [UUID]] = [:]
+        var isPossible: Bool { items != nil || !versions.isEmpty }
+    }
+
+    private func movePlan(_ direction: MoveDirection) -> Move {
+        let items = coordinator.workspace.items
+        let rows = targetRows
+        let selectedItems = Set(itemIDs)
+        var plan = Move(items: Self.shift(items.map(\.id), selected: selectedItems, by: direction.rawValue))
+        for item in items where !selectedItems.contains(item.id) && item.versions.count > 1 {
+            let order = item.versions.map(\.id)
+            let selected = Set(order.filter { rows.contains(.version($0)) })
+            plan.versions[item.id] = Self.shift(order, selected: selected, by: direction.rawValue)
+        }
+        return plan
+    }
+
+    private static func shift(_ original: [UUID], selected: Set<UUID>, by direction: Int) -> [UUID]? {
+        guard !selected.isEmpty else { return nil }
+        var order = original
         let indices = direction < 0 ? Array(order.indices) : Array(order.indices.reversed())
         for index in indices where selected.contains(order[index]) {
             let next = index + direction
             guard order.indices.contains(next), !selected.contains(order[next]) else { continue }
             order.swapAt(index, next)
         }
-        coordinator.reorderItems(order, undoManager: undoManager)
+        return order == original ? nil : order
+    }
+
+    func canMove(_ direction: MoveDirection) -> Bool {
+        movePlan(direction).isPossible
+    }
+
+    func moveSelection(_ direction: MoveDirection) {
+        let plan = movePlan(direction)
+        guard plan.isPossible else { return }
+        coordinator.reorderPlaylistRows(items: plan.items, versions: plan.versions, undoManager: undoManager)
+    }
+}
+
+/// Publish validation by value so the scene menu updates as selection and order change.
+struct PlaylistOrganizationAvailability: Equatable {
+    let canGroup: Bool
+    let canSeparate: Bool
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let canClear: Bool
+
+    @MainActor
+    init(_ context: PlaylistCommandContext) {
+        canGroup = context.canGroup
+        canSeparate = context.canSeparate
+        canMoveUp = context.canMove(.up)
+        canMoveDown = context.canMove(.down)
+        canClear = !context.coordinator.workspace.items.isEmpty
     }
 }
 
@@ -154,48 +214,55 @@ private struct PlaylistCommandContextKey: FocusedValueKey {
     typealias Value = PlaylistCommandContext
 }
 
+private struct PlaylistOrganizationAvailabilityKey: FocusedValueKey {
+    typealias Value = PlaylistOrganizationAvailability
+}
+
 extension FocusedValues {
     var playlistCommandContext: PlaylistCommandContext? {
         get { self[PlaylistCommandContextKey.self] }
         set { self[PlaylistCommandContextKey.self] = newValue }
     }
+
+    var playlistOrganizationAvailability: PlaylistOrganizationAvailability? {
+        get { self[PlaylistOrganizationAvailabilityKey.self] }
+        set { self[PlaylistOrganizationAvailabilityKey.self] = newValue }
+    }
 }
 
 struct PlaylistCommands: Commands {
     @FocusedValue(\.playlistCommandContext) private var context
+    @FocusedValue(\.playlistOrganizationAvailability) private var availability
 
     var body: some Commands {
         CommandMenu("Playlist") {
-            PlaylistOrganizationMenuItems(context: context)
+            playlistOrganizationMenuItems(context: context, availability: availability)
         }
     }
 }
 
 /// The organisation commands, acting on the selection. The Playlist menu and
 /// the bottom bar's `…` pull-down (A2 §7) both show this one list.
-struct PlaylistOrganizationMenuItems: View {
-    let context: PlaylistCommandContext?
-
-    var body: some View {
-        Button("Group as Versions") { context?.group(compare: false) }
-            .keyboardShortcut("g", modifiers: [.command])
-            .disabled(context?.canGroup != true)
-        Button("Group and Compare") { context?.group(compare: true) }
-            .disabled(context?.canGroup != true)
-        Button("Separate Versions") { context?.separate() }
-            .keyboardShortcut("g", modifiers: [.command, .shift])
-            .disabled(context?.canSeparate != true)
-        Divider()
-        Button("Move Up") { context?.moveSelection(direction: -1) }
-            .keyboardShortcut(.upArrow, modifiers: [.command, .option])
-            .disabled(context?.itemIDs.isEmpty != false)
-        Button("Move Down") { context?.moveSelection(direction: 1) }
-            .keyboardShortcut(.downArrow, modifiers: [.command, .option])
-            .disabled(context?.itemIDs.isEmpty != false)
-        Divider()
-        Button("Clear Playlist") { _ = context?.coordinator.clearPlaylist(undoManager: context?.undoManager) }
-            .disabled(context?.coordinator.workspace.items.isEmpty != false)
-    }
+@MainActor @ViewBuilder
+func playlistOrganizationMenuItems(
+    context: PlaylistCommandContext?, availability: PlaylistOrganizationAvailability?
+) -> some View {
+    Button("Group as Versions") { context?.group() }
+        .keyboardShortcut("g", modifiers: [.command])
+        .disabled(availability?.canGroup != true)
+    Button("Separate Versions") { context?.separate() }
+        .keyboardShortcut("g", modifiers: [.command, .shift])
+        .disabled(availability?.canSeparate != true)
+    Divider()
+    Button("Move Up") { context?.moveSelection(.up) }
+        .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+        .disabled(availability?.canMoveUp != true)
+    Button("Move Down") { context?.moveSelection(.down) }
+        .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+        .disabled(availability?.canMoveDown != true)
+    Divider()
+    Button("Clear Playlist") { _ = context?.coordinator.clearPlaylist(undoManager: context?.undoManager) }
+        .disabled(availability?.canClear != true)
 }
 
 /// The playlist list (A2 §6). There is no header bar: the bottom bar below

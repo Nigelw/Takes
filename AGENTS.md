@@ -86,8 +86,9 @@ Key ownership:
 - `PlaylistView.swift`: the playlist list's SwiftUI host (empty state, no
   header bar), selection/expansion presentation state, the Playlist menu, and
   the selection-aware organization commands (`PlaylistCommandContext`); the
-  one list of organization menu items (`PlaylistOrganizationMenuItems`) that
-  the Playlist menu and the bottom bar's `…` pull-down both show.
+  shared organization menu builder (`playlistOrganizationMenuItems`) and
+  focused validation (`PlaylistOrganizationAvailability`) for the Playlist
+  menu and the bottom bar's `…` pull-down.
 - `PlaylistOutlineView.swift`: the playlist table — an `NSOutlineView` wrapped
   in `NSViewRepresentable` (items with versions as children), the A2 rows
   (`PlaylistRowMetrics`, `PlaylistRowView`, `PlaylistItemCellView`,
@@ -257,6 +258,13 @@ These are here to prevent parallel implementations and subtle regressions:
   metadata match or appends.
 - Context-menu commands act on the selection when opened on a selected row and
   on the clicked row alone otherwise (`PlaylistCommandContext.rows`).
+- Move Up/Down shifts selected tracks and selected versions one place among
+  their siblings, keeping their relative order and disabling directions that
+  would leave the order unchanged. A selected track covers its child rows.
+  Group as Versions uses the first selected track as the destination.
+  Separate Versions splits all versions of each selected track and any
+  individually selected versions into standalone tracks, then selects the
+  resulting track rows.
 - The playlist table (A2 §6) is one full-width column with no header.
   AppKit's disclosure triangle and indentation are suppressed
   (`frameOfOutlineCell`, `frameOfCell`); item rows (46 pt) draw their own
@@ -266,10 +274,12 @@ These are here to prevent parallel implementations and subtle regressions:
   radius; the geometry lives in `PlaylistRowMetrics`. Item and version
   titles truncate in the middle; artist lines at the tail.
 - Version rows (30 pt) are named by their title tag, else the filename
-  without its extension (`PlaylistRowText.versionName`). A plain click on a
-  version row makes it the playback version; a missing file shows a warning
-  triangle in place of the check and its click opens Locate. Double-click
-  plays on every row. The hover Compare pill (multi-version items only) and
+  without its extension (`PlaylistRowText.versionName`). A single click
+  selects the row. Double-clicking a version plays it from the beginning
+  and preserves the key version. Click the empty checkbox on a hovered
+  version row or choose Set as Key Version from its context menu to change
+  the key version. A missing file shows a warning triangle and its playback
+  action opens Locate. The hover Compare pill (multi-version items only) and
   the context menu's Compare are the ways into compare from a row; neither
   asks to locate missing files first.
 - Entering compare never starts an item: another item's playback stops, and

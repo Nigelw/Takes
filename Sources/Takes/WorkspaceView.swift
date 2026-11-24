@@ -277,6 +277,8 @@ struct WorkspaceView: View {
         presentedContent
             .focusedSceneValue(\.openFileCommandState, persistence.restorationComplete ? openFiles : nil)
             .focusedSceneValue(\.playlistCommandContext, isComparison ? nil : commandContext)
+            .focusedSceneValue(\.playlistOrganizationAvailability,
+                               isComparison || !canUseShortcuts ? nil : PlaylistOrganizationAvailability(commandContext))
             .focusedSceneValue(\.canShowActiveTrackInFinder, Self.targetVersion(coordinator: coordinator, presentation: presentation) != nil)
             .focusedSceneValue(\.canRemoveActiveTrack, isComparison ? controller.session.activeTrackID != nil : commandContext.canRemove)
             .focusedSceneValue(\.canClearTracks, !coordinator.workspace.items.isEmpty)

@@ -237,7 +237,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         outline.dataSource = self
         outline.delegate = self
         outline.target = self
-        outline.action = #selector(rowClicked)
         outline.doubleAction = #selector(rowDoubleClicked)
         outline.registerForDraggedTypes([PlaylistItemDrag.pasteboardType])
         outline.setDraggingSourceOperationMask(.move, forLocal: true)
@@ -289,6 +288,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         guard notification.object as? NSWindow === outlineView.window else { return }
         availability.removeAll()
         reloadContent()
+        applySelection()
     }
 
     // MARK: Model → view
@@ -322,7 +322,10 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         }
         applyExpansion()
         applySelection()
-        if structureChanged || contentChanged { scheduleThumbnailRequest() }
+        if structureChanged || contentChanged {
+            refreshHover()
+            scheduleThumbnailRequest()
+        }
         if becameActive { focusOutline() }
     }
 
@@ -332,6 +335,8 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     private func reloadContent() {
         guard hasLoaded else { return }
+        isApplying = true
+        defer { isApplying = false }
         outlineView.reloadData(
             forRowIndexes: IndexSet(integersIn: 0..<outlineView.numberOfRows),
             columnIndexes: IndexSet(integersIn: 0..<outlineView.numberOfColumns)
@@ -517,7 +522,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private func configureVersion(_ cell: PlaylistVersionCellView, versionID id: UUID) {
         guard let (item, version) = version(id) else { return }
         let missing = availableURL(for: version) == nil
-        let state: PlaylistVersionCellView.Mark = missing ? .missing : item.selectedVersionID == id ? .playback : .none
+        let state: PlaylistVersionCellView.Mark = missing ? .missing : item.selectedVersion?.id == id ? .key : .none
         cell.configure(
             title: PlaylistRowText.versionName(version),
             format: PlaylistRowText.formatName(version.metadata),
@@ -526,6 +531,10 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             toolTip: [version.file.storedURL.lastPathComponent, PlaylistRowText.format(version.metadata)]
                 .filter { !$0.isEmpty }.joined(separator: "\n")
         )
+        cell.onSetKeyVersion = { [weak self] in self?.setKeyVersion(id) }
+        let row = outlineView.row(forItem: node(.version(id)))
+        cell.isHovered = row >= 0
+            && (outlineView.rowView(atRow: row, makeIfNecessary: false) as? PlaylistRowView)?.isHovered == true
     }
 
     private func toggleExpansion(_ node: PlaylistNode) {
@@ -613,6 +622,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         scheduleThumbnailRequest()
         guard !isApplying, let id = node?.itemID else { return }
         presentation.expanded.remove(id)
+        presentation.prune(in: playlist.workspace)
     }
 
     func outlineView(_ outlineView: NSOutlineView, typeSelectStringFor tableColumn: NSTableColumn?, item: Any) -> String? {
@@ -623,9 +633,9 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         }
     }
 
-    private func refreshHover() {
+    func refreshHover(at windowPoint: NSPoint? = nil) {
         guard let window = outlineView.window else { return }
-        let point = outlineView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        let point = outlineView.convert(windowPoint ?? window.mouseLocationOutsideOfEventStream, from: nil)
         let inside = outlineView.visibleRect.contains(point)
         outlineView.enumerateAvailableRowViews { rowView, _ in
             (rowView as? PlaylistRowView)?.isHovered = inside && rowView.frame.contains(point)
@@ -634,20 +644,9 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     // MARK: Actions
 
-    /// A plain click on a version row makes it the item's playback version
-    /// (A2 §6); a missing file asks to be located instead. Clicks that extend
-    /// the selection only select.
-    @objc private func rowClicked() {
-        let row = outlineView.clickedRow
-        guard row >= 0, let event = NSApp.currentEvent, event.clickCount == 1,
-              event.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty,
-              let id = (outlineView.item(atRow: row) as? PlaylistNode)?.versionID,
-              let (item, version) = version(id) else { return }
-        guard availableURL(for: version) != nil else {
-            presentation.locateVersionID = id
-            return
-        }
-        guard item.selectedVersionID != id else { return }
+    private func setKeyVersion(_ id: UUID) {
+        guard let (item, version) = version(id), item.selectedVersion?.id != id,
+              availableURL(for: version) != nil else { return }
         Task { await playlist.selectPlaybackVersion(id, in: item.id) }
     }
 
@@ -667,7 +666,12 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             presentation.locateVersionID = version.id
             return
         }
-        Task { await playlist.playItem(id: item.id, versionID: version.id) }
+        let fromBeginning: Bool
+        switch rowID {
+        case .item: fromBeginning = false
+        case .version: fromBeginning = true
+        }
+        Task { await playlist.playItem(id: item.id, versionID: version.id, fromBeginning: fromBeginning) }
     }
 
     /// Compare opens even with missing files: their lanes show an error
@@ -729,22 +733,18 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         if case let .item(id)? = single, (itemsByID[id]?.versions.count ?? 0) > 1 {
             playback.append(ClosureMenuItem("Compare") { [weak self] in self?.compare(itemID: id) })
         }
-        if case let .version(id)? = single, let (item, _) = version(id), item.selectedVersionID != id {
-            playback.append(ClosureMenuItem("Use for Playback") { [weak self] in
-                guard let self else { return }
-                Task { await self.playlist.selectPlaybackVersion(id, in: item.id) }
-            })
+        if case let .version(id)? = single, let (item, version) = version(id),
+           item.selectedVersion?.id != id, availableURL(for: version) != nil {
+            playback.append(ClosureMenuItem("Set as Key Version") { [weak self] in self?.setKeyVersion(id) })
         }
         sections.append(playback)
 
         var organize: [NSMenuItem] = []
         if rows.count > 1, !itemIDs.isEmpty {
-            organize.append(ClosureMenuItem("Group as Versions", enabled: context.canGroup) { context.group(compare: false) })
-            organize.append(ClosureMenuItem("Group and Compare", enabled: context.canGroup) { context.group(compare: true) })
+            organize.append(ClosureMenuItem("Group as Versions", enabled: context.canGroup) { context.group() })
         }
         if context.canSeparate {
-            let title = itemIDs.isEmpty && versionIDs.count == 1 ? "Separate into Playlist Item" : "Separate Versions"
-            organize.append(ClosureMenuItem(title) { context.separate() })
+            organize.append(ClosureMenuItem("Separate Versions") { context.separate() })
         }
         if itemIDs.isEmpty, !versionIDs.isEmpty {
             let owners = Set(versionIDs.compactMap { ownerByVersionID[$0] })
@@ -956,7 +956,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         case let .reorderItems(order):
             return playlist.reorderItems(order, undoManager: undoManager)
         case let .group(itemIDs, into: destination):
-            guard playlist.groupItems(itemIDs, into: destination, undoManager: undoManager) else { return false }
+            guard playlist.groupItems(itemIDs, into: destination, undoManager: undoManager) != nil else { return false }
             presentation.selection = [.item(destination)]
             presentation.expanded.insert(destination)
         case let .separate(versionIDs, beforeItem: anchor):
@@ -1017,6 +1017,11 @@ final class PlaylistNSOutlineView: NSOutlineView {
         return NSRect(x: columnRect.minX, y: rowRect.minY, width: columnRect.width, height: rowRect.height)
     }
 
+    override func mouseDown(with event: NSEvent) {
+        controller?.refreshHover(at: event.locationInWindow)
+        super.mouseDown(with: event)
+    }
+
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection([.command, .shift, .control, .option])
         switch event.keyCode {
@@ -1051,7 +1056,7 @@ final class PlaylistNSOutlineView: NSOutlineView {
 
 /// Draws every row background inside the 10 pt edge inset with a 6 pt
 /// radius (A2 §3, §6): selection, the now-playing tint, hover, and the
-/// drop-on-item ring. Tracks hover for the Compare pill.
+/// drop-on-item ring. Tracks hover for the Compare pill and key-version checkbox.
 final class PlaylistRowView: NSTableRowView {
     private var hoverArea: NSTrackingArea?
 
@@ -1060,6 +1065,7 @@ final class PlaylistRowView: NSTableRowView {
             guard isHovered != oldValue else { return }
             needsDisplay = true
             (view(atColumn: 0) as? PlaylistItemCellView)?.isHovered = isHovered
+            (view(atColumn: 0) as? PlaylistVersionCellView)?.isHovered = isHovered
         }
     }
 
@@ -1367,12 +1373,12 @@ final class PlaylistItemCellView: NSTableCellView {
 }
 
 /// Version row, 30 pt (A2 §6): the playback-version check in the thumbnail
-/// column (a warning triangle in its place when the file is missing, §12),
-/// the version's title tag, its format, and its duration.
+/// column with a hover checkbox for other available versions, the version's
+/// title tag, its format, and its duration.
 final class PlaylistVersionCellView: NSTableCellView {
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("version")
 
-    enum Mark: Equatable { case none, playback, missing }
+    enum Mark: Equatable { case none, key, missing }
 
     private let titleField = NSTextField.playlistLabel(font: .systemFont(ofSize: 12), truncation: .byTruncatingMiddle)
     private let formatField = NSTextField.playlistLabel(font: .systemFont(ofSize: 11), truncation: .byClipping)
@@ -1380,9 +1386,14 @@ final class PlaylistVersionCellView: NSTableCellView {
         font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular), truncation: .byClipping, alignment: .right
     )
     private let markView = NSImageView()
+    private let keyVersionButton = NSButton()
     private let titleHeight: CGFloat
     private let detailHeight: CGFloat
     private var mark = Mark.none
+    var onSetKeyVersion: (() -> Void)?
+    var isHovered = false {
+        didSet { if isHovered != oldValue { updateKeyVersionButton() } }
+    }
 
     override var isFlipped: Bool { true }
 
@@ -1395,7 +1406,16 @@ final class PlaylistVersionCellView: NSTableCellView {
         // As on item rows, the duration shows no expansion tooltip.
         durationField.allowsExpansionToolTips = false
         markView.imageScaling = .scaleNone
-        for view in [markView, titleField, formatField, durationField] as [NSView] { addSubview(view) }
+        keyVersionButton.isBordered = false
+        keyVersionButton.refusesFirstResponder = true
+        keyVersionButton.imagePosition = .imageOnly
+        keyVersionButton.image = PlaylistGlyph.symbol("square", size: 12, label: "Set as Key Version")
+        keyVersionButton.setAccessibilityLabel("Set as Key Version")
+        keyVersionButton.toolTip = "Set as Key Version"
+        keyVersionButton.target = self
+        keyVersionButton.action = #selector(setKeyVersion)
+        keyVersionButton.isHidden = true
+        for view in [markView, keyVersionButton, titleField, formatField, durationField] as [NSView] { addSubview(view) }
     }
 
     @available(*, unavailable)
@@ -1411,16 +1431,25 @@ final class PlaylistVersionCellView: NSTableCellView {
         case .none:
             markView.image = nil
             markView.toolTip = nil
-        case .playback:
-            markView.image = PlaylistGlyph.symbol("checkmark.circle.fill", size: 12, label: "Playback version")
-            markView.toolTip = "Playback version"
+        case .key:
+            markView.image = PlaylistGlyph.symbol("checkmark.circle.fill", size: 12, label: "Key Version")
+            markView.toolTip = "Key Version"
         case .missing:
             markView.image = PlaylistGlyph.warning(size: 12)
             markView.toolTip = "This file can’t be found."
         }
         markView.setAccessibilityElement(mark != .none)
+        updateKeyVersionButton()
         applyStyle()
         needsLayout = true
+    }
+
+    private func updateKeyVersionButton() {
+        keyVersionButton.isHidden = mark != .none || !isHovered
+    }
+
+    @objc private func setKeyVersion() {
+        onSetKeyVersion?()
     }
 
     override var backgroundStyle: NSView.BackgroundStyle {
@@ -1441,7 +1470,9 @@ final class PlaylistVersionCellView: NSTableCellView {
             formatField.textColor = .secondaryLabelColor
             durationField.textColor = .secondaryLabelColor
         }
-        if mark == .playback { markView.contentTintColor = emphasized ? selectedText : .secondaryLabelColor }
+        let markColor: NSColor = emphasized ? selectedText : .secondaryLabelColor
+        if mark == .key { markView.contentTintColor = markColor }
+        keyVersionButton.contentTintColor = markColor
     }
 
     override func layout() {
@@ -1449,6 +1480,7 @@ final class PlaylistVersionCellView: NSTableCellView {
         typealias M = PlaylistRowMetrics
         let height = bounds.height
         markView.frame = NSRect(x: M.thumbnailX, y: 0, width: M.thumbnailSide, height: height)
+        keyVersionButton.frame = markView.frame
         let trailing = M.trailingX(rowWidth: bounds.width)
         let durationWidth = max(M.durationMinimumWidth, durationField.fittingTextWidth)
         let durationX = trailing - durationWidth

@@ -368,7 +368,7 @@ struct PlaylistCoordinatorTests {
     }
 
     @MainActor
-    @Test func mixedGroupOverLimitLeavesEveryItemAndUndoUnchanged() async {
+    @Test func mixedGroupOverLimitLeavesEveryItemAndUndoUnchanged() {
         let destination = PlaylistItem(title: "Destination", versions: (0..<31).map { makeVersion("dest-\($0).wav") })
         let first = makeVersion("loose-one.wav")
         let second = makeVersion("loose-two.wav")
@@ -376,12 +376,91 @@ struct PlaylistCoordinatorTests {
         let before = PlaylistWorkspace(items: [destination, source])
         let coordinator = PlaylistCoordinator(workspace: before)
         let undo = UndoManager()
-        let result = await coordinator.groupItems([destination.id], looseVersionIDs: [first.id, second.id],
-                                                  compare: true, undoManager: undo)
+        let result = coordinator.groupItems([destination.id], looseVersionIDs: [first.id, second.id], undoManager: undo)
         #expect(result == nil)
         #expect(coordinator.workspace == before)
         #expect(!undo.canUndo)
         #expect(coordinator.errorMessage != nil)
+    }
+
+    @MainActor
+    @Test func moveCommandsFollowTheCurrentSelectionAndRespectEachRowsSiblings() {
+        let a = PlaylistItem(title: "A", versions: ["a", "b", "c"].map { makeVersion("\($0).wav") })
+        let b = PlaylistItem(title: "B", versions: [makeVersion("d.wav")])
+        let c = PlaylistItem(title: "C", versions: [makeVersion("e.wav")])
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [a, b, c]))
+        let presentation = PlaylistPresentationState()
+        let undo = UndoManager()
+        let context = PlaylistCommandContext(coordinator: coordinator, presentation: presentation, undoManager: undo)
+
+        #expect(!PlaylistOrganizationAvailability(context).canMoveUp)
+        presentation.selection = [.item(b.id), .item(c.id), .version(a.versions[1].id)]
+        #expect(PlaylistOrganizationAvailability(context).canMoveUp)
+        context.moveSelection(.up)
+        #expect(coordinator.workspace.items.map(\.id) == [b.id, c.id, a.id])
+        #expect(coordinator.workspace.items.last?.versions.map(\.id) ==
+                [a.versions[1].id, a.versions[0].id, a.versions[2].id])
+        #expect(coordinator.workspace.items.last?.selectedVersionID == a.selectedVersionID)
+        #expect(!PlaylistOrganizationAvailability(context).canMoveUp)
+        #expect(PlaylistOrganizationAvailability(context).canMoveDown)
+        undo.undo()
+        #expect(coordinator.workspace.items == [a, b, c])
+    }
+
+    @MainActor
+    @Test func separateCommandsSelectResultingTracksInPlace() {
+        let versions = ["first", "second", "third", "fourth", "fifth"].map { makeVersion("\($0).wav") }
+        let item = PlaylistItem(title: "Song", versions: versions, selectedVersionID: versions[1].id)
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
+        let presentation = PlaylistPresentationState()
+        let context = PlaylistCommandContext(coordinator: coordinator, presentation: presentation, undoManager: nil)
+        presentation.expanded = [item.id]
+
+        presentation.selection = [.version(versions[1].id)]
+        #expect(context.canSeparate)
+        context.separate()
+        let partial = coordinator.workspace.items
+        #expect(partial.map { $0.versions.map(\.id) } ==
+                [[versions[0].id, versions[2].id, versions[3].id, versions[4].id], [versions[1].id]])
+        #expect(presentation.selection == [.item(partial[1].id)])
+        #expect(!context.canSeparate)
+
+        presentation.selection = [.version(versions[2].id), .version(versions[4].id)]
+        context.separate()
+        let multiple = coordinator.workspace.items
+        #expect(multiple.map { $0.versions.map(\.id) } ==
+                [[versions[0].id, versions[3].id], [versions[2].id], [versions[4].id], [versions[1].id]])
+        #expect(presentation.selection == [.item(multiple[1].id), .item(multiple[2].id)])
+
+        presentation.selection = [.item(item.id), .version(versions[3].id)]
+        context.separate()
+        let complete = coordinator.workspace.items
+        #expect(complete.map { $0.versions.map(\.id) } ==
+                [[versions[0].id], [versions[3].id], [versions[2].id], [versions[4].id], [versions[1].id]])
+        #expect(presentation.selection == [.item(complete[0].id), .item(complete[1].id)])
+        #expect(!context.canSeparate)
+    }
+
+    @MainActor
+    @Test func groupUsesTheSelectedTrackAndOnlyTheSelectedLooseVersions() {
+        let target = PlaylistItem(title: "Target", versions: ["a", "b"].map { makeVersion("\($0).wav") })
+        let source = PlaylistItem(title: "Source", versions: ["c", "d"].map { makeVersion("\($0).wav") })
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [target, source]))
+        let presentation = PlaylistPresentationState()
+        let context = PlaylistCommandContext(coordinator: coordinator, presentation: presentation, undoManager: nil)
+
+        presentation.selection = [.item(target.id), .version(target.versions[1].id)]
+        #expect(!context.canGroup)
+        presentation.selection.insert(.version(source.versions[0].id))
+        #expect(context.canGroup)
+        context.group()
+
+        #expect(coordinator.workspace.items.map(\.id) == [target.id, source.id])
+        #expect(coordinator.workspace.items[0].versions == target.versions + [source.versions[0]])
+        #expect(coordinator.workspace.items[1].versions == [source.versions[1]])
+        #expect(presentation.selection == [.item(target.id)])
+        #expect(presentation.expanded == [target.id])
+        #expect(!context.canGroup)
     }
 
     @MainActor
@@ -548,6 +627,35 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.mode == .playlist)
         #expect(coordinator.workspace.items[0].selectedVersionID == secondID)
         #expect(controller.session.activeTrackID == secondID)
+    }
+
+    @MainActor
+    @Test func playingAVersionRowRestartsItWithoutChangingTheKeyVersion() async throws {
+        let firstURL = try makeTemporaryAudioFile(name: "key.wav")
+        let secondURL = try makeTemporaryAudioFile(name: "alternate.wav")
+        defer {
+            try? FileManager.default.removeItem(at: firstURL.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: secondURL.deletingLastPathComponent())
+        }
+        let key = makePlaylistVersion(url: firstURL, title: "Key")
+        let alternate = makePlaylistVersion(url: secondURL, title: "Alternate")
+        let item = PlaylistItem(title: "Track", versions: [key, alternate])
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
+        defer { coordinator.pause() }
+
+        await coordinator.playItem(id: item.id, versionID: alternate.id, fromBeginning: true)
+        coordinator.pause()
+        coordinator.seek(to: 1)
+        #expect(coordinator.controller.session.transportPosition == 1)
+
+        await coordinator.playItem(id: item.id, versionID: alternate.id, fromBeginning: true)
+        #expect(coordinator.isPlaying)
+        #expect(coordinator.currentVersionID == alternate.id)
+        #expect(coordinator.workspace.listeningState?.filePosition ?? 1 < 0.5)
+        #expect(coordinator.workspace.items.first?.selectedVersionID == key.id)
+
+        await coordinator.playItem(id: item.id)
+        #expect(coordinator.currentVersionID == key.id)
     }
 
     @MainActor
@@ -759,7 +867,7 @@ struct PlaylistCoordinatorTests {
 
     @MainActor
     @Test
-    func groupAndCompareWithAMissingFileOpensCompareAndKeepsPlayback() async throws {
+    func comparingAGroupWithAMissingFileKeepsPlayback() async throws {
         let url = try makeTemporaryAudioFile(name: "playing.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let version = makePlaylistVersion(url: url, title: "Playing")
@@ -770,8 +878,10 @@ struct PlaylistCoordinatorTests {
         try #require(coordinator.isPlaying)
         defer { coordinator.pause() }
 
-        let group = await coordinator.groupItems([missing.id, playing.id], compare: true)
+        let group = coordinator.groupItems([missing.id, playing.id])
         #expect(group == missing.id)
+        try await waitFor { coordinator.runtimeContext?.itemID == missing.id }
+        await coordinator.enterComparison(itemID: missing.id)
         // Compare opens; the missing version is a silent lane, and the
         // playing version stays audible.
         #expect(coordinator.mode == .comparison(itemID: missing.id))
@@ -1013,7 +1123,7 @@ struct PlaylistCoordinatorTests {
         let undo = UndoManager()
         undo.groupsByEvent = false
         undo.beginUndoGrouping()
-        let grouped = await coordinator.groupItems([original.id, other.id], undoManager: undo)
+        let grouped = coordinator.groupItems([original.id, other.id], undoManager: undo)
         let group = try #require(grouped)
         undo.endUndoGrouping()
         await coordinator.enterComparison(itemID: group)

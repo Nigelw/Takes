@@ -664,6 +664,18 @@ struct PlaylistWorkspace: Codable, Equatable {
         self = candidate
     }
 
+    mutating func reorderVersions(_ orderedIDs: [UUID], in itemID: UUID) throws {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else {
+            throw PlaylistWorkspaceError.itemNotFound(itemID)
+        }
+        let versions = items[index].versions
+        guard orderedIDs.count == versions.count, Set(orderedIDs) == Set(versions.map(\.id)) else {
+            throw PlaylistWorkspaceError.invalidItemOrder
+        }
+        let byID = Dictionary(uniqueKeysWithValues: versions.map { ($0.id, $0) })
+        items[index].versions = orderedIDs.compactMap { byID[$0] }
+    }
+
     /// SwiftUI-compatible reorder operation. The destination is interpreted as
     /// an insertion offset in the original array, just like Array.move.
     mutating func reorderItems(fromOffsets offsets: IndexSet, toOffset destinationOffset: Int) throws {

@@ -438,14 +438,13 @@ None open. The version check for a missing file was decided in milestone 3
 - **Missing version file** (milestone 3, was §12). A version row whose file
   is missing shows a yellow warning triangle in the 34 pt check column in
   place of the check, even when it is the playback version, and a dimmed
-  title. Clicking it opens Locate File… rather than switching playback to a
-  file that can't play. An item row shows the triangle over its darkened
-  thumbnail when any of its files is missing (the tooltip counts them) and
+  title. Double-clicking the row opens Locate File…. An item row shows the
+  triangle over its darkened thumbnail when any of its files is missing (the tooltip counts them) and
   dims its title when its playback version's file is missing.
 - **Entering compare never starts an item** (milestone 3, §9). Another
   item's playback stops and compare opens paused; the item already playing
-  keeps playing. This applies to every way in: the Compare pill, the context
-  menu, and Group and Compare.
+  keeps playing. This applies to the Compare pill, the context menu and the
+  Compare keyboard shortcut.
 - **Row thumbnails** (milestone 3). Item rows show their playback version's
   embedded artwork, decoded only for rows inside the visible rect, 68 px,
   in memory, from a bounded cache separate from the cover's; a version whose
@@ -453,9 +452,10 @@ None open. The version check for a missing file was decided in milestone 3
 - **Version rows** (milestone 3). Name: the title tag, else the filename
   without its extension (the readout's rule). The format
   column shows the container alone (FLAC, MP3); sample rate, bit rate and the
-  filename are in the row's tooltip. Only a plain click changes the playback
-  version; ⌘- and ⇧-clicks only select. Rows being dragged stay in place,
-  dimmed, until the drop lands.
+  filename are in the row's tooltip. A single click selects the row.
+  Double-click plays the version from the beginning. Click the empty checkbox
+  on a hovered row to make it the key version. Rows being dragged stay in
+  place, dimmed, until the drop lands.
 - **Item rows without an artist tag** show the title alone, vertically
   centred.
 - **Compare pill on hover only**, not on the selected row. Keyboard and
@@ -559,7 +559,7 @@ None open. The version check for a missing file was decided in milestone 3
   playlist, the compared item in compare); − runs Delete's command.
 - **`…` pull-down** (milestone 5). A standard pull-down button (ellipsis and
   indicator) holding exactly the Playlist menu's list, shared as one view
-  (`PlaylistOrganizationMenuItems`): Group as Versions, Group and Compare,
+  (`playlistOrganizationMenuItems`): Group as Versions,
   Separate Versions, Move Up, Move Down and Clear Playlist, acting
   on the selection with the menu's validation. It is disabled while the
   playlist is empty, when every command in it is.

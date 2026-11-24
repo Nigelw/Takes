@@ -516,10 +516,11 @@ final class PlaylistCoordinator {
         )
     }
 
-    /// Start the selected item from its saved file position, or from the
-    /// beginning when it has no saved position. Explicit item activation always
-    /// starts playback.
-    func playItem(id itemID: PlaylistItem.ID, versionID: PlaylistVersion.ID? = nil) async {
+    /// Start the item from its saved file position. Playing a version row
+    /// starts at zero and keeps the item's key version.
+    func playItem(
+        id itemID: PlaylistItem.ID, versionID: PlaylistVersion.ID? = nil, fromBeginning: Bool = false
+    ) async {
         let targetVersionID: UUID
         guard let item = workspace.items.first(where: { $0.id == itemID }) else {
             reportError(PlaylistWorkspaceError.itemNotFound(itemID).localizedDescription)
@@ -544,13 +545,10 @@ final class PlaylistCoordinator {
         let savedPosition = workspace.listeningState.flatMap { state in
             state.itemID == itemID && state.versionID == targetVersionID ? state.filePosition : nil
         } ?? 0
-        if let index = workspace.items.firstIndex(where: { $0.id == itemID }) {
-            workspace.items[index].selectedVersionID = targetVersionID
-        }
         let snapshot = PlaybackSnapshot(
             itemID: itemID,
             versionID: targetVersionID,
-            filePosition: savedPosition,
+            filePosition: fromBeginning ? 0 : savedPosition,
             isPlaying: true
         )
         await activatePlaylist(itemID: itemID, versionID: targetVersionID, snapshot: snapshot)
@@ -839,49 +837,15 @@ final class PlaylistCoordinator {
     func groupItems(
         _ itemIDs: [PlaylistItem.ID],
         looseVersionIDs: [PlaylistVersion.ID] = [],
-        compare: Bool = false,
+        into destination: PlaylistItem.ID? = nil,
         undoManager: UndoManager? = nil
-    ) async -> PlaylistItem.ID? {
-        let snapshot = capturePlaybackSnapshot()
-        var before = workspace
-        _ = captureRuntimeEdits(into: &before)
-        do {
-            var candidate = before
-            let playingID = snapshot.isPlaying ? snapshot.versionID : nil
-            let resultID = try candidate.groupItems(itemIDs, looseVersionIDs: looseVersionIDs, playingVersionID: playingID)
-            let newOwnerID = snapshot.versionID.flatMap { versionID in
-                candidate.items.first { $0.versions.contains { $0.id == versionID } }?.id
-            }
-            let needsRefresh = pendingRuntimeRefreshTask != nil || newOwnerID != snapshot.itemID
-                || runtimeRequiresRefresh(before: before, after: candidate, mode: mode)
-            workspace = candidate
-            registerUndo(before: before, undoManager: undoManager, actionName: "Group Items")
-            rebuildTraversal()
-            clearError()
-            if compare {
-                var incoming = snapshot
-                if newOwnerID == resultID { incoming.itemID = resultID }
-                if await enterComparison(itemID: resultID, from: incoming) == .failed, needsRefresh {
-                    let comparisonError = errorMessage
-                    await refreshAfterOrganization(snapshot: snapshot)
-                    if errorMessage == nil { errorMessage = comparisonError }
-                }
-            } else if needsRefresh {
-                beginNavigation()
-                await refreshAfterOrganization(snapshot: snapshot)
-            }
-            return resultID
-        } catch {
-            reportError(error.localizedDescription)
-            return nil
-        }
-    }
-
-    func groupItems(_ itemIDs: [UUID], into destination: UUID, undoManager: UndoManager?) -> Bool {
+    ) -> PlaylistItem.ID? {
         let playingID = controller.session.isPlaying ? currentVersionID : nil
-        return mutateWorkspace(beforeAction: "Group Items", undoManager: undoManager) {
-            try $0.groupItems(itemIDs, into: destination, playingVersionID: playingID)
+        var result: UUID?
+        let succeeded = mutateWorkspace(beforeAction: "Group Items", undoManager: undoManager) {
+            result = try $0.groupItems(itemIDs, looseVersionIDs: looseVersionIDs, into: destination, playingVersionID: playingID)
         }
+        return succeeded ? result : nil
     }
 
     func moveVersions(_ ids: [UUID], to destination: UUID, before anchor: UUID?, undoManager: UndoManager?) -> Bool {
@@ -900,13 +864,21 @@ final class PlaylistCoordinator {
         var created: [UUID] = []
         let succeeded = mutateWorkspace(beforeAction: ids.count == 1 ? "Separate Version" : "Separate Versions",
                                         undoManager: undoManager) { candidate in
-            guard Set(ids).count == ids.count else { throw PlaylistWorkspaceError.invalidItemOrder }
+            let selected = Set(ids)
+            guard selected.count == ids.count else { throw PlaylistWorkspaceError.invalidItemOrder }
             // Adjacent insertion puts each new row directly after the source.
             // Visit those versions backwards to retain their displayed order.
             let visitOrder: [UUID]
+            let fullySelectedItems: Set<UUID>
             switch placement {
-            case .adjacent: visitOrder = ids.reversed()
-            case .beforeItem: visitOrder = ids
+            case .adjacent:
+                visitOrder = ids.reversed()
+                fullySelectedItems = Set(candidate.items.filter { item in
+                    item.versions.count > 1 && item.versions.allSatisfy { selected.contains($0.id) }
+                }.map(\.id))
+            case .beforeItem:
+                visitOrder = ids
+                fullySelectedItems = []
             }
             for id in visitOrder {
                 guard let owner = candidate.items.first(where: { $0.versions.contains { $0.id == id } }) else {
@@ -926,6 +898,10 @@ final class PlaylistCoordinator {
                 try candidate.reorderItems(order)
             } else {
                 created.reverse()
+                for index in candidate.items.indices where fullySelectedItems.contains(candidate.items[index].id) {
+                    candidate.items[index].versions[0].offsetSeconds = 0
+                    candidate.items[index].comparison.loopRegion = nil
+                }
             }
         }
         return succeeded ? created : nil
@@ -949,6 +925,15 @@ final class PlaylistCoordinator {
     ) -> Bool {
         mutateWorkspace(beforeAction: "Reorder Items", undoManager: undoManager) {
             try $0.reorderItems(orderedItemIDs)
+        }
+    }
+
+    func reorderPlaylistRows(items: [UUID]?, versions: [UUID: [UUID]], undoManager: UndoManager?) {
+        _ = mutateWorkspace(beforeAction: "Reorder Playlist Rows", undoManager: undoManager) { candidate in
+            if let items { try candidate.reorderItems(items) }
+            for (itemID, order) in versions {
+                try candidate.reorderVersions(order, in: itemID)
+            }
         }
     }
 
@@ -1603,7 +1588,9 @@ final class PlaylistCoordinator {
                     }
                     return
                 }
-                guard let versionID = self.workspace.items.first(where: { $0.id == nextID })?.selectedVersion?.id else {
+                let versionID = repeatMode == .one && nextID == current
+                    ? self.currentVersionID : self.selectedVersion(for: nextID)?.id
+                guard let versionID else {
                     skippedMessages.append("No playable version is available for playlist item \(nextID.uuidString).")
                     candidate = self.traversal.next(from: nextID, atNaturalEnd: true)
                     continue
@@ -1811,7 +1798,10 @@ final class PlaylistCoordinator {
             synchronizeModeWithWorkspaceView()
             registerUndo(before: before, undoManager: undoManager, actionName: actionName)
             rebuildTraversal()
-            if runtimeRequiresRefresh(before: before, after: workspace, mode: modeBeforeMutation) {
+            let listeningVersionMoved = playback.versionID != nil
+                && candidate.listeningState?.versionID == playback.versionID
+                && candidate.listeningState?.itemID != before.listeningState?.itemID
+            if listeningVersionMoved || runtimeRequiresRefresh(before: before, after: workspace, mode: modeBeforeMutation) {
                 // Metadata-only edits must not cancel a runtime refresh queued
                 // by an earlier organization action in this same event.
                 if let activeID = controller.session.activeTrackID,
@@ -2069,6 +2059,9 @@ final class PlaylistCoordinator {
         guard let itemID else { return false }
         let oldItem = before.items.first(where: { $0.id == itemID })
         let newItem = after.items.first(where: { $0.id == itemID })
+        if mode == .playlist, let versionID = currentVersionID {
+            return oldItem?.versions.first { $0.id == versionID } != newItem?.versions.first { $0.id == versionID }
+        }
         return oldItem?.versions != newItem?.versions
             || oldItem?.comparison != newItem?.comparison
     }

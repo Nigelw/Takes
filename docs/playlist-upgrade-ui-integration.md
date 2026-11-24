@@ -72,8 +72,8 @@ menu actions and Command-arrow jumps remain available. Comparison retains its
 current numeric version hotkeys and arrow-switch behavior. Text editing takes
 precedence in either mode, including rename and Locate File sheets.
 
-The header/context menu offers Group as Versions, Group and Compare, Rename,
-Separate, Move To, Remove, and Clear Playlist. Group actions accept selected
+The header/context menu offers Group as Versions, Rename, Separate, Move To,
+Remove, and Clear Playlist. Group actions accept selected
 item rows in workspace order. Version operations accept selected version IDs;
 mixed selections normalize away children whose parent is selected. Move To
 names a destination item and disables destinations exceeding 32 versions.
@@ -131,7 +131,7 @@ Required operations, with final signatures agreed before UI implementation:
 - Imports: destination capture plus destination-taking local, Music, Finder
   and streaming entry points. Deleted destinations report failure. Inactive
   destination commits update content without replacing active runtime.
-- Organization: ordered ID-taking group, group-and-compare, rename, reorder,
+- Organization: ordered ID-taking group, rename, reorder,
   separate, move, remove, and clear operations with UndoManager support and
   validation/capacity results. Return affected/result IDs for selection repair.
 - Recovery: `locateFile(versionID:url:)`, explicit retry/recovery operations,
