@@ -11,6 +11,11 @@ struct SettingsView: View {
                     Label("General", systemImage: "gearshape")
                 }
 
+            MetadataSettingsView()
+                .tabItem {
+                    Label("Metadata", systemImage: "tag")
+                }
+
             UpdateSettingsView()
                 .tabItem {
                     Label("Updates", systemImage: "arrow.triangle.2.circlepath")
@@ -39,11 +44,11 @@ private struct GeneralSettingsView: View {
 
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Picker("Group similar tracks", selection: $settings.automaticGroupingMode) {
-                        ForEach(AutomaticGroupingMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
+                    Toggle("Group similar tracks", isOn: Binding(
+                        get: { settings.automaticGroupingMode == .automatic },
+                        set: { settings.automaticGroupingMode = $0 ? .automatic : .off }
+                    ))
+                    .toggleStyle(.switch)
                     SettingsHint(settings.automaticGroupingMode.explanation)
                 }
             } header: {
@@ -60,14 +65,14 @@ private struct GeneralSettingsView: View {
                     LabeledContent("Nudge") {
                         OffsetAmountField(value: $settings.offsetStep, stepperIncrement: 10)
                     }
-                    SettingsHint("Offset adjustment when using the stepper buttons or the up/down arrow keys.")
+                    SettingsHint("Offset adjustment when pressing the Up or Down arrow key in a track’s offset field.")
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     LabeledContent("Large nudge") {
                         OffsetAmountField(value: $settings.offsetLargeStep, stepperIncrement: 50)
                     }
-                    SettingsHint("Hold Shift while using steppers or arrow keys to adjust by a larger amount.")
+                    SettingsHint("Hold Shift while pressing the Up or Down arrow key to adjust by a larger amount.")
                 }
             } header: {
                 Text("Track Alignment")
@@ -86,6 +91,48 @@ private struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct MetadataSettingsView: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        Form {
+            Section {
+                MetadataFieldToggles(fields: TrackMetadataField.allCases, enabledFields: $settings.playlistMetadataFields)
+            } header: {
+                Text("Playlist Track Metadata")
+            }
+
+            Section {
+                MetadataFieldToggles(fields: TrackMetadataField.compareFields, enabledFields: $settings.compareMetadataFields)
+            } header: {
+                Text("Compare Track Metadata")
+            }
+        }
+        .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct MetadataFieldToggles: View {
+    let fields: [TrackMetadataField]
+    @Binding var enabledFields: Set<TrackMetadataField>
+
+    var body: some View {
+        ForEach(fields) { field in
+            Toggle(field.title, isOn: Binding(
+                get: { enabledFields.contains(field) },
+                set: { isEnabled in
+                    if isEnabled {
+                        enabledFields.insert(field)
+                    } else {
+                        enabledFields.remove(field)
+                    }
+                }
+            ))
+        }
     }
 }
 

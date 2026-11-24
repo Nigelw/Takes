@@ -697,6 +697,58 @@ struct ControlBarDivider: View {
     }
 }
 
+struct TransportPlayButton: View {
+    let coordinator: PlaylistCoordinator
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        let isPlaying = coordinator.isPlaying
+        let title = isPlaying ? "Pause" : "Play"
+        let canPlay = coordinator.mode.itemID == nil ? coordinator.canPlay : coordinator.controller.session.isPlayable
+        Button { coordinator.togglePlayback() } label: {
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+        }
+        .buttonStyle(CircleTransportButtonStyle(
+            kind: .primary, diameter: ControlBarMetrics.primaryDiameter,
+            glyphSize: ControlBarMetrics.primaryGlyphSize, pressedGlyphOffset: 1.5
+        ))
+        .disabled(!canPlay)
+        .help(title)
+        .accessibilityLabel(title)
+        .componentDebugLabel("Play", enabled: settings.showsComponentDebugLabels)
+    }
+}
+
+/// The playlist's centre controls also appear over the artwork, where
+/// Previous and Next step through takes when comparing.
+struct BasicTransportButtons: View {
+    let coordinator: PlaylistCoordinator
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        stepButton(isNext: false)
+        TransportPlayButton(coordinator: coordinator)
+        stepButton(isNext: true)
+    }
+
+    private func stepButton(isNext: Bool) -> some View {
+        let direction = isNext ? "Next" : "Previous"
+        let title = direction + (coordinator.mode.itemID == nil ? " Track" : " Take")
+        return Button {
+            if isNext { coordinator.next() } else { coordinator.previous() }
+        } label: {
+            Image(systemName: isNext ? "forward.end.fill" : "backward.end.fill")
+        }
+        .buttonStyle(CircleTransportButtonStyle(
+            kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter, glyphSize: ControlBarMetrics.secondaryGlyphSize
+        ))
+        .disabled(isNext ? !coordinator.canNext : !coordinator.canPrevious)
+        .help(title)
+        .accessibilityLabel(title)
+        .componentDebugLabel(direction, enabled: settings.showsComponentDebugLabels)
+    }
+}
+
 /// Shuffle, Blind and Repeat (spec §5.1; side-button lamps spec §2–3, no
 /// lamp): a plain 20 pt icon, no circle, centred in the 30 × 40 pt side
 /// slot. Off, the glyph is the dimmed off colour; on, it lights

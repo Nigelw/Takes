@@ -1095,10 +1095,8 @@ final class OpenFileCommandState: ObservableObject {
 
 struct MainWindowCommandState {
     let resetWindowSizing: @MainActor () -> Void
-    /// View ▸ Show/Hide Artwork: the titlebar toggle's action, so the menu
-    /// gets the same animated resize.
-    var showsArtwork = true
-    var setArtworkVisible: @MainActor (Bool) -> Void = { _ in }
+    let visibility: WorkspaceVisibility
+    let toggleVisibility: @MainActor (WorkspaceVisibility.Region) -> Void
 }
 
 private struct OpenFileCommandStateKey: FocusedValueKey {
@@ -1319,30 +1317,30 @@ struct ContentView: View {
             // Draw the import highlight after the inactive-window treatment so drag
             // hover stays vivid even while the window is in the background.
             .overlay {
-                trackDropHighlightOverlay
+                if settings.windowVisibility.showsPlaylist { trackDropHighlightOverlay }
             }
     }
 
     private var contentStack: some View {
         VStack(alignment: .leading, spacing: 0) {
-            controlBar
-            VStack(spacing: 0) {
-                CompareInfoBar(controller: controller) {
-                    Task { await coordinator.backToPlaylist() }
-                }
-                .componentDebugLabel("Info Bar", enabled: settings.showsComponentDebugLabels)
-                trackTimelineSection
-                    .frame(maxHeight: .infinity)
+            if settings.windowVisibility.showsPlayer {
+                controlBar
+            } else if settings.windowVisibility.showsPlaylist {
+                ControlBarDivider()
             }
-            // Recess the info bar, ruler and lanes beneath the lighter
-            // transport surface. The control bar's groove is the only divider
-            // between them: no line between the info bar and the ruler, and
-            // the ruler has no top border (A2 §3), so the two read as one band.
-            .background(Theme.timelineWellShade)
-            // Below the lanes, which it shortens; the lanes keep their fixed
-            // height and scroll (A2 §7).
-            CompareBottomBar(coordinator: coordinator, openFiles: openFileCommandState)
-                .componentDebugLabel("Bottom Bar", enabled: settings.showsComponentDebugLabels)
+            if settings.windowVisibility.showsPlaylist {
+                VStack(spacing: 0) {
+                    CompareInfoBar(controller: controller) {
+                        Task { await coordinator.backToPlaylist() }
+                    }
+                    .componentDebugLabel("Info Bar", enabled: settings.showsComponentDebugLabels)
+                    trackTimelineSection
+                        .frame(maxHeight: .infinity)
+                }
+                .background(Theme.timelineWellShade)
+                CompareBottomBar(coordinator: coordinator, openFiles: openFileCommandState)
+                    .componentDebugLabel("Bottom Bar", enabled: settings.showsComponentDebugLabels)
+            }
         }
     }
 
@@ -1350,7 +1348,8 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Color.clear
                 .frame(
-                    height: controlBarHeight + CompareInfoBarMetrics.height
+                    height: (settings.windowVisibility.showsPlayer ? controlBarHeight : ControlBarDivider.height)
+                        + CompareInfoBarMetrics.height
                         + (controller.displayedTrackRowCount == 0 ? 0 : CompareLaneLayout.seatBottom)
                 )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
@@ -1368,7 +1367,7 @@ struct ContentView: View {
         ControlBarLayout {
             blindListeningButton
         } center: {
-            playButton
+            TransportPlayButton(coordinator: coordinator)
             switchTrackButton
         } trailing: {
             repeatButton
@@ -1377,24 +1376,6 @@ struct ContentView: View {
             if abs(height - controlBarHeight) > 0.5 { controlBarHeight = height }
         }
         .componentDebugLabel("Control Bar", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private var playButton: some View {
-        Button {
-            coordinator.togglePlayback()
-        } label: {
-            Image(systemName: controller.session.isPlaying ? "pause.fill" : "play.fill")
-        }
-        .buttonStyle(CircleTransportButtonStyle(
-            kind: .primary,
-            diameter: ControlBarMetrics.primaryDiameter,
-            glyphSize: ControlBarMetrics.primaryGlyphSize,
-            pressedGlyphOffset: 1.5
-        ))
-        .disabled(!controller.session.isPlayable)
-        .help(controller.session.isPlaying ? "Pause" : "Play")
-        .accessibilityLabel(controller.session.isPlaying ? "Pause" : "Play")
-        .componentDebugLabel("Play", enabled: settings.showsComponentDebugLabels)
     }
 
     private var switchTrackButton: some View {
@@ -1875,13 +1856,14 @@ struct ContentView: View {
         let trackID = sessionTrack.id
         let isBlind = controller.session.isBlindListeningModeEnabled
         let offsetMs = Int((track.offsetSeconds * 1000).rounded())
+        let format = LaneStripText.format(for: track, isBlind: isBlind, fields: settings.compareMetadataFields)
         return LaneStripView(
             index: index,
             trackID: trackID,
             fileURL: track.url,
             name: LaneStripText.name(for: track, index: index, isBlind: isBlind),
-            format: LaneStripText.format(for: track, isBlind: isBlind),
-            toolTip: LaneStripText.toolTip(for: track, isBlind: isBlind),
+            format: format,
+            toolTip: LaneStripText.toolTip(for: track, isBlind: isBlind, format: format),
             offsetMs: offsetMs,
             isActive: controller.session.activeTrackID == trackID,
             isBlind: isBlind,
@@ -1946,7 +1928,7 @@ struct ContentView: View {
     private func reorderPreviewCard(index: Int, sessionTrack: SessionTrack, width: CGFloat) -> some View {
         let track = sessionTrack.loadedTrack
         let isBlind = controller.session.isBlindListeningModeEnabled
-        let format = LaneStripText.format(for: track, isBlind: isBlind)
+        let format = LaneStripText.format(for: track, isBlind: isBlind, fields: settings.compareMetadataFields)
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             TrackIndexBadgeView(
                 index: index,
@@ -2548,7 +2530,7 @@ private struct ReorderPlacement: ViewModifier {
 
 /// The lane strip's text (A2 §8). The title is the version's title tag, else
 /// its filename without the extension — milestone 3's version-row rule. The
-/// format is the container, sample rate and bit rate. Blind Listening Mode
+/// format shows the enabled container, sample rate and bit rate. Blind Listening Mode
 /// shows `Track n` and no format, as the pre-A2 info column did.
 enum LaneStripText {
     /// Shown in place of the format when the version's file can't be found.
@@ -2558,24 +2540,25 @@ enum LaneStripText {
         isBlind ? "Track \(index + 1)" : PlaylistRowText.versionName(tag: track.title, url: track.url)
     }
 
-    static func format(for track: LoadedTrack, isBlind: Bool) -> String {
+    static func format(for track: LoadedTrack, isBlind: Bool, fields: Set<TrackMetadataField>) -> String {
         guard !isBlind else { return "" }
-        return PlaylistRowText.format(
+        return PlaylistRowText.formatParts(
             fileFormat: track.fileFormatDescription,
             sampleRate: track.sampleRate,
-            bitRate: track.bitRate
-        )
+            bitRate: track.bitRate,
+            fields: fields
+        ).joined(separator: " • ")
     }
 
     /// The strip's tooltip: what the pre-A2 info column showed and the strip
     /// has no room for — the duration and the filename. None while blind.
-    static func toolTip(for track: LoadedTrack, isBlind: Bool) -> String? {
+    static func toolTip(for track: LoadedTrack, isBlind: Bool, format: String) -> String? {
         guard !isBlind else { return nil }
         if track.isMissing {
             return PlaybackError.failedToOpenFile(track.url).localizedDescription
         }
         let details = [
-            format(for: track, isBlind: false),
+            format,
             PlaylistRowText.duration(track.duration)
         ].filter { !$0.isEmpty }.joined(separator: " · ")
         return [

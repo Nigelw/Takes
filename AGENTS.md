@@ -48,7 +48,7 @@ Key ownership:
 
 - `TakesApp.swift`: app windows, app/menu commands, files opened from Finder,
   remote media commands, the main-window size policy (`TakesWindowPolicy`:
-  A2 default/minimum sizes, the artwork toggle's resize, fitting the window
+  A2 default/minimum sizes, visibility toggle resizing, fitting the window
   to added and removed tracks (`frameFittingContent`), frame clamping), and
   Debug menu wiring.
 - `WorkspaceView.swift`: playlist/comparison navigation, shared import routing,
@@ -57,7 +57,7 @@ Key ownership:
   list, keyboard focus handling (including Esc leaving compare), when the
   window fits its tracks (`scheduleContentFit`), and the
   window chrome both modes share: the cover above the control bar and the
-  titlebar artwork toggle.
+  titlebar Artwork, Player, and Playlist toggles.
 - `TransportControls.swift`: the A2 control bar both modes share
   (`ControlBarLayout`: transport row, readout slot (playlist only), divider;
   `ControlBarMetrics`; `ControlBarSideButtonStyle` for Shuffle/Blind/Repeat
@@ -84,8 +84,8 @@ Key ownership:
   thumbnails), the width-scaled cover view, the record placeholder
   (`RecordPlaceholder`: the bundled bitmaps' names, geometry and
   cover-square sizing, and the cover's live ground,
-  `RecordPlaceholderCoverView`), and the artwork toggle with its custom
-  sleeve glyph.
+  `RecordPlaceholderCoverView`), and the titlebar toggle style and custom
+  artwork sleeve glyph.
 - `PlaylistView.swift`: the playlist list's SwiftUI host (empty state, no
   header bar), selection/expansion presentation state, the Playlist menu, and
   the selection-aware organization commands (`PlaylistCommandContext`); the
@@ -112,7 +112,7 @@ Key ownership:
   drag source and context menu), loop gestures, and reorder drag-and-drop.
   The compare bottom bar sits below the lanes; it lives in `BottomBar.swift`.
 - `AppSettings.swift` and `SettingsView.swift`: persisted user preferences
-  (including `showsArtwork`, the titlebar toggle's state) and the Settings
+  (including `WorkspaceVisibility`, the titlebar toggles' state) and the Settings
   window.
 - `PlaybackController.swift`: loading files, session state, transport control,
   playback scheduling, and audibility.
@@ -279,9 +279,11 @@ These are here to prevent parallel implementations and subtle regressions:
   `PlaylistRowView` draws every background (selection, now-playing tint,
   hover, the drop-on-item ring) inside the 10 pt edge inset with a 6 pt
   radius; the geometry lives in `PlaylistRowMetrics`. Item and version
-  titles truncate in the middle; artist lines at the tail.
-  Item rows use their key version's title tag or filename stem, artist,
-  duration, and thumbnail.
+  titles truncate in the middle; item metadata truncates at the tail.
+  Item rows use their key version's title tag or filename stem, duration,
+  thumbnail, and metadata. The Metadata tab in Settings controls which fields
+  appear on the second line (`TrackMetadataField`, Artist by default).
+  `PlaylistRowText.metadataLine` joins enabled, available values with ` • `.
 - Version rows (30 pt) are named by their title tag, else the filename
   without its extension (`PlaylistRowText.versionName`). A single click
   selects the row. Double-clicking a version plays it from the beginning
@@ -327,30 +329,32 @@ These are here to prevent parallel implementations and subtle regressions:
   list; Esc clears the selection. Compare: X / ⇧X Switch Track, ⌘← / ⌘→
   Jump to Beginning / End, plain arrows skip, ⌘D Deselect (the loop; disabled
   in the playlist), Esc leaves. Both: ⌘R Change Repeat Mode, ⇧⌘A Show/Hide
-  Artwork (`MainWindowCommandState.setArtworkVisible`, the titlebar toggle's
+  Artwork (`MainWindowCommandState.toggleVisibility`, the titlebar toggle's
   animated path). Playlist only: ⌘] Compare (`PlaylistCommandContext.compare`,
   one multi-version item), ⌥⌘S Shuffle, ⌘G / ⇧⌘G Group / Separate Versions,
   File ▸ Locate File… (`locateVersionID`). Both modes: ⌥⌘↑ / ⌥⌘↓
   Move Up / Down.
-- One main window serves both modes (A2). It opens 360 pt wide (760 tall with
-  artwork, 412 without) and is user-resizable down to
-  `TakesWindowPolicy.minimumSize(showsArtwork:)`: 260 × 519 with the
+- One main window serves both modes (A2). With the player and lower region
+  visible, it opens 360 pt wide (760 tall with artwork, 412 without) and is
+  user-resizable down to `TakesWindowPolicy.minimumSize(for:isComparison:)`:
+  260 × 519 with the
   artwork, 260 × 271 without (the compare control bar, its info bar, the
   ruler, one whole lane and the bottom bar; `minimumHeightWithoutArtwork`).
   Only the playlist remembers its height (the width is shared):
   `WorkspaceView.switchModeHeight` stores it on entering compare and
   restores it on leaving (`TakesWindowPolicy.storePlaylistHeight`,
-  `frameRestoringPlaylistHeight`; defaults key `main.a2.height.playlist`),
-  stored without the cover so one height serves both artwork states. A live
-  resize, a track fit and a clamped artwork toggle in playlist mode store it
-  too. Compare stores nothing: entering it sizes the window to the item's
+  `WorkspaceView.applyModeHeight`; defaults key `main.a2.height.playlist`).
+  The stored height excludes the cover and is normalized to include the
+  player. A live resize, a track fit and a clamped artwork toggle in
+  expanded playlist mode store it too. Compare sizes the window to the item's
   lanes (`compareFittingHeight` through `frameSettingHeight`, growing or
   shrinking). Launch gives the restored mode its height (`restoreModeHeight`).
-  The retired `main.a2.height.compare` key is removed on launch. Three
-  things resize the window automatically: that mode switch, and the
-  following two. The artwork
-  toggle (the cover height less 12 pt, top edge fixed, clamped on screen).
-  And v2.9.0's track fit, in both modes
+  The retired `main.a2.height.compare` key is removed on launch. The
+  artwork toggle changes the height by the cover height less 12 pt, clamped
+  on screen. Hiding the lower region fits the window to the visible
+  artwork or player and preserves the expanded playlist height. The
+  player toggle removes or restores the control bar height above the divider.
+  Track fit, in both modes
   (`TakesWindowPolicy.frameFittingContent`): adding tracks grows a window
   too short to show every row (`playlistFittingHeight`: item rows and
   expanded version rows; `compareFittingHeight`: one lane per version),
@@ -359,7 +363,7 @@ These are here to prevent parallel implementations and subtle regressions:
   screen's bottom. `WorkspaceView.scheduleContentFit` follows the
   workspace's track count (the playlist's versions, or the compared item's),
   never the runtime's rows, so runtime rebuilds don't resize; it skips mode
-  switches, restoration, a running artwork resize and full screen, and waits
+  switches, restoration, a hidden lower region, a running artwork resize and full screen, and waits
   30 ms so an import's selection and expansion land first. Its
   frame autosaves as `main.a2`; do not reintroduce per-mode frames (only
   the playlist's height is remembered).
@@ -369,11 +373,15 @@ These are here to prevent parallel implementations and subtle regressions:
   the window's current height, keeping the transport at a fixed distance
   from the bottom. A screen-clamped resize animates the remaining cover
   travel. Both transitions respect Reduce Motion.
-- The cover and artwork toggle live in `WorkspaceView`, above both modes'
+- The cover and visibility toggles live in `WorkspaceView`, above both modes'
   control bars, so entering compare never moves them. While the cover is
-  shown, its AppKit hover sensor reveals the toggle and window buttons, with
+  shown, its AppKit hover sensor reveals the toggles and window buttons, with
   a shade behind them over the image. With the cover hidden, the controls stay
-  visible. The control bars take their top padding from
+  visible. Artwork or Player must stay visible. With Player hidden, hovering
+  the cover reveals Previous, Play/Pause and Next. Previous and Next step
+  through tracks in Playlist and takes in Compare. The Playlist toggle
+  controls everything below the divider in either mode. The View menu
+  offers the same three commands. The control bars take their top padding from
   `TakesWindowPolicy.controlBarTopPadding(showsArtwork:)`
   (12 under the cover, 24 under the titlebar). The cover's version comes from
   `CoverVersionRule`: in compare it follows the audible version, except in
@@ -435,7 +443,7 @@ These are here to prevent parallel implementations and subtle regressions:
   (`SideButtonAppearance`, tunable in the Appearance Tuner), not the circle
   buttons' secondary fields. The lit glyph is `Theme.sideButtonLitGlyph`
   (#F4F2FF in dark, with three glow layers; the dark off glyph is
-  #86868C); the titlebar artwork toggle shares that glyph and glow. Repeat's
+  #86868C); the titlebar toggles share that glyph and glow. Repeat's
   glyph names its mode in both modes (`repeat.1` for Repeat One; compare's
   symbols are `ControlBarRepeatSymbol.compare`). Centre buttons are v2.9.0's
   `CircleTransportButtonStyle` (Play 56/22, secondary 40/15). Previous/Next
@@ -496,7 +504,10 @@ These are here to prevent parallel implementations and subtle regressions:
   the row, so a long title truncates rather than running under it. Its hover
   comes from an AppKit tracking area (`HoverSensor`), because SwiftUI hover is
   unreliable over the AppKit text field. Strip titles use
-  the version-row rule (`PlaylistRowText.versionName`); Blind Listening Mode
+  the version-row rule (`PlaylistRowText.versionName`) and always appear.
+  The Metadata tab has separate Format, Sample Rate, and Bitrate settings for
+  Compare, all enabled by default. `LaneStripText.format` joins available,
+  enabled values with ` • ` for the strip, tooltip, and drag preview. Blind Listening Mode
   shows `Track n`, no format or tooltip, and disables Reveal in Finder.
 - Compare has no header. Its bottom bar (A2 §7) has Add Version… (⌘O's
   dialog, importing into the captured item), Remove Active Version (File ▸
@@ -594,14 +605,15 @@ these reintroduces the exact regressions it fixed):
   heights and the grow/shrink rules for added and removed tracks, the stored
   playlist height, compare sizing to its lanes on entry, and the debug
   reset frame), missing versions as silent lanes and their error band's
-  extent, the persisted
-  artwork setting, retired control-bar preferences loading as defaults, the
+  extent, persisted window visibility, compact heights, the artwork/player
+  invariant, retired control-bar preferences loading as defaults, the
   A2 readout title rule (tag, filename), the compare control bar's height
   and the info bar (its geometry, centring and take-count text), the
   ruler labels' tops level with the major notches, the LED meter's cell count
   (no endcaps), head geometry, unlit opacity and glow, the control bar's side-button placement, the side buttons' appearance defaults, compare's repeat glyph per mode, the cover
-  rule (`CoverVersionRule`), the A2 playlist row metrics and version names, the
-  record placeholder (cover-square sizing and ground, the thumbnail rule,
+  rule (`CoverVersionRule`), the A2 playlist row metrics, version names,
+  metadata formatting and playlist and compare preferences, the record placeholder (cover-square
+  sizing and ground, the thumbnail rule,
   one bitmap per appearance, and the disc, label and lead-in geometry
   measured in the exported cover), the
   thumbnail cache (visible-only queue, concurrency bound, capacity, cover

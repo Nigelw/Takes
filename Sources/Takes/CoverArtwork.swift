@@ -397,7 +397,7 @@ struct ArtworkCoverView: View {
                 Theme.artworkPlaceholderFill
                 if let image {
                     let crops = CoverArtworkLayout.crops(image.size)
-                    if proxy.size.width > side + 0.5 || !crops {
+                    if max(proxy.size.width, proxy.size.height) > side + 0.5 || !crops {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -431,35 +431,54 @@ struct ArtworkCoverView: View {
     }
 }
 
-// MARK: - Titlebar toggle
+// MARK: - Titlebar toggles
 
-/// Titlebar button that shows or hides the cover (A2 spec §4). On (artwork
-/// showing): a lit glyph on a frosted chip that reads over any cover. Off: a
-/// plain grey glyph over the control bar.
-struct ArtworkToggleButton: View {
-    @Binding var showsArtwork: Bool
+struct WorkspaceVisibilityButton: View {
+    let region: WorkspaceVisibility.Region
+    let visibility: WorkspaceVisibility
+    let toggle: () -> Void
 
     static let size = CGSize(width: 26, height: 22)
-    static let glyphSize: CGFloat = 16
+    private static let glyphSize: CGFloat = 16
+
+    private var isOn: Bool { visibility[region] }
 
     var body: some View {
-        Button {
-            showsArtwork.toggle()
-        } label: {
-            ArtworkToggleGlyph()
-                .frame(width: Self.glyphSize, height: Self.glyphSize)
+        Button(action: toggle) {
+            Group {
+                switch region {
+                case .artwork: ArtworkToggleGlyph()
+                case .player: Image(systemName: "play.rectangle")
+                case .playlist: Image(systemName: "list.bullet")
+                }
+            }
+            .font(.system(size: Self.glyphSize, weight: .medium))
+            .frame(width: Self.glyphSize, height: Self.glyphSize)
         }
-        .buttonStyle(ArtworkToggleButtonStyle(isOn: showsArtwork))
-        .help(showsArtwork ? "Hide Artwork" : "Show Artwork")
-        .accessibilityLabel(showsArtwork ? "Hide Artwork" : "Show Artwork")
-        .accessibilityAddTraits(showsArtwork ? [.isToggle, .isSelected] : .isToggle)
+        .buttonStyle(WorkspaceVisibilityButtonStyle(isOn: isOn))
+        .disabled(!visibility.canToggle(region))
+        .help(region.visibilityAction(isVisible: isOn))
+        .accessibilityLabel(region.visibilityAction(isVisible: isOn))
+        .accessibilityAddTraits(isOn ? [.isToggle, .isSelected] : .isToggle)
     }
 }
 
-private struct ArtworkToggleButtonStyle: ButtonStyle {
+extension WorkspaceVisibility.Region {
+    func visibilityAction(isVisible: Bool) -> String {
+        let name = switch self {
+        case .artwork: "Artwork"
+        case .player: "Player"
+        case .playlist: "Playlist"
+        }
+        return "\(isVisible ? "Hide" : "Show") \(name)"
+    }
+}
+
+private struct WorkspaceVisibilityButtonStyle: ButtonStyle {
     let isOn: Bool
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
     @Environment(\.transportAppearance) private var transportAppearance
 
     func makeBody(configuration: Configuration) -> some View {
@@ -469,12 +488,12 @@ private struct ArtworkToggleButtonStyle: ButtonStyle {
         return configuration.label
             .foregroundStyle(isOn ? Theme.sideButtonLitGlyph : Color(nsColor: .secondaryLabelColor))
             .sideButtonGlyphGlow(isOn ? glow : [])
-            .frame(width: ArtworkToggleButton.size.width, height: ArtworkToggleButton.size.height)
+            .frame(width: WorkspaceVisibilityButton.size.width, height: WorkspaceVisibilityButton.size.height)
             .background {
                 if isOn { chip }
             }
             .contentShape(Rectangle())
-            .opacity(configuration.isPressed ? 0.7 : 1)
+            .opacity(isEnabled && !configuration.isPressed ? 1 : 0.7)
     }
 
     /// Frosted chip: background blur under a translucent fill, a 0.5 pt inner

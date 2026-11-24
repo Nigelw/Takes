@@ -25,6 +25,45 @@ struct SessionTests {
         #expect(settings.automaticGroupingMode == .automatic)
     }
 
+    @MainActor
+    @Test
+    func playlistMetadataFieldsPersistAndRestoreDefaults() {
+        let defaults = InMemoryAppSettingsDefaults()
+        let settings = AppSettings(defaults: defaults)
+
+        #expect(settings.playlistMetadataFields == [.artist])
+        settings.playlistMetadataFields = [.album, .sampleRate]
+        #expect(AppSettings(defaults: defaults).playlistMetadataFields == [.album, .sampleRate])
+        #expect(!settings.settingsAreDefault)
+
+        settings.playlistMetadataFields = []
+        #expect(AppSettings(defaults: defaults).playlistMetadataFields.isEmpty)
+
+        settings.restoreDefaults()
+        #expect(settings.settingsAreDefault)
+        #expect(AppSettings(defaults: defaults).playlistMetadataFields == [.artist])
+    }
+
+    @MainActor
+    @Test
+    func compareMetadataFieldsPersistIndependentlyAndRestoreDefaults() {
+        let defaults = InMemoryAppSettingsDefaults()
+        let settings = AppSettings(defaults: defaults)
+
+        #expect(settings.compareMetadataFields == [.format, .sampleRate, .bitrate])
+        settings.compareMetadataFields = [.sampleRate]
+        let reloaded = AppSettings(defaults: defaults)
+        #expect(reloaded.compareMetadataFields == [.sampleRate])
+        #expect(reloaded.playlistMetadataFields == [.artist])
+        #expect(!settings.settingsAreDefault)
+
+        settings.compareMetadataFields = []
+        #expect(AppSettings(defaults: defaults).compareMetadataFields.isEmpty)
+        settings.restoreDefaults()
+        #expect(settings.settingsAreDefault)
+        #expect(AppSettings(defaults: defaults).compareMetadataFields == [.format, .sampleRate, .bitrate])
+    }
+
     /// The control bar theme and readout frame settings were removed with
     /// the Teenage Engineering theme and the Retro frame; preferences that
     /// still hold them must load as defaults.
@@ -674,19 +713,56 @@ struct SessionTests {
 
     @MainActor
     @Test
-    func showsArtworkDefaultsOnPersistsAndSurvivesRestoreDefaults() {
+    func windowVisibilityPersistsAndSurvivesRestoreDefaults() {
         let defaults = InMemoryAppSettingsDefaults()
         let settings = AppSettings(defaults: defaults)
 
-        #expect(settings.showsArtwork)
-        settings.showsArtwork = false
+        #expect(settings.windowVisibility == WorkspaceVisibility())
+        settings.windowVisibility.toggle(.artwork)
+        settings.windowVisibility.toggle(.playlist)
         #expect(defaults.object(forKey: AppSettings.showsArtworkKey) as? Bool == false)
-        #expect(!AppSettings(defaults: defaults).showsArtwork)
+        #expect(defaults.object(forKey: AppSettings.showsPlayerKey) as? Bool == true)
+        #expect(defaults.object(forKey: AppSettings.showsPlaylistKey) as? Bool == false)
+        #expect(AppSettings(defaults: defaults).windowVisibility == settings.windowVisibility)
 
-        // Window state, not a preference: Restore Defaults leaves it alone.
+        let visibility = settings.windowVisibility
         settings.restoreDefaults()
-        #expect(!settings.showsArtwork)
+        #expect(settings.windowVisibility == visibility)
         #expect(settings.settingsAreDefault)
+
+        defaults.set(false, forKey: AppSettings.showsPlayerKey)
+        #expect(AppSettings(defaults: defaults).windowVisibility == visibility)
+    }
+
+    @Test
+    func windowVisibilityKeepsArtworkOrPlayerAvailable() {
+        var visibility = WorkspaceVisibility()
+        visibility.toggle(.player)
+        #expect(!visibility.canToggle(.artwork))
+        visibility.toggle(.artwork)
+        visibility.toggle(.playlist)
+        #expect(visibility == WorkspaceVisibility(showsPlayer: false, showsPlaylist: false))
+
+        visibility.toggle(.player)
+        visibility.toggle(.artwork)
+        #expect(!visibility.canToggle(.player))
+        visibility.toggle(.player)
+        #expect(visibility == WorkspaceVisibility(showsArtwork: false, showsPlaylist: false))
+    }
+
+    @MainActor
+    @Test
+    func compactWindowHeightsFollowTheVisibleRegions() {
+        let artworkOnly = WorkspaceVisibility(showsPlayer: false, showsPlaylist: false)
+        #expect(TakesWindowPolicy.defaultSize(for: artworkOnly) == CGSize(width: 360, height: 360))
+        #expect(TakesWindowPolicy.minimumSize(for: artworkOnly, isComparison: true) == CGSize(width: 260, height: 260))
+
+        let playerOnly = WorkspaceVisibility(showsArtwork: false, showsPlaylist: false)
+        #expect(TakesWindowPolicy.defaultSize(for: playerOnly).height == 142)
+        #expect(TakesWindowPolicy.minimumSize(for: playerOnly, isComparison: true).height == 91)
+
+        let artworkAndPlaylist = WorkspaceVisibility(showsPlayer: false)
+        #expect(TakesWindowPolicy.minimumSize(for: artworkAndPlaylist, isComparison: true).height == 441)
     }
 
     @Test
@@ -2491,10 +2567,24 @@ struct SessionTests {
         let untagged = makeTrack(name: "05 Taxman.flac")
         #expect(LaneStripText.name(for: untagged, index: 1, isBlind: false) == "05 Taxman")
 
-        #expect(LaneStripText.format(for: untagged, isBlind: false) == "WAV · 44.1 kHz · 256 kbps")
+        let format = LaneStripText.format(for: tagged, isBlind: false, fields: AppSettings.compareMetadataFieldsDefault)
+        #expect(format == "WAV • 44.1 kHz • 256 kbps")
 
-        let tip = LaneStripText.toolTip(for: tagged, isBlind: false)
-        #expect(tip == "Taxman (2009 Stereo Mix)\nWAV · 44.1 kHz · 256 kbps · 2:00\n05 Taxman.flac")
+        let tip = LaneStripText.toolTip(for: tagged, isBlind: false, format: format)
+        #expect(tip == "Taxman (2009 Stereo Mix)\nWAV • 44.1 kHz • 256 kbps · 2:00\n05 Taxman.flac")
+    }
+
+    @Test
+    func laneStripShowsOnlyEnabledAudioMetadataWithValues() {
+        var track = makeTrack(name: "Take.wav")
+        track.bitRate = 0
+        let format = LaneStripText.format(for: track, isBlind: false, fields: [.sampleRate, .bitrate])
+        #expect(format == "44.1 kHz")
+        #expect(LaneStripText.toolTip(for: track, isBlind: false, format: format) == "Take\n44.1 kHz · 2:00\nTake.wav")
+
+        let hiddenFormat = LaneStripText.format(for: track, isBlind: false, fields: [])
+        #expect(hiddenFormat.isEmpty)
+        #expect(LaneStripText.toolTip(for: track, isBlind: false, format: hiddenFormat) == "Take\n2:00\nTake.wav")
     }
 
     @Test
@@ -2502,8 +2592,9 @@ struct SessionTests {
         var track = makeTrack(name: "05 Taxman.flac")
         track.title = "Taxman (2009 Stereo Mix)"
         #expect(LaneStripText.name(for: track, index: 2, isBlind: true) == "Track 3")
-        #expect(LaneStripText.format(for: track, isBlind: true).isEmpty)
-        #expect(LaneStripText.toolTip(for: track, isBlind: true) == nil)
+        let format = LaneStripText.format(for: track, isBlind: true, fields: AppSettings.compareMetadataFieldsDefault)
+        #expect(format.isEmpty)
+        #expect(LaneStripText.toolTip(for: track, isBlind: true, format: format) == nil)
 
         let blindMenu = LaneStripMenuActions(isBlind: true, hasOffset: true, remove: {}, revealInFinder: {}, resetOffset: {})
         #expect(!blindMenu.canRevealInFinder)
@@ -2857,6 +2948,26 @@ struct SessionTests {
         #expect(PlaylistRowText.itemTitle(item) == "Stereo Mix")
         item.selectedVersionID = untagged.id
         #expect(PlaylistRowText.itemTitle(item) == "Alternate Mix")
+    }
+
+    @Test
+    func playlistMetadataLineJoinsOnlyEnabledFieldsWithValues() {
+        var metadata = PlaylistMetadata(
+            artist: " Artist Name ", album: "Album Title", sampleRate: 44_100,
+            bitRate: 319_500, fileFormatDescription: "FLAC"
+        )
+        let allFields = Set(TrackMetadataField.allCases)
+        #expect(PlaylistRowText.metadataLine(metadata, fields: allFields)
+            == "Artist Name • Album Title • FLAC • 44.1 kHz • 320 kbps")
+        #expect(PlaylistRowText.metadataLine(metadata, fields: [.bitrate, .album]) == "Album Title • 320 kbps")
+        #expect(PlaylistRowText.metadataLine(metadata, fields: []).isEmpty)
+
+        metadata.artist = nil
+        metadata.album = "  "
+        metadata.sampleRate = 0
+        metadata.bitRate = .infinity
+        #expect(PlaylistRowText.metadataLine(metadata, fields: allFields) == "FLAC")
+        #expect(PlaylistRowText.metadataLine(nil, fields: allFields).isEmpty)
     }
 
     @MainActor

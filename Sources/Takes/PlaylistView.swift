@@ -304,6 +304,7 @@ struct PlaylistView: View {
                     playlist: coordinator,
                     presentation: presentation,
                     items: items,
+                    metadataFields: settings.playlistMetadataFields,
                     fileIssues: coordinator.fileIssues,
                     currentItemID: coordinator.currentItemID,
                     isPlaying: coordinator.isPlaying,
@@ -317,8 +318,5 @@ struct PlaylistView: View {
         }
         .background(Theme.timelineWellShade)
         .componentDebugLabel("Playlist", enabled: settings.showsComponentDebugLabels, color: .orange)
-        .onChange(of: items.map { ($0.id.uuidString + $0.versions.map { $0.id.uuidString }.joined()) }) { _, _ in
-            presentation.prune(in: coordinator.workspace)
-        }
     }
 }

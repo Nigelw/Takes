@@ -24,7 +24,7 @@ struct WorkspaceView: View {
     /// on display.
     @State private var artworkStore = PlaylistArtworkStore()
     /// Vertical centre of the window buttons, measured from the window's top
-    /// edge, so the artwork toggle lines up with them.
+    /// edge, so the visibility toggles line up with them.
     @State private var titlebarButtonCenterY: CGFloat = 14
     @State private var artworkIsHovered = false
     @State private var mainWindowIsKey = true
@@ -42,7 +42,19 @@ struct WorkspaceView: View {
 
     private var controller: PlaybackController { coordinator.controller }
     private var isComparison: Bool { coordinator.mode.itemID != nil }
-    private var showsTitlebarControls: Bool { !settings.showsArtwork || artworkIsHovered }
+    private var visibility: WorkspaceVisibility { settings.windowVisibility }
+    private var showsTitlebarControls: Bool { !visibility.showsArtwork || artworkIsHovered }
+    private var heightBelowArtwork: CGFloat {
+        TakesWindowPolicy.heightBelowArtwork(for: visibility, isComparison: isComparison)
+    }
+    private var windowMinimumSize: CGSize {
+        TakesWindowPolicy.minimumSize(for: visibility, isComparison: isComparison)
+    }
+    private var minimumHeightWithoutArtwork: CGFloat {
+        TakesWindowPolicy.heightBelowArtwork(
+            for: WorkspaceVisibility(showsArtwork: false, showsPlaylist: visibility.showsPlaylist), isComparison: isComparison
+        )
+    }
     private var commandContext: PlaylistCommandContext {
         .init(coordinator: coordinator, presentation: presentation, undoManager: undoManager)
     }
@@ -146,29 +158,36 @@ struct WorkspaceView: View {
             }
             .task(id: artworkResize) {
                 guard let resize = artworkResize, let mainWindow else { return }
-                await TakesWindowPolicy.resizeForArtwork(mainWindow, to: resize.targetFrame, animate: !reduceMotion)
+                await TakesWindowPolicy.resizeForArtwork(
+                    mainWindow, to: resize.targetFrame, minimumHeight: minimumHeightWithoutArtwork, animate: !reduceMotion
+                )
                 guard !Task.isCancelled, artworkResize == resize else { return }
-                mainWindow.minSize = TakesWindowPolicy.minimumSize(showsArtwork: settings.showsArtwork)
                 artworkResize = nil
+                updateWindowMinimumSize()
                 // A screen-clamped toggle changes the height beyond the cover's.
                 storePlaylistHeight()
             }
             .onChange(of: contentFitKey) { old, new in scheduleContentFit(from: old, to: new) }
+            .onChange(of: coordinator.workspace.items.map { [$0.id] + $0.versions.map(\.id) }) { _, _ in
+                presentation.prune(in: coordinator.workspace)
+            }
             .onChange(of: presentation.locateVersionID) { _, id in
                 if let id { presentedLocateVersionID = id }
             }
-            .onChange(of: isComparison) { wasComparison, isComparison in
-                switchModeHeight(from: wasComparison, to: isComparison)
-                // A field torn down mid-edit never posts its end-of-editing
-                // notification; recheck the focus so menu shortcuts return.
-                // After the old mode's views have gone.
-                DispatchQueue.main.async {
-                    guard let mainWindow else { return }
-                    textInputIsFocused = !GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: mainWindow.firstResponder)
-                }
+            .onChange(of: isComparison) { wasComparison, _ in
+                switchModeHeight(wasComparison: wasComparison)
+                refreshTextInputFocus()
             }
+            .onChange(of: visibility.showsPlaylist) { _, _ in refreshTextInputFocus() }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndLiveResizeNotification)) { notification in
-                if notification.object as? NSWindow === mainWindow { storePlaylistHeight() }
+                guard notification.object as? NSWindow === mainWindow else { return }
+                if visibility.showsPlaylist { storePlaylistHeight() }
+                else { applyModeHeight() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { notification in
+                guard notification.object as? NSWindow === mainWindow else { return }
+                updateWindowMinimumSize()
+                if !visibility.showsPlaylist { applyModeHeight() }
             }
             .onChange(of: showsTitlebarControls) { _, showsControls in
                 if let mainWindow { updateWindowButtons(in: mainWindow, visible: showsControls) }
@@ -191,35 +210,38 @@ struct WorkspaceView: View {
 
     private var windowContent: some View {
         GeometryReader { proxy in
-            let fraction = artworkResize?.fraction(at: proxy.size.height) ?? (settings.showsArtwork ? 1 : 0)
-            let coverHeight = artworkResize?.coverHeight ?? TakesWindowPolicy.artworkHeight(in: proxy.size)
+            let fraction = artworkResize?.fraction(at: proxy.size.height) ?? (visibility.showsArtwork ? 1 : 0)
+            let coverHeight = artworkResize?.coverHeight ?? (heightBelowArtwork == 0 ? proxy.size.height
+                : TakesWindowPolicy.artworkHeight(in: proxy.size, reserving: heightBelowArtwork))
             workspaceContent(artworkFraction: fraction, coverHeight: coverHeight)
         }
             .frame(minWidth: TakesWindowPolicy.minimumWidth,
-                   minHeight: TakesWindowPolicy.rootViewMinimumHeight(showsArtwork: artworkResize == nil && settings.showsArtwork))
+                   minHeight: (artworkResize == nil ? windowMinimumSize.height : minimumHeightWithoutArtwork)
+                       - TakesWindowPolicy.hiddenTitlebarSafeAreaInset)
             .ignoresSafeArea(.container, edges: .top)
-            .environment(\.transportAppearance, settings.transportAppearance)
             .background(WindowBackground().ignoresSafeArea())
             .background {
                 MainWindowConfigurationView { window in configureWindow(window) }
             }
             // Titlebar overlay: over the cover, or over the top of the
-            // control bar when the cover is hidden. 10 pt from the trailing
-            // edge, centred on the window buttons.
+            // player when the cover is hidden. 10 pt from the trailing edge,
+            // centred on the window buttons.
             // The overlay has its own safe area, so it must ignore the
-            // titlebar inset too, or the toggle lands below the titlebar.
+            // titlebar inset too, or the toggles land below the titlebar.
             .overlay {
                 if showsTitlebarControls {
-                    ArtworkToggleButton(showsArtwork: Binding(
-                        get: { settings.showsArtwork },
-                        set: { setArtworkVisibility($0) }
-                    ))
+                    HStack(spacing: 4) {
+                        ForEach(WorkspaceVisibility.Region.allCases, id: \.self) { region in
+                            WorkspaceVisibilityButton(region: region, visibility: visibility) { toggleVisibility(region) }
+                        }
+                    }
                     .padding(.trailing, 10)
-                    .padding(.top, max(titlebarButtonCenterY - ArtworkToggleButton.size.height / 2, 0))
+                    .padding(.top, max(titlebarButtonCenterY - WorkspaceVisibilityButton.size.height / 2, 0))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .ignoresSafeArea(.container, edges: .top)
                 }
             }
+            .environment(\.transportAppearance, settings.transportAppearance)
             .overlay {
                 if !mainWindowIsKey { InactiveWindowInteractionShield(window: mainWindow).ignoresSafeArea() }
             }
@@ -280,8 +302,8 @@ struct WorkspaceView: View {
             .focusedSceneValue(\.canUseGlobalMenuShortcuts, canUseShortcuts)
             .focusedSceneValue(\.mainWindowCommandState, MainWindowCommandState(
                 resetWindowSizing: { resetWindowSize() },
-                showsArtwork: settings.showsArtwork,
-                setArtworkVisible: { setArtworkVisibility($0) }
+                visibility: visibility,
+                toggleVisibility: { toggleVisibility($0) }
             ))
     }
 
@@ -302,43 +324,34 @@ struct WorkspaceView: View {
         return VStack(spacing: 0) {
             // Keep the same cover above the top edge when closed. Its bottom
             // edge travels with the transport on both opening and closing.
-            ArtworkCoverView(image: artworkStore.artwork(for: shownCoverVersionID),
-                             showsTitlebarControls: showsTitlebarControls)
+            artworkCover
                 .frame(height: coverHeight)
                 .geometryGroup()
                 .offset(y: visibleCoverHeight - coverHeight)
                 .frame(height: visibleCoverHeight, alignment: .top)
                 .clipped()
-                .componentDebugLabel("Cover", enabled: settings.showsComponentDebugLabels && settings.showsArtwork)
+                .componentDebugLabel("Cover", enabled: settings.showsComponentDebugLabels && visibility.showsArtwork)
                 .overlay {
-                    if settings.showsArtwork {
+                    if visibility.showsArtwork {
                         HoverSensor(trackingActivity: .activeAlways) { artworkIsHovered = $0 }
                     }
                 }
-                .allowsHitTesting(settings.showsArtwork)
+                .allowsHitTesting(visibility.showsArtwork)
                 .contentShape(Rectangle())
-                .accessibilityHidden(!settings.showsArtwork)
-                .accessibilityAction(named: Text("Hide Artwork")) { setArtworkVisibility(false) }
-            if let error = persistence.errorMessage {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle")
-                    Text(error).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
-                    if persistence.recoveryAvailable {
-                        Button("Use Recovered Playlist") { Task { await persistence.acceptRecoveredWorkspace() } }
-                    } else if !persistence.savesEnabled {
-                        Button("Retry") { Task { await persistence.retryRestoration() } }
-                    } else {
-                        Button("Dismiss") { persistence.dismissError() }
+                .accessibilityHidden(!visibility.showsArtwork)
+                .accessibilityActions {
+                    if visibility.showsArtwork && visibility.canToggle(.artwork) {
+                        Button("Hide Artwork") { toggleVisibility(.artwork) }
                     }
-                }.padding(12).background(.background)
-            }
+                }
+            if visibility.showsPlaylist { persistenceBanner }
             GeometryReader { proxy in
                 ZStack(alignment: .topLeading) {
                     playlistSurface
                         // Dimmed in the background, as compare is.
                         .windowActivityAppearance(isActive: mainWindowIsKey)
                         .frame(width: isComparison ? retainedPlaylistSize.width : proxy.size.width,
-                               height: isComparison ? retainedPlaylistSize.height : proxy.size.height)
+                               height: isComparison ? retainedPlaylistSize.height : proxy.size.height, alignment: .topLeading)
                         .opacity(isComparison ? 0 : 1)
                         .allowsHitTesting(!isComparison)
                         // Takes its controls out of the Tab loop while compare covers it.
@@ -351,7 +364,7 @@ struct WorkspaceView: View {
                             importProviders: importProviders,
                             locateVersion: { presentation.locateVersionID = $0 }
                         )
-                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
                             .transition(.opacity)
                             .zIndex(1)
                     }
@@ -364,33 +377,78 @@ struct WorkspaceView: View {
                     if !isComparison && size.width > 0 && size.height > 0 { retainedPlaylistSize = size }
                 }
             }
-            .overlay {
-                if !persistence.restorationComplete {
-                    ProgressView("Restoring Playlist…").padding(24).background(.regularMaterial)
-                } else if coordinator.isLoading {
-                    VStack(spacing: 12) {
-                        ProgressView("Importing tracks…")
-                        Button("Cancel Import") { coordinator.cancelCurrentImports() }
-                    }
-                    .padding(24)
-                    .background(.regularMaterial)
-                }
-            }
+            .overlay { if visibility.showsPlaylist { loadingOverlay } }
             .disabled(!persistence.restorationComplete)
             .geometryGroup()
         }
+        .overlay { if !visibility.showsPlaylist { loadingOverlay } }
+        .overlay(alignment: .bottom) { if !visibility.showsPlaylist { persistenceBanner } }
         .environment(\.controlBarTopPadding, TakesWindowPolicy.controlBarTopPadding(artworkFraction: artworkFraction))
         .animation(animateClampedCover ? .easeInOut(duration: TakesWindowPolicy.artworkResizeDuration) : nil,
-                   value: settings.showsArtwork)
+                   value: visibility.showsArtwork)
+    }
+
+    private var artworkCover: some View {
+        ArtworkCoverView(image: artworkStore.artwork(for: shownCoverVersionID),
+                         showsTitlebarControls: showsTitlebarControls)
+            .overlay {
+                if !visibility.showsPlayer && artworkIsHovered {
+                    HStack(spacing: ControlBarMetrics.centerSpacing) {
+                        BasicTransportButtons(coordinator: coordinator)
+                    }
+                    .padding(10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .windowActivityAppearance(isActive: mainWindowIsKey)
+                    .disabled(!persistence.restorationComplete)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var persistenceBanner: some View {
+        if let error = persistence.errorMessage {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                Text(error).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                if persistence.recoveryAvailable {
+                    Button("Use Recovered Playlist") { Task { await persistence.acceptRecoveredWorkspace() } }
+                } else if !persistence.savesEnabled {
+                    Button("Retry") { Task { await persistence.retryRestoration() } }
+                } else {
+                    Button("Dismiss") { persistence.dismissError() }
+                }
+            }
+            .padding(12)
+            .background(.background)
+        }
+    }
+
+    @ViewBuilder
+    private var loadingOverlay: some View {
+        if !persistence.restorationComplete {
+            ProgressView("Restoring Playlist…").padding(24).background(.regularMaterial)
+        } else if coordinator.isLoading {
+            VStack(spacing: 12) {
+                ProgressView("Importing tracks…")
+                Button("Cancel Import") { coordinator.cancelCurrentImports() }
+            }
+            .padding(24)
+            .background(.regularMaterial)
+        }
     }
 
     private var playlistSurface: some View {
         VStack(spacing: 0) {
-            PlaylistTransportView(coordinator: coordinator)
-            PlaylistView(coordinator: coordinator, presentation: presentation, openFiles: openFiles, artworkStore: artworkStore)
-            // Below the list, which it shortens (A2 §7).
-            PlaylistBottomBar(coordinator: coordinator, presentation: presentation, openFiles: openFiles, undoManager: undoManager)
-                .componentDebugLabel("Bottom Bar", enabled: settings.showsComponentDebugLabels)
+            if visibility.showsPlayer {
+                PlaylistTransportView(coordinator: coordinator)
+            } else if visibility.showsPlaylist {
+                ControlBarDivider()
+            }
+            if visibility.showsPlaylist {
+                PlaylistView(coordinator: coordinator, presentation: presentation, openFiles: openFiles, artworkStore: artworkStore)
+                PlaylistBottomBar(coordinator: coordinator, presentation: presentation, openFiles: openFiles, undoManager: undoManager)
+                    .componentDebugLabel("Bottom Bar", enabled: settings.showsComponentDebugLabels)
+            }
         }
     }
 
@@ -488,17 +546,65 @@ struct WorkspaceView: View {
         return true
     }
 
-    private func setArtworkVisibility(_ showsArtwork: Bool) {
-        guard settings.showsArtwork != showsArtwork else { return }
+    private func toggleVisibility(_ region: WorkspaceVisibility.Region) {
+        let previous = visibility
+        guard previous.canToggle(region) else { return }
+        var updated = previous
+        updated.toggle(region)
+        if region == .artwork {
+            setArtworkVisibility(updated)
+            return
+        }
+        finishArtworkResize()
+        if region == .playlist && previous.showsPlaylist { storePlaylistHeight() }
+        settings.windowVisibility = updated
+        updateWindowMinimumSize()
+        guard let mainWindow, !mainWindow.styleMask.contains(.fullScreen) else { return }
+        if region == .player && updated.showsPlaylist {
+            let reduction = TakesWindowPolicy.playerHeightReduction(showsArtwork: updated.showsArtwork, isComparison: isComparison)
+            let height = mainWindow.frame.height + (updated.showsPlayer ? reduction : -reduction)
+            if let frame = frameSettingHeight(height, for: mainWindow) {
+                mainWindow.setFrame(frame, display: true, animate: !reduceMotion)
+            }
+        } else {
+            applyModeHeight(useDefaultPlaylistHeight: true)
+        }
+    }
+
+    private func setArtworkVisibility(_ updated: WorkspaceVisibility) {
+        let showsArtwork = updated.showsArtwork
         if artworkResize != nil {
             // Keep both endpoints, including screen clamping, on reversal.
             artworkResize?.showsArtwork = showsArtwork
-        } else if let mainWindow {
-            artworkResize = .init(from: mainWindow.frame, showsArtwork: showsArtwork,
-                                  visibleFrame: TakesWindowPolicy.visibleFrame(for: mainWindow))
+        } else if let mainWindow, !mainWindow.styleMask.contains(.fullScreen) {
+            let shown = WorkspaceVisibility(showsPlaylist: updated.showsPlaylist)
+            artworkResize = .init(
+                from: mainWindow.frame, showsArtwork: showsArtwork, visibleFrame: TakesWindowPolicy.visibleFrame(for: mainWindow),
+                heightBelowArtwork: TakesWindowPolicy.heightBelowArtwork(for: shown, isComparison: isComparison),
+                hiddenMinimumHeight: minimumHeightWithoutArtwork
+            )
         }
         if !showsArtwork { artworkIsHovered = false }
-        settings.showsArtwork = showsArtwork
+        settings.windowVisibility = updated
+    }
+
+    private func finishArtworkResize() {
+        guard let resize = artworkResize, let mainWindow else { return }
+        artworkResize = nil
+        mainWindow.setFrame(resize.targetFrame, display: true)
+    }
+
+    private func updateWindowMinimumSize() {
+        guard let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen) else { return }
+        mainWindow.minSize = windowMinimumSize
+    }
+
+    private func refreshTextInputFocus() {
+        // A field torn down mid-edit never posts its end-of-editing notification.
+        DispatchQueue.main.async {
+            guard let mainWindow else { return }
+            textInputIsFocused = !GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: mainWindow.firstResponder)
+        }
     }
 
     private func configureWindow(_ window: NSWindow) {
@@ -508,7 +614,7 @@ struct WorkspaceView: View {
         didConfigure = true
         TakesWindowPolicy.configureMainWindow(
             window,
-            showsArtwork: settings.showsArtwork,
+            visibility: visibility,
             resetsLayoutForLaunch: usesTemporaryDefaultWindowLayout
         )
         measureTitlebarButtons(in: window)
@@ -556,27 +662,27 @@ struct WorkspaceView: View {
 
     // MARK: Mode heights
 
-    /// Records the playlist's window height after the user resizes it, a
-    /// track fit, or a clamped artwork toggle. Compare's height is never
-    /// stored: it always sizes to its lanes.
-    private func storePlaylistHeight() {
-        guard !isComparison, let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen),
-              persistence.restorationComplete else { return }
-        TakesWindowPolicy.storePlaylistHeight(mainWindow.frame.size, showsArtwork: settings.showsArtwork)
+    /// Store the expanded playlist height normalized for the cover and player.
+    private func storePlaylistHeight(wasComparison: Bool? = nil) {
+        guard !(wasComparison ?? isComparison), visibility.showsPlaylist, let mainWindow, artworkResize == nil,
+              !mainWindow.styleMask.contains(.fullScreen), persistence.restorationComplete else { return }
+        TakesWindowPolicy.storePlaylistHeight(
+            mainWindow.frame.size, showsArtwork: visibility.showsArtwork,
+            heightBelowArtwork: TakesWindowPolicy.heightBelowArtwork(for: visibility, isComparison: false),
+            playerHeightReduction: visibility.showsPlayer ? 0
+                : TakesWindowPolicy.playerHeightReduction(showsArtwork: visibility.showsArtwork, isComparison: false)
+        )
     }
 
     /// Entering compare stores the playlist's height and sizes the window to
     /// the item's lanes; leaving restores the playlist's height. The window
     /// still has the old mode's frame here, as the mode has only just changed.
-    private func switchModeHeight(from wasComparison: Bool, to isComparison: Bool) {
-        guard let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen),
-              persistence.restorationComplete else { return }
-        if !wasComparison {
-            TakesWindowPolicy.storePlaylistHeight(mainWindow.frame.size, showsArtwork: settings.showsArtwork)
-        }
-        if let frame = modeFrame(for: mainWindow) {
-            mainWindow.setFrame(frame, display: true, animate: !reduceMotion)
-        }
+    private func switchModeHeight(wasComparison: Bool) {
+        guard persistence.restorationComplete else { return }
+        finishArtworkResize()
+        storePlaylistHeight(wasComparison: wasComparison)
+        updateWindowMinimumSize()
+        applyModeHeight()
     }
 
     /// Help ▸ Debug ▸ Reset Window Size: artwork on, the default width, and
@@ -584,42 +690,67 @@ struct WorkspaceView: View {
     /// or compare's fit to its lanes).
     private func resetWindowSize() {
         guard let mainWindow, !mainWindow.styleMask.contains(.fullScreen) else { return }
-        artworkResize = nil
-        settings.showsArtwork = true
-        mainWindow.minSize = TakesWindowPolicy.minimumSize(showsArtwork: true)
-        let height = isComparison
-            ? TakesWindowPolicy.compareFittingHeight(laneCount: contentFitKey.trackCount, showsArtwork: true,
-                                                    width: TakesWindowPolicy.defaultWidth)
-            : TakesWindowPolicy.defaultHeight(showsArtwork: true)
+        finishArtworkResize()
+        if !visibility.showsArtwork { settings.windowVisibility.toggle(.artwork) }
+        updateWindowMinimumSize()
+        let height = isComparison && visibility.showsPlaylist
+            ? compareFittingHeight(width: TakesWindowPolicy.defaultWidth)
+            : visibility.showsPlaylist ? TakesWindowPolicy.defaultSize(for: visibility).height
+                : compactHeight(width: TakesWindowPolicy.defaultWidth)
         let frame = TakesWindowPolicy.frameResettingSize(
             currentFrame: mainWindow.frame, height: height, visibleFrame: TakesWindowPolicy.visibleFrame(for: mainWindow)
         )
         if frame != mainWindow.frame { mainWindow.setFrame(frame, display: true, animate: !reduceMotion) }
-        if !isComparison { TakesWindowPolicy.storePlaylistHeight(frame.size, showsArtwork: true) }
+        if !isComparison { storePlaylistHeight() }
     }
 
     /// At launch the autosaved frame is whichever mode was on screen at
     /// quit; give the restored mode its height.
     private func restoreModeHeight() {
-        guard !usesTemporaryDefaultWindowLayout, let mainWindow, artworkResize == nil,
-              !mainWindow.styleMask.contains(.fullScreen), let frame = modeFrame(for: mainWindow) else { return }
-        mainWindow.setFrame(frame, display: true)
+        updateWindowMinimumSize()
+        guard !usesTemporaryDefaultWindowLayout else { return }
+        applyModeHeight(animate: false)
     }
 
-    /// Compare: fitted to its lanes. Playlist: its stored height, if any.
-    private func modeFrame(for window: NSWindow) -> CGRect? {
-        let showsArtwork = settings.showsArtwork
-        let visibleFrame = TakesWindowPolicy.visibleFrame(for: window)
-        if isComparison {
-            let height = TakesWindowPolicy.compareFittingHeight(
-                laneCount: contentFitKey.trackCount, showsArtwork: showsArtwork, width: window.frame.width
-            )
-            return TakesWindowPolicy.frameSettingHeight(height, showsArtwork: showsArtwork,
-                                                        currentFrame: window.frame, visibleFrame: visibleFrame)
+    private func applyModeHeight(useDefaultPlaylistHeight: Bool = false, animate: Bool = true) {
+        guard let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen) else { return }
+        let width = mainWindow.frame.width
+        let height: CGFloat
+        if !visibility.showsPlaylist {
+            height = compactHeight(width: width)
+        } else if isComparison {
+            height = compareFittingHeight(width: width)
+        } else {
+            let defaultHeight = useDefaultPlaylistHeight ? TakesWindowPolicy.defaultHeight(showsArtwork: false) : nil
+            guard let stored = TakesWindowPolicy.storedPlaylistHeight() ?? defaultHeight else { return }
+            height = TakesWindowPolicy.playlistHeight(restoring: stored, coverWidth: visibility.showsArtwork ? width : 0)
+                - playerHeightReduction
         }
-        guard let stored = TakesWindowPolicy.storedPlaylistHeight() else { return nil }
-        return TakesWindowPolicy.frameRestoringPlaylistHeight(stored, showsArtwork: showsArtwork,
-                                                              currentFrame: window.frame, visibleFrame: visibleFrame)
+        if let frame = frameSettingHeight(height, for: mainWindow) {
+            mainWindow.setFrame(frame, display: true, animate: animate && !reduceMotion)
+        }
+    }
+
+    private func compactHeight(width: CGFloat) -> CGFloat {
+        heightBelowArtwork + (visibility.showsArtwork ? width : 0)
+    }
+
+    private var playerHeightReduction: CGFloat {
+        visibility.showsPlayer ? 0
+            : TakesWindowPolicy.playerHeightReduction(showsArtwork: visibility.showsArtwork, isComparison: isComparison)
+    }
+
+    private func compareFittingHeight(width: CGFloat) -> CGFloat {
+        TakesWindowPolicy.compareFittingHeight(
+            laneCount: contentFitKey.trackCount, showsArtwork: visibility.showsArtwork, width: width
+        ) - playerHeightReduction
+    }
+
+    private func frameSettingHeight(_ height: CGFloat, for window: NSWindow) -> CGRect? {
+        TakesWindowPolicy.frameSettingHeight(
+            height, minimum: windowMinimumSize.height,
+            currentFrame: window.frame, visibleFrame: TakesWindowPolicy.visibleFrame(for: window)
+        )
     }
 
     // MARK: Fitting the window to its tracks
@@ -664,19 +795,19 @@ struct WorkspaceView: View {
     }
 
     private func fitWindowToContent(previousTrackCount: Int) {
-        guard let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen) else { return }
-        let showsArtwork = settings.showsArtwork
+        guard visibility.showsPlaylist, let mainWindow, artworkResize == nil,
+              !mainWindow.styleMask.contains(.fullScreen) else { return }
         let fittingHeight: CGFloat
         if isComparison {
-            fittingHeight = TakesWindowPolicy.compareFittingHeight(
-                laneCount: contentFitKey.trackCount, showsArtwork: showsArtwork, width: mainWindow.frame.width
-            )
+            fittingHeight = compareFittingHeight(width: mainWindow.frame.width)
         } else {
             let rows = presentation.visibleRows(in: coordinator.workspace)
             let itemRows = rows.filter { if case .item = $0 { return true }; return false }.count
-            fittingHeight = TakesWindowPolicy.playlistFittingHeight(
-                itemRows: itemRows, versionRows: rows.count - itemRows, showsArtwork: showsArtwork, width: mainWindow.frame.width
-            )
+            let width = mainWindow.frame.width
+            let height = TakesWindowPolicy.playlistFittingHeight(
+                itemRows: itemRows, versionRows: rows.count - itemRows, showsArtwork: visibility.showsArtwork, width: width
+            ) - playerHeightReduction
+            fittingHeight = max(height, heightBelowArtwork + (visibility.showsArtwork ? width : 0))
         }
         guard let frame = TakesWindowPolicy.frameFittingContent(
             previousTrackCount: previousTrackCount,
@@ -802,22 +933,7 @@ private struct PlaylistTransportView: View {
                 .accessibilityLabel("Shuffle").accessibilityValue(coordinator.workspace.isShuffleEnabled ? "On" : "Off")
                 .componentDebugLabel("Shuffle", enabled: showsLabels)
         } center: {
-            Button { coordinator.previous() } label: { Image(systemName: "backward.end.fill") }
-                .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter,
-                                                        glyphSize: ControlBarMetrics.secondaryGlyphSize))
-                .disabled(!coordinator.canPrevious).help("Previous Track").accessibilityLabel("Previous Track")
-                .componentDebugLabel("Previous", enabled: showsLabels)
-            Button { coordinator.togglePlayback() } label: { Image(systemName: coordinator.isPlaying ? "pause.fill" : "play.fill") }
-                .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: ControlBarMetrics.primaryDiameter,
-                                                        glyphSize: ControlBarMetrics.primaryGlyphSize, pressedGlyphOffset: 1.5))
-                .disabled(!coordinator.canPlay).help(coordinator.isPlaying ? "Pause" : "Play")
-                .accessibilityLabel(coordinator.isPlaying ? "Pause" : "Play")
-                .componentDebugLabel("Play", enabled: showsLabels)
-            Button { coordinator.next() } label: { Image(systemName: "forward.end.fill") }
-                .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter,
-                                                        glyphSize: ControlBarMetrics.secondaryGlyphSize))
-                .disabled(!coordinator.canNext).help("Next Track").accessibilityLabel("Next Track")
-                .componentDebugLabel("Next", enabled: showsLabels)
+            BasicTransportButtons(coordinator: coordinator)
         } trailing: {
             Button { coordinator.cyclePlaylistRepeatMode() } label: {
                 Image(systemName: coordinator.workspace.playlistRepeatMode == .one ? "repeat.1" : "repeat")

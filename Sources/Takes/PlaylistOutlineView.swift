@@ -18,6 +18,7 @@ struct PlaylistOutline: NSViewRepresentable {
     let playlist: PlaylistCoordinator
     @ObservedObject var presentation: PlaylistPresentationState
     let items: [PlaylistItem]
+    let metadataFields: Set<TrackMetadataField>
     let fileIssues: [PlaylistVersion.ID: PlaylistCoordinator.FileIssue]
     let currentItemID: UUID?
     let isPlaying: Bool
@@ -42,7 +43,7 @@ struct PlaylistOutline: NSViewRepresentable {
         context.coordinator.showsDebugLabels = showsDebugLabels
         context.coordinator.update(
             items: items, fileIssues: fileIssues, currentItemID: currentItemID, isPlaying: isPlaying, isActive: isActive,
-            moveRevision: moveRevision, reduceMotion: reduceMotion
+            moveRevision: moveRevision, reduceMotion: reduceMotion, metadataFields: metadataFields
         )
     }
 }
@@ -117,22 +118,32 @@ enum PlaylistRowText {
     /// The details that distinguish versions of one song: container, sample
     /// rate, and bit rate. Shown in the version row's tooltip.
     static func format(_ metadata: PlaylistMetadata) -> String {
-        format(fileFormat: metadata.fileFormatDescription, sampleRate: metadata.sampleRate, bitRate: metadata.bitRate)
+        formatParts(
+            fileFormat: metadata.fileFormatDescription, sampleRate: metadata.sampleRate,
+            bitRate: metadata.bitRate, fields: AppSettings.compareMetadataFieldsDefault
+        ).joined(separator: " · ")
     }
 
     /// Shared with the compare lane strip (`LaneStripText`).
-    static func format(fileFormat: String, sampleRate: Double, bitRate: Double) -> String {
-        var parts: [String] = []
-        if !fileFormat.isEmpty { parts.append(fileFormat) }
-        if sampleRate.isFinite, sampleRate > 0 {
-            let kHz = sampleRate / 1000
-            let text = kHz == kHz.rounded() ? String(format: "%.0f", kHz) : String(format: "%.1f", kHz)
-            parts.append("\(text) kHz")
-        }
-        if bitRate.isFinite, bitRate > 0 {
-            parts.append("\(Int((bitRate / 1000).rounded())) kbps")
-        }
-        return parts.joined(separator: " · ")
+    static func formatParts(
+        fileFormat: String, sampleRate: Double, bitRate: Double, fields: Set<TrackMetadataField>
+    ) -> [String] {
+        [
+            fields.contains(.format) && !fileFormat.isEmpty ? fileFormat : nil,
+            fields.contains(.sampleRate) ? sampleRateText(sampleRate) : nil,
+            fields.contains(.bitrate) ? bitrateText(bitRate) : nil
+        ].compactMap { $0 }
+    }
+
+    private static func sampleRateText(_ sampleRate: Double) -> String? {
+        guard sampleRate.isFinite, sampleRate > 0 else { return nil }
+        let kHz = sampleRate / 1000
+        return String(format: kHz == kHz.rounded() ? "%.0f kHz" : "%.1f kHz", kHz)
+    }
+
+    private static func bitrateText(_ bitrate: Double) -> String? {
+        guard bitrate.isFinite, bitrate > 0 else { return nil }
+        return String(format: "%.0f kbps", (bitrate / 1000).rounded())
     }
 
     /// The version row's format column: the container alone (FLAC, MP3).
@@ -158,9 +169,22 @@ enum PlaylistRowText {
         return stem.isEmpty ? url.lastPathComponent : stem
     }
 
-    /// The item row's second line: the artist tag, or nothing.
-    static func artist(_ version: PlaylistVersion?) -> String {
-        version?.metadata.artist?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    /// The item row's second line, using the key version's available metadata.
+    static func metadataLine(_ metadata: PlaylistMetadata?, fields: Set<TrackMetadataField>) -> String {
+        guard let metadata else { return "" }
+        return TrackMetadataField.allCases.compactMap { field -> String? in
+            guard fields.contains(field) else { return nil }
+            let value: String?
+            switch field {
+            case .artist: value = metadata.artist
+            case .album: value = metadata.album
+            case .format: value = formatName(metadata)
+            case .sampleRate: value = sampleRateText(metadata.sampleRate)
+            case .bitrate: value = bitrateText(metadata.bitRate)
+            }
+            guard let text = value?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+            return text
+        }.joined(separator: " • ")
     }
 }
 
@@ -178,6 +202,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private var items: [PlaylistItem] = []
     private var itemsByID: [UUID: PlaylistItem] = [:]
     private var ownerByVersionID: [UUID: UUID] = [:]
+    private var metadataFields: Set<TrackMetadataField> = []
     private var nodes: [PlaylistRowID: PlaylistNode] = [:]
     private var currentItemID: UUID?
     private var isPlaying = false
@@ -302,16 +327,18 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     func update(
         items newItems: [PlaylistItem], fileIssues newIssues: [PlaylistVersion.ID: PlaylistCoordinator.FileIssue],
         currentItemID: UUID?, isPlaying: Bool, isActive: Bool,
-        moveRevision: Int, reduceMotion: Bool
+        moveRevision: Int, reduceMotion: Bool, metadataFields: Set<TrackMetadataField>
     ) {
         let structureChanged = !hasLoaded || Self.structure(newItems) != Self.structure(items)
         let contentChanged = newItems != items || newIssues != fileIssues
             || currentItemID != self.currentItemID || isPlaying != self.isPlaying
+            || metadataFields != self.metadataFields
         let becameActive = isActive && !self.isActive
         let previousItems = items
         let animateMove = hasLoaded && isActive && self.isActive && !reduceMotion && moveRevision != self.moveRevision
         self.moveRevision = moveRevision
         items = newItems
+        self.metadataFields = metadataFields
         if newIssues != fileIssues {
             availability = availability.filter { fileIssues[$0.key] == newIssues[$0.key] }
             fileIssues = newIssues
@@ -568,7 +595,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         let node = node(.item(id))
         cell.configure(PlaylistItemCellView.Content(
             title: PlaylistRowText.itemTitle(item),
-            artist: PlaylistRowText.artist(version),
+            metadata: PlaylistRowText.metadataLine(version?.metadata, fields: metadataFields),
             duration: version.map { PlaylistRowText.duration($0.metadata.duration) } ?? "",
             hasVersions: item.versions.count > 1,
             isExpanded: outlineView.isItemExpanded(node),
@@ -1275,7 +1302,7 @@ private enum PlaylistGlyph {
     }
 }
 
-/// Item row, 46 pt (A2 §6): chevron slot, thumbnail, title over artist, the
+/// Item row, 46 pt (A2 §6): chevron slot, thumbnail, title over metadata, the
 /// hover Compare pill, and the duration.
 final class PlaylistItemCellView: NSTableCellView {
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("item")
@@ -1284,7 +1311,7 @@ final class PlaylistItemCellView: NSTableCellView {
 
     struct Content {
         var title: String
-        var artist: String
+        var metadata: String
         var duration: String
         var hasVersions: Bool
         var isExpanded: Bool
@@ -1297,7 +1324,7 @@ final class PlaylistItemCellView: NSTableCellView {
     }
 
     private let titleField = NSTextField.playlistLabel(font: .systemFont(ofSize: 13, weight: .semibold), truncation: .byTruncatingMiddle)
-    private let artistField = NSTextField.playlistLabel(font: .systemFont(ofSize: 11), truncation: .byTruncatingTail)
+    private let metadataField = NSTextField.playlistLabel(font: .systemFont(ofSize: 11), truncation: .byTruncatingTail)
     private let durationField = NSTextField.playlistLabel(
         font: .monospacedDigitSystemFont(ofSize: 12, weight: .regular), truncation: .byClipping, alignment: .right
     )
@@ -1305,9 +1332,9 @@ final class PlaylistItemCellView: NSTableCellView {
     private let thumbnail = PlaylistThumbnailView()
     private let comparePill = PlaylistComparePill()
     private let titleHeight: CGFloat
-    private let artistHeight: CGFloat
+    private let metadataHeight: CGFloat
     private var content = Content(
-        title: "", artist: "", duration: "", hasVersions: false, isExpanded: false,
+        title: "", metadata: "", duration: "", hasVersions: false, isExpanded: false,
         nowPlaying: nil, warning: nil, isDimmed: false, thumbnail: nil
     )
 
@@ -1322,7 +1349,7 @@ final class PlaylistItemCellView: NSTableCellView {
 
     init() {
         titleHeight = titleField.lineHeight
-        artistHeight = artistField.lineHeight
+        metadataHeight = metadataField.lineHeight
         super.init(frame: .zero)
         // The title has its own truncation tooltip (`layout`), and the
         // duration never needs one: AppKit's expansion tooltip showed on it
@@ -1335,7 +1362,7 @@ final class PlaylistItemCellView: NSTableCellView {
         disclosure.action = { [weak self] in self?.onDisclosure?() }
         comparePill.target = self
         comparePill.action = #selector(comparePressed)
-        for view in [disclosure, thumbnail, titleField, artistField, comparePill, durationField] as [NSView] {
+        for view in [disclosure, thumbnail, titleField, metadataField, comparePill, durationField] as [NSView] {
             addSubview(view)
         }
     }
@@ -1346,8 +1373,8 @@ final class PlaylistItemCellView: NSTableCellView {
     func configure(_ content: Content) {
         self.content = content
         titleField.stringValue = content.title
-        artistField.stringValue = content.artist
-        artistField.isHidden = content.artist.isEmpty
+        metadataField.stringValue = content.metadata
+        metadataField.isHidden = content.metadata.isEmpty
         durationField.stringValue = content.duration
         disclosure.isHidden = !content.hasVersions
         disclosure.setExpanded(content.isExpanded, animated: false)
@@ -1384,12 +1411,12 @@ final class PlaylistItemCellView: NSTableCellView {
         let selectedText = NSColor.alternateSelectedControlTextColor
         if emphasized {
             titleField.textColor = content.isDimmed ? selectedText.withAlphaComponent(0.6) : selectedText
-            artistField.textColor = selectedText.withAlphaComponent(0.75)
+            metadataField.textColor = selectedText.withAlphaComponent(0.75)
             durationField.textColor = selectedText.withAlphaComponent(0.75)
         } else {
             titleField.textColor = content.isDimmed ? .tertiaryLabelColor
                 : content.nowPlaying != nil ? PlaylistRowPalette.nowPlayingTitle : .labelColor
-            artistField.textColor = .secondaryLabelColor
+            metadataField.textColor = .secondaryLabelColor
             durationField.textColor = .secondaryLabelColor
         }
         disclosure.isEmphasized = emphasized
@@ -1419,15 +1446,14 @@ final class PlaylistItemCellView: NSTableCellView {
             textRight = pillX - M.gap
         }
         let textWidth = max(0, textRight - M.titleX)
-        if artistField.isHidden {
+        if metadataField.isHidden {
             titleField.frame = NSRect(x: M.titleX, y: (height - titleHeight) / 2, width: textWidth, height: titleHeight)
-            artistField.frame = .zero
+            metadataField.frame = .zero
         } else {
-            let top = ((height - titleHeight - 1 - artistHeight) / 2).rounded()
+            let top = ((height - titleHeight - 1 - metadataHeight) / 2).rounded()
             titleField.frame = NSRect(x: M.titleX, y: top, width: textWidth, height: titleHeight)
-            artistField.frame = NSRect(x: M.titleX, y: top + titleHeight + 1, width: textWidth, height: artistHeight)
+            metadataField.frame = NSRect(x: M.titleX, y: top + titleHeight + 1, width: textWidth, height: metadataHeight)
         }
-        artistField.isHidden = content.artist.isEmpty
         // The full title, only while it is cut short: by a narrow window or
         // by the hover Compare pill, which takes room from it.
         titleField.toolTip = titleField.isTruncatingText ? content.title : nil
