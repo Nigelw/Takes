@@ -192,7 +192,8 @@ struct WorkspaceView: View {
     private var windowContent: some View {
         GeometryReader { proxy in
             let fraction = artworkResize?.fraction(at: proxy.size.height) ?? (settings.showsArtwork ? 1 : 0)
-            workspaceContent(artworkFraction: fraction)
+            let coverHeight = artworkResize?.coverHeight ?? TakesWindowPolicy.artworkHeight(in: proxy.size)
+            workspaceContent(artworkFraction: fraction, coverHeight: coverHeight)
         }
             .frame(minWidth: TakesWindowPolicy.minimumWidth,
                    minHeight: TakesWindowPolicy.rootViewMinimumHeight(showsArtwork: artworkResize == nil && settings.showsArtwork))
@@ -295,17 +296,18 @@ struct WorkspaceView: View {
             && !openFiles.isImportingTracks && presentation.locateVersionID == nil
     }
 
-    private func workspaceContent(artworkFraction: CGFloat) -> some View {
-        let coverHeight = TakesWindowPolicy.artworkHeight * artworkFraction
+    private func workspaceContent(artworkFraction: CGFloat, coverHeight: CGFloat) -> some View {
+        let visibleCoverHeight = coverHeight * artworkFraction
         let animateClampedCover = artworkResize?.followsWindow == false && !reduceMotion
         return VStack(spacing: 0) {
             // Keep the same cover above the top edge when closed. Its bottom
             // edge travels with the transport on both opening and closing.
             ArtworkCoverView(image: artworkStore.artwork(for: shownCoverVersionID),
                              showsTitlebarControls: showsTitlebarControls)
+                .frame(height: coverHeight)
                 .geometryGroup()
-                .offset(y: coverHeight - TakesWindowPolicy.artworkHeight)
-                .frame(height: coverHeight, alignment: .top)
+                .offset(y: visibleCoverHeight - coverHeight)
+                .frame(height: visibleCoverHeight, alignment: .top)
                 .clipped()
                 .componentDebugLabel("Cover", enabled: settings.showsComponentDebugLabels && settings.showsArtwork)
                 .overlay {
@@ -560,7 +562,7 @@ struct WorkspaceView: View {
     private func storePlaylistHeight() {
         guard !isComparison, let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen),
               persistence.restorationComplete else { return }
-        TakesWindowPolicy.storePlaylistHeight(mainWindow.frame.height, showsArtwork: settings.showsArtwork)
+        TakesWindowPolicy.storePlaylistHeight(mainWindow.frame.size, showsArtwork: settings.showsArtwork)
     }
 
     /// Entering compare stores the playlist's height and sizes the window to
@@ -570,14 +572,14 @@ struct WorkspaceView: View {
         guard let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen),
               persistence.restorationComplete else { return }
         if !wasComparison {
-            TakesWindowPolicy.storePlaylistHeight(mainWindow.frame.height, showsArtwork: settings.showsArtwork)
+            TakesWindowPolicy.storePlaylistHeight(mainWindow.frame.size, showsArtwork: settings.showsArtwork)
         }
         if let frame = modeFrame(for: mainWindow) {
             mainWindow.setFrame(frame, display: true, animate: !reduceMotion)
         }
     }
 
-    /// Help ▸ Debug ▸ Reset Window Size: artwork on, the minimum width, and
+    /// Help ▸ Debug ▸ Reset Window Size: artwork on, the default width, and
     /// the mode's height (the playlist's default, which it then remembers,
     /// or compare's fit to its lanes).
     private func resetWindowSize() {
@@ -586,13 +588,14 @@ struct WorkspaceView: View {
         settings.showsArtwork = true
         mainWindow.minSize = TakesWindowPolicy.minimumSize(showsArtwork: true)
         let height = isComparison
-            ? TakesWindowPolicy.compareFittingHeight(laneCount: contentFitKey.trackCount, showsArtwork: true)
+            ? TakesWindowPolicy.compareFittingHeight(laneCount: contentFitKey.trackCount, showsArtwork: true,
+                                                    width: TakesWindowPolicy.defaultWidth)
             : TakesWindowPolicy.defaultHeight(showsArtwork: true)
         let frame = TakesWindowPolicy.frameResettingSize(
             currentFrame: mainWindow.frame, height: height, visibleFrame: TakesWindowPolicy.visibleFrame(for: mainWindow)
         )
         if frame != mainWindow.frame { mainWindow.setFrame(frame, display: true, animate: !reduceMotion) }
-        if !isComparison { TakesWindowPolicy.storePlaylistHeight(frame.height, showsArtwork: true) }
+        if !isComparison { TakesWindowPolicy.storePlaylistHeight(frame.size, showsArtwork: true) }
     }
 
     /// At launch the autosaved frame is whichever mode was on screen at
@@ -608,7 +611,9 @@ struct WorkspaceView: View {
         let showsArtwork = settings.showsArtwork
         let visibleFrame = TakesWindowPolicy.visibleFrame(for: window)
         if isComparison {
-            let height = TakesWindowPolicy.compareFittingHeight(laneCount: contentFitKey.trackCount, showsArtwork: showsArtwork)
+            let height = TakesWindowPolicy.compareFittingHeight(
+                laneCount: contentFitKey.trackCount, showsArtwork: showsArtwork, width: window.frame.width
+            )
             return TakesWindowPolicy.frameSettingHeight(height, showsArtwork: showsArtwork,
                                                         currentFrame: window.frame, visibleFrame: visibleFrame)
         }
@@ -663,12 +668,14 @@ struct WorkspaceView: View {
         let showsArtwork = settings.showsArtwork
         let fittingHeight: CGFloat
         if isComparison {
-            fittingHeight = TakesWindowPolicy.compareFittingHeight(laneCount: contentFitKey.trackCount, showsArtwork: showsArtwork)
+            fittingHeight = TakesWindowPolicy.compareFittingHeight(
+                laneCount: contentFitKey.trackCount, showsArtwork: showsArtwork, width: mainWindow.frame.width
+            )
         } else {
             let rows = presentation.visibleRows(in: coordinator.workspace)
             let itemRows = rows.filter { if case .item = $0 { return true }; return false }.count
             fittingHeight = TakesWindowPolicy.playlistFittingHeight(
-                itemRows: itemRows, versionRows: rows.count - itemRows, showsArtwork: showsArtwork
+                itemRows: itemRows, versionRows: rows.count - itemRows, showsArtwork: showsArtwork, width: mainWindow.frame.width
             )
         }
         guard let frame = TakesWindowPolicy.frameFittingContent(

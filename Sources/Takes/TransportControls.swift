@@ -428,26 +428,31 @@ struct SevenSegmentDisplay: View {
 
     // MARK: Metrics (all derived from digitHeight so the display scales as one)
 
-    private var digitWidth: CGFloat { digitHeight * 0.56 }
-    private var colonWidth: CGFloat { digitHeight * 0.24 }
+    private static let digitWidthRatio: CGFloat = 0.56
+    private static let colonWidthRatio: CGFloat = 0.24
+    private static let spacingRatio: CGFloat = 0.24
     private var thickness: CGFloat { digitHeight * 0.15 }
-    private var cellSpacing: CGFloat { digitHeight * 0.24 }
+    private var cellSpacing: CGFloat { digitHeight * Self.spacingRatio }
     /// Rightward lean of the digits (tangent of the slant angle), the classic
     /// italic cant of LED clock faces.
-    private var skew: CGFloat { 0.10 }
+    private static let skew: CGFloat = 0.10
 
     private var glyphs: [Character] { Array(text) }
 
     private func width(of glyph: Character) -> CGFloat {
-        glyph == ":" ? colonWidth : digitWidth
+        Self.widthRatio(of: glyph) * digitHeight
     }
 
-    private var intrinsicWidth: CGFloat {
-        let cells = glyphs.reduce(CGFloat.zero) { $0 + width(of: $1) }
-        let gaps = cellSpacing * CGFloat(max(glyphs.count - 1, 0))
+    private static func widthRatio(of glyph: Character) -> CGFloat {
+        glyph == ":" ? colonWidthRatio : digitWidthRatio
+    }
+
+    static func width(of text: String, digitHeight: CGFloat) -> CGFloat {
+        let cells = text.reduce(CGFloat.zero) { $0 + widthRatio(of: $1) }
+        let gaps = spacingRatio * CGFloat(max(text.count - 1, 0))
         // The slant pushes the top of the leftmost cell past the layout origin,
         // so reserve the overhang.
-        return cells + gaps + digitHeight * skew
+        return (cells + gaps + skew) * digitHeight
     }
 
     /// Extra canvas margin on every side so the glow blur can trail off
@@ -460,7 +465,7 @@ struct SevenSegmentDisplay: View {
             context.translateBy(x: bleed, y: bleed)
             // Shear so cells lean right at the top while their baselines stay put.
             context.concatenate(CGAffineTransform(
-                a: 1, b: 0, c: -skew, d: 1, tx: skew * digitHeight, ty: 0
+                a: 1, b: 0, c: -Self.skew, d: 1, tx: Self.skew * digitHeight, ty: 0
             ))
 
             let isLED = colorScheme == .dark
@@ -500,7 +505,7 @@ struct SevenSegmentDisplay: View {
                 x = cell.maxX + cellSpacing
             }
         }
-        .frame(width: intrinsicWidth + bleed * 2, height: digitHeight + bleed * 2)
+        .frame(width: Self.width(of: text, digitHeight: digitHeight) + bleed * 2, height: digitHeight + bleed * 2)
         .padding(-bleed)
     }
 
@@ -802,6 +807,8 @@ enum ControlBarMetrics {
     /// The playlist's Previous · Play · Next group (160 pt), which places the
     /// side buttons in both modes.
     static let playlistCenterGroupWidth = secondaryDiameter * 2 + primaryDiameter + centerSpacing * 2
+    /// Each centred side slot has the standard inset on both sides at the minimum.
+    static let minimumWidth = playlistCenterGroupWidth + 2 * (sideSlotSize.width + 2 * edgeInset)
 
     /// A side button's centre, from its window edge: midway between the edge
     /// and the playlist's centre group (50 pt in a 360 pt window).

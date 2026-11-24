@@ -186,6 +186,10 @@ struct SessionTests {
         #expect(side == 140 - CompareInfoBarRow.columnSpacing)
         #expect(side * 2 + 60 + CompareInfoBarRow.columnSpacing * 2 == 340)
         #expect(CompareInfoBarRow.sideWidth(barWidth: 40, centerWidth: 60) == 0)
+        let narrowBar = TakesWindowPolicy.minimumWidth - 2 * CompareInfoBarMetrics.edgeInset
+        let availableClockWidth = CompareInfoBarRow.centerWidth(barWidth: narrowBar, sideWidth: 56)
+        #expect(CompareInfoBarRow.sideWidth(barWidth: narrowBar, centerWidth: availableClockWidth) == 56)
+        #expect(availableClockWidth < SevenSegmentDisplay.width(of: "-123:45:56", digitHeight: 14) + 18)
     }
 
     @Test
@@ -491,7 +495,7 @@ struct SessionTests {
     func windowPolicyUsesTheA2SizesInBothArtworkStates() {
         #expect(TakesWindowPolicy.defaultSize(showsArtwork: true) == CGSize(width: 360, height: 760))
         #expect(TakesWindowPolicy.defaultSize(showsArtwork: false) == CGSize(width: 360, height: 412))
-        #expect(TakesWindowPolicy.artworkCollapseHeight == 348)
+        #expect(TakesWindowPolicy.artworkCollapseHeight(coverHeight: 360) == 348)
         #expect(TakesWindowPolicy.controlBarTopPadding(showsArtwork: true) == 12)
         #expect(TakesWindowPolicy.controlBarTopPadding(showsArtwork: false) == 24)
     }
@@ -501,12 +505,12 @@ struct SessionTests {
         for showsArtwork in [true, false] {
             let minimum = TakesWindowPolicy.minimumSize(showsArtwork: showsArtwork)
             let defaultSize = TakesWindowPolicy.defaultSize(showsArtwork: showsArtwork)
-            #expect(minimum.width == 360)
+            #expect(minimum.width == 260)
             #expect(minimum.height <= defaultSize.height)
         }
         #expect(
             TakesWindowPolicy.minimumHeight(showsArtwork: true) - TakesWindowPolicy.minimumHeight(showsArtwork: false)
-                == TakesWindowPolicy.artworkCollapseHeight
+                == TakesWindowPolicy.artworkCollapseHeight(coverHeight: TakesWindowPolicy.minimumWidth)
         )
     }
 
@@ -533,7 +537,7 @@ struct SessionTests {
         #expect(hidden.maxY == currentFrame.maxY)
         #expect(hidden.minX == currentFrame.minX)
         #expect(hidden.width == currentFrame.width)
-        #expect(hidden.height == currentFrame.height - TakesWindowPolicy.artworkCollapseHeight)
+        #expect(hidden.height == currentFrame.height - TakesWindowPolicy.artworkCollapseHeight(coverHeight: 420))
 
         let shown = TakesWindowPolicy.frameTogglingArtwork(
             currentFrame: hidden, showsArtwork: true, visibleFrame: visibleFrame
@@ -544,16 +548,17 @@ struct SessionTests {
     @Test
     func artworkRevealKeepsTransportAtTheSameDistanceFromTheWindowBottom() {
         let screen = CGRect(x: 0, y: 0, width: 1200, height: 900)
-        let hidden = CGRect(x: 0, y: 488, width: 360, height: 412)
+        let hidden = CGRect(x: 0, y: 488, width: 420, height: 412)
         var resize = TakesWindowPolicy.ArtworkResize(from: hidden, showsArtwork: true, visibleFrame: screen)
         #expect(resize.followsWindow)
-        for height: CGFloat in [412, 500, 586, 690, 760] {
+        #expect(resize.coverHeight == 420)
+        for height: CGFloat in [412, 500, 616, 690, 820] {
             let fraction = resize.fraction(at: height)
-            let transportTop = TakesWindowPolicy.artworkHeight * fraction + TakesWindowPolicy.controlBarTopPadding(artworkFraction: fraction)
+            let transportTop = resize.coverHeight * fraction + TakesWindowPolicy.controlBarTopPadding(artworkFraction: fraction)
             #expect(abs(height - transportTop - 388) < 0.001)
         }
         resize.showsArtwork = false
-        #expect(resize.fraction(at: 586) == 0.5)
+        #expect(resize.fraction(at: 616) == 0.5)
         #expect(resize.targetFrame == hidden)
     }
 
@@ -598,6 +603,19 @@ struct SessionTests {
     }
 
     @Test
+    func artworkScalesWithWidthAndKeepsRoomForTheControls() {
+        #expect(TakesWindowPolicy.artworkHeight(in: CGSize(width: 260, height: 530)) == 260)
+        #expect(TakesWindowPolicy.artworkHeight(in: CGSize(width: 500, height: 800)) == 500)
+        let visibleFrame = CGRect(x: 0, y: 0, width: 1440, height: 700)
+        let shown = CGRect(x: 50, y: 0, width: 900, height: 700)
+        #expect(TakesWindowPolicy.artworkHeight(in: shown.size) == 441)
+        let hidden = TakesWindowPolicy.frameTogglingArtwork(
+            currentFrame: shown, showsArtwork: false, visibleFrame: visibleFrame
+        )
+        #expect(hidden == CGRect(x: 50, y: 429, width: 900, height: 271))
+    }
+
+    @Test
     func windowPolicyHidingArtworkNeverGoesBelowTheHiddenMinimum() {
         let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 1000)
         let currentFrame = CGRect(x: 96, y: 300, width: 360, height: 500)
@@ -625,7 +643,7 @@ struct SessionTests {
     }
 
     @Test
-    func debugResetSizeUsesTheMinimumWidthAndTheGivenHeight() {
+    func debugResetSizeUsesTheDefaultWidthAndTheGivenHeight() {
         let currentFrame = CGRect(x: 96, y: 100, width: 920, height: 700)
         let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 1000)
         let resetFrame = TakesWindowPolicy.frameResettingSize(
@@ -2365,6 +2383,12 @@ struct SessionTests {
         // at 50 and 310 — in compare too, whose centre group is narrower.
         #expect(ControlBarMetrics.sideButtonCenterX(barWidth: 360) == 50)
         #expect(ControlBarMetrics.sideButtonCenterX(barWidth: 600) == 110)
+        let minimum = TakesWindowPolicy.minimumWidth
+        let center = ControlBarMetrics.sideButtonCenterX(barWidth: minimum)
+        let halfSlot = ControlBarMetrics.sideSlotSize.width / 2
+        #expect(center - halfSlot == ControlBarMetrics.edgeInset)
+        #expect((minimum - ControlBarMetrics.playlistCenterGroupWidth) / 2 - center - halfSlot
+            == ControlBarMetrics.edgeInset)
         // Never closer to the edge than half a slot.
         #expect(ControlBarMetrics.sideButtonCenterX(barWidth: 100) == 15)
     }
@@ -2658,11 +2682,13 @@ struct SessionTests {
         #expect(BottomBarMetrics.height == 30)
         #expect(TakesWindowPolicy.minimumHeightWithoutArtwork == 271)
         #expect(TakesWindowPolicy.minimumHeight(showsArtwork: false) == 271)
-        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: true) == 619)
+        #expect(TakesWindowPolicy.minimumHeight(showsArtwork: true) == 519)
 
         for showsArtwork in [true, false] {
             let lanes = { (windowHeight: CGFloat) in
-                (windowHeight - (showsArtwork ? TakesWindowPolicy.artworkHeight : 0)
+                (windowHeight - (showsArtwork ? TakesWindowPolicy.artworkHeight(
+                    in: CGSize(width: TakesWindowPolicy.defaultWidth, height: windowHeight)
+                ) : 0)
                     - TakesWindowPolicy.compareControlBarHeight(showsArtwork: showsArtwork)
                     - CompareInfoBarMetrics.height
                     - CompareLaneLayout.seatBottom - BottomBarMetrics.height) / CompareLaneLayout.laneStep
@@ -2682,13 +2708,13 @@ struct SessionTests {
         #expect(TakesWindowPolicy.playlistControlBarHeight(showsArtwork: true) == 130)
         #expect(TakesWindowPolicy.playlistControlBarHeight(showsArtwork: false) == 142)
         // 360 + 130 + 6 + 4 × 46 + 2 × 30 + 6 + 30.
-        #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 4, versionRows: 2, showsArtwork: true) == 776)
-        #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 4, versionRows: 2, showsArtwork: false) == 428)
+        #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 4, versionRows: 2, showsArtwork: true, width: 360) == 776)
+        #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 4, versionRows: 2, showsArtwork: false, width: 360) == 428)
         // Few or no rows never go below the minimum.
-        #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 0, versionRows: 0, showsArtwork: true) == 619)
-        #expect(TakesWindowPolicy.compareFittingHeight(laneCount: 0, showsArtwork: true) == 619)
-        #expect(TakesWindowPolicy.compareFittingHeight(laneCount: 1, showsArtwork: false) == 271)
-        #expect(TakesWindowPolicy.compareFittingHeight(laneCount: 3, showsArtwork: false) == 463)
+        #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 0, versionRows: 0, showsArtwork: true, width: 260) == 519)
+        #expect(TakesWindowPolicy.compareFittingHeight(laneCount: 0, showsArtwork: true, width: 360) == 619)
+        #expect(TakesWindowPolicy.compareFittingHeight(laneCount: 1, showsArtwork: false, width: 360) == 271)
+        #expect(TakesWindowPolicy.compareFittingHeight(laneCount: 3, showsArtwork: false, width: 360) == 463)
     }
 
     @Test
@@ -2740,12 +2766,12 @@ struct SessionTests {
     func playlistHeightIsStoredWithoutTheCover() throws {
         let defaults = try #require(UserDefaults(suiteName: "SessionTests.playlistHeight.\(UUID())"))
         #expect(TakesWindowPolicy.storedPlaylistHeight(defaults: defaults) == nil)
-        TakesWindowPolicy.storePlaylistHeight(800, showsArtwork: true, defaults: defaults)
+        TakesWindowPolicy.storePlaylistHeight(CGSize(width: 400, height: 840), showsArtwork: true, defaults: defaults)
         #expect(TakesWindowPolicy.storedPlaylistHeight(defaults: defaults) == 452)
-        TakesWindowPolicy.storePlaylistHeight(500, showsArtwork: false, defaults: defaults)
+        TakesWindowPolicy.storePlaylistHeight(CGSize(width: 400, height: 500), showsArtwork: false, defaults: defaults)
         #expect(TakesWindowPolicy.storedPlaylistHeight(defaults: defaults) == 500)
         // Never stored below the minimum.
-        TakesWindowPolicy.storePlaylistHeight(100, showsArtwork: false, defaults: defaults)
+        TakesWindowPolicy.storePlaylistHeight(CGSize(width: 400, height: 100), showsArtwork: false, defaults: defaults)
         #expect(TakesWindowPolicy.storedPlaylistHeight(defaults: defaults) == 271)
         // Compare's height, from an earlier build, is retired.
         #expect(TakesWindowPolicy.retiredLayoutDefaultsKeys.contains("main.a2.height.compare"))
@@ -2757,15 +2783,17 @@ struct SessionTests {
         let frame = CGRect(x: 100, y: 200, width: 400, height: 620)
         // The cover is added back when shown; width and top edge stay.
         #expect(TakesWindowPolicy.frameRestoringPlaylistHeight(452, showsArtwork: true, currentFrame: frame, visibleFrame: screen)
-            == CGRect(x: 100, y: 20, width: 400, height: 800))
+            == CGRect(x: 100, y: 0, width: 400, height: 820))
         #expect(TakesWindowPolicy.frameRestoringPlaylistHeight(452, showsArtwork: false, currentFrame: frame, visibleFrame: screen)
             == CGRect(x: 100, y: 368, width: 400, height: 452))
         // Stops at the bottom of the screen, never below the minimum.
         #expect(TakesWindowPolicy.frameRestoringPlaylistHeight(2000, showsArtwork: false, currentFrame: frame, visibleFrame: screen)
             == CGRect(x: 100, y: 0, width: 400, height: 820))
         #expect(TakesWindowPolicy.frameRestoringPlaylistHeight(10, showsArtwork: true, currentFrame: frame, visibleFrame: screen)
-            == CGRect(x: 100, y: 201, width: 400, height: 619))
-        #expect(TakesWindowPolicy.frameRestoringPlaylistHeight(272, showsArtwork: true, currentFrame: frame, visibleFrame: screen) == nil)
+            == CGRect(x: 100, y: 161, width: 400, height: 659))
+        let fitted = CGRect(x: 100, y: 160, width: 400, height: 660)
+        #expect(TakesWindowPolicy.frameRestoringPlaylistHeight(272, showsArtwork: true, currentFrame: fitted, visibleFrame: screen)
+            == nil)
     }
 
     @Test
@@ -2773,16 +2801,16 @@ struct SessionTests {
         let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
         let tall = CGRect(x: 100, y: 0, width: 360, height: 880)
         // Shrinks to three lanes (619 + 2 × 96 = 811) even from a taller window.
-        let three = TakesWindowPolicy.compareFittingHeight(laneCount: 3, showsArtwork: true)
+        let three = TakesWindowPolicy.compareFittingHeight(laneCount: 3, showsArtwork: true, width: 360)
         #expect(TakesWindowPolicy.frameSettingHeight(three, showsArtwork: true, currentFrame: tall, visibleFrame: screen)
             == CGRect(x: 100, y: 69, width: 360, height: 811))
         // Grows to the lanes, stopping at the bottom of the screen.
         let short = CGRect(x: 100, y: 300, width: 360, height: 619)
-        let many = TakesWindowPolicy.compareFittingHeight(laneCount: 10, showsArtwork: true)
+        let many = TakesWindowPolicy.compareFittingHeight(laneCount: 10, showsArtwork: true, width: 360)
         #expect(TakesWindowPolicy.frameSettingHeight(many, showsArtwork: true, currentFrame: short, visibleFrame: screen)
             == CGRect(x: 100, y: 0, width: 360, height: 919))
         // One lane at the minimum height: unchanged.
-        let one = TakesWindowPolicy.compareFittingHeight(laneCount: 1, showsArtwork: true)
+        let one = TakesWindowPolicy.compareFittingHeight(laneCount: 1, showsArtwork: true, width: 360)
         #expect(TakesWindowPolicy.frameSettingHeight(one, showsArtwork: true, currentFrame: short, visibleFrame: screen) == nil)
     }
 

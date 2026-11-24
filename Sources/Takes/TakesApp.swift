@@ -318,11 +318,8 @@ final class RemotePlaybackCommandController: ObservableObject {
 /// (docs/a2-redesign-spec.md §2).
 ///
 /// One window serves playlist and comparison. It opens 360 pt wide in both
-/// modes, and mode switches never resize it. The user can resize it both ways
-/// down to the minimums below. The artwork toggle is the only automatic
-/// resize: hiding the 360 pt cover shrinks the window by
-/// `artworkCollapseHeight` and showing it grows it back by the same amount,
-/// keeping the top edge where it is.
+/// modes, which share the same width. The artwork toggle, mode switches and
+/// track fitting keep the top edge in place when the window changes height.
 enum TakesWindowPolicy {
     static let mainWindowID = "main"
     static let analysisWindowID = "analysis"
@@ -341,19 +338,22 @@ enum TakesWindowPolicy {
     // MARK: Window size
 
     static let defaultWidth: CGFloat = 360
-    static let minimumWidth: CGFloat = 360
-    /// Full-bleed square cover at the top of the window.
-    static let artworkHeight: CGFloat = 360
+    static let minimumWidth = ControlBarMetrics.minimumWidth
     static let artworkResizeDuration: TimeInterval = 0.24
     /// Control-bar top padding under the cover.
     static let controlBarTopPaddingBelowArtwork: CGFloat = 12
     /// Control-bar top padding when the titlebar overlays the bar, so the
     /// transport buttons clear the window buttons and the artwork toggle.
     static let controlBarTopPaddingUnderTitlebar: CGFloat = 24
-    /// How much the window shrinks when the cover is hidden: the cover, less
-    /// the extra padding the control bar gains under the titlebar (348 pt).
-    static let artworkCollapseHeight = artworkHeight
-        - (controlBarTopPaddingUnderTitlebar - controlBarTopPaddingBelowArtwork)
+    /// The cover is square when there is room. At wide, short frames it fits
+    /// above the same controls and minimum content area.
+    static func artworkHeight(in size: CGSize) -> CGFloat {
+        max(min(size.width, size.height - minimumHeightBelowArtwork), 0)
+    }
+
+    static func artworkCollapseHeight(coverHeight: CGFloat) -> CGFloat {
+        max(coverHeight - (controlBarTopPaddingUnderTitlebar - controlBarTopPaddingBelowArtwork), 0)
+    }
 
     /// For a full toggle the window itself drives the reveal. When the screen
     /// clamps its travel, the cover still needs to slide the full distance.
@@ -370,8 +370,10 @@ enum TakesWindowPolicy {
         }
 
         var targetFrame: CGRect { showsArtwork ? shownFrame : hiddenFrame }
+        var coverHeight: CGFloat { artworkHeight(in: shownFrame.size) }
         var followsWindow: Bool {
-            abs(shownFrame.height - hiddenFrame.height - artworkCollapseHeight) < 1
+            let travel = shownFrame.height - hiddenFrame.height
+            return travel > 0 && abs(travel - artworkCollapseHeight(coverHeight: coverHeight)) < 1
         }
 
         func fraction(at windowHeight: CGFloat) -> CGFloat {
@@ -389,6 +391,8 @@ enum TakesWindowPolicy {
     static let minimumHeightWithoutArtwork: CGFloat = compareControlBarHeight(showsArtwork: false)
         + CompareInfoBarMetrics.height + CompareLaneLayout.seatBottom + CompareLaneLayout.laneStep
         + BottomBarMetrics.height
+    static let minimumHeightBelowArtwork = minimumHeightWithoutArtwork
+        - (controlBarTopPaddingUnderTitlebar - controlBarTopPaddingBelowArtwork)
 
     static func controlBarTopPadding(showsArtwork: Bool) -> CGFloat {
         controlBarTopPadding(artworkFraction: showsArtwork ? 1 : 0)
@@ -399,11 +403,11 @@ enum TakesWindowPolicy {
     }
 
     static func defaultHeight(showsArtwork: Bool) -> CGFloat {
-        showsArtwork ? defaultHeightWithArtwork : defaultHeightWithArtwork - artworkCollapseHeight
+        showsArtwork ? defaultHeightWithArtwork : defaultHeightWithArtwork - artworkCollapseHeight(coverHeight: defaultWidth)
     }
 
-    static func minimumHeight(showsArtwork: Bool) -> CGFloat {
-        minimumHeightWithoutArtwork + (showsArtwork ? artworkCollapseHeight : 0)
+    static func minimumHeight(showsArtwork: Bool, width: CGFloat = minimumWidth) -> CGFloat {
+        showsArtwork ? width + minimumHeightBelowArtwork : minimumHeightWithoutArtwork
     }
 
     static func defaultSize(showsArtwork: Bool) -> CGSize {
@@ -454,19 +458,19 @@ enum TakesWindowPolicy {
     /// The window height that shows every row of the playlist table without
     /// scrolling, never below the minimum.
     @MainActor
-    static func playlistFittingHeight(itemRows: Int, versionRows: Int, showsArtwork: Bool) -> CGFloat {
+    static func playlistFittingHeight(itemRows: Int, versionRows: Int, showsArtwork: Bool, width: CGFloat) -> CGFloat {
         let list = PlaylistRowMetrics.listVerticalInset * 2
             + PlaylistRowMetrics.itemHeight * CGFloat(itemRows)
             + PlaylistRowMetrics.versionHeight * CGFloat(versionRows)
-        let height = (showsArtwork ? artworkHeight : 0) + playlistControlBarHeight(showsArtwork: showsArtwork)
+        let height = (showsArtwork ? width : 0) + playlistControlBarHeight(showsArtwork: showsArtwork)
             + list + BottomBarMetrics.height
-        return max(height, minimumHeight(showsArtwork: showsArtwork))
+        return max(height, minimumHeight(showsArtwork: showsArtwork, width: width))
     }
 
     /// The window height that shows every compare lane without scrolling:
     /// the minimum holds one lane, and each further lane adds a lane step.
-    static func compareFittingHeight(laneCount: Int, showsArtwork: Bool) -> CGFloat {
-        minimumHeight(showsArtwork: showsArtwork) + CGFloat(max(laneCount, 1) - 1) * CompareLaneLayout.laneStep
+    static func compareFittingHeight(laneCount: Int, showsArtwork: Bool, width: CGFloat) -> CGFloat {
+        minimumHeight(showsArtwork: showsArtwork, width: width) + CGFloat(max(laneCount, 1) - 1) * CompareLaneLayout.laneStep
     }
 
     /// v2.9.0's resize on adding and removing tracks, for either mode.
@@ -494,8 +498,8 @@ enum TakesWindowPolicy {
 
     /// The playlist remembers its window height; compare doesn't, and sizes
     /// to its lanes instead (`compareFittingHeight`). The height is stored
-    /// without the cover (`artworkCollapseHeight` taken off when it is
-    /// shown), so one stored height serves both artwork states.
+    /// without the visible cover, so one stored height serves both artwork
+    /// states and can be restored at a different width.
     static let playlistHeightDefaultsKey = "main.a2.height.playlist"
     /// Written by an earlier build, when compare remembered its height too.
     static let retiredCompareHeightDefaultsKey = "main.a2.height.compare"
@@ -505,17 +509,19 @@ enum TakesWindowPolicy {
         return CGFloat(value)
     }
 
-    static func storePlaylistHeight(_ windowHeight: CGFloat, showsArtwork: Bool, defaults: UserDefaults = .standard) {
-        let height = windowHeight - (showsArtwork ? artworkCollapseHeight : 0)
-        defaults.set(Double(max(height, minimumHeight(showsArtwork: false))), forKey: playlistHeightDefaultsKey)
+    static func storePlaylistHeight(_ size: CGSize, showsArtwork: Bool, defaults: UserDefaults = .standard) {
+        let coverHeight = showsArtwork ? artworkHeight(in: size) : 0
+        let height = size.height - artworkCollapseHeight(coverHeight: coverHeight)
+        defaults.set(Double(max(height, minimumHeightWithoutArtwork)), forKey: playlistHeightDefaultsKey)
     }
 
     /// The frame for the stored playlist height: the cover added back when
     /// shown. `nil` when the height is unchanged.
     static func frameRestoringPlaylistHeight(_ storedHeight: CGFloat, showsArtwork: Bool,
                                              currentFrame: CGRect, visibleFrame: CGRect) -> CGRect? {
-        frameSettingHeight(storedHeight + (showsArtwork ? artworkCollapseHeight : 0), showsArtwork: showsArtwork,
-                           currentFrame: currentFrame, visibleFrame: visibleFrame)
+        let coverHeight = showsArtwork ? currentFrame.width : 0
+        let height = max(storedHeight, minimumHeightWithoutArtwork) + artworkCollapseHeight(coverHeight: coverHeight)
+        return frameSettingHeight(height, showsArtwork: showsArtwork, currentFrame: currentFrame, visibleFrame: visibleFrame)
     }
 
     /// A frame of the given window height: never below the minimum, top edge
@@ -541,12 +547,12 @@ enum TakesWindowPolicy {
         )
     }
 
-    /// Help ▸ Debug ▸ Reset Window Size: the minimum width and `height`,
+    /// Help ▸ Debug ▸ Reset Window Size: the default width and `height`,
     /// keeping the top-left corner. The caller turns the artwork on and
     /// picks the mode's height (`WorkspaceView.resetWindowSize`).
     static func frameResettingSize(currentFrame: CGRect, height: CGFloat, visibleFrame: CGRect) -> CGRect {
         clampedFrame(
-            CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: minimumWidth, height: height),
+            CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: defaultWidth, height: height),
             visibleFrame: visibleFrame
         )
     }
@@ -560,11 +566,13 @@ enum TakesWindowPolicy {
         )
     }
 
-    /// The frame after the artwork is shown or hidden: the height changes by
-    /// `artworkCollapseHeight`, the width and top edge stay. A window that
+    /// Showing adds room for a square cover at the current width. Hiding
+    /// removes the cover's visible height. A window that
     /// would run off the bottom of the screen moves up only as far as needed.
     static func frameTogglingArtwork(currentFrame: CGRect, showsArtwork: Bool, visibleFrame: CGRect) -> CGRect {
-        let delta = showsArtwork ? artworkCollapseHeight : -artworkCollapseHeight
+        let coverHeight = showsArtwork ? currentFrame.width : artworkHeight(in: currentFrame.size)
+        let collapseHeight = artworkCollapseHeight(coverHeight: coverHeight)
+        let delta = showsArtwork ? collapseHeight : -collapseHeight
         let height = max(currentFrame.height + delta, minimumHeight(showsArtwork: showsArtwork))
         return clampedFrame(
             CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: currentFrame.width, height: height),

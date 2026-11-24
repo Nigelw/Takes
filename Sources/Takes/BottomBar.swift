@@ -13,6 +13,7 @@ enum BottomBarMetrics {
     static let spacing: CGFloat = 6
     /// The compare zoom slider, between its two magnifiers.
     static let zoomSliderWidth: CGFloat = 96
+    static let minimumZoomSliderWidth: CGFloat = 64
 }
 
 /// One bottom bar for both modes (A2 §7), as `ControlBarLayout` is for the
@@ -406,7 +407,8 @@ struct CompareZoomControl: View {
                 ),
                 in: 0...1
             )
-            .frame(width: BottomBarMetrics.zoomSliderWidth)
+            .frame(minWidth: BottomBarMetrics.minimumZoomSliderWidth, idealWidth: BottomBarMetrics.zoomSliderWidth,
+                   maxWidth: BottomBarMetrics.zoomSliderWidth)
             .accessibilityLabel("Timeline Zoom")
             Button { step(zoomingIn: true) } label: { Image(systemName: "plus.magnifyingglass") }
                 .help("Zoom In")

@@ -18,7 +18,7 @@ still apply.
 
 ## 1. Concept
 
-One narrow window, 360 pt wide, in both modes.
+One window, 360 pt wide by default, in both modes.
 
 - **Playlist mode:** album artwork on top, then the control bar (transport and
   readout), then the track list, then a bottom bar.
@@ -39,10 +39,11 @@ One narrow window, 360 pt wide, in both modes.
 | Compare, artwork hidden | 360 | 412 |
 
 - Width is the same in both modes; mode switches never resize horizontally.
-- Hiding the artwork removes the 360 pt cover. The titlebar then overlays the
+- Hiding the artwork removes the cover. The titlebar then overlays the
   top of the control bar (as v2.9.0's control bar already does), and the
   control bar's top padding grows from 12 to 24 pt so Shuffle and Repeat clear
-  the window buttons. The window shrinks by 348 pt.
+  the window buttons. The window shrinks by the displayed cover height
+  less 12 pt (348 pt at the default width).
 - The window's top edge stays put when it shrinks or grows (grow and shrink
   downward), as `WorkspaceView.setPlaylistFrame` does today.
 - This replaces the current playlist/comparison size policy:
@@ -51,7 +52,8 @@ One narrow window, 360 pt wide, in both modes.
   `applyModeWindowSize(previousMode:)` in `WorkspaceView.swift`.
 
 **Decided (§13):** the window is user-resizable in both directions. The
-sizes above are the defaults; the minimum width is 360. Every A2 element
+sizes above are the defaults. The minimum width is 260 pt, leaving the
+standard 10 pt inset beside Shuffle and Repeat. Every A2 element
 must therefore stretch horizontally as well as vertically.
 
 ## 3. Shared layout grid
@@ -67,7 +69,7 @@ must therefore stretch horizontally as well as vertically.
 
 ## 4. Titlebar and artwork
 
-- Artwork: full-bleed 360 × 360 square, no text overlay. A faint top shade
+- Artwork: a full-width square when height allows, with no text overlay. A faint top shade
   (`black 35%` → clear over 40 pt) keeps the window buttons legible on hover.
 - Window buttons at their standard position (10 pt in).
 - While the cover is shown, the window buttons and the artwork toggle appear
@@ -403,7 +405,7 @@ None open. The version check for a missing file was decided in milestone 3
   only animate lines that actually overflow. The compare readout is narrower,
   so it scrolls more often.
 - **The window is resizable in both directions** (§2). Defaults are the §2
-  sizes. Minimum width is 360 pt. Minimum height is 619 pt with artwork and
+  sizes. Minimum width is 260 pt. Minimum height is 519 pt with artwork and
   271 pt without (`TakesWindowPolicy.minimumHeightWithoutArtwork`). It fits
   the compare control bar (79 pt below the cover, 91 pt under the titlebar), its info bar (32),
   the ruler (22 with its border), one whole lane (96) and the bottom bar
@@ -415,13 +417,13 @@ None open. The version check for a missing file was decided in milestone 3
   1–4 used a provisional 300. Mode switches resize ("The playlist
   remembers its height; compare fits its lanes"); adding and removing
   tracks resizes too ("Window fits added and removed tracks"). The artwork
-  toggle changes the height by exactly 348 pt, keeping any extra height the
+  toggle changes the height by the cover height less 12 pt, keeping any extra height the
   user added; a window that would run off the bottom of the screen moves up
   only as far as needed.
-- **Cover in a wider window:** the cover area stays 360 pt tall; the square
-  stays 360 × 360, centred over a blurred fill of the same image. No artwork
-  (or nothing playing): a neutral tile with a music-note glyph and no top
-  shade.
+- **Cover in a wider window:** the square grows with the window width.
+  At a wide, short size, it fits above the bars and one compare lane,
+  centred over a blurred fill of the same image. The placeholder note
+  scales with the cover.
 - **Artwork-toggle chip, light appearance:** a pale frosted chip (system
   thin material under a white 50% fill), 0.5 pt white 70% inner hairline,
   black 20% drop shadow. The glyph is `Theme.primaryLitGlyph` with

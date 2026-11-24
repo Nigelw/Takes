@@ -78,7 +78,7 @@ struct CompareInfoBarTime: View {
     let controller: PlaybackController
 
     var body: some View {
-        ControlBarElapsedDigits(controller: controller, digitHeight: ControlBarReadoutLine.digitHeight)
+        ControlBarElapsedDigits(controller: controller, digitHeight: ControlBarReadoutLine.digitHeight, fitsWidth: true)
             .padding(.horizontal, Self.horizontalPadding)
             .frame(height: Self.height)
             .readoutGlass(cornerRadius: Self.cornerRadius)
@@ -130,12 +130,30 @@ struct ControlBarReadoutLine: View {
 struct ControlBarElapsedDigits: View {
     let controller: PlaybackController
     let digitHeight: CGFloat
+    var fitsWidth = false
 
     var body: some View {
         let elapsed = controller.session.isPlaying
             ? controller.playingReadoutText
             : controller.session.transportPosition.formattedSignedTimestamp
-        SevenSegmentDisplay(text: elapsed, digitHeight: digitHeight)
+        Group {
+            if fitsWidth {
+                ViewThatFits(in: .horizontal) {
+                    SevenSegmentDisplay(text: elapsed, digitHeight: digitHeight)
+                    GeometryReader { proxy in
+                        let naturalWidth = SevenSegmentDisplay.width(of: elapsed, digitHeight: digitHeight)
+                        let scale = min(proxy.size.width / naturalWidth, 1)
+                        if scale > 0 {
+                            SevenSegmentDisplay(text: elapsed, digitHeight: digitHeight * scale)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .frame(height: digitHeight)
+                }
+            } else {
+                SevenSegmentDisplay(text: elapsed, digitHeight: digitHeight)
+            }
+        }
             .accessibilityElement()
             .accessibilityLabel("Elapsed Time")
             .accessibilityValue(elapsed)

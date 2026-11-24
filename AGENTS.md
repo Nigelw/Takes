@@ -81,7 +81,7 @@ Key ownership:
   Glass frame (`readoutGlass`).
 - `CoverArtwork.swift`: `PlaylistArtworkStore` (in-memory, downsampled,
   bounded embedded-artwork caches: the cover, and the playlist rows'
-  thumbnails), the 360 pt cover view, and the artwork toggle with its custom
+  thumbnails), the width-scaled cover view, and the artwork toggle with its custom
   sleeve glyph.
 - `PlaylistView.swift`: the playlist list's SwiftUI host (empty state, no
   header bar), selection/expansion presentation state, the Playlist menu, and
@@ -300,7 +300,7 @@ These are here to prevent parallel implementations and subtle regressions:
   context menu and the Playlist menu keep every one of those commands; the
   bar is another way in, not a replacement.
 - Help ▸ Debug ▸ Reset Window Size (`WorkspaceView.resetWindowSize`) turns
-  the artwork on and sets the minimum width and the mode's height: the
+  the artwork on and sets the default 360 pt width and the mode's height: the
   playlist's default (760 pt, then stored as its height) or compare's fit
   to its lanes; top-left kept (`frameResettingSize(currentFrame:height:)`).
 - Keep global shortcuts focus-safe; active numeric text fields should retain
@@ -331,8 +331,8 @@ These are here to prevent parallel implementations and subtle regressions:
   Move Up / Down.
 - One main window serves both modes (A2). It opens 360 pt wide (760 tall with
   artwork, 412 without) and is user-resizable down to
-  `TakesWindowPolicy.minimumSize(showsArtwork:)`: 360 × 619 with the
-  artwork, 360 × 271 without (the compare control bar, its info bar, the
+  `TakesWindowPolicy.minimumSize(showsArtwork:)`: 260 × 519 with the
+  artwork, 260 × 271 without (the compare control bar, its info bar, the
   ruler, one whole lane and the bottom bar; `minimumHeightWithoutArtwork`).
   Only the playlist remembers its height (the width is shared):
   `WorkspaceView.switchModeHeight` stores it on entering compare and
@@ -346,8 +346,8 @@ These are here to prevent parallel implementations and subtle regressions:
   The retired `main.a2.height.compare` key is removed on launch. Three
   things resize the window automatically: that mode switch, and the
   following two. The artwork
-  toggle (±`artworkCollapseHeight`, 348 pt, top edge fixed, clamped on
-  screen). And v2.9.0's track fit, in both modes
+  toggle (the cover height less 12 pt, top edge fixed, clamped on screen).
+  And v2.9.0's track fit, in both modes
   (`TakesWindowPolicy.frameFittingContent`): adding tracks grows a window
   too short to show every row (`playlistFittingHeight`: item rows and
   expanded version rows; `compareFittingHeight`: one lane per version),
@@ -361,7 +361,7 @@ These are here to prevent parallel implementations and subtle regressions:
   frame autosaves as `main.a2`; do not reintroduce per-mode frames (only
   the playlist's height is remembered).
   Playlist and compare crossfade below the shared cover. Toggling artwork
-  slides the fixed-size cover down from the top or back up along the same
+  slides the cover down from the top or back up along the same
   path while the window resizes. The cover and control-bar inset follow
   the window's current height, keeping the transport at a fixed distance
   from the bottom. A screen-clamped resize animates the remaining cover
@@ -408,8 +408,8 @@ These are here to prevent parallel implementations and subtle regressions:
   transport row (`ControlBarMetrics.transportRowBottomPadding`), 51 pt
   shorter than the playlist's (79 vs 130 pt with the artwork), and the
   transport row doesn't move between modes. It stretches to any width of
-  360 pt or more; do not
-  reintroduce width-dependent layouts. Side buttons are plain icons
+  260 pt or more, with at least 10 pt between each side slot and the window
+  edge. Side buttons are plain icons
   (`ControlBarSideButtonStyle`) with no lamp or other indicator: the lit
   glyph is the on state. Their values are
   `TransportAppearance.lightSideButton`/`darkSideButton`
@@ -488,8 +488,8 @@ These are here to prevent parallel implementations and subtle regressions:
   lists `Track n`, never file names.
 - Both modes build their bottom bar from one `BottomBarLayout` (A2 §7): 30 pt
   including its 1 pt top hairline, 10 pt insets, standard small controls
-  (`.controlSize(.small)`), stretching to any width with no width-dependent
-  layouts. It sits below the playlist table or the compare lanes and
+  (`.controlSize(.small)`). The compare zoom slider contracts from 96 pt
+  to fit narrow widths. It sits below the playlist table or the compare lanes and
   shortens their scroll area, never a lane. Every control runs an existing
   command (`OpenFileCommandState`, `PlaylistCommandContext`, the
   controller's align and zoom methods) and follows that command's

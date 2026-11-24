@@ -49,9 +49,9 @@ The transport row itself doesn't move between modes.
   waveform"), so the info bar uses the well colour too. The canvas draws the
   ruler and info bar `#27272a` on a `#1f1f21` well; follow the app, not the
   canvas.
-- **Three columns:** left and right take equal flexible widths and the centre
-  takes its natural width, so the time stays centred in the window whatever
-  the text on either side.
+- **Three columns:** left and right take equal flexible widths and the
+  time stays centred. Long timestamps scale down when the space between
+  the side columns is narrower than the clock.
 
 ### 2.1 Take count (left)
 

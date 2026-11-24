@@ -321,23 +321,32 @@ struct CompareInfoBarRow: Layout {
         max((barWidth - centerWidth) / 2 - columnSpacing, 0)
     }
 
+    static func centerWidth(barWidth: CGFloat, sideWidth: CGFloat) -> CGFloat {
+        max(barWidth - 2 * (sideWidth + columnSpacing), 0)
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 3 else { return .zero }
         let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
         return CGSize(
-            width: proposal.width ?? sizes.reduce(0) { $0 + $1.width } + Self.columnSpacing * 2,
+            width: proposal.width ?? sizes[1].width + 2 * (max(sizes[0].width, sizes[2].width) + Self.columnSpacing),
             height: proposal.height ?? sizes.map(\.height).max() ?? 0
         )
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard subviews.count == 3 else { return }
-        let center = subviews[1].sizeThatFits(.unspecified)
+        let sideWidth = max(subviews[0].sizeThatFits(.unspecified).width, subviews[2].sizeThatFits(.unspecified).width)
+        let centerProposal = ProposedViewSize(
+            width: Self.centerWidth(barWidth: bounds.width, sideWidth: sideWidth), height: bounds.height
+        )
+        let center = subviews[1].sizeThatFits(centerProposal)
         let side = ProposedViewSize(
             width: Self.sideWidth(barWidth: bounds.width, centerWidth: center.width),
             height: bounds.height
         )
         subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: side)
-        subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: .unspecified)
+        subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: centerProposal)
         subviews[2].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: side)
     }
 }
@@ -1928,7 +1937,7 @@ struct ContentView: View {
     }
 
     /// The lifted card's width: fixed, so it fits inside the 10 pt edge insets
-    /// (A2 §3) of the 360 pt minimum window and doesn't grow in a wider one.
+    /// (A2 §3) of the 360 pt default window and doesn't grow in a wider one.
     private static let reorderCardWidth: CGFloat = 320
 
     /// The floating card shown under the pointer while a lane is dragged to

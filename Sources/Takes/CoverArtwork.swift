@@ -24,7 +24,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class PlaylistArtworkStore {
-    /// Twice the 360 pt cover, for Retina.
+    /// Twice the default 360 pt cover, for Retina.
     nonisolated static let maximumPixelSize = 720
     static let capacity = 12
     /// Twice the 34 pt row thumbnail, for Retina.
@@ -260,7 +260,7 @@ struct ArtworkDecodeTarget: Equatable, Sendable {
     /// `maximumCropAspect`.
     var alwaysCrops: Bool
 
-    /// The 360 pt cover.
+    /// The cover at its default width.
     static let cover = ArtworkDecodeTarget(
         side: PlaylistArtworkStore.maximumPixelSize,
         maximumCropAspect: CoverArtworkLayout.maximumCropAspect,
@@ -286,10 +286,10 @@ struct ArtworkDecodeTarget: Equatable, Sendable {
 
 // MARK: - Cover
 
-/// The 360 pt full-bleed cover at the top of the main window (A2 spec §4).
+/// The width-scaled cover at the top of the main window (A2 spec §4).
 /// A faint top shade appears with the window buttons to keep them legible
-/// over bright art. When the window is wider than the cover, the square stays
-/// 360 pt and centred over a blurred fill of the same image. Non-square art
+/// over bright art. When height limits the square, it is centred over a
+/// blurred fill of the same image. Non-square art
 /// (`CoverArtworkLayout`) is cropped when nearly square, and otherwise shown
 /// whole, fitted in the square, over that same blurred fill. Pressing on the
 /// cover drags the window, as the control bar does.
@@ -297,16 +297,16 @@ struct ArtworkCoverView: View {
     let image: NSImage?
     let showsTitlebarControls: Bool
 
-    private static let side = TakesWindowPolicy.artworkHeight
     private static let topShadeHeight: CGFloat = 40
 
     var body: some View {
         GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
             ZStack {
                 Theme.artworkPlaceholderFill
                 if let image {
                     let crops = CoverArtworkLayout.crops(image.size)
-                    if proxy.size.width > Self.side + 0.5 || !crops {
+                    if proxy.size.width > side + 0.5 || !crops {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -319,7 +319,7 @@ struct ArtworkCoverView: View {
                         .resizable()
                         .interpolation(.high)
                         .aspectRatio(contentMode: crops ? .fill : .fit)
-                        .frame(width: Self.side, height: Self.side)
+                        .frame(width: side, height: side)
                         .clipped()
                     if showsTitlebarControls {
                         LinearGradient(colors: [.black.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)
@@ -328,13 +328,12 @@ struct ArtworkCoverView: View {
                     }
                 } else {
                     Image(systemName: "music.note")
-                        .font(.system(size: 72, weight: .light))
+                        .font(.system(size: max(side / 5, 1), weight: .light))
                         .foregroundStyle(Theme.artworkPlaceholderGlyph)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
-        .frame(height: Self.side)
         .clipped()
         .overlay(WindowDragArea())
         .accessibilityElement()
