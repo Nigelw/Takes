@@ -52,7 +52,7 @@ private struct GeneralSettingsView: View {
                     SettingsHint(settings.automaticGroupingMode.explanation)
                 }
             } header: {
-                Text("Playlist Import")
+                Text("Opening Files")
             }
 
             Section {
@@ -102,13 +102,13 @@ private struct MetadataSettingsView: View {
             Section {
                 MetadataFieldToggles(fields: TrackMetadataField.allCases, enabledFields: $settings.playlistMetadataFields)
             } header: {
-                Text("Playlist Track Metadata")
+                Text("Playlist Metadata")
             }
 
             Section {
                 MetadataFieldToggles(fields: TrackMetadataField.compareFields, enabledFields: $settings.compareMetadataFields)
             } header: {
-                Text("Compare Track Metadata")
+                Text("Comparison Metadata")
             }
         }
         .formStyle(.grouped)
