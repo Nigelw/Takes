@@ -59,11 +59,10 @@ light and dark. Only the ground behind it and its shadows change (§3, §6).
 
 ## 3. Cover
 
-Every value in this section is given for a 360 pt square. For a square of
-side s, multiply every length (diameters, radii, ring widths, shadow
-offsets and blurs, the groove step) by s / 360; colours, opacities, angles
-and the label's 100-unit art don't change. In practice: draw the record at
-the reference size and scale the image (§5).
+Every value in this section is given for a 360 pt square. Use that geometry
+when exporting the cover bitmap at the resolution in §5. The app scales
+the bitmap uniformly to the displayed square. The live ground gradient
+uses the same square for its centre and radius.
 
 ### 3.1 Ground
 
@@ -145,8 +144,8 @@ scaled to L (1 unit ≈ 1 pt).
 8. The disc's sheen (§3.2 step 6) again, at 28% opacity, screen blend.
 9. Gloss on top: linear from the top left, white 14% → clear at 45%.
 
-Pre-rendering the noise (2–3) into a small tiled image is fine; it must look
-like the 2.5× close-up.
+Bake the noise and fibre into the cover bitmap. Match the fine grain in the
+2.5× close-up.
 
 **Printing**, all white (`#FFFFFF`) at the opacity given. Text is SF Pro
 except the script.
@@ -184,46 +183,40 @@ The tile keeps its 4 pt radius and clipping.
      white 35%; sheen at 35%, screen. No printing, grain or gloss.
   9. Spindle hole: radius 1.6, as §3.2 step 11 without the lip highlight.
 
-## 5. Drawing
+## 5. Bundled images and display
 
-- The placeholder is static. Draw it into an image and reuse it: one
-  cover record and one thumbnail per appearance and backing scale, held in
-  memory (in `PlaylistArtworkStore` or beside it). No disk cache, no
-  per-frame work, no `TimelineView`, no animation.
-- The cover's square changes size with the window, smaller or larger than
-  360 pt, so don't redraw the record per size:
-  - Render the whole square on a transparent background (the record, its
-    cast shadow and the floor shadow, everything in §3 except the ground),
-    so the image maps one-to-one onto the square however large it is.
-  - Render at a reference side of 360 pt, or at the next 120 pt step at or
-    above the square's side when it is larger than 360. Show the image
-    resizable, with high-quality interpolation, at the square's size.
-  - Scaling down is always fine. When a live resize grows the square past
-    the rendered size, keep scaling the existing image up (slightly soft)
-    and re-render at the new step once the live resize ends; never render
-    during one.
-  - Keep only the current render per appearance and backing scale; a new
-    step replaces the old one, so memory stays bounded.
-  - The ground is a plain gradient: draw it live (a SwiftUI
-    `RadialGradient` sized to the square), not into the image.
-  - At small squares the label's printing becomes too small to read. That is
-    expected: it is texture, not information.
-- Every playlist row without artwork shares the one thumbnail image; draw it
-  through the tile's existing `contentsImage` path (the image shown when
-  artwork loads), not as a separate view per row.
-- Re-render on appearance change (the effective appearance of the window)
-  and backing-scale change.
-- Core Graphics or SwiftUI `ImageRenderer` are both fine. The deployment
-  target is macOS 14, so `CGContext.drawConicGradient` is available for the
-  sheen. Lay the arc text glyph by glyph with Core Text (SwiftUI has no text
-  on a path).
-- Put the placeholder's geometry in one place (for example
-  `RecordPlaceholderMetrics`: D, L, hole radius, band radii, groove range
-  and step, rim width, the thumbnail's values) so tests can check it.
-- Remove `Theme.artworkPlaceholderGlyph`, `PlaylistRowPalette.thumbnailGlyph`
-  and the `noteGlyph` view once nothing uses them. Keep
-  `PlaylistRowPalette.thumbnailFill`: the warning state and the stacked-card
-  edges still use the plain tile.
+Export four sRGB PNGs as source assets. Bundle them in `Assets/Assets.xcassets`
+as two image sets, each with a light and a dark variant. Each variant uses
+one source bitmap across display scales.
+
+- **Cover.** Export the entire square with transparency around the record
+  and its cast and floor shadows. Start at 1440 × 1440 px, which supplies
+  two source pixels per point through a 720 pt cover square on Retina.
+  Confirm the export size at the default 360 pt square and at the largest
+  square where the label should stay sharp. At small sizes the lettering
+  reads as texture. Beyond the export's native resolution the image can
+  soften as it scales up.
+- **Thumbnail.** Export the simplified 34 pt design in §4 at 68 × 68 px,
+  including its ground and cast shadow. The tile applies its 4 pt corner
+  clipping in the app.
+
+At runtime, load the variants for the effective appearance on demand. In
+`ArtworkCoverView`, centre the cover bitmap in the `min(width, height)`
+square and scale it with high-quality interpolation. Draw the ground as a
+SwiftUI `RadialGradient` sized to that square over the §3.1 edge colour,
+which fills the whole cover. The same bitmap scales during and after live
+resize and any programmatic size change.
+
+Every eligible playlist row shares the thumbnail image for its appearance
+through the tile's existing `contentsImage` path. Resolve the appearance
+variant before assigning the tile's layer contents so visible rows update
+when the appearance changes. Window size and backing scale affect display
+only. Runtime work is limited to loading and displaying the bundled images
+and drawing the cover gradient.
+
+Remove `Theme.artworkPlaceholderGlyph`, `PlaylistRowPalette.thumbnailGlyph`
+and the `noteGlyph` view once nothing uses them. The warning state and
+stacked-card edges use `PlaylistRowPalette.thumbnailFill`.
 
 ## 6. Light appearance
 
@@ -235,24 +228,22 @@ shadows in §3.2 and §4. The record does not lighten.
 - The cover and the thumbnail draw the record when there is no artwork, in
   both appearances; loaded artwork, the warning state, the stacked edges and
   the now-playing overlay look as they do today.
-- The canonical `xcodebuild test` passes. Add tests for the geometry in
-  `RecordPlaceholderMetrics` (cover disc 288 and label 100.8 centred in
-  the 360 square, and scaled with the square's side; the lead-in ring's
-  outer edge inside the disc; thumbnail
-  disc 29.9 and label 12 inside the 34 tile) and for the thumbnail
-  rule (record when there is no image and no warning; plain tile with a
-  warning).
-- Live-resizing the window with the cover showing redraws nothing but the
-  scaled image and the gradient; the record stays centred in the square at
-  every width, below and above 360 pt.
+- The canonical `xcodebuild test` passes. Test cover square sizing and the
+  thumbnail rule (record when there is no image and no warning; plain tile
+  with a warning). Verify the disc, label and lead-in ring geometry in the
+  exported images.
+- The record stays centred in the square during and after resizing below
+  and above 360 pt. In a wide, shallow cover the ground fills the width.
+  Resizing and moving between display scales reuse the same bitmap.
 - Checked in the running app against the round 3 artboard and its 2.5×
-  close-up, dark and light, on a Retina display: the disc is round (no flat
-  edges), the arc text is centred and legible, and the paper reads as fine
-  grain.
-- Scrolling a long playlist of tracks without artwork stays smooth: rows
-  reuse the one image.
+  close-up, dark and light, on a Retina display. At the default and largest
+  target cover sizes, the disc is round, the arc text is centred and
+  legible, and the paper reads as fine grain. Changing appearance swaps the
+  cover and visible thumbnail variants.
+- Scrolling a long playlist of tracks without artwork stays smooth. Rows
+  reuse the shared thumbnail for their appearance.
 - `AGENTS.md` updated: `CoverArtwork.swift`'s ownership line, the artwork
-  invariant (the placeholder is drawn once per size and appearance, in
-  memory), the thumbnail sentence that mentions the placeholder note, and
-  the Test Map.
+  invariant (the placeholder uses bundled cover and thumbnail bitmaps for
+  each appearance), the thumbnail sentence that mentions the placeholder
+  note, and the Test Map.
 - `a2-redesign-spec.md` §13 records the change (or links here).
