@@ -321,6 +321,8 @@ final class PlaylistCoordinator {
 
     var isPlaying: Bool { controller.session.isPlaying }
 
+    private var canNavigateBetweenModes: Bool { controller.settings?.windowVisibility.showsPlaylist ?? true }
+
     var canPlay: Bool {
         controller.session.isPlayable
             || workspace.items.contains { item in
@@ -577,6 +579,7 @@ final class PlaylistCoordinator {
     /// file time, version, and playing state; another item begins paused at
     /// its timeline start.
     func enterComparison(itemID: PlaylistItem.ID, autoAlignAfterActivation: Bool = false) async {
+        guard canNavigateBetweenModes else { return }
         guard workspace.items.contains(where: { $0.id == itemID }) else {
             reportError(PlaylistWorkspaceError.itemNotFound(itemID).localizedDescription)
             return
@@ -624,6 +627,7 @@ final class PlaylistCoordinator {
     /// Return to playlist playback while preserving the version being
     /// auditioned and translating comparison transport back to file time.
     func backToPlaylist() async {
+        guard canNavigateBetweenModes else { return }
         let snapshot = capturePlaybackSnapshot()
         captureRuntimeEdits()
         let targetItemID = snapshot.itemID ?? currentItemID ?? workspace.listeningState?.itemID

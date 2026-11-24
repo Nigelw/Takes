@@ -1215,7 +1215,7 @@ struct ContentView: View {
     /// re-laying-out. Written from the container via an equality-guarded
     /// `.onChange`; see `LaneViewport` for why it can't be a row input.
     @State private var laneViewportStore = LaneViewportStore()
-    @State private var controlBarHeight: CGFloat = TakesWindowPolicy.controlBarReservedHeight
+    @State private var controlBarHeight: CGFloat = TakesWindowPolicy.controlBarReservedHeight - ControlBarDivider.height
 
     /// An in-progress loop drag, in absolute seconds. `start` is where the drag
     /// began; `current` tracks the pointer. Committed to a `LoopRegion` on mouse-up.
@@ -1325,10 +1325,9 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             if settings.windowVisibility.showsPlayer {
                 controlBar
-            } else if settings.windowVisibility.showsPlaylist {
-                ControlBarDivider()
             }
             if settings.windowVisibility.showsPlaylist {
+                ControlBarDivider()
                 VStack(spacing: 0) {
                     CompareInfoBar(controller: controller) {
                         Task { await coordinator.backToPlaylist() }
@@ -1348,8 +1347,8 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Color.clear
                 .frame(
-                    height: (settings.windowVisibility.showsPlayer ? controlBarHeight : ControlBarDivider.height)
-                        + CompareInfoBarMetrics.height
+                    height: (settings.windowVisibility.showsPlayer ? controlBarHeight : 0)
+                        + ControlBarDivider.height + CompareInfoBarMetrics.height
                         + (controller.displayedTrackRowCount == 0 ? 0 : CompareLaneLayout.seatBottom)
                 )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
@@ -1364,89 +1363,18 @@ struct ContentView: View {
     /// with no readout. The elapsed time and Done are in the info bar below
     /// the divider (A2 compare info-bar variant).
     private var controlBar: some View {
-        ControlBarLayout {
-            blindListeningButton
+        let buttons = CompareTransportButtons(coordinator: coordinator, showsDebugLabels: settings.showsComponentDebugLabels)
+        return ControlBarLayout {
+            buttons.blindListening
         } center: {
-            TransportPlayButton(coordinator: coordinator)
-            switchTrackButton
+            buttons.center()
         } trailing: {
-            repeatButton
+            buttons.repeatMode
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
             if abs(height - controlBarHeight) > 0.5 { controlBarHeight = height }
         }
         .componentDebugLabel("Control Bar", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private var switchTrackButton: some View {
-        Button {
-            if SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: NSApp.currentEvent?.modifierFlags) {
-                coordinator.previous()
-            } else {
-                coordinator.next()
-            }
-        } label: {
-            Image(systemName: "arrow.trianglehead.swap")
-        }
-        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter,
-                                                glyphSize: ControlBarMetrics.secondaryGlyphSize))
-        .disabled(!controller.session.canSwitchPlayback)
-        .help("Switch Track")
-        .accessibilityLabel("Switch Track")
-        .componentDebugLabel("Switch Track", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private var repeatButton: some View {
-        let mode = controller.session.repeatMode
-        return Button {
-            coordinator.cycleRepeatMode()
-        } label: {
-            Image(systemName: Self.repeatSymbol(for: mode))
-        }
-        .buttonStyle(ControlBarSideButtonStyle(isOn: mode != .off))
-        .disabled(!controller.session.isPlayable)
-        .help(Self.repeatHelp(for: mode))
-        .accessibilityLabel("Repeat")
-        .accessibilityValue(Self.repeatModeName(for: mode))
-        .componentDebugLabel("Repeat", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private var blindListeningButton: some View {
-        let isOn = controller.session.isBlindListeningModeEnabled
-        return Button {
-            controller.toggleBlindListeningMode()
-        } label: {
-            if isOn {
-                // The custom symbol sits high in its box; nudged down by the
-                // same proportion as at v2.9.0's 15 pt.
-                Image("BlindListening")
-                    .offset(y: 2.5 * ControlBarSideButtonStyle.glyphSize / 15)
-            } else {
-                Image(systemName: "eye")
-            }
-        }
-        .buttonStyle(ControlBarSideButtonStyle(isOn: isOn))
-        .disabled(!controller.session.canToggleBlindListeningMode)
-        .help("Blind Listening Mode")
-        .accessibilityLabel("Blind Listening Mode")
-        .accessibilityValue(isOn ? "On" : "Off")
-        .componentDebugLabel("Blind Listening Mode", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private static func repeatSymbol(for mode: RepeatMode) -> String {
-        ControlBarRepeatSymbol.compare(mode)
-    }
-
-    private static func repeatModeName(for mode: RepeatMode) -> String {
-        switch mode {
-        case .off: return "Off"
-        case .one: return "One"
-        case .switchAndRepeat: return "Switch & Repeat"
-        }
-    }
-
-    private static func repeatHelp(for mode: RepeatMode) -> String {
-        "Repeat: \(repeatModeName(for: mode))"
     }
 
     // NOTE: `visibleStart` changes on every horizontal scroll event (and every

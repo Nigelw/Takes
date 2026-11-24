@@ -758,8 +758,8 @@ struct SessionTests {
         #expect(TakesWindowPolicy.minimumSize(for: artworkOnly, isComparison: true) == CGSize(width: 260, height: 260))
 
         let playerOnly = WorkspaceVisibility(showsArtwork: false, showsPlaylist: false)
-        #expect(TakesWindowPolicy.defaultSize(for: playerOnly).height == 142)
-        #expect(TakesWindowPolicy.minimumSize(for: playerOnly, isComparison: true).height == 91)
+        #expect(TakesWindowPolicy.defaultSize(for: playerOnly).height == 141)
+        #expect(TakesWindowPolicy.minimumSize(for: playerOnly, isComparison: true).height == 90)
 
         let artworkAndPlaylist = WorkspaceVisibility(showsPlayer: false)
         #expect(TakesWindowPolicy.minimumSize(for: artworkAndPlaylist, isComparison: true).height == 441)

@@ -489,24 +489,24 @@ private struct WorkspaceVisibilityButtonStyle: ButtonStyle {
             .foregroundStyle(isOn ? Theme.sideButtonLitGlyph : Color(nsColor: .secondaryLabelColor))
             .sideButtonGlyphGlow(isOn ? glow : [])
             .frame(width: WorkspaceVisibilityButton.size.width, height: WorkspaceVisibilityButton.size.height)
-            .background {
-                if isOn { chip }
-            }
             .contentShape(Rectangle())
             .opacity(isEnabled && !configuration.isPressed ? 1 : 0.7)
     }
+}
 
-    /// Frosted chip: background blur under a translucent fill, a 0.5 pt inner
-    /// hairline, and a small drop shadow. Dark over the cover in dark
-    /// appearance, pale in light.
-    private var chip: some View {
+/// Shared surface for the titlebar toggles and playback controls over artwork.
+struct ArtworkControlsBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
         let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
         let isDark = colorScheme == .dark
-        return shape
+        shape
             .fill(.ultraThinMaterial)
             .overlay(shape.fill(isDark ? Color(white: 0.08).opacity(0.5) : Color.white.opacity(0.5)))
             .overlay(shape.strokeBorder(isDark ? Color.white.opacity(0.22) : Color.white.opacity(0.7), lineWidth: 0.5))
             .shadow(color: .black.opacity(isDark ? 0.35 : 0.2), radius: 1.5, y: 1)
+            .allowsHitTesting(false)
     }
 }
 

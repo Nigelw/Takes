@@ -59,7 +59,7 @@ Key ownership:
   window chrome both modes share: the cover above the control bar and the
   titlebar Artwork, Player, and Playlist toggles.
 - `TransportControls.swift`: the A2 control bar both modes share
-  (`ControlBarLayout`: transport row, readout slot (playlist only), divider;
+  (`ControlBarLayout`: transport row and readout slot (playlist only);
   `ControlBarMetrics`; `ControlBarSideButtonStyle` for Shuffle/Blind/Repeat
   (`SideButtonAppearance`) and `ControlBarRepeatSymbol`;
   `ControlBarDivider`), v2.9.0's `CircleTransportButtonStyle`,
@@ -354,6 +354,7 @@ These are here to prevent parallel implementations and subtle regressions:
   on screen. Hiding the lower region fits the window to the visible
   artwork or player and preserves the expanded playlist height. The
   player toggle removes or restores the control bar height above the divider.
+  The lower region owns the divider, so hiding it hides the divider too.
   Track fit, in both modes
   (`TakesWindowPolicy.frameFittingContent`): adding tracks grows a window
   too short to show every row (`playlistFittingHeight`: item rows and
@@ -377,11 +378,16 @@ These are here to prevent parallel implementations and subtle regressions:
   control bars, so entering compare never moves them. While the cover is
   shown, its AppKit hover sensor reveals the toggles and window buttons, with
   a shade behind them over the image. With the cover hidden, the controls stay
-  visible. Artwork or Player must stay visible. With Player hidden, hovering
-  the cover reveals Previous, Play/Pause and Next. Previous and Next step
-  through tracks in Playlist and takes in Compare. The Playlist toggle
-  controls everything below the divider in either mode. The View menu
-  offers the same three commands. The control bars take their top padding from
+  visible. Artwork or Player must stay visible. The toggles share one
+  rounded material background and stay visible in the artwork-only layout.
+  With Player hidden, hovering over the cover reveals playback controls at
+  its bottom in the same material. The overlay uses 32 pt Play/Pause and
+  26 pt secondary buttons. Playlist shows Previous, Play/Pause and Next.
+  Compare shows Play/Pause and Switch Track. The Playlist toggle controls
+  the divider and everything below it in either mode. Hiding it disables
+  navigation between modes, including a grouped import opening Compare.
+  The View menu offers the same three
+  visibility commands. The control bars take their top padding from
   `TakesWindowPolicy.controlBarTopPadding(showsArtwork:)`
   (12 under the cover, 24 under the titlebar). The cover's version comes from
   `CoverVersionRule`: in compare it follows the audible version, except in

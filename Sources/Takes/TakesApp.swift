@@ -437,16 +437,15 @@ enum TakesWindowPolicy {
     static func heightBelowArtwork(for visibility: WorkspaceVisibility, isComparison: Bool) -> CGFloat {
         if visibility.showsPlaylist {
             return minimumHeight(showsArtwork: visibility.showsArtwork, width: 0)
-                - (visibility.showsPlayer ? 0 : playerHeightReduction(showsArtwork: visibility.showsArtwork, isComparison: true))
+                - (visibility.showsPlayer ? 0 : playerHeightWithoutDivider(showsArtwork: visibility.showsArtwork, isComparison: true))
         }
         guard visibility.showsPlayer else { return 0 }
-        return isComparison ? compareControlBarHeight(showsArtwork: visibility.showsArtwork)
-            : playlistControlBarHeight(showsArtwork: visibility.showsArtwork)
+        return playerHeightWithoutDivider(showsArtwork: visibility.showsArtwork, isComparison: isComparison)
     }
 
     /// The divider belongs to the lower content when the player is hidden.
     @MainActor
-    static func playerHeightReduction(showsArtwork: Bool, isComparison: Bool) -> CGFloat {
+    static func playerHeightWithoutDivider(showsArtwork: Bool, isComparison: Bool) -> CGFloat {
         let barHeight = isComparison ? compareControlBarHeight(showsArtwork: showsArtwork)
             : playlistControlBarHeight(showsArtwork: showsArtwork)
         return barHeight - ControlBarDivider.height
@@ -462,7 +461,7 @@ enum TakesWindowPolicy {
     static func defaultSize(for visibility: WorkspaceVisibility) -> CGSize {
         let height = visibility.showsPlaylist
             ? defaultHeight(showsArtwork: visibility.showsArtwork)
-                - (visibility.showsPlayer ? 0 : playerHeightReduction(showsArtwork: visibility.showsArtwork, isComparison: false))
+                - (visibility.showsPlayer ? 0 : playerHeightWithoutDivider(showsArtwork: visibility.showsArtwork, isComparison: false))
             : (visibility.showsArtwork ? defaultWidth : 0) + heightBelowArtwork(for: visibility, isComparison: false)
         return CGSize(width: defaultWidth, height: height)
     }
@@ -1210,10 +1209,10 @@ private struct ViewCommands: Commands {
             Divider()
             Button("Compare") { playlistContext?.compare() }
                 .keyboardShortcut("]", modifiers: [.command])
-                .disabled(coordinator.mode.itemID != nil || playlistContext?.compareItemID == nil)
+                .disabled(!showsPlaylist || coordinator.mode.itemID != nil || playlistContext?.compareItemID == nil)
             Button("Back to Playlist") { Task { await coordinator.backToPlaylist() } }
                 .keyboardShortcut("[", modifiers: [.command])
-                .disabled(coordinator.mode.itemID == nil)
+                .disabled(!showsPlaylist || coordinator.mode.itemID == nil)
             // Compare only: removes the loop. The playlist clears its
             // selection with Esc.
             Button("Deselect") { coordinator.deselectLoop() }
@@ -1251,6 +1250,8 @@ private struct ViewCommands: Commands {
             Divider()
         }
     }
+
+    private var showsPlaylist: Bool { mainWindowCommandState?.visibility.showsPlaylist == true }
 
     private var canUseZoomShortcuts: Bool {
         coordinator.mode.itemID != nil && canUseGlobalMenuShortcuts == true

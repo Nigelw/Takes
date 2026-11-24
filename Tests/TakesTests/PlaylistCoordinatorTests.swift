@@ -901,6 +901,46 @@ struct PlaylistCoordinatorTests {
 
     @MainActor
     @Test
+    func hiddenPlaylistBlocksModeNavigationAndImportAutoEntry() async throws {
+        let firstURL = try makeTemporaryAudioFile(name: "hidden-playlist-first.wav")
+        let secondURL = try makeTemporaryAudioFile(name: "hidden-playlist-second.wav")
+        defer {
+            try? FileManager.default.removeItem(at: firstURL.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: secondURL.deletingLastPathComponent())
+        }
+        let loader = CoordinatorTestAudioLoader(tracks: [
+            firstURL: makeLoadedTrack(for: firstURL, title: "Single Group", artist: "Artist"),
+            secondURL: makeLoadedTrack(for: secondURL, title: "Single Group (Stereo Mix)", artist: "Artist")
+        ])
+        let coordinator = PlaylistCoordinator(loader: loader)
+        let settings = AppSettings(defaults: InMemoryAppSettingsDefaults())
+        coordinator.controller.settings = settings
+        settings.windowVisibility.toggle(.playlist)
+
+        let imported = await coordinator.importFiles([firstURL, secondURL], destination: .playlist)
+        let itemID = try #require(imported.first)
+        #expect(coordinator.workspace.items.first?.versions.count == 2)
+        #expect(coordinator.mode == .playlist)
+        await coordinator.enterComparison(itemID: itemID)
+        #expect(coordinator.mode == .playlist)
+
+        settings.windowVisibility.toggle(.playlist)
+        await coordinator.enterComparison(itemID: itemID)
+        #expect(coordinator.mode == .comparison(itemID: itemID))
+
+        settings.windowVisibility.toggle(.playlist)
+        let context = coordinator.runtimeContext
+        await coordinator.backToPlaylist()
+        #expect(coordinator.mode == .comparison(itemID: itemID))
+        #expect(coordinator.runtimeContext == context)
+
+        settings.windowVisibility.toggle(.playlist)
+        await coordinator.backToPlaylist()
+        #expect(coordinator.mode == .playlist)
+    }
+
+    @MainActor
+    @Test
     func comparingAGroupWithAMissingFileKeepsPlayback() async throws {
         let url = try makeTemporaryAudioFile(name: "playing.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

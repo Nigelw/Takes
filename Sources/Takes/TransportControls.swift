@@ -612,8 +612,8 @@ struct SevenSegmentDisplay: View {
 // MARK: - A2 control bar
 
 /// The A2 control bar shared by playlist and compare (spec §3, §5): the
-/// transport row, over the readout in playlist mode, on one surface, then
-/// the one divider to the content below. Stretches to any window width: the
+/// transport row, over the readout in playlist mode, on one surface.
+/// Stretches to any window width: the
 /// centre group stays centred, the side buttons sit midway between the
 /// window edges and the playlist's centre group (`ControlBarTransportRow`),
 /// and the readout takes the width inside the 10 pt edge insets. Compare has
@@ -656,7 +656,6 @@ struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: Vi
             // The control bar doubles as the titlebar: clicks on empty bar
             // space drag the window.
             .background(WindowDragArea())
-            ControlBarDivider()
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -697,8 +696,33 @@ struct ControlBarDivider: View {
     }
 }
 
+enum TransportButtonSize {
+    case regular
+    case mini
+
+    @MainActor
+    func style(for kind: CircleTransportButtonStyle.Kind) -> CircleTransportButtonStyle {
+        switch (self, kind) {
+        case (.regular, .primary):
+            CircleTransportButtonStyle(
+                kind: kind, diameter: ControlBarMetrics.primaryDiameter,
+                glyphSize: ControlBarMetrics.primaryGlyphSize, pressedGlyphOffset: 1.5
+            )
+        case (.regular, .secondary):
+            CircleTransportButtonStyle(
+                kind: kind, diameter: ControlBarMetrics.secondaryDiameter, glyphSize: ControlBarMetrics.secondaryGlyphSize
+            )
+        case (.mini, .primary):
+            CircleTransportButtonStyle(kind: kind, diameter: 32, glyphSize: 13, pressedGlyphOffset: 1)
+        case (.mini, .secondary):
+            CircleTransportButtonStyle(kind: kind, diameter: 26, glyphSize: 10)
+        }
+    }
+}
+
 struct TransportPlayButton: View {
     let coordinator: PlaylistCoordinator
+    let size: TransportButtonSize
     @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
@@ -708,10 +732,7 @@ struct TransportPlayButton: View {
         Button { coordinator.togglePlayback() } label: {
             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
         }
-        .buttonStyle(CircleTransportButtonStyle(
-            kind: .primary, diameter: ControlBarMetrics.primaryDiameter,
-            glyphSize: ControlBarMetrics.primaryGlyphSize, pressedGlyphOffset: 1.5
-        ))
+        .buttonStyle(size.style(for: .primary))
         .disabled(!canPlay)
         .help(title)
         .accessibilityLabel(title)
@@ -719,33 +740,111 @@ struct TransportPlayButton: View {
     }
 }
 
-/// The playlist's centre controls also appear over the artwork, where
-/// Previous and Next step through takes when comparing.
+/// The playlist's centre controls also appear over the artwork.
 struct BasicTransportButtons: View {
     let coordinator: PlaylistCoordinator
+    var size: TransportButtonSize = .regular
     @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
         stepButton(isNext: false)
-        TransportPlayButton(coordinator: coordinator)
+        TransportPlayButton(coordinator: coordinator, size: size)
         stepButton(isNext: true)
     }
 
     private func stepButton(isNext: Bool) -> some View {
         let direction = isNext ? "Next" : "Previous"
-        let title = direction + (coordinator.mode.itemID == nil ? " Track" : " Take")
+        let title = direction + " Track"
         return Button {
             if isNext { coordinator.next() } else { coordinator.previous() }
         } label: {
             Image(systemName: isNext ? "forward.end.fill" : "backward.end.fill")
         }
-        .buttonStyle(CircleTransportButtonStyle(
-            kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter, glyphSize: ControlBarMetrics.secondaryGlyphSize
-        ))
+        .buttonStyle(size.style(for: .secondary))
         .disabled(isNext ? !coordinator.canNext : !coordinator.canPrevious)
         .help(title)
         .accessibilityLabel(title)
         .componentDebugLabel(direction, enabled: settings.showsComponentDebugLabels)
+    }
+}
+
+/// Compare's controls are shared by the player and the artwork overlay.
+@MainActor
+struct CompareTransportButtons {
+    let coordinator: PlaylistCoordinator
+    let showsDebugLabels: Bool
+
+    private var controller: PlaybackController { coordinator.controller }
+
+    @ViewBuilder func center(size: TransportButtonSize = .regular) -> some View {
+        TransportPlayButton(coordinator: coordinator, size: size)
+        switchTrackButton(size: size)
+    }
+
+    private func switchTrackButton(size: TransportButtonSize) -> some View {
+        Button {
+            if SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: NSApp.currentEvent?.modifierFlags) {
+                coordinator.previous()
+            } else {
+                coordinator.next()
+            }
+        } label: {
+            Image(systemName: "arrow.trianglehead.swap")
+        }
+        .buttonStyle(size.style(for: .secondary))
+        .disabled(!controller.session.canSwitchPlayback)
+        .help("Switch Track")
+        .accessibilityLabel("Switch Track")
+        .componentDebugLabel("Switch Track", enabled: showsDebugLabels)
+    }
+
+    var repeatMode: some View {
+        let mode = controller.session.repeatMode
+        return Button {
+            coordinator.cycleRepeatMode()
+        } label: {
+            Image(systemName: ControlBarRepeatSymbol.compare(mode))
+        }
+        .buttonStyle(ControlBarSideButtonStyle(isOn: mode != .off))
+        .disabled(!controller.session.isPlayable)
+        .help(Self.repeatHelp(for: mode))
+        .accessibilityLabel("Repeat")
+        .accessibilityValue(Self.repeatModeName(for: mode))
+        .componentDebugLabel("Repeat", enabled: showsDebugLabels)
+    }
+
+    var blindListening: some View {
+        let isOn = controller.session.isBlindListeningModeEnabled
+        return Button {
+            controller.toggleBlindListeningMode()
+        } label: {
+            if isOn {
+                // The custom symbol sits high in its box; nudged down by the
+                // same proportion as at v2.9.0's 15 pt.
+                Image("BlindListening")
+                    .offset(y: 2.5 * ControlBarSideButtonStyle.glyphSize / 15)
+            } else {
+                Image(systemName: "eye")
+            }
+        }
+        .buttonStyle(ControlBarSideButtonStyle(isOn: isOn))
+        .disabled(!controller.session.canToggleBlindListeningMode)
+        .help("Blind Listening Mode")
+        .accessibilityLabel("Blind Listening Mode")
+        .accessibilityValue(isOn ? "On" : "Off")
+        .componentDebugLabel("Blind Listening Mode", enabled: showsDebugLabels)
+    }
+
+    private static func repeatModeName(for mode: RepeatMode) -> String {
+        switch mode {
+        case .off: return "Off"
+        case .one: return "One"
+        case .switchAndRepeat: return "Switch & Repeat"
+        }
+    }
+
+    private static func repeatHelp(for mode: RepeatMode) -> String {
+        "Repeat: \(repeatModeName(for: mode))"
     }
 }
 

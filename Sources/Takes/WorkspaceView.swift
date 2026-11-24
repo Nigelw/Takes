@@ -44,6 +44,7 @@ struct WorkspaceView: View {
     private var isComparison: Bool { coordinator.mode.itemID != nil }
     private var visibility: WorkspaceVisibility { settings.windowVisibility }
     private var showsTitlebarControls: Bool { !visibility.showsArtwork || artworkIsHovered }
+    private var showsVisibilityToggles: Bool { showsTitlebarControls || (!visibility.showsPlayer && !visibility.showsPlaylist) }
     private var heightBelowArtwork: CGFloat {
         TakesWindowPolicy.heightBelowArtwork(for: visibility, isComparison: isComparison)
     }
@@ -229,12 +230,13 @@ struct WorkspaceView: View {
             // The overlay has its own safe area, so it must ignore the
             // titlebar inset too, or the toggles land below the titlebar.
             .overlay {
-                if showsTitlebarControls {
-                    HStack(spacing: 4) {
+                if showsVisibilityToggles {
+                    HStack(spacing: 0) {
                         ForEach(WorkspaceVisibility.Region.allCases, id: \.self) { region in
                             WorkspaceVisibilityButton(region: region, visibility: visibility) { toggleVisibility(region) }
                         }
                     }
+                    .background(ArtworkControlsBackground())
                     .padding(.trailing, 10)
                     .padding(.top, max(titlebarButtonCenterY - WorkspaceVisibilityButton.size.height / 2, 0))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -390,14 +392,23 @@ struct WorkspaceView: View {
 
     private var artworkCover: some View {
         ArtworkCoverView(image: artworkStore.artwork(for: shownCoverVersionID),
-                         showsTitlebarControls: showsTitlebarControls)
-            .overlay {
+                         showsTitlebarControls: showsVisibilityToggles)
+            .overlay(alignment: .bottom) {
                 if !visibility.showsPlayer && artworkIsHovered {
-                    HStack(spacing: ControlBarMetrics.centerSpacing) {
-                        BasicTransportButtons(coordinator: coordinator)
+                    HStack(spacing: 7) {
+                        if isComparison {
+                            let buttons = CompareTransportButtons(
+                                coordinator: coordinator, showsDebugLabels: settings.showsComponentDebugLabels
+                            )
+                            buttons.center(size: .mini)
+                        } else {
+                            BasicTransportButtons(coordinator: coordinator, size: .mini)
+                        }
                     }
-                    .padding(10)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 5)
+                    .background(ArtworkControlsBackground())
+                    .padding(.bottom, 10)
                     .windowActivityAppearance(isActive: mainWindowIsKey)
                     .disabled(!persistence.restorationComplete)
                 }
@@ -441,10 +452,9 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             if visibility.showsPlayer {
                 PlaylistTransportView(coordinator: coordinator)
-            } else if visibility.showsPlaylist {
-                ControlBarDivider()
             }
             if visibility.showsPlaylist {
+                ControlBarDivider()
                 PlaylistView(coordinator: coordinator, presentation: presentation, openFiles: openFiles, artworkStore: artworkStore)
                 PlaylistBottomBar(coordinator: coordinator, presentation: presentation, openFiles: openFiles, undoManager: undoManager)
                     .componentDebugLabel("Bottom Bar", enabled: settings.showsComponentDebugLabels)
@@ -561,7 +571,7 @@ struct WorkspaceView: View {
         updateWindowMinimumSize()
         guard let mainWindow, !mainWindow.styleMask.contains(.fullScreen) else { return }
         if region == .player && updated.showsPlaylist {
-            let reduction = TakesWindowPolicy.playerHeightReduction(showsArtwork: updated.showsArtwork, isComparison: isComparison)
+            let reduction = TakesWindowPolicy.playerHeightWithoutDivider(showsArtwork: updated.showsArtwork, isComparison: isComparison)
             let height = mainWindow.frame.height + (updated.showsPlayer ? reduction : -reduction)
             if let frame = frameSettingHeight(height, for: mainWindow) {
                 mainWindow.setFrame(frame, display: true, animate: !reduceMotion)
@@ -670,7 +680,7 @@ struct WorkspaceView: View {
             mainWindow.frame.size, showsArtwork: visibility.showsArtwork,
             heightBelowArtwork: TakesWindowPolicy.heightBelowArtwork(for: visibility, isComparison: false),
             playerHeightReduction: visibility.showsPlayer ? 0
-                : TakesWindowPolicy.playerHeightReduction(showsArtwork: visibility.showsArtwork, isComparison: false)
+                : TakesWindowPolicy.playerHeightWithoutDivider(showsArtwork: visibility.showsArtwork, isComparison: false)
         )
     }
 
@@ -737,7 +747,7 @@ struct WorkspaceView: View {
 
     private var playerHeightReduction: CGFloat {
         visibility.showsPlayer ? 0
-            : TakesWindowPolicy.playerHeightReduction(showsArtwork: visibility.showsArtwork, isComparison: isComparison)
+            : TakesWindowPolicy.playerHeightWithoutDivider(showsArtwork: visibility.showsArtwork, isComparison: isComparison)
     }
 
     private func compareFittingHeight(width: CGFloat) -> CGFloat {
@@ -844,6 +854,7 @@ struct WorkspaceView: View {
             if isComparison {
                 // Esc leaves compare, like the readout's back button (§9).
                 if event.keyCode == 53 && flags.isEmpty {
+                    guard visibility.showsPlaylist else { return false }
                     Task { await coordinator.backToPlaylist() }; return true
                 }
                 if let key = TrackNumberHotkey.hotkey(forKeyCode: event.keyCode, modifierFlags: flags), controller.canSelectTrackForHotkey(key) {
