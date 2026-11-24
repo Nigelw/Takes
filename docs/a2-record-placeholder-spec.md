@@ -190,14 +190,24 @@ The tile keeps its 4 pt radius and clipping.
   cover record and one thumbnail per appearance and backing scale, held in
   memory (in `PlaylistArtworkStore` or beside it). No disk cache, no
   per-frame work, no `TimelineView`, no animation.
-- The cover's square changes size with the window, so don't redraw the
-  record per size. Render the record (disc and label, without the ground)
-  at a reference side of 360 pt, or at the next 120 pt step above the
-  current side when the square is larger than 360, and show it resizable
-  with high-quality interpolation at the square's size. Re-render for a
-  larger step only after a live resize ends, never during one; scaling the
-  existing image down is always fine. The ground is a plain gradient and
-  can be drawn live (a SwiftUI `RadialGradient` sized to the square).
+- The cover's square changes size with the window, smaller or larger than
+  360 pt, so don't redraw the record per size:
+  - Render the whole square on a transparent background (the record, its
+    cast shadow and the floor shadow, everything in §3 except the ground),
+    so the image maps one-to-one onto the square however large it is.
+  - Render at a reference side of 360 pt, or at the next 120 pt step at or
+    above the square's side when it is larger than 360. Show the image
+    resizable, with high-quality interpolation, at the square's size.
+  - Scaling down is always fine. When a live resize grows the square past
+    the rendered size, keep scaling the existing image up (slightly soft)
+    and re-render at the new step once the live resize ends; never render
+    during one.
+  - Keep only the current render per appearance and backing scale; a new
+    step replaces the old one, so memory stays bounded.
+  - The ground is a plain gradient: draw it live (a SwiftUI
+    `RadialGradient` sized to the square), not into the image.
+  - At small squares the label's printing becomes too small to read. That is
+    expected: it is texture, not information.
 - Every playlist row without artwork shares the one thumbnail image; draw it
   through the tile's existing `contentsImage` path (the image shown when
   artwork loads), not as a separate view per row.
