@@ -2,16 +2,18 @@ import Foundation
 
 /// The repeat modes used while the workspace is playing its ordered playlist.
 /// Comparison repeat behavior continues to use ``RepeatMode``.
+/// Ordered Off → All → One, as the Repeat button cycles and the menu lists
+/// them. Stored by raw value, so the order is free to change.
 enum PlaylistRepeatMode: String, CaseIterable, Codable, Equatable {
     case off
-    case one
     case all
+    case one
 
     var next: PlaylistRepeatMode {
         switch self {
-        case .off: return .one
-        case .one: return .all
-        case .all: return .off
+        case .off: return .all
+        case .all: return .one
+        case .one: return .off
         }
     }
 }

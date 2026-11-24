@@ -1072,8 +1072,8 @@ private struct PlaybackCommands: Commands {
                         set: { coordinator.setPlaylistRepeatMode($0) }
                     )) {
                         Text("Off").tag(PlaylistRepeatMode.off)
-                        Text("One").tag(PlaylistRepeatMode.one)
                         Text("All").tag(PlaylistRepeatMode.all)
+                        Text("One").tag(PlaylistRepeatMode.one)
                     }.pickerStyle(.inline)
                 } else {
                 Picker("Repeat", selection: Binding(
