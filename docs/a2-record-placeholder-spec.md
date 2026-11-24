@@ -3,7 +3,7 @@
 A change to what Takes shows when a version has no embedded artwork. Today
 both places draw SF Symbols' `music.note` on a flat grey tile:
 
-- the 360 pt cover (`ArtworkCoverView`, `Theme.artworkPlaceholderFill` and
+- the cover (`ArtworkCoverView`, `Theme.artworkPlaceholderFill` and
   `Theme.artworkPlaceholderGlyph`);
 - the playlist row's 34 pt thumbnail (`PlaylistThumbnailView`'s
   `noteGlyph` on `PlaylistRowPalette.thumbnailFill`/`thumbnailGlyph`).
@@ -37,9 +37,11 @@ flipped context.
 
 ## 1. Where it shows
 
-- **Cover:** whenever `ArtworkCoverView` has no image. The ground fills the
-  whole cover, which is as wide as the window; the record stays centred in
-  a 360 × 360 square in the middle of it.
+- **Cover:** whenever `ArtworkCoverView` has no image. Since 081e43d the
+  cover's square is `min(width, height)` of the cover area, so it can be
+  smaller or larger than 360 pt; the cover itself is as wide as the window.
+  The record is centred in that square and scales with it (§3), and the
+  ground fills the whole cover.
 - **Thumbnail:** whenever `PlaylistThumbnailView` has no image and its
   status is not `.warning`. The warning state keeps today's behaviour: the
   plain tile, scrim and warning triangle, with no record. The stacked-card
@@ -55,7 +57,13 @@ size, radius and status overlays.
 The record itself (disc, grooves, sheen, rim and label) is identical in
 light and dark. Only the ground behind it and its shadows change (§3, §6).
 
-## 3. Cover (360 pt square)
+## 3. Cover
+
+Every value in this section is given for a 360 pt square. For a square of
+side s, multiply every length (diameters, radii, ring widths, shadow
+offsets and blurs, the groove step) by s / 360; colours, opacities, angles
+and the label's 100-unit art don't change. In practice: draw the record at
+the reference size and scale the image (§5).
 
 ### 3.1 Ground
 
@@ -67,8 +75,9 @@ farthest corner:
 | Dark | `#34343A` | `#1D1D20` | `#141416` |
 | Light | `#FBFBFD` | `#E6E6EB` | `#D4D4DB` |
 
-When the cover is wider than 360 pt, extend the gradient's 100% colour to
-the cover's edges (the gradient stays sized to the 360 square).
+The gradient is sized to the square (its centre and radius move with it).
+Where the cover is wider than the square, extend the 100% colour to the
+cover's edges.
 
 A **floor shadow** under the record: an ellipse spanning 18%–82% of the
 square's width, 8% of its height, its bottom 7% above the square's bottom;
@@ -76,7 +85,8 @@ radial from black at 50% (dark) or 22% (light) to clear, blurred 4 pt.
 
 ### 3.2 Disc
 
-Diameter **D = 288** (80% of 360), centred in the square; radius r = 144.
+Diameter **D = 288** at 360 (80% of the square's side), centred in the
+square; radius r = 144.
 Layers, bottom to top:
 
 1. **Cast shadow.** Dark: 0, 22 offset, 44 blur, black 60%; plus 0, 4, 10,
@@ -176,10 +186,18 @@ The tile keeps its 4 pt radius and clipping.
 
 ## 5. Drawing
 
-- The placeholder is static. Draw it once per size, appearance and backing
-  scale into an image and reuse it: one cover image and one thumbnail image
-  per appearance, held in memory (in `PlaylistArtworkStore` or beside it).
-  No disk cache, no per-frame work, no `TimelineView`, no animation.
+- The placeholder is static. Draw it into an image and reuse it: one
+  cover record and one thumbnail per appearance and backing scale, held in
+  memory (in `PlaylistArtworkStore` or beside it). No disk cache, no
+  per-frame work, no `TimelineView`, no animation.
+- The cover's square changes size with the window, so don't redraw the
+  record per size. Render the record (disc and label, without the ground)
+  at a reference side of 360 pt, or at the next 120 pt step above the
+  current side when the square is larger than 360, and show it resizable
+  with high-quality interpolation at the square's size. Re-render for a
+  larger step only after a live resize ends, never during one; scaling the
+  existing image down is always fine. The ground is a plain gradient and
+  can be drawn live (a SwiftUI `RadialGradient` sized to the square).
 - Every playlist row without artwork shares the one thumbnail image; draw it
   through the tile's existing `contentsImage` path (the image shown when
   artwork loads), not as a separate view per row.
@@ -209,10 +227,14 @@ shadows in §3.2 and §4. The record does not lighten.
   the now-playing overlay look as they do today.
 - The canonical `xcodebuild test` passes. Add tests for the geometry in
   `RecordPlaceholderMetrics` (cover disc 288 and label 100.8 centred in
-  the 360 square; the lead-in ring's outer edge inside the disc; thumbnail
+  the 360 square, and scaled with the square's side; the lead-in ring's
+  outer edge inside the disc; thumbnail
   disc 29.9 and label 12 inside the 34 tile) and for the thumbnail
   rule (record when there is no image and no warning; plain tile with a
   warning).
+- Live-resizing the window with the cover showing redraws nothing but the
+  scaled image and the gradient; the record stays centred in the square at
+  every width, below and above 360 pt.
 - Checked in the running app against the round 3 artboard and its 2.5×
   close-up, dark and light, on a Retina display: the disc is round (no flat
   edges), the arc text is centred and legible, and the paper reads as fine
