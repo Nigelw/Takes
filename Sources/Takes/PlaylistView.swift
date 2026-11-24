@@ -102,6 +102,40 @@ struct PlaylistCommandContext {
         presentation.prune(in: coordinator.workspace)
     }
 
+    /// View ▸ Compare (⌘]): the one multi-version item the selection points
+    /// at, as the row's Compare pill and context menu allow.
+    var compareItemID: UUID? {
+        let rows = targetRows
+        let owners = Set(coordinator.workspace.items.filter { item in
+            rows.contains(.item(item.id)) || item.versions.contains { rows.contains(.version($0.id)) }
+        }.map(\.id))
+        guard owners.count == 1, let id = owners.first,
+              (coordinator.workspace.items.first { $0.id == id }?.versions.count ?? 0) > 1 else { return nil }
+        return id
+    }
+
+    func compare() {
+        guard let id = compareItemID else { return }
+        Task { await coordinator.enterComparison(itemID: id) }
+    }
+
+    /// File ▸ Locate File…: the first missing file among the selected rows
+    /// (an item row stands for all its versions).
+    var locateVersionID: UUID? {
+        let rows = targetRows
+        for item in coordinator.workspace.items {
+            for version in item.versions where rows.contains(.item(item.id)) || rows.contains(.version(version.id)) {
+                if case .available = PlaylistWorkspaceStore.resolveFileReference(version.file) { continue }
+                return version.id
+            }
+        }
+        return nil
+    }
+
+    func locate() {
+        presentation.locateVersionID = locateVersionID
+    }
+
     func moveSelection(direction: Int) {
         var order = coordinator.workspace.items.map(\.id)
         let selected = Set(itemIDs)
@@ -144,15 +178,19 @@ struct PlaylistOrganizationMenuItems: View {
 
     var body: some View {
         Button("Group as Versions") { context?.group(compare: false) }
+            .keyboardShortcut("g", modifiers: [.command])
             .disabled(context?.canGroup != true)
         Button("Group and Compare") { context?.group(compare: true) }
             .disabled(context?.canGroup != true)
         Button("Separate Versions") { context?.separate() }
+            .keyboardShortcut("g", modifiers: [.command, .shift])
             .disabled(context?.canSeparate != true)
         Divider()
         Button("Move Up") { context?.moveSelection(direction: -1) }
+            .keyboardShortcut(.upArrow, modifiers: [.command, .option])
             .disabled(context?.itemIDs.isEmpty != false)
         Button("Move Down") { context?.moveSelection(direction: 1) }
+            .keyboardShortcut(.downArrow, modifiers: [.command, .option])
             .disabled(context?.itemIDs.isEmpty != false)
         Divider()
         Button("Clear Playlist") { _ = context?.coordinator.clearPlaylist(undoManager: context?.undoManager) }

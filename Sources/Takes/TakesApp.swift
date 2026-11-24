@@ -936,6 +936,7 @@ private struct FileCommands: Commands {
     @FocusedValue(\.canRemoveActiveTrack) private var canRemoveActiveTrack
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
     @FocusedValue(\.canClearTracks) private var canClearTracks
+    @FocusedValue(\.playlistCommandContext) private var playlistContext
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -971,6 +972,11 @@ private struct FileCommands: Commands {
             .keyboardShortcut("r", modifiers: [.shift, .command])
             .disabled(openFileCommandState == nil || canShowActiveTrackInFinder != true)
 
+            // Playlist: the selection's first missing file. Compare's lanes
+            // offer it from their strip menu.
+            Button("Locate File…") { playlistContext?.locate() }
+                .disabled(playlistContext?.locateVersionID == nil || canUseGlobalMenuShortcuts != true)
+
             Divider()
 
             Button(coordinator.mode.itemID == nil ? "Remove Selected Items" : "Remove Version") {
@@ -1001,70 +1007,63 @@ private struct PlaybackCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Playback") {
-            Button(controller.session.isPlaying ? "Pause" : "Play") {
+            Button(coordinator.isPlaying ? "Pause" : "Play") {
                 coordinator.togglePlayback()
             }
             .keyboardShortcut(.space, modifiers: [])
             .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
-            Button(isComparison ? "Switch Track" : "Next Item") {
-                coordinator.next()
+            if isComparison {
+                Button("Switch Track") { coordinator.next() }
+                    .keyboardShortcut("x", modifiers: [])
+                    .disabled(!coordinator.canNext || canUseGlobalMenuShortcuts != true)
+
+                Button("Switch to Previous Track") { coordinator.previous() }
+                    .keyboardShortcut("x", modifiers: [.shift])
+                    .disabled(!coordinator.canPrevious || canUseGlobalMenuShortcuts != true)
+
+                Divider()
+
+                Button("Jump to Beginning") { coordinator.seek(to: controller.session.timelineStart) }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command])
+                    .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
+
+                Button("Jump to End") { coordinator.seek(to: controller.session.timelineEnd) }
+                    .keyboardShortcut(.rightArrow, modifiers: [.command])
+                    .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
+            } else {
+                // Standard media-player Previous/Next (`PlaylistCoordinator.previous`,
+                // `next`): Previous restarts a track past its first seconds.
+                Button("Next Track") { coordinator.next() }
+                    .keyboardShortcut(.rightArrow, modifiers: [.command])
+                    .disabled(!coordinator.canNext || canUseGlobalMenuShortcuts != true)
+
+                Button("Previous Track") { coordinator.previous() }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command])
+                    .disabled(!coordinator.canPrevious || canUseGlobalMenuShortcuts != true)
             }
-            .keyboardShortcut("x", modifiers: [])
-            .disabled(!coordinator.canNext || canUseGlobalMenuShortcuts != true)
 
-            Button(isComparison ? "Switch to Previous Track" : "Previous Item") {
-                coordinator.previous()
-            }
-            .keyboardShortcut("x", modifiers: [.shift])
-            .disabled(!coordinator.canPrevious || canUseGlobalMenuShortcuts != true)
-
-            Divider()
-
-            Button("Jump to Beginning") {
-                coordinator.seek(to: controller.session.timelineStart)
-            }
-            .keyboardShortcut(.leftArrow, modifiers: [.command])
-            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
-
-            Button("Jump to End") {
-                coordinator.seek(to: controller.session.timelineEnd)
-            }
-            .keyboardShortcut(.rightArrow, modifiers: [.command])
-            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
-
+            // Compare skips on the plain arrows; the playlist's arrows move
+            // through the list, so it skips with ⌥.
             Menu("Skip") {
-                Button("Skip Forward 1s") {
-                    coordinator.skip(by: 1)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [])
-                .disabled(playlistContext?.presentation.listHasFocus == true)
-                .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
-
-                Button("Skip Forward 10s") {
-                    coordinator.skip(by: 10)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [.shift])
-                .disabled(playlistContext?.presentation.listHasFocus == true)
-                .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
-
-                Button("Skip Backward 1s") {
-                    coordinator.skip(by: -1)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-                .disabled(playlistContext?.presentation.listHasFocus == true)
-                .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
-
-                Button("Skip Backward 10s") {
-                    coordinator.skip(by: -10)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [.shift])
-                .disabled(playlistContext?.presentation.listHasFocus == true)
-                .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
+                Button("Skip Forward 1s") { coordinator.skip(by: 1) }
+                    .keyboardShortcut(.rightArrow, modifiers: skipModifiers)
+                Button("Skip Forward 10s") { coordinator.skip(by: 10) }
+                    .keyboardShortcut(.rightArrow, modifiers: skipModifiers.union(.shift))
+                Button("Skip Backward 1s") { coordinator.skip(by: -1) }
+                    .keyboardShortcut(.leftArrow, modifiers: skipModifiers)
+                Button("Skip Backward 10s") { coordinator.skip(by: -10) }
+                    .keyboardShortcut(.leftArrow, modifiers: skipModifiers.union(.shift))
             }
             .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
             Divider()
+
+            Button("Change Repeat Mode") {
+                if isComparison { coordinator.cycleRepeatMode() } else { coordinator.cyclePlaylistRepeatMode() }
+            }
+            .keyboardShortcut("r", modifiers: [.command])
+            .disabled(isComparison && !controller.session.isPlayable)
 
             Menu("Repeat") {
                 if !isComparison {
@@ -1092,6 +1091,7 @@ private struct PlaybackCommands: Commands {
 
             if !isComparison {
                 Toggle("Shuffle", isOn: Binding(get: { coordinator.workspace.isShuffleEnabled }, set: { coordinator.setShuffleEnabled($0) }))
+                    .keyboardShortcut("s", modifiers: [.command, .option])
             }
             Toggle(
                 "Blind Listening Mode",
@@ -1135,6 +1135,8 @@ private struct PlaybackCommands: Commands {
             .disabled(!isComparison || controller.session.activeTrack == nil || canUseGlobalMenuShortcuts != true)
         }
     }
+
+    private var skipModifiers: EventModifiers { isComparison ? [] : [.option] }
 }
 
 private struct ViewCommands: Commands {
@@ -1142,18 +1144,28 @@ private struct ViewCommands: Commands {
     private var controller: PlaybackController { coordinator.controller }
     @FocusedValue(\.playlistCommandContext) private var playlistContext
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
+    @FocusedValue(\.mainWindowCommandState) private var mainWindowCommandState
 
     var body: some Commands {
         CommandGroup(after: .toolbar) {
+            Button(mainWindowCommandState?.showsArtwork == false ? "Show Artwork" : "Hide Artwork") {
+                guard let state = mainWindowCommandState else { return }
+                state.setArtworkVisible(!state.showsArtwork)
+            }
+            .keyboardShortcut("a", modifiers: [.command, .shift])
+            .disabled(mainWindowCommandState == nil)
+            Divider()
+            Button("Compare") { playlistContext?.compare() }
+                .keyboardShortcut("]", modifiers: [.command])
+                .disabled(coordinator.mode.itemID != nil || playlistContext?.compareItemID == nil)
             Button("Back to Playlist") { Task { await coordinator.backToPlaylist() } }
                 .keyboardShortcut("[", modifiers: [.command])
                 .disabled(coordinator.mode.itemID == nil)
-            Button("Deselect") {
-                if coordinator.mode.itemID != nil { coordinator.deselectLoop() }
-                else { playlistContext?.presentation.selection = [] }
-            }
-            .keyboardShortcut("d", modifiers: [.command])
-            .disabled(coordinator.mode.itemID != nil ? controller.session.loopRegion == nil : playlistContext?.presentation.selection.isEmpty != false)
+            // Compare only: removes the loop. The playlist clears its
+            // selection with Esc.
+            Button("Deselect") { coordinator.deselectLoop() }
+                .keyboardShortcut("d", modifiers: [.command])
+                .disabled(coordinator.mode.itemID == nil || controller.session.loopRegion == nil)
             Divider()
             Button("Zoom In") {
                 controller.stepZoom(zoomingIn: true)

@@ -2846,7 +2846,7 @@ struct SessionTests {
         let calls = await gate.calls
         #expect(calls.count == 3)
         #expect(Set(calls.map(\.url)) == [rows[0].url, rows[1].url, rows[5].url])
-        #expect(await gate.calls.allSatisfy { $0.size == PlaylistArtworkStore.thumbnailPixelSize })
+        #expect(await gate.calls.allSatisfy { $0.size == .thumbnail })
         #expect(store.thumbnail(for: rows[3].id, url: rows[3].url) == .unknown)
         guard case let .image(image) = store.thumbnail(for: rows[5].id, url: rows[5].url) else {
             Issue.record("Expected a thumbnail")
@@ -2888,11 +2888,26 @@ struct SessionTests {
         #expect(await gate.callCount == 3)
     }
 
+    @Test
+    func coverCropsOnlyNearlySquareArtAndDecodesEnoughPixels() {
+        #expect(CoverArtworkLayout.crops(CGSize(width: 1000, height: 1000)))
+        #expect(CoverArtworkLayout.crops(CGSize(width: 1100, height: 1000)))
+        #expect(!CoverArtworkLayout.crops(CGSize(width: 1600, height: 900)))
+        #expect(!CoverArtworkLayout.crops(CGSize(width: 900, height: 1600)))
+        // A cropped cover's short edge reaches 720 px; a fitted one's long edge.
+        #expect(ArtworkDecodeTarget.cover.longEdge(width: 1000, height: 1000) == 720)
+        #expect(ArtworkDecodeTarget.cover.longEdge(width: 1100, height: 1000) == 792)
+        #expect(ArtworkDecodeTarget.cover.longEdge(width: 1600, height: 900) == 720)
+        // Thumbnails always crop, so their long edge grows, capped at 4:1.
+        #expect(ArtworkDecodeTarget.thumbnail.longEdge(width: 1600, height: 900) == 121)
+        #expect(ArtworkDecodeTarget.thumbnail.longEdge(width: 5000, height: 500) == 272)
+    }
+
     @MainActor
     @Test
     func thumbnailCacheIsBoundedAndKeepsMisses() async throws {
         let store = PlaylistArtworkStore { url, size in
-            url.lastPathComponent.hasPrefix("none") ? nil : Self.makeImage(side: size)
+            url.lastPathComponent.hasPrefix("none") ? nil : Self.makeImage(side: size.side)
         }
         var loaded = 0
         store.onThumbnailLoaded = { _ in loaded += 1 }
@@ -2930,7 +2945,7 @@ struct SessionTests {
         store.requestThumbnails([(version.id, url)])
         await gate.releaseAll()
         try await waitUntil { loaded == [version.id] }
-        #expect(await gate.calls.map(\.size) == [PlaylistArtworkStore.maximumPixelSize])
+        #expect(await gate.calls.map(\.size) == [.cover])
         #expect(store.artwork(for: version.id) != nil)
         guard case let .image(image) = store.thumbnail(for: version.id, url: url) else {
             Issue.record("Expected a thumbnail scaled from the cover")
@@ -2987,16 +3002,16 @@ struct SessionTests {
 
 /// Holds thumbnail and cover loads until released, recording each call.
 private actor ThumbnailLoadGate {
-    private(set) var calls: [(url: URL, size: Int)] = []
+    private(set) var calls: [(url: URL, size: ArtworkDecodeTarget)] = []
     private var waiting: [CheckedContinuation<Void, Never>] = []
     private var isOpen = false
 
     var callCount: Int { calls.count }
 
-    func load(_ url: URL, size: Int) async -> CGImage? {
+    func load(_ url: URL, size: ArtworkDecodeTarget) async -> CGImage? {
         calls.append((url, size))
         if !isOpen { await withCheckedContinuation { waiting.append($0) } }
-        return SessionTests.makeImage(side: size)
+        return SessionTests.makeImage(side: size.side)
     }
 
     func releaseFirst() {

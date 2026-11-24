@@ -34,8 +34,8 @@ final class PlaylistArtworkStore {
     static let thumbnailCapacity = 160
     static let maximumConcurrentThumbnailLoads = 2
 
-    /// Reads a file's embedded artwork, downsampled to the given pixel size.
-    typealias ArtworkLoader = @Sendable (URL, Int) async -> CGImage?
+    /// Reads a file's embedded artwork, downsampled for the given target.
+    typealias ArtworkLoader = @Sendable (URL, ArtworkDecodeTarget) async -> CGImage?
 
     enum Thumbnail: Equatable {
         /// Not loaded yet (or loaded for a different file).
@@ -67,7 +67,7 @@ final class PlaylistArtworkStore {
     /// without art.
     @ObservationIgnored var onThumbnailLoaded: ((PlaylistVersion.ID) -> Void)?
 
-    init(loadArtwork: @escaping ArtworkLoader = { url, size in await PlaylistArtworkStore.embeddedArtwork(for: url, maximumPixelSize: size) }) {
+    init(loadArtwork: @escaping ArtworkLoader = { url, target in await PlaylistArtworkStore.embeddedArtwork(for: url, target: target) }) {
         self.loadArtwork = loadArtwork
     }
 
@@ -103,7 +103,7 @@ final class PlaylistArtworkStore {
         inFlight.insert(id)
         let loadArtwork = loadArtwork
         Task { [weak self] in
-            let image = await loadArtwork(url, Self.maximumPixelSize)
+            let image = await loadArtwork(url, .cover)
             guard let self else { return }
             self.inFlight.remove(id)
             self.images[id] = .some(image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) })
@@ -151,10 +151,12 @@ final class PlaylistArtworkStore {
             guard thumbnails[id]?.url != url else { continue }
             if case let .some(.some(cover)) = images[id],
                let cgImage = cover.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-                startThumbnail(id, url) { Self.scaled(cgImage, maximumPixelSize: Self.thumbnailPixelSize) }
+                startThumbnail(id, url) {
+                    Self.scaled(cgImage, maximumPixelSize: ArtworkDecodeTarget.thumbnail.longEdge(width: cgImage.width, height: cgImage.height))
+                }
             } else {
                 let loadArtwork = loadArtwork
-                startThumbnail(id, url) { await loadArtwork(url, Self.thumbnailPixelSize) }
+                startThumbnail(id, url) { await loadArtwork(url, .thumbnail) }
             }
         }
     }
@@ -188,14 +190,20 @@ final class PlaylistArtworkStore {
 
     // MARK: Decoding
 
-    nonisolated static func embeddedArtwork(for url: URL, maximumPixelSize: Int) async -> CGImage? {
+    nonisolated static func embeddedArtwork(for url: URL, target: ArtworkDecodeTarget) async -> CGImage? {
         guard let data = await AudioFileLoader.embeddedArtworkData(for: url),
               let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        // The thumbnail size caps the LONG edge; a cropped image needs its
+        // short edge at the target, so size it from the image's shape.
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        var width = properties?[kCGImagePropertyPixelWidth] as? Int ?? 0
+        var height = properties?[kCGImagePropertyPixelHeight] as? Int ?? 0
+        if let orientation = properties?[kCGImagePropertyOrientation] as? Int, orientation >= 5 { swap(&width, &height) }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
+            kCGImageSourceThumbnailMaxPixelSize: target.longEdge(width: width, height: height),
         ]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
@@ -219,12 +227,71 @@ final class PlaylistArtworkStore {
     }
 }
 
+// MARK: - Aspect ratio
+
+/// How non-square artwork is shown. The cover crops art that is nearly
+/// square (losing at most a sliver) and otherwise shows the whole image,
+/// fitted, over a blurred fill of itself. Row thumbnails always crop: bars
+/// at 34 pt would read as a rendering fault.
+enum CoverArtworkLayout {
+    /// Longer side over shorter side, up to which the cover crops.
+    nonisolated static let maximumCropAspect: CGFloat = 1.1
+
+    nonisolated static func aspect(width: CGFloat, height: CGFloat) -> CGFloat {
+        guard width > 0, height > 0 else { return 1 }
+        return max(width, height) / min(width, height)
+    }
+
+    /// Whether the cover fills its square by cropping (else it fits).
+    nonisolated static func crops(_ size: CGSize) -> Bool {
+        aspect(width: size.width, height: size.height) <= maximumCropAspect
+    }
+}
+
+/// The pixel size artwork is decoded at. Image I/O caps the long edge, so a
+/// cropped image's long edge must grow with its aspect ratio for the short
+/// edge to reach `side`; a fitted image only needs its long edge there.
+struct ArtworkDecodeTarget: Equatable, Sendable {
+    /// Pixels across the square it is drawn in (2× the points, for Retina).
+    var side: Int
+    /// Crops (fills the square) up to this aspect ratio; beyond it, fits.
+    var maximumCropAspect: CGFloat
+    /// Crops at any aspect, capping the extra resolution at
+    /// `maximumCropAspect`.
+    var alwaysCrops: Bool
+
+    /// The 360 pt cover.
+    static let cover = ArtworkDecodeTarget(
+        side: PlaylistArtworkStore.maximumPixelSize,
+        maximumCropAspect: CoverArtworkLayout.maximumCropAspect,
+        alwaysCrops: false
+    )
+    /// The 34 pt row thumbnail.
+    static let thumbnail = ArtworkDecodeTarget(
+        side: PlaylistArtworkStore.thumbnailPixelSize, maximumCropAspect: 4, alwaysCrops: true
+    )
+
+    func longEdge(width: Int, height: Int) -> Int {
+        let aspect = CoverArtworkLayout.aspect(width: CGFloat(width), height: CGFloat(height))
+        if aspect <= maximumCropAspect { return Self.pixels(CGFloat(side) * aspect) }
+        return alwaysCrops ? Self.pixels(CGFloat(side) * maximumCropAspect) : side
+    }
+
+    /// Whole pixels, rounding up past floating-point noise (720 × 1.1 is
+    /// 792.000…1, which must not become 793).
+    private static func pixels(_ value: CGFloat) -> Int {
+        Int((value - 0.001).rounded(.up))
+    }
+}
+
 // MARK: - Cover
 
 /// The 360 pt full-bleed cover at the top of the main window (A2 spec §4).
 /// A faint top shade appears with the window buttons to keep them legible
 /// over bright art. When the window is wider than the cover, the square stays
-/// 360 pt and centred over a blurred fill of the same image. Pressing on the
+/// 360 pt and centred over a blurred fill of the same image. Non-square art
+/// (`CoverArtworkLayout`) is cropped when nearly square, and otherwise shown
+/// whole, fitted in the square, over that same blurred fill. Pressing on the
 /// cover drags the window, as the control bar does.
 struct ArtworkCoverView: View {
     let image: NSImage?
@@ -238,7 +305,8 @@ struct ArtworkCoverView: View {
             ZStack {
                 Theme.artworkPlaceholderFill
                 if let image {
-                    if proxy.size.width > Self.side + 0.5 {
+                    let crops = CoverArtworkLayout.crops(image.size)
+                    if proxy.size.width > Self.side + 0.5 || !crops {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -250,7 +318,7 @@ struct ArtworkCoverView: View {
                     Image(nsImage: image)
                         .resizable()
                         .interpolation(.high)
-                        .aspectRatio(contentMode: .fill)
+                        .aspectRatio(contentMode: crops ? .fill : .fit)
                         .frame(width: Self.side, height: Self.side)
                         .clipped()
                     if showsTitlebarControls {

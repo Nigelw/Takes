@@ -311,20 +311,27 @@ final class PlaylistCoordinator {
             }
     }
 
+    /// Playlist Next Track is always available with items: at the end it
+    /// wraps with Repeat All, or returns to the first track, paused.
     var canNext: Bool {
         guard !workspace.items.isEmpty else { return false }
         if mode.itemID != nil {
             return controller.session.canSwitchPlayback
         }
-        let current = currentItemID ?? workspace.listeningState?.itemID
-        return traversal.hasNext(from: current)
+        return true
     }
 
+    /// Playlist Previous Track is available whenever there is a track to
+    /// restart or go back to.
     var canPrevious: Bool {
         if mode.itemID != nil { return controller.session.canSwitchPlayback }
-        let current = currentItemID ?? workspace.listeningState?.itemID
-        return traversal.hasPrevious(from: current)
+        return !workspace.items.isEmpty
     }
+
+    /// Previous Track restarts the current track once it has played this
+    /// long, as standard media players do; earlier, it goes to the previous
+    /// track.
+    nonisolated static let previousTrackRestartThreshold: TimeInterval = 3
 
     /// Capture the destination synchronously, before a picker, metadata read,
     /// or provider task can suspend.
@@ -735,13 +742,31 @@ final class PlaylistCoordinator {
             updateListeningStateFromRuntime()
             return
         }
+        // Next Track (playlist): the next track in play order, wrapping
+        // with Repeat All. Past the last track with Repeat off it returns to
+        // the first track, paused, as standard media players do.
         let current = currentItemID ?? workspace.listeningState?.itemID
-        guard let nextID = traversal.next(from: current) else { return }
         let wasPlaying = controller.session.isPlaying
-        let versionID = workspace.items.first(where: { $0.id == nextID })?.selectedVersion?.id
-        guard let versionID else { return }
-        let snapshot = PlaybackSnapshot(itemID: nextID, versionID: versionID, filePosition: 0, isPlaying: wasPlaying)
-        enqueuePlaylistActivation(itemID: nextID, versionID: versionID, snapshot: snapshot)
+        if let nextID = traversal.next(from: current) {
+            activatePlaylistTrack(nextID, isPlaying: wasPlaying)
+            return
+        }
+        traversal.reset()
+        guard let firstID = traversal.next(from: nil) else { return }
+        activatePlaylistTrack(firstID, isPlaying: false)
+    }
+
+    private func activatePlaylistTrack(_ itemID: PlaylistItem.ID, isPlaying: Bool) {
+        guard let versionID = workspace.items.first(where: { $0.id == itemID })?.selectedVersion?.id else { return }
+        let snapshot = PlaybackSnapshot(itemID: itemID, versionID: versionID, filePosition: 0, isPlaying: isPlaying)
+        enqueuePlaylistActivation(itemID: itemID, versionID: versionID, snapshot: snapshot)
+    }
+
+    /// The playlist's position in the current track, in file seconds.
+    private var playlistTrackPosition: TimeInterval {
+        let current = currentItemID ?? workspace.listeningState?.itemID
+        if runtimeContext?.itemID == current, current != nil { return controller.displayTransportPosition() }
+        return workspace.listeningState?.itemID == current ? workspace.listeningState?.filePosition ?? 0 : 0
     }
 
     func previous() {
@@ -751,13 +776,43 @@ final class PlaylistCoordinator {
             updateListeningStateFromRuntime()
             return
         }
+        // Previous Track (playlist), as standard media players do: past the
+        // first few seconds it restarts the current track; otherwise it goes
+        // back through listening history, then to the track above in list
+        // order (wrapping to the last with Repeat All). At the start, it
+        // restarts the current track.
         let current = currentItemID ?? workspace.listeningState?.itemID
-        guard let previousID = traversal.previous(from: current) else { return }
         let wasPlaying = controller.session.isPlaying
-        let versionID = workspace.items.first(where: { $0.id == previousID })?.selectedVersion?.id
-        guard let versionID else { return }
-        let snapshot = PlaybackSnapshot(itemID: previousID, versionID: versionID, filePosition: 0, isPlaying: wasPlaying)
-        enqueuePlaylistActivation(itemID: previousID, versionID: versionID, snapshot: snapshot)
+        guard let current else {
+            if let first = workspace.items.first?.id { activatePlaylistTrack(first, isPlaying: wasPlaying) }
+            return
+        }
+        if playlistTrackPosition > Self.previousTrackRestartThreshold {
+            restartPlaylistTrack(current, isPlaying: wasPlaying)
+            return
+        }
+        if let previousID = traversal.previous(from: current) {
+            activatePlaylistTrack(previousID, isPlaying: wasPlaying)
+            return
+        }
+        let ids = workspace.items.map(\.id)
+        if !workspace.isShuffleEnabled, let index = ids.firstIndex(of: current) {
+            let target = index > 0 ? ids[index - 1] : (workspace.playlistRepeatMode == .all ? ids.last : nil)
+            if let target, target != current {
+                traversal.reset(currentID: target)
+                activatePlaylistTrack(target, isPlaying: wasPlaying)
+                return
+            }
+        }
+        restartPlaylistTrack(current, isPlaying: wasPlaying)
+    }
+
+    private func restartPlaylistTrack(_ itemID: PlaylistItem.ID, isPlaying: Bool) {
+        if runtimeContext?.itemID == itemID {
+            seek(to: 0)
+        } else {
+            activatePlaylistTrack(itemID, isPlaying: isPlaying)
+        }
     }
 
     func setPlaylistRepeatMode(_ mode: PlaylistRepeatMode) {

@@ -1050,13 +1050,60 @@ struct PlaylistCoordinatorTests {
         )
     }
 
-    private func makePlaylistVersion(url: URL, title: String, artist: String? = nil) -> PlaylistVersion {
+    @MainActor
+    @Test
+    func previousAndNextTrackBehaveLikeAMediaPlayer() async throws {
+        let urls = try ["a.wav", "b.wav"].map { try makeTemporaryAudioFile(name: $0, duration: 6) }
+        defer { urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
+        let items = urls.enumerated().map { index, url in
+            PlaylistItem(title: "\(index)", versions: [makePlaylistVersion(url: url, title: "\(index)", duration: 6)])
+        }
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: items))
+        await coordinator.playItem(id: items[1].id)
+        coordinator.pause()
+        #expect(coordinator.canPrevious && coordinator.canNext)
+
+        // Past the first few seconds, Previous restarts the track.
+        coordinator.seek(to: 4)
+        coordinator.previous()
+        #expect(coordinator.currentItemID == items[1].id)
+        #expect(coordinator.controller.displayTransportPosition() == 0)
+
+        // At its start, Previous goes to the track above, in list order.
+        coordinator.previous()
+        try await waitFor { coordinator.currentItemID == items[0].id && coordinator.runtimeContext?.itemID == items[0].id }
+
+        // At the first track, Previous restarts it.
+        coordinator.seek(to: 1)
+        coordinator.previous()
+        #expect(coordinator.currentItemID == items[0].id)
+        #expect(coordinator.controller.displayTransportPosition() == 0)
+
+        // Next past the last track (Repeat off) returns to the first, paused.
+        coordinator.next()
+        try await waitFor { coordinator.currentItemID == items[1].id && coordinator.runtimeContext?.itemID == items[1].id }
+        await coordinator.playItem(id: items[1].id)
+        coordinator.next()
+        try await waitFor { coordinator.currentItemID == items[0].id && coordinator.runtimeContext?.itemID == items[0].id }
+        #expect(!coordinator.isPlaying)
+    }
+
+    @MainActor
+    private func waitFor(_ condition: @MainActor () -> Bool) async throws {
+        for _ in 0..<200 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Timed out waiting for the condition")
+    }
+
+    private func makePlaylistVersion(url: URL, title: String, artist: String? = nil, duration: TimeInterval = 2) -> PlaylistVersion {
         PlaylistVersion(
             file: PlaylistWorkspaceStore.makeFileReference(for: url),
             metadata: PlaylistMetadata(
                 title: title,
                 artist: artist,
-                duration: 2,
+                duration: duration,
                 sampleRate: 44_100,
                 channelCount: 1,
                 fileFormatDescription: "WAV",

@@ -159,6 +159,13 @@ struct WorkspaceView: View {
             }
             .onChange(of: isComparison) { wasComparison, isComparison in
                 switchModeHeight(from: wasComparison, to: isComparison)
+                // A field torn down mid-edit never posts its end-of-editing
+                // notification; recheck the focus so menu shortcuts return.
+                // After the old mode's views have gone.
+                DispatchQueue.main.async {
+                    guard let mainWindow else { return }
+                    textInputIsFocused = !GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: mainWindow.firstResponder)
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndLiveResizeNotification)) { notification in
                 if notification.object as? NSWindow === mainWindow { storePlaylistHeight() }
@@ -274,11 +281,21 @@ struct WorkspaceView: View {
             .focusedSceneValue(\.canRemoveActiveTrack, isComparison ? controller.session.activeTrackID != nil : commandContext.canRemove)
             .focusedSceneValue(\.canClearTracks, !coordinator.workspace.items.isEmpty)
             .focusedSceneValue(\.canUseGlobalMenuShortcuts, canUseShortcuts)
-            .focusedSceneValue(\.mainWindowCommandState, MainWindowCommandState { resetWindowSize() })
+            .focusedSceneValue(\.mainWindowCommandState, MainWindowCommandState(
+                resetWindowSizing: { resetWindowSize() },
+                showsArtwork: settings.showsArtwork,
+                setArtworkVisible: { setArtworkVisibility($0) }
+            ))
     }
 
-    private var canUseShortcuts: Bool {
-        persistence.restorationComplete && !textInputIsFocused && !openFiles.isPromptingForStreamingURL
+    /// Menu shortcuts: off while text is being edited, so a plain-key
+    /// equivalent like Space can't take keystrokes from a text field.
+    private var canUseShortcuts: Bool { shortcutsAreAvailable && !textInputIsFocused }
+
+    /// Everything but text editing, which the key monitor reads from the
+    /// first responder at each key press instead.
+    private var shortcutsAreAvailable: Bool {
+        persistence.restorationComplete && !openFiles.isPromptingForStreamingURL
             && !openFiles.isImportingTracks && presentation.locateVersionID == nil
     }
 
@@ -681,8 +698,14 @@ struct WorkspaceView: View {
 
     private func setupKeyboard() {
         let monitor = KeyMonitor { event in
-            guard canUseShortcuts, let mainWindow, event.window === mainWindow,
-                  GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: mainWindow.firstResponder) else { return false }
+            guard let mainWindow, event.window === mainWindow else { return false }
+            // Read the focus at the key press. The notification-driven flag
+            // can go stale when a field is torn down mid-edit (a lane's
+            // offset field when compare closes), which used to block every
+            // global shortcut, Space included, until relaunch.
+            let isEditingText = !GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: mainWindow.firstResponder)
+            if textInputIsFocused != isEditingText { textInputIsFocused = isEditingText }
+            guard !isEditingText, shortcutsAreAvailable else { return false }
             let flags = event.modifierFlags.intersection([.command, .shift, .control, .option])
             if isComparison {
                 // Esc leaves compare, like the readout's back button (§9).
@@ -695,20 +718,33 @@ struct WorkspaceView: View {
                 if let direction = TrackSwitchArrowHotkey.direction(forKeyCode: event.keyCode, modifierFlags: flags), controller.session.canSwitchPlayback {
                     if direction == .previous { coordinator.previous() } else { coordinator.next() }; return true
                 }
+            } else if event.keyCode == 53 && flags.isEmpty && !presentation.selection.isEmpty {
+                // Esc clears the playlist selection (⌘D is compare's Deselect).
+                presentation.selection = []; return true
             }
             switch event.keyCode {
             case 49 where flags.isEmpty:
                 coordinator.togglePlayback(); return true
-            case 7 where flags.isEmpty || flags == .shift:
+            case 7 where isComparison && (flags.isEmpty || flags == .shift):
+                // Switch Track; the playlist uses ⌘← / ⌘→ instead.
                 if flags == .shift { coordinator.previous() } else { coordinator.next() }; return true
             case 123, 124:
                 let forward = event.keyCode == 124
                 if flags == .command {
-                    coordinator.seek(to: forward ? controller.session.timelineEnd : controller.session.timelineStart); return true
+                    // Compare jumps to the ends of the timeline; the playlist
+                    // goes to the previous or next track.
+                    if isComparison {
+                        coordinator.seek(to: forward ? controller.session.timelineEnd : controller.session.timelineStart)
+                    } else if forward ? coordinator.canNext : coordinator.canPrevious {
+                        if forward { coordinator.next() } else { coordinator.previous() }
+                    }
+                    return true
                 }
-                if !isComparison && presentation.listHasFocus { return false }
-                guard flags.isEmpty || flags == .shift else { return false }
-                coordinator.skip(by: (forward ? 1 : -1) * (flags == .shift ? 10 : 1)); return true
+                // Compare skips on the plain arrows; the playlist's arrows
+                // move through the list, so it skips with ⌥.
+                let skipFlags: NSEvent.ModifierFlags = isComparison ? [] : [.option]
+                guard flags == skipFlags || flags == skipFlags.union(.shift) else { return false }
+                coordinator.skip(by: (forward ? 1 : -1) * (flags.contains(.shift) ? 10 : 1)); return true
             default: return false
             }
         }
@@ -766,7 +802,7 @@ private struct PlaylistTransportView: View {
             Button { coordinator.previous() } label: { Image(systemName: "backward.end.fill") }
                 .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter,
                                                         glyphSize: ControlBarMetrics.secondaryGlyphSize))
-                .disabled(!coordinator.canPrevious).help("Previous Item").accessibilityLabel("Previous Item")
+                .disabled(!coordinator.canPrevious).help("Previous Track").accessibilityLabel("Previous Track")
                 .componentDebugLabel("Previous", enabled: showsLabels)
             Button { coordinator.togglePlayback() } label: { Image(systemName: coordinator.isPlaying ? "pause.fill" : "play.fill") }
                 .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: ControlBarMetrics.primaryDiameter,
@@ -777,7 +813,7 @@ private struct PlaylistTransportView: View {
             Button { coordinator.next() } label: { Image(systemName: "forward.end.fill") }
                 .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter,
                                                         glyphSize: ControlBarMetrics.secondaryGlyphSize))
-                .disabled(!coordinator.canNext).help("Next Item").accessibilityLabel("Next Item")
+                .disabled(!coordinator.canNext).help("Next Track").accessibilityLabel("Next Track")
                 .componentDebugLabel("Next", enabled: showsLabels)
         } trailing: {
             Button { coordinator.cyclePlaylistRepeatMode() } label: {

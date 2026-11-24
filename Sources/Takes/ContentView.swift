@@ -1086,6 +1086,10 @@ final class OpenFileCommandState: ObservableObject {
 
 struct MainWindowCommandState {
     let resetWindowSizing: @MainActor () -> Void
+    /// View ▸ Show/Hide Artwork: the titlebar toggle's action, so the menu
+    /// gets the same animated resize.
+    var showsArtwork = true
+    var setArtworkVisible: @MainActor (Bool) -> Void = { _ in }
 }
 
 private struct OpenFileCommandStateKey: FocusedValueKey {

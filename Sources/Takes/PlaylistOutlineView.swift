@@ -804,6 +804,31 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         return pasteboardItem
     }
 
+    /// File URLs for an item row's other versions, so dragging an item to
+    /// Finder copies all of its versions. Missing files are left out, and a
+    /// file already in the drag (the row's own, or a dragged version row's)
+    /// isn't added twice. Each extra carries only a file URL: in-app drops
+    /// read `draggedNodes`, never these.
+    func extraDraggingItems(for draggingItems: [NSDraggingItem]) -> [NSDraggingItem] {
+        let pasteboardItems = draggingItems.compactMap { $0.item as? NSPasteboardItem }
+        var seen = Set(pasteboardItems.compactMap { $0.string(forType: .fileURL) })
+        var extras: [NSDraggingItem] = []
+        for draggingItem in draggingItems {
+            guard let pasteboardItem = draggingItem.item as? NSPasteboardItem,
+                  let id = pasteboardItem.string(forType: PlaylistItemDrag.pasteboardType).flatMap(UUID.init(uuidString:)),
+                  let item = itemsByID[id] else { continue }
+            for version in item.versions {
+                guard let url = availableURL(for: version), seen.insert(url.absoluteString).inserted else { continue }
+                let extra = NSPasteboardItem()
+                extra.setString(url.absoluteString, forType: .fileURL)
+                let extraItem = NSDraggingItem(pasteboardWriter: extra)
+                extraItem.setDraggingFrame(draggingItem.draggingFrame, contents: nil)
+                extras.append(extraItem)
+            }
+        }
+        return extras
+    }
+
     func outlineView(
         _ outlineView: NSOutlineView, draggingSession session: NSDraggingSession,
         willBeginAt screenPoint: NSPoint, forItems draggedItems: [Any]
@@ -974,6 +999,15 @@ final class PlaylistNSOutlineView: NSOutlineView {
     /// stop on it before reaching the lanes' offset fields.
     override var canBecomeKeyView: Bool {
         (controller?.isActive ?? true) && super.canBecomeKeyView
+    }
+
+    /// Dragging an item out carries every version whose file is there, not
+    /// only its playback version: the extra files ride along as image-less
+    /// dragging items (`PlaylistOutlineController.extraDraggingItems`).
+    override func beginDraggingSession(
+        with items: [NSDraggingItem], event: NSEvent, source: NSDraggingSource
+    ) -> NSDraggingSession {
+        super.beginDraggingSession(with: items + (controller?.extraDraggingItems(for: items) ?? []), event: event, source: source)
     }
 
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {

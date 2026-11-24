@@ -249,7 +249,10 @@ These are here to prevent parallel implementations and subtle regressions:
   expansion; the outline controller mirrors it in both directions.
 - Playlist row drags are in-app only for organization (reorder, drop on an
   item to group, drag versions between items or out to separate) and carry a
-  file URL for dragging out to Finder. Finder file drops are position
+  file URL for dragging out to Finder. An item row dragged out copies every
+  version whose file is there: `PlaylistNSOutlineView.beginDraggingSession`
+  adds the other versions as image-less, file-URL-only dragging items
+  (`extraDraggingItems`); in-app drops read `draggedNodes`, never those. Finder file drops are position
   independent: they go through the shared import path, which merges into a
   metadata match or appends.
 - Context-menu commands act on the selection when opened on a selected row and
@@ -283,7 +286,28 @@ These are here to prevent parallel implementations and subtle regressions:
   playlist's default (760 pt, then stored as its height) or compare's fit
   to its lanes; top-left kept (`frameResettingSize(currentFrame:height:)`).
 - Keep global shortcuts focus-safe; active numeric text fields should retain
-  normal text editing behavior.
+  normal text editing behavior. The key monitor (`WorkspaceView.setupKeyboard`)
+  reads text editing from the first responder at each key press
+  (`GlobalShortcutFocusPolicy`), never from `textInputIsFocused`: that
+  notification-driven flag goes stale when a field is torn down mid-edit, and
+  once blocked Space and every other global shortcut until relaunch. The flag
+  only disables menu shortcuts (`canUseShortcuts`), and the monitor and mode
+  switches correct it.
+- Transport shortcuts differ by mode. Playlist: Space play/pause; ⌘← / ⌘→
+  Previous / Next Track, which behave like a media player
+  (`PlaylistCoordinator.previous`/`next`): Previous restarts the track past
+  `previousTrackRestartThreshold` (3 s), else walks back through listening
+  history, then list order (wrapping with Repeat All), else restarts; Next
+  wraps with Repeat All, and past the last track returns to the first,
+  paused. The control bar's buttons and the media keys use the same
+  commands. ⌥← / ⌥→ skip (⇧ for 10 s), since plain arrows move through the
+  list; Esc clears the selection. Compare: X / ⇧X Switch Track, ⌘← / ⌘→
+  Jump to Beginning / End, plain arrows skip, ⌘D Deselect (the loop; disabled
+  in the playlist), Esc leaves. Both: ⌘R Change Repeat Mode, ⇧⌘A Show/Hide
+  Artwork (`MainWindowCommandState.setArtworkVisible`, the titlebar toggle's
+  animated path). Playlist only: ⌘] Compare (`PlaylistCommandContext.compare`,
+  one multi-version item), ⌥⌘S Shuffle, ⌘G / ⇧⌘G Group / Separate Versions,
+  ⌥⌘↑ / ⌥⌘↓ Move Up / Down, File ▸ Locate File… (`locateVersionID`).
 - One main window serves both modes (A2). It opens 360 pt wide (760 tall with
   artwork, 412 without) and is user-resizable down to
   `TakesWindowPolicy.minimumSize(showsArtwork:)`: 360 × 619 with the
@@ -334,11 +358,17 @@ These are here to prevent parallel implementations and subtle regressions:
   the next one has loaded (`shownCoverVersionID`), so switching never
   flashes the placeholder.
 - Artwork is in-memory only (no disk caches); the readouts carry none. The
-  cover loads only the version on display, downsampled to 720 px, capped at
+  cover loads only the version on display, capped at
   `PlaylistArtworkStore.capacity` decoded images. Playlist item rows show a
   34 pt thumbnail of their playback version from a separate bounded cache
   (`thumbnailPixelSize` 68 px, `thumbnailCapacity`, at most
-  `maximumConcurrentThumbnailLoads` decodes at once). The outline controller
+  `maximumConcurrentThumbnailLoads` decodes at once). Decoding sizes come
+  from `ArtworkDecodeTarget` (`.cover` 720 px, `.thumbnail` 68 px): Image I/O
+  caps the long edge, so a cropped image's long edge grows with its aspect
+  ratio until the short edge reaches the target. The cover crops only nearly
+  square art (`CoverArtworkLayout.maximumCropAspect`, 1.1) and otherwise
+  fits the whole image over a blurred fill of itself; thumbnails always crop
+  (extra resolution capped at 4:1). The outline controller
   requests thumbnails only for item rows inside the visible rect
   (`requestVisibleThumbnails`, coalesced per run-loop turn on scroll/resize/
   reload), and each request replaces the queue, so rows scrolled away before
@@ -502,7 +532,7 @@ these reintroduces the exact regressions it fixed):
   Undo, missing-file repair/advancement, 100-item/32-version runtime isolation,
   automatic-grouping transactions/cancellation, entering compare without
   starting another item, compare opening (and restoring) with missing
-  versions as error lanes, and workspace/runtime integration.
+  versions as error lanes, media-player Previous/Next Track, and workspace/runtime integration.
 - `PlaylistRuntimeTests.swift`: runtime replacement, stable IDs, stale imports,
   teardown, preparation failure, and natural-end callbacks.
 - `PlaylistWorkspaceStoreTests.swift`: snapshot round trips, recovery protection,
@@ -532,7 +562,7 @@ these reintroduces the exact regressions it fixed):
   (no endcaps), head geometry, unlit opacity and glow, the control bar's side-button placement, the side buttons' appearance defaults, compare's repeat glyph per mode, the cover
   rule (`CoverVersionRule`), the A2 playlist row metrics and version names, the
   thumbnail cache (visible-only queue, concurrency bound, capacity, cover
-  reuse), the A2 compact compare geometry (ruler and seat, the fixed lane
+  reuse, the cover's crop-or-fit rule and decode sizes), the A2 compact compare geometry (ruler and seat, the fixed lane
   height, the waveform band, ruler notches and labels, the playhead's line
   and grabber), the lane strip's text and blind rules, the offset field's
   width, the bottom bars (the playlist summary's count and total, both
