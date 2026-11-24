@@ -6,6 +6,8 @@ enum PlaylistRowID: Hashable {
     case version(UUID)
 }
 
+enum RowMoveDirection: Int { case up = -1, down = 1 }
+
 @MainActor
 final class PlaylistPresentationState: ObservableObject {
     @Published var selection: Set<PlaylistRowID> = []
@@ -137,6 +139,7 @@ struct PlaylistCommandContext {
         let rows = targetRows
         for item in coordinator.workspace.items {
             for version in item.versions where rows.contains(.item(item.id)) || rows.contains(.version(version.id)) {
+                if coordinator.fileIssues[version.id]?.reference == version.file { return version.id }
                 if case .available = PlaylistWorkspaceStore.resolveFileReference(version.file) { continue }
                 return version.id
             }
@@ -148,15 +151,13 @@ struct PlaylistCommandContext {
         presentation.locateVersionID = locateVersionID
     }
 
-    enum MoveDirection: Int { case up = -1, down = 1 }
-
     private struct Move {
         var items: [UUID]?
         var versions: [UUID: [UUID]] = [:]
         var isPossible: Bool { items != nil || !versions.isEmpty }
     }
 
-    private func movePlan(_ direction: MoveDirection) -> Move {
+    private func movePlan(_ direction: RowMoveDirection) -> Move {
         let items = coordinator.workspace.items
         let rows = targetRows
         let selectedItems = Set(itemIDs)
@@ -181,11 +182,11 @@ struct PlaylistCommandContext {
         return order == original ? nil : order
     }
 
-    func canMove(_ direction: MoveDirection) -> Bool {
+    func canMove(_ direction: RowMoveDirection) -> Bool {
         movePlan(direction).isPossible
     }
 
-    func moveSelection(_ direction: MoveDirection) {
+    func moveSelection(_ direction: RowMoveDirection) {
         let plan = movePlan(direction)
         guard plan.isPossible else { return }
         coordinator.reorderPlaylistRows(items: plan.items, versions: plan.versions, undoManager: undoManager)
@@ -202,11 +203,12 @@ struct PlaylistOrganizationAvailability: Equatable {
 
     @MainActor
     init(_ context: PlaylistCommandContext) {
-        canGroup = context.canGroup
-        canSeparate = context.canSeparate
-        canMoveUp = context.canMove(.up)
-        canMoveDown = context.canMove(.down)
-        canClear = !context.coordinator.workspace.items.isEmpty
+        let isPlaylist = context.coordinator.mode == .playlist
+        canGroup = isPlaylist && context.canGroup
+        canSeparate = isPlaylist && context.canSeparate
+        canMoveUp = isPlaylist ? context.canMove(.up) : context.coordinator.canMoveActiveComparisonVersion(.up)
+        canMoveDown = isPlaylist ? context.canMove(.down) : context.coordinator.canMoveActiveComparisonVersion(.down)
+        canClear = isPlaylist && !context.coordinator.workspace.items.isEmpty
     }
 }
 
@@ -231,12 +233,19 @@ extension FocusedValues {
 }
 
 struct PlaylistCommands: Commands {
+    let coordinator: PlaylistCoordinator
     @FocusedValue(\.playlistCommandContext) private var context
     @FocusedValue(\.playlistOrganizationAvailability) private var availability
 
     var body: some Commands {
         CommandMenu("Playlist") {
-            playlistOrganizationMenuItems(context: context, availability: availability)
+            playlistOrganizationMenuItems(context: context, availability: availability) { direction in
+                if coordinator.mode == .playlist {
+                    context?.moveSelection(direction)
+                } else {
+                    coordinator.moveActiveComparisonVersion(direction, undoManager: NSApp.mainWindow?.undoManager)
+                }
+            }
         }
     }
 }
@@ -245,7 +254,8 @@ struct PlaylistCommands: Commands {
 /// the bottom bar's `…` pull-down (A2 §7) both show this one list.
 @MainActor @ViewBuilder
 func playlistOrganizationMenuItems(
-    context: PlaylistCommandContext?, availability: PlaylistOrganizationAvailability?
+    context: PlaylistCommandContext?, availability: PlaylistOrganizationAvailability?,
+    move: @escaping (RowMoveDirection) -> Void
 ) -> some View {
     Button("Group as Versions") { context?.group() }
         .keyboardShortcut("g", modifiers: [.command])
@@ -254,10 +264,10 @@ func playlistOrganizationMenuItems(
         .keyboardShortcut("g", modifiers: [.command, .shift])
         .disabled(availability?.canSeparate != true)
     Divider()
-    Button("Move Up") { context?.moveSelection(.up) }
+    Button("Move Up") { move(.up) }
         .keyboardShortcut(.upArrow, modifiers: [.command, .option])
         .disabled(availability?.canMoveUp != true)
-    Button("Move Down") { context?.moveSelection(.down) }
+    Button("Move Down") { move(.down) }
         .keyboardShortcut(.downArrow, modifiers: [.command, .option])
         .disabled(availability?.canMoveDown != true)
     Divider()
@@ -294,9 +304,11 @@ struct PlaylistView: View {
                     playlist: coordinator,
                     presentation: presentation,
                     items: items,
+                    fileIssues: coordinator.fileIssues,
                     currentItemID: coordinator.currentItemID,
                     isPlaying: coordinator.isPlaying,
                     isActive: coordinator.mode == .playlist,
+                    moveRevision: coordinator.rowMoveRevision,
                     artworkStore: artworkStore,
                     undoManager: undoManager,
                     showsDebugLabels: settings.showsComponentDebugLabels

@@ -1157,6 +1157,7 @@ struct ContentView: View {
     private let locateVersion: (PlaylistVersion.ID) -> Void
     var controller: PlaybackController { coordinator.controller }
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var settings: AppSettings
 
     @ObservedObject private var openFileCommandState: OpenFileCommandState
@@ -1557,6 +1558,7 @@ struct ContentView: View {
                                         .modifier(reorderPlacement(index: index, trackID: nil, rowStep: laneStep))
                                 }
                             }
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: coordinator.rowMoveRevision)
                             // Publish the zoom-varying window to the store the
                             // lane leaves observe. The container body re-running
                             // per zoom step is fine (it's cheap and produces
@@ -1583,6 +1585,7 @@ struct ContentView: View {
                                         .modifier(reorderPlacement(index: index, trackID: sessionTrack.id, rowStep: laneStep))
                                 }
                             }
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: coordinator.rowMoveRevision)
                         }
                         .frame(width: proxy.size.width)
                         // Vertical visibility culling: track which row indices
@@ -2559,6 +2562,9 @@ enum LaneStripText {
     /// has no room for — the duration and the filename. None while blind.
     static func toolTip(for track: LoadedTrack, isBlind: Bool) -> String? {
         guard !isBlind else { return nil }
+        if track.isMissing {
+            return PlaybackError.failedToOpenFile(track.url).localizedDescription
+        }
         let details = [
             format(for: track, isBlind: false),
             PlaylistRowText.duration(track.duration)

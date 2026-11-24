@@ -261,6 +261,10 @@ These are here to prevent parallel implementations and subtle regressions:
 - Move Up/Down shifts selected tracks and selected versions one place among
   their siblings, keeping their relative order and disabling directions that
   would leave the order unchanged. A selected track covers its child rows.
+  The commands animate playlist rows through `NSOutlineView.moveItem` and
+  the active lane in Compare. Compare keeps the audio runtime in place, and
+  a Blind Listening move changes only the displayed order. Both animations
+  respect Reduce Motion.
   Group as Versions uses the first selected track as the destination.
   Separate Versions splits all versions of each selected track and any
   individually selected versions into standalone tracks, then selects the
@@ -273,15 +277,19 @@ These are here to prevent parallel implementations and subtle regressions:
   hover, the drop-on-item ring) inside the 10 pt edge inset with a 6 pt
   radius; the geometry lives in `PlaylistRowMetrics`. Item and version
   titles truncate in the middle; artist lines at the tail.
+  Item rows use their key version's title tag or filename stem, artist,
+  duration, and thumbnail.
 - Version rows (30 pt) are named by their title tag, else the filename
   without its extension (`PlaylistRowText.versionName`). A single click
   selects the row. Double-clicking a version plays it from the beginning
-  and preserves the key version. Click the empty checkbox on a hovered
+  and preserves the key version. Click the empty circle on a hovered
   version row or choose Set as Key Version from its context menu to change
-  the key version. A missing file shows a warning triangle and its playback
-  action opens Locate. The hover Compare pill (multi-version items only) and
-  the context menu's Compare are the ways into compare from a row; neither
-  asks to locate missing files first.
+  the key version. Unavailable files show a warning triangle with the load
+  error in its tooltip. The warning hides the thumbnail's placeholder note.
+  A failed play attempt leaves playback alone. Locate
+  File… is available explicitly in the menus. The hover Compare pill
+  (multi-version items only) and the context menu's Compare are the ways
+  into compare from a row; neither asks to locate missing files first.
 - Entering compare never starts an item: another item's playback stops, and
   only the item already playing keeps playing
   (`PlaylistCoordinator.enterComparison`).
@@ -308,8 +316,10 @@ These are here to prevent parallel implementations and subtle regressions:
   (`PlaylistCoordinator.previous`/`next`): Previous restarts the track past
   `previousTrackRestartThreshold` (3 s), else walks back through listening
   history, then list order (wrapping with Repeat All), else restarts; Next
-  wraps with Repeat All, and past the last track returns to the first,
-  paused. The control bar's buttons and the media keys use the same
+  wraps with Repeat All, and past the last track returns to the first
+  playable track, paused. Previous, Next and natural advancement skip
+  unavailable files without adding the skipped items to listening history.
+  The control bar's buttons and the media keys use the same
   commands. ⌥← / ⌥→ skip (⇧ for 10 s), since plain arrows move through the
   list; Esc clears the selection. Compare: X / ⇧X Switch Track, ⌘← / ⌘→
   Jump to Beginning / End, plain arrows skip, ⌘D Deselect (the loop; disabled
@@ -317,7 +327,8 @@ These are here to prevent parallel implementations and subtle regressions:
   Artwork (`MainWindowCommandState.setArtworkVisible`, the titlebar toggle's
   animated path). Playlist only: ⌘] Compare (`PlaylistCommandContext.compare`,
   one multi-version item), ⌥⌘S Shuffle, ⌘G / ⇧⌘G Group / Separate Versions,
-  ⌥⌘↑ / ⌥⌘↓ Move Up / Down, File ▸ Locate File… (`locateVersionID`).
+  File ▸ Locate File… (`locateVersionID`). Both modes: ⌥⌘↑ / ⌥⌘↓
+  Move Up / Down.
 - One main window serves both modes (A2). It opens 360 pt wide (760 tall with
   artwork, 412 without) and is user-resizable down to
   `TakesWindowPolicy.minimumSize(showsArtwork:)`: 360 × 619 with the

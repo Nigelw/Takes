@@ -159,7 +159,7 @@ Replaces the current column table. Still an `NSOutlineView`
 - 34 pt artwork thumbnail, 4 pt radius. Items with versions show a stacked
   look: two offset card edges up and to the right (`3,-3` and `6,-6`).
   Items without artwork show a neutral tile with a music-note glyph.
-- Title (13 pt semibold) over artist (11 pt secondary).
+- Key version's title (13 pt semibold) over its artist (11 pt secondary).
 - Trailing duration (12 pt, tabular digits).
 - Now playing: primary-tinted row background (~14%), title in the light
   primary tint, speaker glyph over the thumbnail.
@@ -172,8 +172,9 @@ Replaces the current column table. Still an `NSOutlineView`
   6 pt radius.
 
 **Version rows, 30 pt** (shown when the item is expanded):
-- A check in a 34 pt column under the thumbnail marks the playback version;
-  clicking a version row makes it the playback version.
+- A circular check in a 34 pt column under the thumbnail marks the key
+  version. Clicking the empty circle on a hovered version sets it as the
+  key version.
 - Name = the file's **track title tag**, not its filename
   (`Eleanor Rigby (2009 Stereo Mix)`), 12 pt, aligned with item titles.
 - Format (e.g. FLAC, MP3) and duration, secondary.
@@ -435,12 +436,13 @@ None open. The version check for a missing file was decided in milestone 3
   flashes the placeholder.
 - **Double-click plays, on every row.** It does not open compare, even for
   multi-version items; the Compare pill is the way in.
-- **Missing version file** (milestone 3, was §12). A version row whose file
-  is missing shows a yellow warning triangle in the 34 pt check column in
-  place of the check, even when it is the playback version, and a dimmed
-  title. Double-clicking the row opens Locate File…. An item row shows the
-  triangle over its darkened thumbnail when any of its files is missing (the tooltip counts them) and
-  dims its title when its playback version's file is missing.
+- **Unavailable version file** (milestone 3, was §12). A version row whose
+  file is unavailable shows a yellow warning triangle in the 34 pt check
+  column and a dimmed title. An item row shows the triangle over its
+  darkened thumbnail when any version is unavailable and dims its title
+  when the playback version is unavailable. The triangle replaces the music
+  note on a thumbnail without artwork. Hovering the triangle shows the load
+  error. Locate File… is available in the context menu.
 - **Entering compare never starts an item** (milestone 3, §9). Another
   item's playback stops and compare opens paused; the item already playing
   keeps playing. This applies to the Compare pill, the context menu and the
@@ -453,7 +455,7 @@ None open. The version check for a missing file was decided in milestone 3
   without its extension (the readout's rule). The format
   column shows the container alone (FLAC, MP3); sample rate, bit rate and the
   filename are in the row's tooltip. A single click selects the row.
-  Double-click plays the version from the beginning. Click the empty checkbox
+  Double-click plays the version from the beginning. Click the empty circle
   on a hovered row to make it the key version. Rows being dragged stay in
   place, dimmed, until the drop lands.
 - **Item rows without an artist tag** show the title alone, vertically

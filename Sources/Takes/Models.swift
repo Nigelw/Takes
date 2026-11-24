@@ -333,6 +333,13 @@ enum PlaybackError: LocalizedError, Equatable {
     case trackLimitExceeded(limit: Int, skippedFileNames: [String])
     case importSummary(failures: [ImportFailure], skippedFileNames: [String], limit: Int)
 
+    var fileURL: URL? {
+        switch self {
+        case let .unsupportedFormat(url), let .failedToOpenFile(url): url
+        default: nil
+        }
+    }
+
     var errorDescription: String? {
         switch self {
         case let .unsupportedFormat(url):

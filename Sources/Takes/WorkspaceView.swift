@@ -260,12 +260,6 @@ struct WorkspaceView: View {
             }
             .fileDialogMessage(Text(locateFileMessage))
             .fileDialogConfirmationLabel(Text(presentation.locateVersionID == nil ? "Open" : "Locate"))
-            .alert("Takes Error", isPresented: Binding(
-                get: { coordinator.errorMessage != nil || controller.playbackError != nil },
-                set: { if !$0 { coordinator.clearError(); controller.clearPlaybackError() } }
-            )) {
-                Button("OK") { coordinator.clearError(); controller.clearPlaybackError() }
-            } message: { Text(coordinator.errorMessage ?? controller.playbackError?.localizedDescription ?? "") }
     }
 
     private var locateFileMessage: String {
@@ -278,7 +272,7 @@ struct WorkspaceView: View {
             .focusedSceneValue(\.openFileCommandState, persistence.restorationComplete ? openFiles : nil)
             .focusedSceneValue(\.playlistCommandContext, isComparison ? nil : commandContext)
             .focusedSceneValue(\.playlistOrganizationAvailability,
-                               isComparison || !canUseShortcuts ? nil : PlaylistOrganizationAvailability(commandContext))
+                               canUseShortcuts ? PlaylistOrganizationAvailability(commandContext) : nil)
             .focusedSceneValue(\.canShowActiveTrackInFinder, Self.targetVersion(coordinator: coordinator, presentation: presentation) != nil)
             .focusedSceneValue(\.canRemoveActiveTrack, isComparison ? controller.session.activeTrackID != nil : commandContext.canRemove)
             .focusedSceneValue(\.canClearTracks, !coordinator.workspace.items.isEmpty)

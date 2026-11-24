@@ -307,7 +307,8 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.controller.session.activeTrackID == thirdVersion.id)
         #expect(coordinator.controller.runtimeTrackCount == 1)
         #expect(coordinator.isPlaying)
-        #expect(coordinator.errorMessage != nil)
+        #expect(coordinator.errorMessage == nil)
+        #expect(coordinator.fileIssues[missingVersion.id]?.error == .failedToOpenFile(missingVersion.file.storedURL))
     }
 
     @MainActor
@@ -405,6 +406,38 @@ struct PlaylistCoordinatorTests {
         #expect(PlaylistOrganizationAvailability(context).canMoveDown)
         undo.undo()
         #expect(coordinator.workspace.items == [a, b, c])
+    }
+
+    @MainActor
+    @Test(arguments: [false, true])
+    func compareMoveFollowsTheActiveLaneAndKeepsTheRuntime(blind: Bool) async throws {
+        let urls = try ["move-a.wav", "move-b.wav"].map { try makeTemporaryAudioFile(name: $0) }
+        defer { urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
+        let versions = urls.map { makePlaylistVersion(url: $0, title: $0.lastPathComponent) }
+        let item = PlaylistItem(title: "Pair", versions: versions)
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
+        await coordinator.enterComparison(itemID: item.id)
+        if blind {
+            coordinator.controller.setBlindListeningMode(true) { Array($0.reversed()) }
+        }
+        coordinator.play()
+        defer { coordinator.pause() }
+        let context = coordinator.runtimeContext
+        let activeID = coordinator.controller.session.activeTrackID
+        let displayedOrder = coordinator.controller.session.tracks.map(\.id)
+
+        #expect(!coordinator.canMoveActiveComparisonVersion(.up))
+        #expect(coordinator.canMoveActiveComparisonVersion(.down))
+        coordinator.moveActiveComparisonVersion(.down, undoManager: nil)
+
+        #expect(coordinator.controller.session.tracks.map(\.id) == Array(displayedOrder.reversed()))
+        #expect(coordinator.controller.session.activeTrackID == activeID)
+        #expect(coordinator.runtimeContext == context)
+        #expect(coordinator.isPlaying)
+        #expect(coordinator.canMoveActiveComparisonVersion(.up))
+        #expect(!coordinator.canMoveActiveComparisonVersion(.down))
+        #expect(coordinator.workspace.items.first?.versions.map(\.id) ==
+                (blind ? versions.map(\.id) : Array(versions.map(\.id).reversed())))
     }
 
     @MainActor
@@ -677,7 +710,8 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.workspace == workspace)
         #expect(coordinator.runtimeTrackCount == 0)
         #expect(coordinator.controller.session.tracks.isEmpty)
-        #expect(coordinator.errorMessage != nil)
+        #expect(coordinator.errorMessage == nil)
+        #expect(coordinator.fileIssues[version.id]?.error == .failedToOpenFile(version.file.storedURL))
     }
 
     @MainActor
@@ -1031,7 +1065,8 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.mode == .playlist)
         #expect(coordinator.runtimeContext == nil)
         #expect(coordinator.workspace.listeningState?.filePosition == 1)
-        #expect(coordinator.errorMessage != nil)
+        #expect(coordinator.errorMessage == nil)
+        #expect(coordinator.fileIssues[version.id]?.error == .failedToOpenFile(version.file.storedURL))
     }
 
     @MainActor
@@ -1045,8 +1080,10 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.isPlaying)
         #expect(coordinator.removeItem(item.id))
         #expect(!coordinator.isPlaying)
-        for _ in 0..<100 where coordinator.errorMessage == nil { await Task.yield() }
-        #expect(coordinator.errorMessage != nil)
+        let version = successor.versions[0]
+        try await waitFor { coordinator.fileIssues[version.id] != nil }
+        #expect(coordinator.errorMessage == nil)
+        #expect(coordinator.fileIssues[version.id]?.error == .failedToOpenFile(version.file.storedURL))
         #expect(coordinator.currentItemID == successor.id)
         #expect(coordinator.runtimeContext == nil)
         #expect(coordinator.controller.runtimeTrackCount == 0)
@@ -1196,6 +1233,56 @@ struct PlaylistCoordinatorTests {
         coordinator.next()
         try await waitFor { coordinator.currentItemID == items[0].id && coordinator.runtimeContext?.itemID == items[0].id }
         #expect(!coordinator.isPlaying)
+    }
+
+    @MainActor
+    @Test func manualTrackNavigationSkipsMissingAndDamagedFilesInBothDirections() async throws {
+        let urls = try ["first.wav", "damaged.wav", "last.wav"].map { try makeTemporaryAudioFile(name: $0, duration: 6) }
+        defer { urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
+        try Data("not audio".utf8).write(to: urls[1])
+        let first = PlaylistItem(title: "First", versions: [makePlaylistVersion(url: urls[0], title: "First", duration: 6)])
+        let missing = PlaylistItem(title: "Missing", versions: [makeVersion("skip-missing.wav")])
+        let damaged = makePlaylistVersion(url: urls[1], title: "Damaged", duration: 6)
+        let last = PlaylistItem(title: "Last", versions: [makePlaylistVersion(url: urls[2], title: "Last", duration: 6)])
+        let tail = PlaylistItem(title: "Tail", versions: [makeVersion("skip-tail.wav")])
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [
+            first, missing, PlaylistItem(title: "Damaged", versions: [damaged]), last, tail
+        ]))
+        defer { coordinator.pause() }
+
+        await coordinator.playItem(id: first.id)
+        coordinator.next()
+        try await waitFor { coordinator.currentItemID == last.id }
+        #expect(coordinator.isPlaying)
+        #expect(coordinator.fileIssues[missing.versions[0].id] != nil)
+        #expect(coordinator.fileIssues[damaged.id]?.error.fileURL?.lastPathComponent == "damaged.wav")
+
+        await coordinator.playItem(id: last.id, fromBeginning: true)
+        coordinator.pause()
+        coordinator.previous()
+        try await waitFor { coordinator.currentItemID == first.id }
+        #expect(!coordinator.isPlaying)
+
+        await coordinator.playItem(id: last.id)
+        coordinator.next()
+        try await waitFor { coordinator.currentItemID == first.id }
+        #expect(!coordinator.isPlaying)
+        #expect(coordinator.fileIssues[tail.versions[0].id] != nil)
+        #expect(coordinator.errorMessage == nil)
+    }
+
+    @MainActor
+    @Test func repeatAllExhaustsAnUnavailablePlaylistSilently() async throws {
+        let versions = [makeVersion("unavailable-a.wav"), makeVersion("unavailable-b.wav")]
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(
+            items: versions.map { PlaylistItem(title: "Unavailable", versions: [$0]) },
+            playlistRepeatMode: .all
+        ))
+        coordinator.next()
+        try await waitFor { coordinator.fileIssues.count == versions.count }
+        #expect(coordinator.currentItemID == nil)
+        #expect(!coordinator.isPlaying)
+        #expect(coordinator.errorMessage == nil)
     }
 
     @MainActor

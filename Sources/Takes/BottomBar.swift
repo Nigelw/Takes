@@ -180,7 +180,9 @@ struct PlaylistBottomBar: View {
             )
             .fixedSize()
             Menu {
-                playlistOrganizationMenuItems(context: context, availability: PlaylistOrganizationAvailability(context))
+                playlistOrganizationMenuItems(
+                    context: context, availability: PlaylistOrganizationAvailability(context), move: context.moveSelection
+                )
             } label: {
                 Image(systemName: "ellipsis")
             }

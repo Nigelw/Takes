@@ -2822,9 +2822,34 @@ struct SessionTests {
         #expect(PlaylistRowText.versionName(version(title: "  ", file: "02 eleanor.flac")) == "02 eleanor")
         #expect(PlaylistRowText.versionName(version(title: nil, file: "take.final.wav")) == "take.final")
         #expect(PlaylistRowText.formatName(version(title: nil, file: "a.flac").metadata) == "FLAC")
-        #expect(PlaylistRowText.missingWarning(missing: 0, of: 3) == nil)
-        #expect(PlaylistRowText.missingWarning(missing: 1, of: 1) == "The file for this item can’t be found.")
-        #expect(PlaylistRowText.missingWarning(missing: 2, of: 3) == "2 of 3 files can’t be found.")
+
+        let tagged = version(title: "Stereo Mix", file: "stereo.wav")
+        let untagged = version(title: nil, file: "Alternate Mix.wav")
+        var item = PlaylistItem(title: "Original Track Title", versions: [tagged, untagged])
+        #expect(PlaylistRowText.itemTitle(item) == "Stereo Mix")
+        item.selectedVersionID = untagged.id
+        #expect(PlaylistRowText.itemTitle(item) == "Alternate Mix")
+    }
+
+    @MainActor
+    @Test
+    func playlistWarningTooltipsUseTheLoadErrorAndClearWhenTheFilePlays() {
+        let message = PlaybackError.failedToOpenFile(URL(fileURLWithPath: "/tmp/missing.wav")).localizedDescription
+        let thumbnail = PlaylistThumbnailView(frame: .zero)
+        thumbnail.configure(image: nil, isStacked: false, status: .warning(message))
+        #expect(thumbnail.toolTip == message)
+        let glyphs = thumbnail.subviews.flatMap(\.subviews).compactMap { $0 as? NSImageView }
+        #expect(glyphs.filter { !$0.isHidden && $0.image != nil }.count == 1)
+        thumbnail.image = nil
+        #expect(glyphs.filter { !$0.isHidden && $0.image != nil }.count == 1)
+        thumbnail.configure(image: nil, isStacked: false, status: .playing)
+        #expect(thumbnail.toolTip == nil)
+
+        let version = PlaylistVersionCellView()
+        version.configure(title: "Missing", format: "WAV", duration: "0:35", mark: .warning(message), toolTip: "")
+        #expect(version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
+        version.configure(title: "Available", format: "WAV", duration: "0:35", mark: .key, toolTip: "")
+        #expect(!version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
     }
 
     @MainActor

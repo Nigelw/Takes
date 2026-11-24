@@ -967,22 +967,24 @@ final class PlaybackController {
     }
 
     func reorderTrack(_ trackID: SessionTrack.ID, before destinationTrackID: SessionTrack.ID?) {
-        guard let sourceIndex = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
-        guard destinationTrackID != trackID else { return }
-
-        let movedTrack = session.tracks.remove(at: sourceIndex)
+        var order = session.tracks.map(\.id)
+        guard let sourceIndex = order.firstIndex(of: trackID), destinationTrackID != trackID else { return }
+        order.remove(at: sourceIndex)
         let destinationIndex: Int
         if let destinationTrackID {
-            guard let targetIndex = session.tracks.firstIndex(where: { $0.id == destinationTrackID }) else {
-                session.tracks.insert(movedTrack, at: sourceIndex)
-                return
-            }
+            guard let targetIndex = order.firstIndex(of: destinationTrackID) else { return }
             destinationIndex = targetIndex
         } else {
-            destinationIndex = session.tracks.endIndex
+            destinationIndex = order.endIndex
         }
+        order.insert(trackID, at: destinationIndex)
+        reorderTracks(order)
+    }
 
-        session.tracks.insert(movedTrack, at: destinationIndex)
+    func reorderTracks(_ order: [SessionTrack.ID]) {
+        let tracks = Dictionary(uniqueKeysWithValues: session.tracks.map { ($0.id, $0) })
+        guard order.count == tracks.count, Set(order) == Set(tracks.keys) else { return }
+        session.tracks = order.compactMap { tracks[$0] }
         applyAudibility()
     }
 

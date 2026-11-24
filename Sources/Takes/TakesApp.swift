@@ -737,7 +737,7 @@ struct TakesApp: App {
             }
 
             FileCommands(coordinator: coordinator)
-            PlaylistCommands()
+            PlaylistCommands(coordinator: coordinator)
             PlaybackCommands(coordinator: coordinator)
             ViewCommands(coordinator: coordinator)
 

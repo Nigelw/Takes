@@ -181,6 +181,15 @@ struct PlaylistTraversal {
         return result
     }
 
+    /// Advancing probes candidates in play order. Only successful activations
+    /// should stay in the listening history.
+    mutating func discardSkippedHistory(_ skipped: Set<ID>) {
+        guard !skipped.isEmpty else { return }
+        let retainedThroughCursor = history.prefix(historyIndex + 1).filter { !skipped.contains($0) }.count
+        history.removeAll { skipped.contains($0) }
+        historyIndex = retainedThroughCursor - 1
+    }
+
     private mutating func record(_ id: ID) {
         guard itemIDs.contains(id) else { return }
         if history.indices.contains(historyIndex), history[historyIndex] == id {
@@ -246,7 +255,9 @@ final class PlaylistCoordinator {
     private(set) var currentVersionID: PlaylistVersion.ID?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
+    private(set) var fileIssues: [PlaylistVersion.ID: FileIssue] = [:]
     private(set) var runtimeContext: PlaylistRuntimeContext?
+    private(set) var rowMoveRevision = 0
 
     /// The current runtime's stable item identity. The controller owns the
     /// callback and only invokes it for a natural end, never for a seek or a
@@ -267,6 +278,13 @@ final class PlaylistCoordinator {
         var filePosition: TimeInterval
         var isPlaying: Bool
     }
+
+    struct FileIssue: Equatable {
+        let reference: PlaylistFileReference
+        let error: PlaybackError
+    }
+
+    private enum PlaylistAdvance { case next, previous, naturalEnd }
 
     private struct AutomaticImportPlan: Sendable {
         let decisions: [TrackSimilarityClusterEvidence<UUID>]
@@ -541,7 +559,6 @@ final class PlaylistCoordinator {
         }
 
         captureRuntimeEdits()
-        traversal.reset(currentID: itemID)
         let savedPosition = workspace.listeningState.flatMap { state in
             state.itemID == itemID && state.versionID == targetVersionID ? state.filePosition : nil
         } ?? 0
@@ -551,7 +568,9 @@ final class PlaylistCoordinator {
             filePosition: fromBeginning ? 0 : savedPosition,
             isPlaying: true
         )
-        await activatePlaylist(itemID: itemID, versionID: targetVersionID, snapshot: snapshot)
+        if await activatePlaylist(itemID: itemID, versionID: targetVersionID, snapshot: snapshot) == .activated {
+            traversal.reset(currentID: itemID)
+        }
     }
 
     /// Enter the current item's comparison view. The playing item preserves
@@ -632,7 +651,7 @@ final class PlaylistCoordinator {
             filePosition: snapshot.filePosition,
             isPlaying: snapshot.isPlaying
         )
-        if await activatePlaylist(itemID: targetItemID, versionID: versionID, snapshot: nextSnapshot) == .failed {
+        if await activatePlaylist(itemID: targetItemID, versionID: versionID, snapshot: nextSnapshot).didFail {
             showPlaylistWithoutRuntime(nextSnapshot)
         }
     }
@@ -740,24 +759,7 @@ final class PlaylistCoordinator {
             updateListeningStateFromRuntime()
             return
         }
-        // Next Track (playlist): the next track in play order, wrapping
-        // with Repeat All. Past the last track with Repeat off it returns to
-        // the first track, paused, as standard media players do.
-        let current = currentItemID ?? workspace.listeningState?.itemID
-        let wasPlaying = controller.session.isPlaying
-        if let nextID = traversal.next(from: current) {
-            activatePlaylistTrack(nextID, isPlaying: wasPlaying)
-            return
-        }
-        traversal.reset()
-        guard let firstID = traversal.next(from: nil) else { return }
-        activatePlaylistTrack(firstID, isPlaying: false)
-    }
-
-    private func activatePlaylistTrack(_ itemID: PlaylistItem.ID, isPlaying: Bool) {
-        guard let versionID = workspace.items.first(where: { $0.id == itemID })?.selectedVersion?.id else { return }
-        let snapshot = PlaybackSnapshot(itemID: itemID, versionID: versionID, filePosition: 0, isPlaying: isPlaying)
-        enqueuePlaylistActivation(itemID: itemID, versionID: versionID, snapshot: snapshot)
+        enqueuePlaylistAdvance(.next)
     }
 
     /// The playlist's position in the current track, in file seconds.
@@ -780,37 +782,13 @@ final class PlaylistCoordinator {
         // order (wrapping to the last with Repeat All). At the start, it
         // restarts the current track.
         let current = currentItemID ?? workspace.listeningState?.itemID
-        let wasPlaying = controller.session.isPlaying
-        guard let current else {
-            if let first = workspace.items.first?.id { activatePlaylistTrack(first, isPlaying: wasPlaying) }
-            return
-        }
-        if playlistTrackPosition > Self.previousTrackRestartThreshold {
-            restartPlaylistTrack(current, isPlaying: wasPlaying)
-            return
-        }
-        if let previousID = traversal.previous(from: current) {
-            activatePlaylistTrack(previousID, isPlaying: wasPlaying)
-            return
-        }
-        let ids = workspace.items.map(\.id)
-        if !workspace.isShuffleEnabled, let index = ids.firstIndex(of: current) {
-            let target = index > 0 ? ids[index - 1] : (workspace.playlistRepeatMode == .all ? ids.last : nil)
-            if let target, target != current {
-                traversal.reset(currentID: target)
-                activatePlaylistTrack(target, isPlaying: wasPlaying)
-                return
-            }
-        }
-        restartPlaylistTrack(current, isPlaying: wasPlaying)
-    }
-
-    private func restartPlaylistTrack(_ itemID: PlaylistItem.ID, isPlaying: Bool) {
-        if runtimeContext?.itemID == itemID {
+        if let current, runtimeContext?.itemID == current, controller.session.isPlayable,
+           playlistTrackPosition > Self.previousTrackRestartThreshold
+               || (!traversal.hasPrevious(from: current) && previousPlaylistItems(from: current).isEmpty) {
             seek(to: 0)
-        } else {
-            activatePlaylistTrack(itemID, isPlaying: isPlaying)
+            return
         }
+        enqueuePlaylistAdvance(.previous)
     }
 
     func setPlaylistRepeatMode(_ mode: PlaylistRepeatMode) {
@@ -929,12 +907,56 @@ final class PlaylistCoordinator {
     }
 
     func reorderPlaylistRows(items: [UUID]?, versions: [UUID: [UUID]], undoManager: UndoManager?) {
-        _ = mutateWorkspace(beforeAction: "Reorder Playlist Rows", undoManager: undoManager) { candidate in
+        let moved = mutateWorkspace(beforeAction: "Reorder Playlist Rows", undoManager: undoManager) { candidate in
             if let items { try candidate.reorderItems(items) }
             for (itemID, order) in versions {
                 try candidate.reorderVersions(order, in: itemID)
             }
         }
+        if moved { rowMoveRevision &+= 1 }
+    }
+
+    private func comparisonMoveIndices(_ direction: RowMoveDirection) -> (from: Int, to: Int)? {
+        guard let itemID = mode.itemID, runtimeContext?.itemID == itemID,
+              controller.runtimeContext == runtimeContext, pendingRuntimeRefreshTask == nil,
+              let from = controller.session.activeTrackIndex else { return nil }
+        let to = from + direction.rawValue
+        return controller.session.tracks.indices.contains(to) ? (from, to) : nil
+    }
+
+    func canMoveActiveComparisonVersion(_ direction: RowMoveDirection) -> Bool {
+        comparisonMoveIndices(direction) != nil
+    }
+
+    func moveActiveComparisonVersion(_ direction: RowMoveDirection, undoManager: UndoManager?) {
+        guard let itemID = mode.itemID,
+              let indices = comparisonMoveIndices(direction),
+              let item = workspace.items.first(where: { $0.id == itemID }) else { return }
+        var displayedOrder = controller.session.tracks.map(\.id)
+        let activeID = displayedOrder[indices.from]
+        let neighborID = displayedOrder[indices.to]
+        displayedOrder.swapAt(indices.from, indices.to)
+
+        if controller.session.isBlindListeningModeEnabled {
+            controller.reorderTracks(displayedOrder)
+        } else {
+            // A previously shuffled comparison can still be in a different
+            // order. Save only the active lane's move relative to its neighbor.
+            let originalOrder = item.versions.map(\.id)
+            var savedOrder = originalOrder.filter { $0 != activeID }
+            guard savedOrder.count + 1 == originalOrder.count,
+                  let neighborIndex = savedOrder.firstIndex(of: neighborID) else { return }
+            savedOrder.insert(activeID, at: direction == .up ? neighborIndex : neighborIndex + 1)
+            if savedOrder != originalOrder {
+                guard mutateWorkspace(beforeAction: "Reorder Versions", undoManager: undoManager,
+                                      displayedComparisonOrder: displayedOrder, { candidate in
+                    try candidate.reorderVersions(savedOrder, in: itemID)
+                }) else { return }
+            } else {
+                controller.reorderTracks(displayedOrder)
+            }
+        }
+        rowMoveRevision &+= 1
     }
 
     @discardableResult
@@ -1170,6 +1192,7 @@ final class PlaylistCoordinator {
         runtimeContext = nil
         runtimeTrackCount = controller.runtimeTrackCount
         workspace = restored
+        fileIssues.removeAll()
         mode = restored.activeView.itemID.map { .comparison(itemID: $0) } ?? .playlist
         currentItemID = restored.listeningState?.itemID ?? restored.activeItemID
         currentVersionID = restored.listeningState?.versionID
@@ -1284,6 +1307,7 @@ final class PlaylistCoordinator {
             }
             try candidate.validate()
             workspace = candidate
+            fileIssues[versionID] = nil
             clearError()
             if operationGeneration == navigationGeneration,
                currentVersionID == versionID,
@@ -1321,9 +1345,14 @@ final class PlaylistCoordinator {
 
     // MARK: - Runtime activation
 
-    private enum ActivationResult { case activated, failed, superseded }
+    private enum ActivationResult {
+        case activated, unavailable, failed, superseded
+
+        var didFail: Bool { self == .failed || self == .unavailable }
+    }
 
     private func showPlaylistWithoutRuntime(_ snapshot: PlaybackSnapshot) {
+        beginNavigation()
         controller.invalidateRuntimeContext()
         runtimeContext = nil
         runtimeTrackCount = 0
@@ -1351,9 +1380,12 @@ final class PlaylistCoordinator {
             reportError(PlaylistWorkspaceError.versionNotInItem(versionID: versionID, itemID: itemID).localizedDescription)
             return .failed
         }
+        guard case let .available(resolvedURL) = PlaylistWorkspaceStore.resolveFileReference(version.file) else {
+            recordFileIssue(.failedToOpenFile(version.file.storedURL), for: version)
+            return .unavailable
+        }
         let generation = beginNavigation()
         let context = PlaylistRuntimeContext(itemID: itemID)
-        guard let resolvedURL = resolvedURL(for: version) else { return .failed }
         let loaded = playlistLoadedTrack(for: version, url: resolvedURL)
         let session = ComparisonSession(
             tracks: [SessionTrack(id: version.id, loadedTrack: loaded)],
@@ -1380,12 +1412,19 @@ final class PlaylistCoordinator {
             workspace.activeView = .playlist
             currentItemID = itemID
             currentVersionID = versionID
+            fileIssues[versionID] = nil
             if snapshot.isPlaying { controller.play() }
             updateListeningStateFromRuntime()
             clearError()
             return .activated
+        } catch is CancellationError {
+            return .superseded
         } catch {
             guard generation == navigationGeneration else { return .superseded }
+            if let fileError = error as? PlaybackError, fileError.fileURL != nil {
+                recordFileIssue(fileError, for: version)
+                return .unavailable
+            }
             reportError(error.localizedDescription)
             return .failed
         }
@@ -1444,6 +1483,9 @@ final class PlaylistCoordinator {
             workspace.activeView = .comparison(itemID: itemID)
             currentItemID = itemID
             currentVersionID = session.activeTrackID
+            for version in item.versions where !missingIDs.contains(version.id) && fileIssues[version.id] != nil {
+                fileIssues[version.id] = nil
+            }
             if let span = item.comparison.visibleSpan, span > 0 {
                 controller.zoomVisibleSpan(to: span)
                 if let start = item.comparison.visibleStart {
@@ -1459,6 +1501,11 @@ final class PlaylistCoordinator {
             return .activated
         } catch {
             guard generation == navigationGeneration else { return .superseded }
+            if let fileError = error as? PlaybackError, let url = fileError.fileURL,
+               let index = runtimeItem.versions.firstIndex(where: { $0.file.storedURL == url }) {
+                recordFileIssue(fileError, for: item.versions[index])
+                return .failed
+            }
             reportError(error.localizedDescription)
             return .failed
         }
@@ -1491,11 +1538,9 @@ final class PlaylistCoordinator {
         }
     }
 
-    private func enqueuePlaylistActivation(
-        itemID: PlaylistItem.ID,
-        versionID: PlaylistVersion.ID,
-        snapshot: PlaybackSnapshot
-    ) {
+    private func enqueuePlaylistAdvance(_ advance: PlaylistAdvance) {
+        let current = currentItemID ?? workspace.listeningState?.itemID
+        let wasPlaying = controller.session.isPlaying
         let generation = navigationGeneration
         let expectedContext = runtimeContext
         Task { [weak self] in
@@ -1503,7 +1548,77 @@ final class PlaylistCoordinator {
                   self.navigationGeneration == generation,
                   self.runtimeContext == expectedContext,
                   self.mode.itemID == nil else { return }
-            await self.activatePlaylist(itemID: itemID, versionID: versionID, snapshot: snapshot)
+            await self.advancePlaylist(advance, from: current, wasPlaying: wasPlaying)
+        }
+    }
+
+    private func previousPlaylistItems(from current: UUID?) -> [UUID] {
+        let ids = workspace.items.map(\.id)
+        guard let current else { return ids }
+        guard !workspace.isShuffleEnabled, let index = ids.firstIndex(of: current) else { return [] }
+        let preceding = Array(ids[..<index].reversed())
+        return workspace.playlistRepeatMode == .all
+            ? preceding + Array(ids[(index + 1)...].reversed()) : preceding
+    }
+
+    private func advancePlaylist(_ advance: PlaylistAdvance, from current: UUID?, wasPlaying: Bool) async {
+        var path = traversal
+        var attempted = Set<UUID>()
+        var cursor = current
+        var returningToStart = false
+        var earlier = (advance == .previous ? previousPlaylistItems(from: current) : []).makeIterator()
+        let repeatsCurrent = advance == .naturalEnd && path.repeatMode == .one && current != nil
+        var tryRepeatCurrent = repeatsCurrent
+
+        while attempted.count < path.itemIDs.count {
+            let itemID: UUID
+            if advance == .previous {
+                if let heard = path.previous(from: cursor) {
+                    itemID = heard
+                } else if let preceding = earlier.next() {
+                    itemID = preceding
+                    path.reset(currentID: itemID)
+                } else if let current, !attempted.contains(current) {
+                    if runtimeContext?.itemID == current && controller.session.isPlayable {
+                        seek(to: 0)
+                        return
+                    }
+                    itemID = current
+                    path.reset(currentID: itemID)
+                } else {
+                    return
+                }
+            } else if let next = path.next(
+                from: cursor, atNaturalEnd: advance == .naturalEnd && (!repeatsCurrent || tryRepeatCurrent)
+            ) {
+                itemID = next
+            } else {
+                // Manual Next past the end returns to the first playable
+                // item, paused. Natural playback simply ends here.
+                guard advance == .next, !returningToStart else { return }
+                returningToStart = true
+                path.reset()
+                cursor = nil
+                continue
+            }
+            cursor = itemID
+            let versionID = tryRepeatCurrent ? currentVersionID : selectedVersion(for: itemID)?.id
+            tryRepeatCurrent = false
+            guard attempted.insert(itemID).inserted, let versionID else { continue }
+            let snapshot = PlaybackSnapshot(
+                itemID: itemID, versionID: versionID, filePosition: 0,
+                isPlaying: !returningToStart && (advance == .naturalEnd || wasPlaying)
+            )
+            switch await activatePlaylist(itemID: itemID, versionID: versionID, snapshot: snapshot) {
+            case .activated:
+                path.discardSkippedHistory(attempted.subtracting([itemID]))
+                traversal = path
+                return
+            case .unavailable:
+                continue
+            case .failed, .superseded:
+                return
+            }
         }
     }
 
@@ -1548,7 +1663,7 @@ final class PlaylistCoordinator {
         case .comparison:
             result = await activateComparison(itemID: item.id, versionID: versionID, snapshot: refreshed)
         }
-        if result == .failed {
+        if result.didFail {
             showPlaylistWithoutRuntime(refreshed)
         }
     }
@@ -1561,67 +1676,7 @@ final class PlaylistCoordinator {
             return
         }
         updateListeningStateFromRuntime()
-        let current = currentItemID
-        let repeatMode = workspace.playlistRepeatMode
-        guard let current else { return }
-        let generation = navigationGeneration
-        let expectedContext = runtimeContext
-        Task { [weak self] in
-            guard let self else { return }
-            var expectedGeneration = generation
-            var candidate: UUID?
-            var skippedMessages: [String] = []
-            guard self.navigationGeneration == expectedGeneration,
-                  self.runtimeContext == expectedContext,
-                  self.mode.itemID == nil else { return }
-            switch repeatMode {
-            case .one, .off, .all:
-                candidate = self.traversal.next(from: current, atNaturalEnd: true)
-            }
-            for _ in 0..<max(1, self.workspace.items.count) {
-                guard self.navigationGeneration == expectedGeneration,
-                      self.runtimeContext == expectedContext,
-                      self.mode.itemID == nil else { return }
-                guard let nextID = candidate else {
-                    if !skippedMessages.isEmpty {
-                        self.reportError(skippedMessages.joined(separator: "\n"))
-                    }
-                    return
-                }
-                let versionID = repeatMode == .one && nextID == current
-                    ? self.currentVersionID : self.selectedVersion(for: nextID)?.id
-                guard let versionID else {
-                    skippedMessages.append("No playable version is available for playlist item \(nextID.uuidString).")
-                    candidate = self.traversal.next(from: nextID, atNaturalEnd: true)
-                    continue
-                }
-                let snapshot = PlaybackSnapshot(itemID: nextID, versionID: versionID, filePosition: 0, isPlaying: true)
-                let contextBefore = self.runtimeContext
-                let generationBefore = self.navigationGeneration
-                let errorBefore = self.errorMessage
-                await self.activatePlaylist(itemID: nextID, versionID: versionID, snapshot: snapshot)
-                if self.runtimeContext != contextBefore,
-                   self.runtimeContext?.itemID == nextID {
-                    if !skippedMessages.isEmpty {
-                        self.reportError(skippedMessages.joined(separator: "\n"))
-                    }
-                    return
-                }
-                guard self.runtimeContext == expectedContext else { return }
-                if self.navigationGeneration != generationBefore,
-                   let error = self.errorMessage,
-                   error != errorBefore {
-                    skippedMessages.append(error)
-                }
-                expectedGeneration = self.navigationGeneration
-                candidate = self.traversal.next(from: nextID, atNaturalEnd: true)
-            }
-            if skippedMessages.isEmpty {
-                self.reportError("No playable playlist items remain.")
-            } else {
-                self.reportError(skippedMessages.joined(separator: "\n"))
-            }
-        }
+        if currentItemID != nil { enqueuePlaylistAdvance(.naturalEnd) }
     }
 
     // MARK: - Workspace helpers
@@ -1785,6 +1840,7 @@ final class PlaylistCoordinator {
     private func mutateWorkspace(
         beforeAction actionName: String,
         undoManager: UndoManager?,
+        displayedComparisonOrder: [UUID]? = nil,
         _ mutation: (inout PlaylistWorkspace) throws -> Void
     ) -> Bool {
         let playback = capturePlaybackSnapshot()
@@ -1801,7 +1857,9 @@ final class PlaylistCoordinator {
             let listeningVersionMoved = playback.versionID != nil
                 && candidate.listeningState?.versionID == playback.versionID
                 && candidate.listeningState?.itemID != before.listeningState?.itemID
-            if listeningVersionMoved || runtimeRequiresRefresh(before: before, after: workspace, mode: modeBeforeMutation) {
+            if let displayedComparisonOrder {
+                controller.reorderTracks(displayedComparisonOrder)
+            } else if listeningVersionMoved || runtimeRequiresRefresh(before: before, after: workspace, mode: modeBeforeMutation) {
                 // Metadata-only edits must not cancel a runtime refresh queued
                 // by an earlier organization action in this same event.
                 if let activeID = controller.session.activeTrackID,
@@ -2106,12 +2164,9 @@ final class PlaylistCoordinator {
         )
     }
 
-    private func resolvedURL(for version: PlaylistVersion) -> URL? {
-        guard case let .available(url) = PlaylistWorkspaceStore.resolveFileReference(version.file) else {
-            reportError(PlaybackError.failedToOpenFile(version.file.storedURL).localizedDescription)
-            return nil
-        }
-        return url
+    private func recordFileIssue(_ error: PlaybackError, for version: PlaylistVersion) {
+        let issue = FileIssue(reference: version.file, error: error)
+        if fileIssues[version.id] != issue { fileIssues[version.id] = issue }
     }
 
     private func canonicalFileKey(_ version: PlaylistVersion) -> String {

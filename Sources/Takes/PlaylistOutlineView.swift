@@ -18,11 +18,14 @@ struct PlaylistOutline: NSViewRepresentable {
     let playlist: PlaylistCoordinator
     @ObservedObject var presentation: PlaylistPresentationState
     let items: [PlaylistItem]
+    let fileIssues: [PlaylistVersion.ID: PlaylistCoordinator.FileIssue]
     let currentItemID: UUID?
     let isPlaying: Bool
     let isActive: Bool
+    let moveRevision: Int
     let artworkStore: PlaylistArtworkStore
     let undoManager: UndoManager?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Help ▸ Show Component Names: badges the item and version rows.
     var showsDebugLabels = false
 
@@ -37,7 +40,10 @@ struct PlaylistOutline: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.undoManager = undoManager
         context.coordinator.showsDebugLabels = showsDebugLabels
-        context.coordinator.update(items: items, currentItemID: currentItemID, isPlaying: isPlaying, isActive: isActive)
+        context.coordinator.update(
+            items: items, fileIssues: fileIssues, currentItemID: currentItemID, isPlaying: isPlaying, isActive: isActive,
+            moveRevision: moveRevision, reduceMotion: reduceMotion
+        )
     }
 }
 
@@ -134,6 +140,10 @@ enum PlaylistRowText {
         metadata.fileFormatDescription
     }
 
+    static func itemTitle(_ item: PlaylistItem) -> String {
+        item.selectedVersion.map(versionName) ?? item.title
+    }
+
     /// A version's name: its title tag, else its filename without the
     /// extension (A2 §6). The playlist readout uses the same name.
     static func versionName(_ version: PlaylistVersion) -> String {
@@ -151,12 +161,6 @@ enum PlaylistRowText {
     /// The item row's second line: the artist tag, or nothing.
     static func artist(_ version: PlaylistVersion?) -> String {
         version?.metadata.artist?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    }
-
-    /// Tooltip on an item row's warning overlay.
-    static func missingWarning(missing: Int, of total: Int) -> String? {
-        guard missing > 0 else { return nil }
-        return total == 1 ? "The file for this item can’t be found." : "\(missing) of \(total) files can’t be found."
     }
 }
 
@@ -179,10 +183,12 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private var isPlaying = false
     private(set) var isActive = false
     private var hasLoaded = false
+    private var moveRevision = 0
     /// True while this controller pushes model state into the outline view, so
     /// the resulting delegate callbacks are not echoed back into the model.
     private var isApplying = false
     private var availability: [UUID: (reference: PlaylistFileReference, url: URL?)] = [:]
+    private var fileIssues: [PlaylistVersion.ID: PlaylistCoordinator.FileIssue] = [:]
     private var draggedNodes: [PlaylistNode] = []
     private var thumbnailRequestScheduled = false
     var showsDebugLabels = false {
@@ -293,11 +299,23 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     // MARK: Model → view
 
-    func update(items newItems: [PlaylistItem], currentItemID: UUID?, isPlaying: Bool, isActive: Bool) {
+    func update(
+        items newItems: [PlaylistItem], fileIssues newIssues: [PlaylistVersion.ID: PlaylistCoordinator.FileIssue],
+        currentItemID: UUID?, isPlaying: Bool, isActive: Bool,
+        moveRevision: Int, reduceMotion: Bool
+    ) {
         let structureChanged = !hasLoaded || Self.structure(newItems) != Self.structure(items)
-        let contentChanged = newItems != items || currentItemID != self.currentItemID || isPlaying != self.isPlaying
+        let contentChanged = newItems != items || newIssues != fileIssues
+            || currentItemID != self.currentItemID || isPlaying != self.isPlaying
         let becameActive = isActive && !self.isActive
+        let previousItems = items
+        let animateMove = hasLoaded && isActive && self.isActive && !reduceMotion && moveRevision != self.moveRevision
+        self.moveRevision = moveRevision
         items = newItems
+        if newIssues != fileIssues {
+            availability = availability.filter { fileIssues[$0.key] == newIssues[$0.key] }
+            fileIssues = newIssues
+        }
         self.currentItemID = currentItemID
         self.isPlaying = isPlaying
         self.isActive = isActive
@@ -305,7 +323,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         ownerByVersionID = [:]
         for item in newItems { for version in item.versions { ownerByVersionID[version.id] = item.id } }
 
-        if structureChanged {
+        if structureChanged && !(animateMove && animateReorder(from: previousItems)) {
             if !hasLoaded {
                 // Fit the column to the window once the scroll view has a size.
                 DispatchQueue.main.async { [weak self] in self?.outlineView.sizeLastColumnToFit() }
@@ -317,7 +335,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             isApplying = true
             outlineView.reloadData()
             isApplying = false
-        } else if contentChanged {
+        } else if !structureChanged && contentChanged {
             reloadContent()
         }
         applyExpansion()
@@ -331,6 +349,48 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     private static func structure(_ items: [PlaylistItem]) -> [[UUID]] {
         items.map { [$0.id] + $0.versions.map(\.id) }
+    }
+
+    private func animateReorder(from previousItems: [PlaylistItem]) -> Bool {
+        guard previousItems.count == items.count, previousItems.allSatisfy({ old in
+            guard let new = itemsByID[old.id] else { return false }
+            return Set(old.versions.map(\.id)) == Set(new.versions.map(\.id))
+        }) else { return false }
+
+        isApplying = true
+        defer { isApplying = false }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            outlineView.beginUpdates()
+            for old in previousItems {
+                let parent = node(.item(old.id))
+                guard outlineView.isItemExpanded(parent), let new = itemsByID[old.id] else { continue }
+                moveChildren(from: old.versions.map(\.id), to: new.versions.map(\.id), in: parent)
+            }
+            moveChildren(from: previousItems.map(\.id), to: items.map(\.id), in: nil)
+            outlineView.endUpdates()
+        }
+        outlineView.enumerateAvailableRowViews { rowView, row in
+            guard let rowView = rowView as? PlaylistRowView,
+                  let node = self.outlineView.item(atRow: row) as? PlaylistNode else { return }
+            self.configureRowView(rowView, node: node)
+            switch (node.rowID, rowView.view(atColumn: 0)) {
+            case let (.item(id), cell as PlaylistItemCellView): self.configureItem(cell, itemID: id)
+            case let (.version(id), cell as PlaylistVersionCellView): self.configureVersion(cell, versionID: id)
+            default: break
+            }
+        }
+        return true
+    }
+
+    private func moveChildren(from oldOrder: [UUID], to newOrder: [UUID], in parent: PlaylistNode?) {
+        var order = oldOrder
+        for (target, id) in newOrder.enumerated() where order[target] != id {
+            guard let source = order.firstIndex(of: id) else { return }
+            outlineView.moveItem(at: source, inParent: parent, to: target, inParent: parent)
+            let moved = order.remove(at: source)
+            order.insert(moved, at: target)
+        }
     }
 
     private func reloadContent() {
@@ -404,6 +464,14 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         if case let .available(resolved) = PlaylistWorkspaceStore.resolveFileReference(version.file) { url = resolved }
         availability[version.id] = (version.file, url)
         return url
+    }
+
+    private func fileWarning(for version: PlaylistVersion) -> String? {
+        if let issue = fileIssues[version.id], issue.reference == version.file {
+            return issue.error.localizedDescription
+        }
+        return availableURL(for: version) == nil
+            ? PlaybackError.failedToOpenFile(version.file.storedURL).localizedDescription : nil
     }
 
     /// The version a row stands for: a version row's own, or an item row's
@@ -496,17 +564,17 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         guard let item = itemsByID[id] else { return }
         let version = item.selectedVersion ?? item.versions.first
         let versionURL = version.flatMap { availableURL(for: $0) }
-        let missingCount = item.versions.filter { availableURL(for: $0) == nil }.count
+        let warnings = item.versions.compactMap { fileWarning(for: $0) }
         let node = node(.item(id))
         cell.configure(PlaylistItemCellView.Content(
-            title: item.title,
+            title: PlaylistRowText.itemTitle(item),
             artist: PlaylistRowText.artist(version),
             duration: version.map { PlaylistRowText.duration($0.metadata.duration) } ?? "",
             hasVersions: item.versions.count > 1,
             isExpanded: outlineView.isItemExpanded(node),
             nowPlaying: currentItemID == id ? (isPlaying ? .playing : .paused) : nil,
-            warning: PlaylistRowText.missingWarning(missing: missingCount, of: item.versions.count),
-            isDimmed: version != nil && versionURL == nil,
+            warning: warnings.isEmpty ? nil : warnings.joined(separator: "\n"),
+            isDimmed: version.flatMap { fileWarning(for: $0) } != nil,
             thumbnail: thumbnailImage(version: version, url: versionURL)
         ))
         cell.onDisclosure = { [weak self, weak node] in
@@ -521,8 +589,8 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     private func configureVersion(_ cell: PlaylistVersionCellView, versionID id: UUID) {
         guard let (item, version) = version(id) else { return }
-        let missing = availableURL(for: version) == nil
-        let state: PlaylistVersionCellView.Mark = missing ? .missing : item.selectedVersion?.id == id ? .key : .none
+        let state = fileWarning(for: version).map(PlaylistVersionCellView.Mark.warning)
+            ?? (item.selectedVersion?.id == id ? .key : .none)
         cell.configure(
             title: PlaylistRowText.versionName(version),
             format: PlaylistRowText.formatName(version.metadata),
@@ -628,7 +696,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     func outlineView(_ outlineView: NSOutlineView, typeSelectStringFor tableColumn: NSTableColumn?, item: Any) -> String? {
         guard let node = item as? PlaylistNode else { return nil }
         switch node.rowID {
-        case let .item(id): return itemsByID[id]?.title
+        case let .item(id): return itemsByID[id].map(PlaylistRowText.itemTitle)
         case let .version(id): return version(id).map { PlaylistRowText.versionName($0.version) }
         }
     }
@@ -646,7 +714,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     private func setKeyVersion(_ id: UUID) {
         guard let (item, version) = version(id), item.selectedVersion?.id != id,
-              availableURL(for: version) != nil else { return }
+              fileWarning(for: version) == nil else { return }
         Task { await playlist.selectPlaybackVersion(id, in: item.id) }
     }
 
@@ -662,10 +730,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     private func play(_ rows: Set<PlaylistRowID>) {
         guard let rowID = rowsInDisplayOrder(rows).first, let (item, version) = representedVersion(rowID) else { return }
-        guard availableURL(for: version) != nil else {
-            presentation.locateVersionID = version.id
-            return
-        }
         let fromBeginning: Bool
         switch rowID {
         case .item: fromBeginning = false
@@ -734,7 +798,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             playback.append(ClosureMenuItem("Compare") { [weak self] in self?.compare(itemID: id) })
         }
         if case let .version(id)? = single, let (item, version) = version(id),
-           item.selectedVersion?.id != id, availableURL(for: version) != nil {
+           item.selectedVersion?.id != id, fileWarning(for: version) == nil {
             playback.append(ClosureMenuItem("Set as Key Version") { [weak self] in self?.setKeyVersion(id) })
         }
         sections.append(playback)
@@ -753,7 +817,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             for destination in items where owners != [destination.id] {
                 let incoming = versionIDs.filter { ownerByVersionID[$0] != destination.id }.count
                 let hasRoom = destination.versions.count + incoming <= PlaylistWorkspace.maximumVersionsPerItem
-                submenu.addItem(ClosureMenuItem(destination.title, enabled: hasRoom) { [weak self] in
+                submenu.addItem(ClosureMenuItem(PlaylistRowText.itemTitle(destination), enabled: hasRoom) { [weak self] in
                     self?.moveVersions(versionIDs, to: destination.id, before: nil)
                 })
             }
@@ -775,7 +839,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             case let .item(id): candidates = itemsByID[id]?.versions ?? []
             case .version: candidates = represented
             }
-            if let missing = candidates.first(where: { availableURL(for: $0) == nil }) {
+            if let missing = candidates.first(where: { fileWarning(for: $0) != nil }) {
                 files.append(ClosureMenuItem("Locate File…") { [weak self] in self?.presentation.locateVersionID = missing.id })
             }
         }
@@ -1203,7 +1267,7 @@ private enum PlaylistGlyph {
     }
 
     static func warning(size: CGFloat) -> NSImage? {
-        NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "File not found")?
+        NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Audio file unavailable")?
             .withSymbolConfiguration(
                 NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
                     .applying(.init(paletteColors: [PlaylistRowPalette.warningMark, PlaylistRowPalette.warningFill]))
@@ -1225,9 +1289,9 @@ final class PlaylistItemCellView: NSTableCellView {
         var hasVersions: Bool
         var isExpanded: Bool
         var nowPlaying: NowPlaying?
-        /// Tooltip of the warning overlay; nil when every file is present.
+        /// Playback errors for versions of this item.
         var warning: String?
-        /// The playback version's file is missing.
+        /// The playback version's file is unavailable.
         var isDimmed: Bool
         var thumbnail: NSImage?
     }
@@ -1289,7 +1353,7 @@ final class PlaylistItemCellView: NSTableCellView {
         disclosure.setExpanded(content.isExpanded, animated: false)
         thumbnail.configure(
             image: content.thumbnail, isStacked: content.hasVersions,
-            status: content.warning.map { .missing($0) } ?? content.nowPlaying.map { $0 == .playing ? .playing : .paused } ?? .none
+            status: content.warning.map { .warning($0) } ?? content.nowPlaying.map { $0 == .playing ? .playing : .paused } ?? .none
         )
         updatePill()
         applyStyle()
@@ -1378,7 +1442,14 @@ final class PlaylistItemCellView: NSTableCellView {
 final class PlaylistVersionCellView: NSTableCellView {
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("version")
 
-    enum Mark: Equatable { case none, key, missing }
+    enum Mark: Equatable {
+        case none, key, warning(String)
+
+        var isWarning: Bool {
+            if case .warning = self { return true }
+            return false
+        }
+    }
 
     private let titleField = NSTextField.playlistLabel(font: .systemFont(ofSize: 12), truncation: .byTruncatingMiddle)
     private let formatField = NSTextField.playlistLabel(font: .systemFont(ofSize: 11), truncation: .byClipping)
@@ -1409,7 +1480,7 @@ final class PlaylistVersionCellView: NSTableCellView {
         keyVersionButton.isBordered = false
         keyVersionButton.refusesFirstResponder = true
         keyVersionButton.imagePosition = .imageOnly
-        keyVersionButton.image = PlaylistGlyph.symbol("square", size: 12, label: "Set as Key Version")
+        keyVersionButton.image = PlaylistGlyph.symbol("circle", size: 12, label: "Set as Key Version")
         keyVersionButton.setAccessibilityLabel("Set as Key Version")
         keyVersionButton.toolTip = "Set as Key Version"
         keyVersionButton.target = self
@@ -1434,11 +1505,12 @@ final class PlaylistVersionCellView: NSTableCellView {
         case .key:
             markView.image = PlaylistGlyph.symbol("checkmark.circle.fill", size: 12, label: "Key Version")
             markView.toolTip = "Key Version"
-        case .missing:
+        case let .warning(message):
             markView.image = PlaylistGlyph.warning(size: 12)
-            markView.toolTip = "This file can’t be found."
+            markView.toolTip = message
         }
         markView.setAccessibilityElement(mark != .none)
+        markView.setAccessibilityHelp(mark.isWarning ? markView.toolTip : nil)
         updateKeyVersionButton()
         applyStyle()
         needsLayout = true
@@ -1459,7 +1531,7 @@ final class PlaylistVersionCellView: NSTableCellView {
     private func applyStyle() {
         let emphasized = backgroundStyle == .emphasized
         let selectedText = NSColor.alternateSelectedControlTextColor
-        let dimmed = mark == .missing
+        let dimmed = mark.isWarning
         if emphasized {
             titleField.textColor = dimmed ? selectedText.withAlphaComponent(0.6) : selectedText
             formatField.textColor = selectedText.withAlphaComponent(0.75)
@@ -1573,7 +1645,7 @@ final class PlaylistDisclosureButton: NSView {
 final class PlaylistThumbnailView: NSView {
     enum Status: Equatable {
         case none, playing, paused
-        case missing(String)
+        case warning(String)
     }
 
     static let stackExtent: CGFloat = PlaylistRowMetrics.stackOffsets.last.map { $0 - 2 } ?? 0
@@ -1584,10 +1656,15 @@ final class PlaylistThumbnailView: NSView {
     var image: NSImage? {
         didSet {
             tile.contentsImage = image
-            noteGlyph.isHidden = image != nil
+            if case .warning = status {
+                noteGlyph.isHidden = true
+            } else {
+                noteGlyph.isHidden = image != nil
+            }
         }
     }
 
+    private var status: Status = .none
     private let farEdge = PlaylistFillView()
     private let nearEdge = PlaylistFillView()
     private let tile = PlaylistFillView()
@@ -1632,14 +1709,15 @@ final class PlaylistThumbnailView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(image: NSImage?, isStacked: Bool, status: Status) {
+        self.status = status
         self.image = image
         nearEdge.isHidden = !isStacked
         farEdge.isHidden = !isStacked
+        toolTip = nil
         switch status {
         case .none:
             scrim.isHidden = true
             statusGlyph.image = nil
-            statusGlyph.toolTip = nil
         case .playing, .paused:
             scrim.isHidden = false
             scrim.fillColor = PlaylistRowPalette.playingScrim
@@ -1647,14 +1725,17 @@ final class PlaylistThumbnailView: NSView {
             statusGlyph.image = PlaylistGlyph.symbol(playing ? "speaker.wave.2.fill" : "speaker.fill", size: 13,
                                                      label: playing ? "Playing" : "Current")
             statusGlyph.contentTintColor = .white
-            statusGlyph.toolTip = nil
-        case let .missing(warning):
+        case let .warning(warning):
             scrim.isHidden = false
             scrim.fillColor = PlaylistRowPalette.missingScrim
             statusGlyph.image = PlaylistGlyph.warning(size: 16)
-            statusGlyph.toolTip = warning
+            statusGlyph.contentTintColor = nil
+            // The tile's decorative layer ignores hit testing. Register the
+            // tooltip on the thumbnail so AppKit can find it under the icon.
+            toolTip = warning
         }
         statusGlyph.setAccessibilityElement(statusGlyph.image != nil)
+        statusGlyph.setAccessibilityHelp(toolTip)
     }
 }
 
