@@ -1638,7 +1638,8 @@ final class PlaylistDisclosureButton: NSView {
     }
 }
 
-/// The item row's 34 pt thumbnail: artwork (or a music-note tile), the
+/// The item row's 34 pt thumbnail: artwork (or the shared record
+/// placeholder, `RecordPlaceholder.thumbnail`), the
 /// stacked-card edges of a multi-version item, and the now-playing or
 /// missing-file overlay. Laid out flipped; the stack edges extend
 /// `stackExtent` above and to the right of the tile.
@@ -1654,21 +1655,24 @@ final class PlaylistThumbnailView: NSView {
     }
 
     var image: NSImage? {
-        didSet {
-            tile.contentsImage = image
-            if case .warning = status {
-                noteGlyph.isHidden = true
-            } else {
-                noteGlyph.isHidden = image != nil
-            }
-        }
+        didSet { tile.contentsImage = Self.tileImage(artwork: image, status: status) }
     }
+
+    /// What the tile shows: the artwork, else the record placeholder,
+    /// except in the warning state, which keeps the plain tile.
+    static func tileImage(artwork: NSImage?, status: Status) -> NSImage? {
+        if let artwork { return artwork }
+        if case .warning = status { return nil }
+        return RecordPlaceholder.thumbnail
+    }
+
+    /// The image the tile is showing, for tests.
+    var displayedImage: NSImage? { tile.contentsImage }
 
     private var status: Status = .none
     private let farEdge = PlaylistFillView()
     private let nearEdge = PlaylistFillView()
     private let tile = PlaylistFillView()
-    private let noteGlyph = NSImageView()
     private let scrim = PlaylistFillView()
     private let statusGlyph = NSImageView()
 
@@ -1691,11 +1695,6 @@ final class PlaylistThumbnailView: NSView {
         tile.frame = tileRect
         tile.fillColor = PlaylistRowPalette.thumbnailFill
         tile.cornerRadius = M.thumbnailRadius
-        noteGlyph.image = PlaylistGlyph.symbol("music.note", size: 15)
-        noteGlyph.contentTintColor = PlaylistRowPalette.thumbnailGlyph
-        noteGlyph.imageScaling = .scaleNone
-        noteGlyph.frame = tile.bounds
-        tile.addSubview(noteGlyph)
         scrim.frame = tile.bounds
         tile.addSubview(scrim)
         statusGlyph.imageScaling = .scaleNone
@@ -1761,12 +1760,19 @@ final class PlaylistFillView: NSView {
     override func updateLayer() {
         guard let layer else { return }
         var color: CGColor?
-        effectiveAppearance.performAsCurrentDrawingAppearance { color = fillColor.cgColor }
+        var contents: CGImage?
+        // Resolve both for this view's appearance: a catalog image with
+        // light and dark variants (the record placeholder) picks its bitmap
+        // here, so an appearance change swaps it in visible rows.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = fillColor.cgColor
+            contents = contentsImage?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        }
         layer.backgroundColor = color
         layer.cornerRadius = cornerRadius
         layer.masksToBounds = cornerRadius > 0
         layer.contentsGravity = .resizeAspectFill
-        layer.contents = contentsImage?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        layer.contents = contents
     }
 
     override func viewDidChangeEffectiveAppearance() {

@@ -135,17 +135,11 @@ enum Theme {
         dark: (0.263, 0.272, 0.310)
     )
 
-    /// Neutral tile behind the cover when the playing item has no artwork
-    /// (or nothing is playing).
+    /// Neutral fill behind loaded cover artwork. Without artwork the cover
+    /// shows the record placeholder on its own ground (`RecordPlaceholder`).
     static let artworkPlaceholderFill = dynamic(
         light: (0.88, 0.88, 0.90),
         dark: (0.10, 0.10, 0.11)
-    )
-
-    /// Music-note glyph on the artwork placeholder.
-    static let artworkPlaceholderGlyph = dynamic(
-        light: (0.66, 0.66, 0.70),
-        dark: (0.30, 0.30, 0.33)
     )
 
     /// Waveform color for inactive (non-selected) tracks.
@@ -270,9 +264,9 @@ enum PlaylistRowPalette {
     static let dropTargetFill = primary(lightAlpha: 0.14, darkAlpha: 0.18)
     static let dropTargetRing = primary(lightAlpha: 1, darkAlpha: 1)
 
-    /// Thumbnail tile without artwork, and its music-note glyph.
+    /// The plain thumbnail tile: under the warning state (no record
+    /// placeholder) and behind loaded artwork.
     static let thumbnailFill = dynamic(light: (0.863, 0.863, 0.882, 1), dark: (0.227, 0.227, 0.243, 1))
-    static let thumbnailGlyph = dynamic(light: (0.612, 0.612, 0.639, 1), dark: (0.467, 0.467, 0.490, 1))
     /// Stacked-card edges behind a multi-version item's thumbnail: the near
     /// card (3, −3) and the far card (6, −6).
     static let stackNearEdge = dynamic(light: (0.725, 0.725, 0.753, 1), dark: (0.353, 0.353, 0.376, 1))

@@ -2880,6 +2880,123 @@ struct SessionTests {
         #expect(!version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
     }
 
+    // MARK: Record placeholder
+
+    @Test
+    func recordPlaceholderCoverSquareIsTheCentredMinimumSquare() {
+        typealias R = RecordPlaceholder
+        #expect(R.coverSquare(in: CGSize(width: 360, height: 360)) == CGRect(x: 0, y: 0, width: 360, height: 360))
+        // Wide and shallow: height limits the square, centred horizontally.
+        #expect(R.coverSquare(in: CGSize(width: 600, height: 240)) == CGRect(x: 180, y: 0, width: 240, height: 240))
+        // Narrow and tall, below 360 pt.
+        #expect(R.coverSquare(in: CGSize(width: 260, height: 400)) == CGRect(x: 0, y: 70, width: 260, height: 260))
+        // Above 360 pt.
+        #expect(R.coverSquare(in: CGSize(width: 720, height: 720)) == CGRect(x: 0, y: 0, width: 720, height: 720))
+        #expect(R.coverSquare(in: .zero) == .zero)
+
+        // The ground's centre and radius follow the square, not the cover.
+        let wide = CGSize(width: 600, height: 240)
+        let square = R.coverSquare(in: wide)
+        let center = R.groundCenter(square: square, in: wide)
+        #expect(abs(center.x - 0.5) < 1e-9)
+        #expect(abs(center.y - 0.38) < 1e-9)
+        #expect(abs(R.groundRadius(square: square) - hypot(120, 240 * 0.62)) < 1e-9)
+        #expect(R.groundStops(isDark: true).count == 3)
+    }
+
+    @MainActor
+    @Test
+    func recordPlaceholderThumbnailShowsWithoutArtworkExceptInTheWarningState() throws {
+        let record = try #require(RecordPlaceholder.thumbnail)
+        let artwork = NSImage(size: NSSize(width: 4, height: 4))
+        typealias T = PlaylistThumbnailView
+        #expect(T.tileImage(artwork: nil, status: .none) === record)
+        #expect(T.tileImage(artwork: nil, status: .playing) === record)
+        #expect(T.tileImage(artwork: nil, status: .paused) === record)
+        #expect(T.tileImage(artwork: nil, status: .warning("Missing")) == nil)
+        #expect(T.tileImage(artwork: artwork, status: .none) === artwork)
+        #expect(T.tileImage(artwork: artwork, status: .warning("Missing")) === artwork)
+
+        let thumbnail = PlaylistThumbnailView(frame: .zero)
+        thumbnail.configure(image: nil, isStacked: true, status: .none)
+        #expect(thumbnail.displayedImage === record)
+        thumbnail.configure(image: nil, isStacked: false, status: .warning("Missing"))
+        #expect(thumbnail.displayedImage == nil)
+        thumbnail.configure(image: artwork, isStacked: false, status: .none)
+        #expect(thumbnail.displayedImage === artwork)
+        thumbnail.image = nil
+        #expect(thumbnail.displayedImage === record)
+    }
+
+    @MainActor
+    @Test
+    func recordPlaceholderBitmapsResolveOnePerAppearance() throws {
+        let thumbnail = try #require(RecordPlaceholder.thumbnail)
+        let cover = try #require(NSImage(named: RecordPlaceholder.coverImageName))
+        for (image, side) in [(thumbnail, RecordPlaceholder.thumbnailPixelSide), (cover, RecordPlaceholder.coverPixelSide)] {
+            let light = try #require(RecordPlaceholderPixels(image, dark: false))
+            let dark = try #require(RecordPlaceholderPixels(image, dark: true))
+            #expect(light.width == side && light.height == side)
+            #expect(dark.width == side && dark.height == side)
+            #expect(light.bytes != dark.bytes)
+        }
+        // The thumbnail carries its ground: light corners, dark corners.
+        let lightThumbnail = try #require(RecordPlaceholderPixels(thumbnail, dark: false))
+        let darkThumbnail = try #require(RecordPlaceholderPixels(thumbnail, dark: true))
+        #expect(lightThumbnail.pixel(0, 0).r > 180 && lightThumbnail.pixel(0, 0).a == 255)
+        #expect(darkThumbnail.pixel(0, 0).r < 40 && darkThumbnail.pixel(0, 0).a == 255)
+        // The cover is transparent outside the record and its shadows.
+        let darkCover = try #require(RecordPlaceholderPixels(cover, dark: true))
+        #expect(darkCover.pixel(2, 2).a == 0)
+    }
+
+    /// The disc is round to the edge (the lead-in no longer clips it flat),
+    /// the label sits at its diameter, and the lead-in is a smooth band out
+    /// to the disc's edge, in both exports.
+    @MainActor
+    @Test
+    func recordPlaceholderCoverExportMatchesTheSpecGeometry() throws {
+        typealias R = RecordPlaceholder
+        let cover = try #require(NSImage(named: R.coverImageName))
+        let scale = CGFloat(R.coverPixelSide) / R.referenceSide
+        let discRadius = R.discDiameter / 2 * scale
+        let labelRadius = R.labelDiameter / 2 * scale
+        for dark in [false, true] {
+            let pixels = try #require(RecordPlaceholderPixels(cover, dark: dark))
+            let center = CGFloat(pixels.width) / 2
+            func sample(_ degrees: Double, _ radius: CGFloat) -> RecordPlaceholderPixels.Pixel {
+                let t = degrees * .pi / 180
+                return pixels.pixel(Int(center + radius * CGFloat(sin(t))), Int(center - radius * CGFloat(cos(t))))
+            }
+            for degrees in stride(from: 0.0, to: 360, by: 7.5) {
+                // Disc edge: the first pixel out from the centre that isn't
+                // opaque (the cast shadow outside never reaches 100%).
+                let edge = (500...620).first { sample(degrees, CGFloat($0) + 0.5).a < 250 }
+                let discEdge = try #require(edge.map(CGFloat.init))
+                #expect(abs(discEdge - discRadius) <= 1.5, "disc edge \(discEdge) at \(degrees)°")
+
+                // Label edge: the outermost indigo pixel.
+                let labelEdge = (150...260).last { radius in
+                    let p = sample(degrees, CGFloat(radius) + 0.5)
+                    return Int(p.b) > Int(p.r) + 60 && p.b > 120
+                }
+                let measured = try #require(labelEdge.map(CGFloat.init))
+                #expect(abs(measured + 1 - labelRadius) <= 2.5, "label edge \(measured) at \(degrees)°")
+            }
+            // The lead-in (inside the 2.2 pt rim) is smooth vinyl: no grooves
+            // or bands, so its brightness barely changes along a radius.
+            // Sampled where the sheen is clear.
+            let leadInInner = discRadius - R.leadInWidth * scale
+            let rimInner = discRadius - 2.2 * scale
+            for degrees in [120.0, 150, 300, 330] {
+                let values = stride(from: leadInInner + 3, through: rimInner - 3, by: 1).map {
+                    Int(sample(degrees, $0).g)
+                }
+                #expect(values.max()! - values.min()! <= 3, "lead-in at \(degrees)°: \(values)")
+            }
+        }
+    }
+
     @MainActor
     @Test
     func thumbnailsLoadOnlyForTheLatestVisibleRowsTwoAtATime() async throws {
@@ -3200,5 +3317,38 @@ private actor StreamingStatusRecorder {
 
     func statuses() -> [StreamingURLPromptStatus] {
         recordedStatuses
+    }
+}
+
+/// A record placeholder variant drawn into a known RGBA buffer (row 0 at
+/// the top), for pixel checks.
+struct RecordPlaceholderPixels {
+    struct Pixel { var r, g, b, a: UInt8 }
+
+    let width: Int
+    let height: Int
+    let bytes: [UInt8]
+
+    @MainActor
+    init?(_ image: NSImage, dark: Bool) {
+        var resolved: CGImage?
+        NSAppearance(named: dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+            resolved = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        }
+        guard let cgImage = resolved,
+              let context = CGContext(data: nil, width: cgImage.width, height: cgImage.height, bitsPerComponent: 8,
+                                      bytesPerRow: cgImage.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+        guard let data = context.data else { return nil }
+        width = cgImage.width
+        height = cgImage.height
+        bytes = Array(UnsafeBufferPointer(start: data.assumingMemoryBound(to: UInt8.self), count: width * height * 4))
+    }
+
+    func pixel(_ x: Int, _ y: Int) -> Pixel {
+        let o = (min(max(y, 0), height - 1) * width + min(max(x, 0), width - 1)) * 4
+        return Pixel(r: bytes[o], g: bytes[o + 1], b: bytes[o + 2], a: bytes[o + 3])
     }
 }
