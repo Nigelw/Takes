@@ -5,7 +5,7 @@ import SwiftUI
 
 /// The playlist readout's title (spec §5.2): the version's title tag, else
 /// its filename without the extension, preserving the source capitalization.
-/// Compare has no readout title: its title bar shows the take count, and the
+/// Compare has no readout title: its info bar shows the take count, and the
 /// active lane and the cover carry the audible version.
 enum ControlBarReadoutTitle {
     static func playlist(_ version: PlaylistVersion?) -> String {
@@ -65,12 +65,12 @@ struct PlaylistControlBarReadout: View {
     }
 }
 
-/// The compare title bar's elapsed time (A2 compare title-bar variant
+/// The compare info bar's elapsed time (A2 compare info-bar variant
 /// §2.2): the seven-segment digits in a 24 pt Glass frame, as wide as its
 /// content. The digits are `ControlBarElapsedDigits`, the isolated leaf that
 /// re-renders once per displayed second; this frame reads nothing from the
 /// controller itself.
-struct CompareTitleBarTime: View {
+struct CompareInfoBarTime: View {
     static let height: CGFloat = 24
     static let cornerRadius: CGFloat = 6
     static let horizontalPadding: CGFloat = 9
@@ -124,7 +124,7 @@ struct ControlBarReadoutLine: View {
 /// re-renders only this leaf. While playing the text comes from
 /// `playingReadoutText`, which changes only when the displayed second rolls
 /// over; while paused it derives from `transportPosition`, written only at
-/// anchor events. Shared by the playlist readout and the compare title bar;
+/// anchor events. Shared by the playlist readout and the compare info bar;
 /// nothing else in either reads `playingReadoutText` or the transport
 /// position.
 struct ControlBarElapsedDigits: View {

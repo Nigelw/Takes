@@ -246,7 +246,6 @@ final class PlaylistCoordinator {
     private(set) var currentVersionID: PlaylistVersion.ID?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
-    private(set) var importSummaryMessage: String?
     private(set) var runtimeContext: PlaylistRuntimeContext?
 
     /// The current runtime's stable item identity. The controller owns the
@@ -271,13 +270,8 @@ final class PlaylistCoordinator {
 
     private struct AutomaticImportPlan: Sendable {
         let decisions: [TrackSimilarityClusterEvidence<UUID>]
-        let hadFallback: Bool
     }
 
-    private struct AutomaticGroupingApplication {
-        let itemIDs: [PlaylistItem.ID]
-        let didOverflowCapacity: Bool
-    }
 
     init(
         workspace: PlaylistWorkspace = PlaylistWorkspace(),
@@ -440,17 +434,13 @@ final class PlaylistCoordinator {
             }
 
             let newItemIDs: [PlaylistItem.ID]
-            let groupingHadFallback = automaticPlan?.hadFallback == true
-            var didOverflowCapacity = false
             switch destination {
             case .playlist:
                 if let automaticPlan {
-                    let application = try applyAutomaticImportPlan(
+                    newItemIDs = try applyAutomaticImportPlan(
                         automaticPlan,
                         versions: acceptedVersions
                     )
-                    newItemIDs = application.itemIDs
-                    didOverflowCapacity = application.didOverflowCapacity
                 } else {
                     newItemIDs = try workspace.appendSeparateItems(acceptedVersions)
                 }
@@ -480,17 +470,6 @@ final class PlaylistCoordinator {
             } else if operationGeneration == importGeneration {
                 clearError()
             }
-
-            let groupedCount = Set(newItemIDs).count
-            let summary = "\(acceptedVersions.count) \(acceptedVersions.count == 1 ? "file" : "files") added as \(groupedCount) playlist \(groupedCount == 1 ? "item" : "items")."
-            var summaryDetails: [String] = []
-            if groupingHadFallback {
-                summaryDetails.append("Some tracks lacked enough metadata to group confidently and were left separate.")
-            }
-            if didOverflowCapacity {
-                summaryDetails.append("A 32-version limit created an additional playlist item.")
-            }
-            importSummaryMessage = ([summary] + summaryDetails).joined(separator: " ")
 
             if destination == .playlist,
                automaticGroupingMode != .off,
@@ -1212,16 +1191,11 @@ final class PlaylistCoordinator {
         errorMessage = nil
     }
 
-    func clearImportSummary() {
-        importSummaryMessage = nil
-    }
-
     /// Cancels all playlist imports currently between metadata loading and
     /// their atomic commit. The generation check guarantees that no result
     /// commits after cancellation.
     func cancelCurrentImports() {
         importCancellationGeneration &+= 1
-        importSummaryMessage = nil
     }
 
     /// Replace a missing version's file reference while retaining its stable
@@ -1677,16 +1651,13 @@ final class PlaylistCoordinator {
                 ))
             }
         }
-        return AutomaticImportPlan(
-            decisions: decisions,
-            hadFallback: incoming.contains { !$0.identity.isUsable }
-        )
+        return AutomaticImportPlan(decisions: decisions)
     }
 
     private func applyAutomaticImportPlan(
         _ plan: AutomaticImportPlan,
         versions: [PlaylistVersion]
-    ) throws -> AutomaticGroupingApplication {
+    ) throws -> [PlaylistItem.ID] {
         let incomingIDs = versions.map(\.id)
         let existingGroups: [TrackSimilarityExistingGroup<UUID, UUID>] = workspace.items.map { item in
             TrackSimilarityExistingGroup(
@@ -1740,11 +1711,7 @@ final class PlaylistCoordinator {
         try candidate.validate()
         workspace = candidate
         var seen = Set<UUID>()
-        return AutomaticGroupingApplication(
-            itemIDs: incomingIDs.compactMap { itemIDByVersionID[$0] }.filter { seen.insert($0).inserted },
-            didOverflowCapacity: result.didOverflowCapacity
-                || result.newGroups.contains { $0.count > PlaylistWorkspace.maximumVersionsPerItem }
-        )
+        return incomingIDs.compactMap { itemIDByVersionID[$0] }.filter { seen.insert($0).inserted }
     }
 
     private func automaticGroupTitle(for version: PlaylistVersion) -> String {

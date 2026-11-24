@@ -23,6 +23,8 @@ struct PlaylistOutline: NSViewRepresentable {
     let isActive: Bool
     let artworkStore: PlaylistArtworkStore
     let undoManager: UndoManager?
+    /// Help ▸ Show Component Names: badges the item and version rows.
+    var showsDebugLabels = false
 
     func makeCoordinator() -> PlaylistOutlineController {
         PlaylistOutlineController(playlist: playlist, presentation: presentation, artworkStore: artworkStore)
@@ -34,6 +36,7 @@ struct PlaylistOutline: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.undoManager = undoManager
+        context.coordinator.showsDebugLabels = showsDebugLabels
         context.coordinator.update(items: items, currentItemID: currentItemID, isPlaying: isPlaying, isActive: isActive)
     }
 }
@@ -161,7 +164,7 @@ enum PlaylistRowText {
 
 @MainActor
 final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate,
-    NSTextFieldDelegate, NSMenuDelegate {
+    NSMenuDelegate {
     private let playlist: PlaylistCoordinator
     private let presentation: PlaylistPresentationState
     private let artworkStore: PlaylistArtworkStore
@@ -181,9 +184,17 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private var isApplying = false
     private var availability: [UUID: (reference: PlaylistFileReference, url: URL?)] = [:]
     private var draggedNodes: [PlaylistNode] = []
-    private var editingItemID: UUID?
-    private var needsContentReload = false
     private var thumbnailRequestScheduled = false
+    var showsDebugLabels = false {
+        didSet {
+            guard showsDebugLabels != oldValue, hasLoaded else { return }
+            outlineView.enumerateAvailableRowViews { rowView, row in
+                guard let rowView = rowView as? PlaylistRowView,
+                      let node = self.outlineView.item(atRow: row) as? PlaylistNode else { return }
+                self.configureRowView(rowView, node: node)
+            }
+        }
+    }
 
     init(playlist: PlaylistCoordinator, presentation: PlaylistPresentationState, artworkStore: PlaylistArtworkStore) {
         self.playlist = playlist
@@ -300,7 +311,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
                 DispatchQueue.main.async { [weak self] in self?.outlineView.sizeLastColumnToFit() }
             }
             hasLoaded = true
-            if editingItemID != nil { finishRename(commit: false) }
             let valid = Set(newItems.flatMap { item in [PlaylistRowID.item(item.id)] + item.versions.map { .version($0.id) } })
             nodes = nodes.filter { valid.contains($0.key) }
             availability = availability.filter { ownerByVersionID[$0.key] != nil }
@@ -314,9 +324,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         applySelection()
         if structureChanged || contentChanged { scheduleThumbnailRequest() }
         if becameActive { focusOutline() }
-        if let id = presentation.renamingItemID, editingItemID != id {
-            DispatchQueue.main.async { [weak self] in self?.beginRename(id) }
-        }
     }
 
     private static func structure(_ items: [PlaylistItem]) -> [[UUID]] {
@@ -325,8 +332,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     private func reloadContent() {
         guard hasLoaded else { return }
-        guard editingItemID == nil else { needsContentReload = true; return }
-        needsContentReload = false
         outlineView.reloadData(
             forRowIndexes: IndexSet(integersIn: 0..<outlineView.numberOfRows),
             columnIndexes: IndexSet(integersIn: 0..<outlineView.numberOfColumns)
@@ -479,6 +484,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private func configureRowView(_ rowView: PlaylistRowView, node: PlaylistNode) {
         rowView.isNowPlaying = node.itemID != nil && node.itemID == currentItemID
         rowView.alphaValue = draggedNodes.contains(node) ? 0.3 : 1
+        rowView.debugLabel = showsDebugLabels ? (node.versionID == nil ? "Item Row" : "Version Row") : nil
     }
 
     private func configureItem(_ cell: PlaylistItemCellView, itemID id: UUID) {
@@ -487,7 +493,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         let versionURL = version.flatMap { availableURL(for: $0) }
         let missingCount = item.versions.filter { availableURL(for: $0) == nil }.count
         let node = node(.item(id))
-        cell.titleField.delegate = self
         cell.configure(PlaylistItemCellView.Content(
             title: item.title,
             artist: PlaylistRowText.artist(version),
@@ -759,9 +764,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             moveTo.isEnabled = submenu.numberOfItems > 0
             organize.append(moveTo)
         }
-        if case let .item(id)? = single {
-            organize.append(ClosureMenuItem("Rename…") { [weak self] in self?.presentation.renamingItemID = id })
-        }
         if !organize.isEmpty { sections.append(organize) }
 
         let represented = rowsInDisplayOrder(rows).compactMap { representedVersion($0)?.version }
@@ -788,60 +790,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             result.append(contentsOf: section)
         }
         return result
-    }
-
-    // MARK: Inline rename
-
-    private func beginRename(_ itemID: UUID) {
-        guard editingItemID == nil, presentation.renamingItemID == itemID else { return }
-        guard let node = nodes[.item(itemID)], case let row = outlineView.row(forItem: node), row >= 0,
-              let window = outlineView.window else {
-            presentation.renamingItemID = nil
-            return
-        }
-        outlineView.scrollRowToVisible(row)
-        guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: true) as? PlaylistItemCellView else {
-            presentation.renamingItemID = nil
-            return
-        }
-        editingItemID = itemID
-        cell.setEditing(true)
-        window.makeFirstResponder(cell.titleField)
-        cell.titleField.currentEditor()?.selectAll(nil)
-    }
-
-    private func finishRename(commit: Bool, field: NSTextField? = nil) {
-        guard let itemID = editingItemID else { return }
-        editingItemID = nil
-        let original = itemsByID[itemID]?.title ?? ""
-        if let field {
-            let title = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            (field.superview as? PlaylistItemCellView)?.setEditing(false)
-            if commit, !title.isEmpty, title != original {
-                playlist.renameItem(itemID, to: title, undoManager: undoManager)
-            } else {
-                field.stringValue = original
-            }
-        }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            if self.presentation.renamingItemID == itemID { self.presentation.renamingItemID = nil }
-            if self.needsContentReload { self.reloadContent() }
-            if let window = self.outlineView.window, window.firstResponder === window {
-                window.makeFirstResponder(self.outlineView)
-            }
-        }
-    }
-
-    func controlTextDidEndEditing(_ notification: Notification) {
-        finishRename(commit: true, field: notification.object as? NSTextField)
-    }
-
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard commandSelector == #selector(NSResponder.cancelOperation(_:)), let field = control as? NSTextField else { return false }
-        field.abortEditing()
-        finishRename(commit: false, field: field)
-        return true
     }
 
     // MARK: Drag source
@@ -1087,6 +1035,36 @@ final class PlaylistRowView: NSTableRowView {
         didSet { if isNowPlaying != oldValue { needsDisplay = true } }
     }
 
+    /// Help ▸ Show Component Names badge, drawn over the row's cells.
+    var debugLabel: String? {
+        didSet {
+            guard debugLabel != oldValue else { return }
+            if let debugLabel {
+                let badge = debugBadge ?? ComponentDebugBadgeView(name: debugLabel, color: .systemTeal)
+                badge.name = debugLabel
+                badge.frame = PlaylistRowMetrics.highlightRect(in: bounds)
+                badge.autoresizingMask = [.width, .height]
+                addSubview(badge, positioned: .above, relativeTo: nil)
+                debugBadge = badge
+            } else {
+                debugBadge?.removeFromSuperview()
+                debugBadge = nil
+            }
+        }
+    }
+    private var debugBadge: ComponentDebugBadgeView?
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        // Cells arrive after the badge; keep the badge on top.
+        if let debugBadge, subview !== debugBadge { addSubview(debugBadge, positioned: .above, relativeTo: nil) }
+    }
+
+    override func layout() {
+        super.layout()
+        debugBadge?.frame = PlaylistRowMetrics.highlightRect(in: bounds)
+    }
+
     private var highlightPath: NSBezierPath {
         let radius = PlaylistRowMetrics.highlightRadius
         return NSBezierPath(roundedRect: PlaylistRowMetrics.highlightRect(in: bounds), xRadius: radius, yRadius: radius)
@@ -1170,7 +1148,14 @@ private extension NSTextField {
         return ceil(intrinsicContentSize.height)
     }
 
-    var fittingTextWidth: CGFloat { ceil(intrinsicContentSize.width) }
+    /// Width that shows the whole text. Measured from the cell, which
+    /// includes the label's side padding; `intrinsicContentSize` leaves it
+    /// out and clipped the last few points (a version row's "FLAC").
+    var fittingTextWidth: CGFloat {
+        guard let cell else { return ceil(intrinsicContentSize.width) }
+        let unbounded = NSRect(x: 0, y: 0, width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        return ceil(cell.cellSize(forBounds: unbounded).width)
+    }
 }
 
 private enum PlaylistGlyph {
@@ -1209,7 +1194,7 @@ final class PlaylistItemCellView: NSTableCellView {
         var thumbnail: NSImage?
     }
 
-    let titleField = NSTextField.playlistLabel(font: .systemFont(ofSize: 13, weight: .semibold), truncation: .byTruncatingMiddle)
+    private let titleField = NSTextField.playlistLabel(font: .systemFont(ofSize: 13, weight: .semibold), truncation: .byTruncatingMiddle)
     private let artistField = NSTextField.playlistLabel(font: .systemFont(ofSize: 11), truncation: .byTruncatingTail)
     private let durationField = NSTextField.playlistLabel(
         font: .monospacedDigitSystemFont(ofSize: 12, weight: .regular), truncation: .byClipping, alignment: .right
@@ -1223,7 +1208,6 @@ final class PlaylistItemCellView: NSTableCellView {
         title: "", artist: "", duration: "", hasVersions: false, isExpanded: false,
         nowPlaying: nil, warning: nil, isDimmed: false, thumbnail: nil
     )
-    private var isEditingTitle = false
 
     var onDisclosure: (() -> Void)?
     var onCompare: (() -> Void)?
@@ -1258,7 +1242,6 @@ final class PlaylistItemCellView: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(_ content: Content) {
-        if titleField.isEditable { setEditing(false) }
         self.content = content
         titleField.stringValue = content.title
         artistField.stringValue = content.artist
@@ -1285,17 +1268,8 @@ final class PlaylistItemCellView: NSTableCellView {
         disclosure.setExpanded(expanded, animated: animated)
     }
 
-    /// While renaming, the title field takes the space up to the duration.
-    func setEditing(_ editing: Bool) {
-        isEditingTitle = editing
-        titleField.isEditable = editing
-        titleField.isSelectable = editing
-        updatePill()
-        needsLayout = true
-    }
-
     private func updatePill() {
-        comparePill.isHidden = !(isHovered && content.hasVersions && !isEditingTitle)
+        comparePill.isHidden = !(isHovered && content.hasVersions)
         needsLayout = true
     }
 
@@ -1343,7 +1317,7 @@ final class PlaylistItemCellView: NSTableCellView {
             textRight = pillX - M.gap
         }
         let textWidth = max(0, textRight - M.titleX)
-        if artistField.isHidden || isEditingTitle {
+        if artistField.isHidden {
             titleField.frame = NSRect(x: M.titleX, y: (height - titleHeight) / 2, width: textWidth, height: titleHeight)
             artistField.frame = .zero
         } else {
@@ -1351,10 +1325,10 @@ final class PlaylistItemCellView: NSTableCellView {
             titleField.frame = NSRect(x: M.titleX, y: top, width: textWidth, height: titleHeight)
             artistField.frame = NSRect(x: M.titleX, y: top + titleHeight + 1, width: textWidth, height: artistHeight)
         }
-        artistField.isHidden = content.artist.isEmpty || isEditingTitle
+        artistField.isHidden = content.artist.isEmpty
         // The full title, only while it is cut short: by a narrow window or
         // by the hover Compare pill, which takes room from it.
-        titleField.toolTip = !isEditingTitle && titleField.isTruncatingText ? content.title : nil
+        titleField.toolTip = titleField.isTruncatingText ? content.title : nil
     }
 
     @objc private func comparePressed() { onCompare?() }

@@ -33,6 +33,10 @@ struct WorkspaceView: View {
     /// has loaded or is known to be missing. Until then the previous cover
     /// stays up, so switching versions never flashes the placeholder.
     @State private var shownCoverVersionID: PlaylistVersion.ID?
+    /// Track count before the first of a run of adds or removes, while the
+    /// resize that fits them is pending (`fitWindowToContent`).
+    @State private var contentFitBaseline: Int?
+    @State private var contentFitTask: Task<Void, Never>?
 
     private var controller: PlaybackController { coordinator.controller }
     private var isComparison: Bool { coordinator.mode.itemID != nil }
@@ -129,6 +133,7 @@ struct WorkspaceView: View {
                 didStart = true
                 setupKeyboard()
                 await persistence.start()
+                restoreModeHeight()
                 configureOpenRouter()
             }
             .task(id: coverVersion?.id) {
@@ -143,6 +148,15 @@ struct WorkspaceView: View {
                 guard !Task.isCancelled, artworkResize == resize else { return }
                 mainWindow.minSize = TakesWindowPolicy.minimumSize(showsArtwork: settings.showsArtwork)
                 artworkResize = nil
+                // A screen-clamped toggle changes the height beyond the cover's.
+                storePlaylistHeight()
+            }
+            .onChange(of: contentFitKey) { old, new in scheduleContentFit(from: old, to: new) }
+            .onChange(of: isComparison) { wasComparison, isComparison in
+                switchModeHeight(from: wasComparison, to: isComparison)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndLiveResizeNotification)) { notification in
+                if notification.object as? NSWindow === mainWindow { storePlaylistHeight() }
             }
             .onChange(of: showsTitlebarControls) { _, showsControls in
                 if let mainWindow { updateWindowButtons(in: mainWindow, visible: showsControls) }
@@ -258,7 +272,7 @@ struct WorkspaceView: View {
 
     private var canUseShortcuts: Bool {
         persistence.restorationComplete && !textInputIsFocused && !openFiles.isPromptingForStreamingURL
-            && !openFiles.isImportingTracks && presentation.renamingItemID == nil && presentation.locateVersionID == nil
+            && !openFiles.isImportingTracks && presentation.locateVersionID == nil
     }
 
     private func workspaceContent(artworkFraction: CGFloat) -> some View {
@@ -273,6 +287,7 @@ struct WorkspaceView: View {
                 .offset(y: coverHeight - TakesWindowPolicy.artworkHeight)
                 .frame(height: coverHeight, alignment: .top)
                 .clipped()
+                .componentDebugLabel("Cover", enabled: settings.showsComponentDebugLabels && settings.showsArtwork)
                 .overlay {
                     if settings.showsArtwork {
                         HoverSensor(trackingActivity: .activeAlways) { artworkIsHovered = $0 }
@@ -298,6 +313,8 @@ struct WorkspaceView: View {
             GeometryReader { proxy in
                 ZStack(alignment: .topLeading) {
                     playlistSurface
+                        // Dimmed in the background, as compare is.
+                        .windowActivityAppearance(isActive: mainWindowIsKey)
                         .frame(width: isComparison ? retainedPlaylistSize.width : proxy.size.width,
                                height: isComparison ? retainedPlaylistSize.height : proxy.size.height)
                         .opacity(isComparison ? 0 : 1)
@@ -347,22 +364,10 @@ struct WorkspaceView: View {
     private var playlistSurface: some View {
         VStack(spacing: 0) {
             PlaylistTransportView(coordinator: coordinator)
-            if let summary = coordinator.importSummaryMessage {
-                HStack(spacing: 8) {
-                    Text(summary).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
-                    Button { coordinator.clearImportSummary() } label: {
-                        Image(systemName: "xmark").imageScale(.small)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Dismiss Import Summary")
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(.thinMaterial)
-            }
             PlaylistView(coordinator: coordinator, presentation: presentation, openFiles: openFiles, artworkStore: artworkStore)
             // Below the list, which it shortens (A2 §7).
             PlaylistBottomBar(coordinator: coordinator, presentation: presentation, openFiles: openFiles, undoManager: undoManager)
+                .componentDebugLabel("Bottom Bar", enabled: settings.showsComponentDebugLabels)
         }
     }
 
@@ -526,6 +531,118 @@ struct WorkspaceView: View {
         )
     }
 
+    // MARK: Mode heights
+
+    /// Records the playlist's window height after the user resizes it, a
+    /// track fit, or a clamped artwork toggle. Compare's height is never
+    /// stored: it always sizes to its lanes.
+    private func storePlaylistHeight() {
+        guard !isComparison, let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen),
+              persistence.restorationComplete else { return }
+        TakesWindowPolicy.storePlaylistHeight(mainWindow.frame.height, showsArtwork: settings.showsArtwork)
+    }
+
+    /// Entering compare stores the playlist's height and sizes the window to
+    /// the item's lanes; leaving restores the playlist's height. The window
+    /// still has the old mode's frame here, as the mode has only just changed.
+    private func switchModeHeight(from wasComparison: Bool, to isComparison: Bool) {
+        guard let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen),
+              persistence.restorationComplete else { return }
+        if !wasComparison {
+            TakesWindowPolicy.storePlaylistHeight(mainWindow.frame.height, showsArtwork: settings.showsArtwork)
+        }
+        if let frame = modeFrame(for: mainWindow) {
+            mainWindow.setFrame(frame, display: true, animate: !reduceMotion)
+        }
+    }
+
+    /// At launch the autosaved frame is whichever mode was on screen at
+    /// quit; give the restored mode its height.
+    private func restoreModeHeight() {
+        guard !usesTemporaryDefaultWindowLayout, let mainWindow, artworkResize == nil,
+              !mainWindow.styleMask.contains(.fullScreen), let frame = modeFrame(for: mainWindow) else { return }
+        mainWindow.setFrame(frame, display: true)
+    }
+
+    /// Compare: fitted to its lanes. Playlist: its stored height, if any.
+    private func modeFrame(for window: NSWindow) -> CGRect? {
+        let showsArtwork = settings.showsArtwork
+        let visibleFrame = TakesWindowPolicy.visibleFrame(for: window)
+        if isComparison {
+            let height = TakesWindowPolicy.compareFittingHeight(laneCount: contentFitKey.trackCount, showsArtwork: showsArtwork)
+            return TakesWindowPolicy.frameSettingHeight(height, showsArtwork: showsArtwork,
+                                                        currentFrame: window.frame, visibleFrame: visibleFrame)
+        }
+        guard let stored = TakesWindowPolicy.storedPlaylistHeight() else { return nil }
+        return TakesWindowPolicy.frameRestoringPlaylistHeight(stored, showsArtwork: showsArtwork,
+                                                              currentFrame: window.frame, visibleFrame: visibleFrame)
+    }
+
+    // MARK: Fitting the window to its tracks
+
+    /// What `TakesWindowPolicy.frameFittingContent` follows: the playlist's
+    /// tracks, or the compared item's versions (its lanes).
+    private struct ContentFitKey: Equatable {
+        var mode: PlaylistCoordinator.Mode
+        var trackCount: Int
+    }
+
+    private var contentFitKey: ContentFitKey {
+        let workspace = coordinator.workspace
+        if let itemID = coordinator.mode.itemID {
+            let count = workspace.items.first(where: { $0.id == itemID })?.versions.count ?? 0
+            return ContentFitKey(mode: coordinator.mode, trackCount: count)
+        }
+        return ContentFitKey(mode: .playlist, trackCount: workspace.allVersions.count)
+    }
+
+    /// Adds and removes resize the window as in v2.9.0; mode switches,
+    /// restoration and the artwork toggle's resize don't. The fit waits a
+    /// moment so an import's selection and expansion (`WorkspaceImports`)
+    /// land first, and a run of changes resizes once.
+    private func scheduleContentFit(from old: ContentFitKey, to new: ContentFitKey) {
+        guard old.mode == new.mode else {
+            contentFitTask?.cancel()
+            contentFitBaseline = nil
+            return
+        }
+        guard old.trackCount != new.trackCount, persistence.restorationComplete else { return }
+        if contentFitBaseline == nil { contentFitBaseline = old.trackCount }
+        contentFitTask?.cancel()
+        contentFitTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(30))
+            guard !Task.isCancelled else { return }
+            let previous = contentFitBaseline
+            contentFitBaseline = nil
+            guard let previous, contentFitKey.mode == new.mode else { return }
+            fitWindowToContent(previousTrackCount: previous)
+        }
+    }
+
+    private func fitWindowToContent(previousTrackCount: Int) {
+        guard let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen) else { return }
+        let showsArtwork = settings.showsArtwork
+        let fittingHeight: CGFloat
+        if isComparison {
+            fittingHeight = TakesWindowPolicy.compareFittingHeight(laneCount: contentFitKey.trackCount, showsArtwork: showsArtwork)
+        } else {
+            let rows = presentation.visibleRows(in: coordinator.workspace)
+            let itemRows = rows.filter { if case .item = $0 { return true }; return false }.count
+            fittingHeight = TakesWindowPolicy.playlistFittingHeight(
+                itemRows: itemRows, versionRows: rows.count - itemRows, showsArtwork: showsArtwork
+            )
+        }
+        guard let frame = TakesWindowPolicy.frameFittingContent(
+            previousTrackCount: previousTrackCount,
+            newTrackCount: contentFitKey.trackCount,
+            fittingHeight: fittingHeight,
+            currentFrame: mainWindow.frame,
+            visibleFrame: TakesWindowPolicy.visibleFrame(for: mainWindow)
+        ) else { return }
+        mainWindow.setFrame(frame, display: true, animate: !reduceMotion)
+        storePlaylistHeight()
+    }
+
     private struct CoverState: Equatable {
         var versionID: PlaylistVersion.ID?
         var isResolved: Bool
@@ -609,6 +726,7 @@ private struct WorkspaceImports {
 /// Repeat over the two-line readout.
 private struct PlaylistTransportView: View {
     let coordinator: PlaylistCoordinator
+    @EnvironmentObject private var settings: AppSettings
     private var controller: PlaybackController { coordinator.controller }
 
     var body: some View {
@@ -617,20 +735,24 @@ private struct PlaylistTransportView: View {
                 .buttonStyle(ControlBarSideButtonStyle(isOn: coordinator.workspace.isShuffleEnabled))
                 .help("Shuffle")
                 .accessibilityLabel("Shuffle").accessibilityValue(coordinator.workspace.isShuffleEnabled ? "On" : "Off")
+                .componentDebugLabel("Shuffle", enabled: showsLabels)
         } center: {
             Button { coordinator.previous() } label: { Image(systemName: "backward.end.fill") }
                 .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter,
                                                         glyphSize: ControlBarMetrics.secondaryGlyphSize))
                 .disabled(!coordinator.canPrevious).help("Previous Item").accessibilityLabel("Previous Item")
+                .componentDebugLabel("Previous", enabled: showsLabels)
             Button { coordinator.togglePlayback() } label: { Image(systemName: coordinator.isPlaying ? "pause.fill" : "play.fill") }
                 .buttonStyle(CircleTransportButtonStyle(kind: .primary, diameter: ControlBarMetrics.primaryDiameter,
                                                         glyphSize: ControlBarMetrics.primaryGlyphSize, pressedGlyphOffset: 1.5))
                 .disabled(!coordinator.canPlay).help(coordinator.isPlaying ? "Pause" : "Play")
                 .accessibilityLabel(coordinator.isPlaying ? "Pause" : "Play")
+                .componentDebugLabel("Play", enabled: showsLabels)
             Button { coordinator.next() } label: { Image(systemName: "forward.end.fill") }
                 .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: ControlBarMetrics.secondaryDiameter,
                                                         glyphSize: ControlBarMetrics.secondaryGlyphSize))
                 .disabled(!coordinator.canNext).help("Next Item").accessibilityLabel("Next Item")
+                .componentDebugLabel("Next", enabled: showsLabels)
         } trailing: {
             Button { coordinator.cyclePlaylistRepeatMode() } label: {
                 Image(systemName: coordinator.workspace.playlistRepeatMode == .one ? "repeat.1" : "repeat")
@@ -638,14 +760,19 @@ private struct PlaylistTransportView: View {
             .buttonStyle(ControlBarSideButtonStyle(isOn: coordinator.workspace.playlistRepeatMode != .off))
             .help("Repeat")
             .accessibilityLabel("Repeat").accessibilityValue(coordinator.workspace.playlistRepeatMode.rawValue.capitalized)
+            .componentDebugLabel("Repeat", enabled: showsLabels)
         } readout: {
             PlaylistControlBarReadout(
                 controller: controller,
                 title: ControlBarReadoutTitle.playlist(currentVersion),
                 seek: coordinator.seek
             )
+            .componentDebugLabel("Readout", enabled: showsLabels, color: .orange)
         }
+        .componentDebugLabel("Control Bar", enabled: showsLabels)
     }
+
+    private var showsLabels: Bool { settings.showsComponentDebugLabels }
 
     /// The version the transport is showing: the current one, else the
     /// item's selected version (same fallback the coordinator uses).

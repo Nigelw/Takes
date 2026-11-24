@@ -612,7 +612,7 @@ struct SevenSegmentDisplay: View {
 /// centre group stays centred, the side buttons sit midway between the
 /// window edges and the playlist's centre group (`ControlBarTransportRow`),
 /// and the readout takes the width inside the 10 pt edge insets. Compare has
-/// no readout (its title bar sits below the divider), so its bar ends 10 pt
+/// no readout (its info bar sits below the divider), so its bar ends 10 pt
 /// under the transport row.
 struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: View>: View {
     @Environment(\.controlBarTopPadding) private var topPadding
@@ -662,8 +662,8 @@ extension EnvironmentValues {
 }
 
 extension ControlBarLayout where Readout == EmptyView {
-    /// A control bar with no readout: compare's (A2 compare title-bar
-    /// variant), whose elapsed time is in the title bar below the divider.
+    /// A control bar with no readout: compare's (A2 compare info-bar
+    /// variant), whose elapsed time is in the info bar below the divider.
     init(
         @ViewBuilder leading: () -> Leading,
         @ViewBuilder center: () -> Center,

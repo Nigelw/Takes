@@ -335,7 +335,8 @@ enum TakesWindowPolicy {
     /// Pre-A2 keys for the playlist frame, the comparison's per-window
     /// autosave, and the comparison's track-info column width (removed with
     /// the column in A2 milestone 4). No longer read; removed on launch.
-    static let retiredLayoutDefaultsKeys = ["playlistWindowFrame", "NSWindow Frame main", "trackInfoColumnWidth"]
+    static let retiredLayoutDefaultsKeys = ["playlistWindowFrame", "NSWindow Frame main", "trackInfoColumnWidth",
+                                            retiredCompareHeightDefaultsKey]
 
     // MARK: Window size
 
@@ -381,12 +382,12 @@ enum TakesWindowPolicy {
     }
     static let defaultHeightWithArtwork: CGFloat = 760
     /// Room below the cover at the minimum height (A2 milestone 5, §13, and
-    /// the compare title-bar variant): the compare control bar, its title
+    /// the compare info-bar variant): the compare control bar, its title
     /// bar, the ruler, one whole lane and the bottom bar (91 + 32 + 22 + 96
     /// + 30 = 271 pt). The playlist's control bar is 51 pt taller, which
     /// leaves its list two rows and part of a third.
     static let minimumHeightWithoutArtwork: CGFloat = compareControlBarHeight(showsArtwork: false)
-        + CompareTitleBarMetrics.height + CompareLaneLayout.seatBottom + CompareLaneLayout.laneStep
+        + CompareInfoBarMetrics.height + CompareLaneLayout.seatBottom + CompareLaneLayout.laneStep
         + BottomBarMetrics.height
 
     static func controlBarTopPadding(showsArtwork: Bool) -> CGFloat {
@@ -429,8 +430,8 @@ enum TakesWindowPolicy {
 
     /// The compare control bar's height with the artwork shown (12 + 56 +
     /// 10 + 1 divider; no readout): the import highlight's starting inset
-    /// until the bar's measured height arrives. The title bar, ruler and
-    /// lanes below it are sized by `CompareTitleBarMetrics` and `CompareLaneLayout`.
+    /// until the bar's measured height arrives. The info bar, ruler and
+    /// lanes below it are sized by `CompareInfoBarMetrics` and `CompareLaneLayout`.
     static let controlBarReservedHeight = controlBarTopPaddingBelowArtwork
         + ControlBarMetrics.primaryDiameter + ControlBarMetrics.transportRowBottomPadding + ControlBarDivider.height
 
@@ -438,6 +439,95 @@ enum TakesWindowPolicy {
     /// the titlebar, whose overlay adds 12 pt of top padding.
     static func compareControlBarHeight(showsArtwork: Bool) -> CGFloat {
         controlBarReservedHeight - controlBarTopPaddingBelowArtwork + controlBarTopPadding(showsArtwork: showsArtwork)
+    }
+
+    // MARK: Fitting content
+
+    /// The playlist control bar's height: compare's plus the readout row
+    /// (51 pt): 130 pt under the cover, 142 under the titlebar.
+    @MainActor
+    static func playlistControlBarHeight(showsArtwork: Bool) -> CGFloat {
+        compareControlBarHeight(showsArtwork: showsArtwork) - ControlBarMetrics.transportRowBottomPadding
+            + ControlBarMetrics.readoutTopSpacing + PlaylistControlBarReadout.height + ControlBarMetrics.readoutBottomPadding
+    }
+
+    /// The window height that shows every row of the playlist table without
+    /// scrolling, never below the minimum.
+    @MainActor
+    static func playlistFittingHeight(itemRows: Int, versionRows: Int, showsArtwork: Bool) -> CGFloat {
+        let list = PlaylistRowMetrics.listVerticalInset * 2
+            + PlaylistRowMetrics.itemHeight * CGFloat(itemRows)
+            + PlaylistRowMetrics.versionHeight * CGFloat(versionRows)
+        let height = (showsArtwork ? artworkHeight : 0) + playlistControlBarHeight(showsArtwork: showsArtwork)
+            + list + BottomBarMetrics.height
+        return max(height, minimumHeight(showsArtwork: showsArtwork))
+    }
+
+    /// The window height that shows every compare lane without scrolling:
+    /// the minimum holds one lane, and each further lane adds a lane step.
+    static func compareFittingHeight(laneCount: Int, showsArtwork: Bool) -> CGFloat {
+        minimumHeight(showsArtwork: showsArtwork) + CGFloat(max(laneCount, 1) - 1) * CompareLaneLayout.laneStep
+    }
+
+    /// v2.9.0's resize on adding and removing tracks, for either mode.
+    /// Adding tracks grows a window too short to show them all; removing
+    /// tracks shrinks a window taller than the rest need. Otherwise the
+    /// window keeps its size, so a window the user made taller stays taller
+    /// as tracks are added. The top edge stays put, and growth stops at the
+    /// bottom of the screen. Returns `nil` when the frame should not change.
+    static func frameFittingContent(
+        previousTrackCount: Int,
+        newTrackCount: Int,
+        fittingHeight: CGFloat,
+        currentFrame: CGRect,
+        visibleFrame: CGRect
+    ) -> CGRect? {
+        let grows = newTrackCount > previousTrackCount && fittingHeight > currentFrame.height + 0.5
+        let shrinks = newTrackCount < previousTrackCount && fittingHeight < currentFrame.height - 0.5
+        guard grows || shrinks else { return nil }
+        let height = min(fittingHeight, max(currentFrame.maxY - visibleFrame.minY, 0))
+        guard grows ? height > currentFrame.height + 0.5 : height < currentFrame.height - 0.5 else { return nil }
+        return CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: currentFrame.width, height: height)
+    }
+
+    // MARK: Mode heights
+
+    /// The playlist remembers its window height; compare doesn't, and sizes
+    /// to its lanes instead (`compareFittingHeight`). The height is stored
+    /// without the cover (`artworkCollapseHeight` taken off when it is
+    /// shown), so one stored height serves both artwork states.
+    static let playlistHeightDefaultsKey = "main.a2.height.playlist"
+    /// Written by an earlier build, when compare remembered its height too.
+    static let retiredCompareHeightDefaultsKey = "main.a2.height.compare"
+
+    static func storedPlaylistHeight(defaults: UserDefaults = .standard) -> CGFloat? {
+        guard let value = defaults.object(forKey: playlistHeightDefaultsKey) as? Double, value > 0 else { return nil }
+        return CGFloat(value)
+    }
+
+    static func storePlaylistHeight(_ windowHeight: CGFloat, showsArtwork: Bool, defaults: UserDefaults = .standard) {
+        let height = windowHeight - (showsArtwork ? artworkCollapseHeight : 0)
+        defaults.set(Double(max(height, minimumHeight(showsArtwork: false))), forKey: playlistHeightDefaultsKey)
+    }
+
+    /// The frame for the stored playlist height: the cover added back when
+    /// shown. `nil` when the height is unchanged.
+    static func frameRestoringPlaylistHeight(_ storedHeight: CGFloat, showsArtwork: Bool,
+                                             currentFrame: CGRect, visibleFrame: CGRect) -> CGRect? {
+        frameSettingHeight(storedHeight + (showsArtwork ? artworkCollapseHeight : 0), showsArtwork: showsArtwork,
+                           currentFrame: currentFrame, visibleFrame: visibleFrame)
+    }
+
+    /// A frame of the given window height: never below the minimum, top edge
+    /// fixed, and no lower than the bottom of the screen. Entering compare
+    /// uses it with `compareFittingHeight`, growing or shrinking to the
+    /// lanes. `nil` when the height is unchanged.
+    static func frameSettingHeight(_ windowHeight: CGFloat, showsArtwork: Bool,
+                                   currentFrame: CGRect, visibleFrame: CGRect) -> CGRect? {
+        let minimum = minimumHeight(showsArtwork: showsArtwork)
+        let height = max(min(max(windowHeight, minimum), currentFrame.maxY - visibleFrame.minY), minimum)
+        guard abs(height - currentFrame.height) > 0.5 else { return nil }
+        return CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: currentFrame.width, height: height)
     }
 
     // MARK: Frames

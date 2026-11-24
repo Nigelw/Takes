@@ -10,7 +10,6 @@ enum PlaylistRowID: Hashable {
 final class PlaylistPresentationState: ObservableObject {
     @Published var selection: Set<PlaylistRowID> = []
     @Published var expanded: Set<UUID> = []
-    @Published var renamingItemID: UUID?
     @Published var locateVersionID: UUID?
     @Published var listHasFocus = false
 
@@ -148,8 +147,6 @@ struct PlaylistOrganizationMenuItems: View {
             .disabled(context?.canGroup != true)
         Button("Group and Compare") { context?.group(compare: true) }
             .disabled(context?.canGroup != true)
-        Button("Rename…") { context?.presentation.renamingItemID = context?.itemIDs.first }
-            .disabled(context?.itemIDs.count != 1)
         Button("Separate Versions") { context?.separate() }
             .disabled(context?.canSeparate != true)
         Divider()
@@ -173,6 +170,7 @@ struct PlaylistView: View {
     @ObservedObject var openFiles: OpenFileCommandState
     let artworkStore: PlaylistArtworkStore
     @Environment(\.undoManager) private var undoManager
+    @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
         let items = coordinator.workspace.items
@@ -195,11 +193,13 @@ struct PlaylistView: View {
                     isPlaying: coordinator.isPlaying,
                     isActive: coordinator.mode == .playlist,
                     artworkStore: artworkStore,
-                    undoManager: undoManager
+                    undoManager: undoManager,
+                    showsDebugLabels: settings.showsComponentDebugLabels
                 )
             }
         }
         .background(Theme.timelineWellShade)
+        .componentDebugLabel("Playlist", enabled: settings.showsComponentDebugLabels, color: .orange)
         .onChange(of: items.map { ($0.id.uuidString + $0.versions.map { $0.id.uuidString }.joined()) }) { _, _ in
             presentation.prune(in: coordinator.workspace)
         }

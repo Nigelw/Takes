@@ -210,9 +210,9 @@ and the window minimum) are in §13.
 Below the divider: ruler, lanes, bottom bar. No track-info column.
 
 **Ruler, 21 pt** (v2.9.0's arrangement, shortened from 34 pt; 26 pt until
-the compare title-bar variant, §13):
+the compare info-bar variant, §13):
 - Notches hang from the bottom edge: major 19 pt, minor 8 pt (v2.9.0's
-  heights; 11 and 5 until the compare title-bar variant, §13), colour
+  heights; 11 and 5 until the compare info-bar variant, §13), colour
   `Theme.timelineRulerTick`.
 - Labels with their digits' tops level with their major notch's top (2 pt
   from the ruler's top; 3 pt from the top until §13), 4 pt right of it
@@ -325,7 +325,7 @@ None open. The version check for a missing file was decided in milestone 3
   frame only; `ReadoutStyle` and the "Readout frame" picker are gone, and a
   stored `readoutStyle` preference is ignored.
 - **Readout titles** (milestone 2; compare's removed by the compare
-  title-bar variant, below, which leaves the playlist rule only). Both
+  info-bar variant, below, which leaves the playlist rule only). Both
   readouts show a version's title tag,
   falling back to its filename without the extension. The playlist preserves
   the source capitalization. Playlist:
@@ -338,7 +338,7 @@ None open. The version check for a missing file was decided in milestone 3
   transport row has no room for them, so they moved to the bottom bar's
   right side (see "Bottom-bar zoom" below). ⌘+/⌘−, Zoom to Selection, Zoom
   to Fit and pinch zoom as well.
-- **Esc leaves compare**, as the back button (now the title bar's Done)
+- **Esc leaves compare**, as the back button (now the info bar's Done)
   and ⌘[ do (§9). It goes through
   the same focus-safe shortcut gate, so text fields keep Esc.
 - **Side-button placement** (milestone 4 review). Shuffle/Blind and Repeat
@@ -356,7 +356,7 @@ None open. The version check for a missing file was decided in milestone 3
   width (80 cells in a 360 pt window, the canvas's count). The lit run is
   drawn a step below full; the leading cell is brightest (white-hot in
   dark, full ink in light). It has 3 pt of extra hit area above and below.
-  Matched to the canvas after the compare title-bar variant: the endcaps
+  Matched to the canvas after the compare info-bar variant: the endcaps
   milestone 2 kept from `DotMatrixProgressBar` are gone, unlit cells are
   the canvas's 9% in dark (were 22%; light's LCD keeps 22%), and in dark
   the lit run glows (2 pt blur at 50%) and the leading cell glows brighter
@@ -379,10 +379,10 @@ None open. The version check for a missing file was decided in milestone 3
   gone, so the groove is the only edge there.
 - **Control-bar heights differ by mode.** Milestone 2: the readouts were
   42 and 30 pt, so the compare bar was 12 pt shorter (119 vs 131 pt with
-  artwork). Since the compare title-bar variant (below) compare has no
+  artwork). Since the compare info-bar variant (below) compare has no
   readout. Its bar ends 10 pt under the transport row and is 51 pt shorter
   than the playlist's (79 vs 130 pt with artwork, 91 vs 142 under the
-  titlebar). Its 32 pt title bar sits below the divider. The transport row
+  titlebar). Its 32 pt info bar sits below the divider. The transport row
   and everything above it stay put when switching modes.
 - **Side buttons light brighter** (after milestone 5;
   [a2-side-button-lamps-spec.md](a2-side-button-lamps-spec.md), §2–4 without
@@ -404,14 +404,16 @@ None open. The version check for a missing file was decided in milestone 3
 - **The window is resizable in both directions** (§2). Defaults are the §2
   sizes. Minimum width is 360 pt. Minimum height is 619 pt with artwork and
   271 pt without (`TakesWindowPolicy.minimumHeightWithoutArtwork`). It fits
-  the compare control bar (79 pt below the cover, 91 pt under the titlebar), its title bar (32),
+  the compare control bar (79 pt below the cover, 91 pt under the titlebar), its info bar (32),
   the ruler (22 with its border), one whole lane (96) and the bottom bar
   (30), so compare always shows its controls and one lane. Milestone 5
   settled the rule at 286 (a 133 pt control bar with the readout, no title
-  bar and a 27 pt ruler); the compare title-bar variant kept the rule,
+  bar and a 27 pt ruler); the compare info-bar variant kept the rule,
   which lowered it to 271 without artwork. The playlist's control bar
   is 51 pt taller, leaving room for two list rows and part of a third. Milestones
-  1–4 used a provisional 300. Mode switches never resize. The artwork
+  1–4 used a provisional 300. Mode switches resize ("The playlist
+  remembers its height; compare fits its lanes"); adding and removing
+  tracks resizes too ("Window fits added and removed tracks"). The artwork
   toggle changes the height by exactly 348 pt, keeping any extra height the
   user added; a window that would run off the bottom of the screen moves up
   only as far as needed.
@@ -478,11 +480,11 @@ None open. The version check for a missing file was decided in milestone 3
   Lanes never resize with the window or the version count; those that don't
   fit scroll, and fewer leave the well empty below. In the default 760 pt
   window about two and a half lanes show (two and a third with the compare
-  readout row, before the title-bar variant; two and a half before milestone 5's
+  readout row, before the info-bar variant; two and a half before milestone 5's
   bottom bar). The first build gave lanes equal shares of the space
   (74 pt for three in the default window, 64 pt minimum), which resized
   every lane, and redrew every waveform, whenever a version was added or
-  removed. The ruler is 21 pt (26 before the compare title-bar variant)
+  removed. The ruler is 21 pt (26 before the compare info-bar variant)
   plus its 1 pt bottom border, so the lanes and the playhead line start
   22 pt below the ruler's top, where the grabber's tip sits.
 - **Lane waveform** (milestone 4). Centred in the space below the strip with
@@ -558,7 +560,7 @@ None open. The version check for a missing file was decided in milestone 3
 - **`…` pull-down** (milestone 5). A standard pull-down button (ellipsis and
   indicator) holding exactly the Playlist menu's list, shared as one view
   (`PlaylistOrganizationMenuItems`): Group as Versions, Group and Compare,
-  Rename…, Separate Versions, Move Up, Move Down and Clear Playlist, acting
+  Separate Versions, Move Up, Move Down and Clear Playlist, acting
   on the selection with the menu's validation. It is disabled while the
   playlist is empty, when every command in it is.
 - **Remove Active Version** (milestone 5, decided in review). Follows the
@@ -591,12 +593,12 @@ None open. The version check for a missing file was decided in milestone 3
   Zoom to Fit and pinch all move one value. The pre-A2 haptic tick at each
   quarter of the range is kept. All three disable when the timeline is too
   short to zoom.
-- **Compare title bar instead of the readout** (after milestone 5; see
-  [a2-compare-title-bar-spec.md](a2-compare-title-bar-spec.md), which
+- **Compare info bar instead of the readout** (after milestone 5; see
+  [a2-compare-info-bar-spec.md](a2-compare-info-bar-spec.md), which
   overrides §5.2's compare readout and §9's back button). The compare
   control bar is the transport row alone, ending 10 pt under it; the
   readout, its back button and its scrolling title are gone, and so is the
-  compare readout title rule (`TRACK n` when blind). A 32 pt title bar
+  compare readout title rule (`TRACK n` when blind). A 32 pt info bar
   sits between the divider and the ruler, on the well with no line to the
   ruler: `N takes` (`1 take`) on the left in 12 pt medium secondary, the
   elapsed time in a 24 pt Glass frame centred in the window, and a
@@ -607,8 +609,28 @@ None open. The version check for a missing file was decided in milestone 3
   ruler shrank from 26 to 21 pt: the labels moved down so their digits'
   tops are level with the major notches' tops, 2 pt from the ruler's top.
   The playhead grabber now overlaps the labels; that was accepted, and it
-  replaces the title-bar spec's §3 rule (labels 1 pt clear of the
+  replaces the info-bar spec's §3 rule (labels 1 pt clear of the
   grabber). The window minimum is documented under "The window is resizable".
-  The title bar shows
+  The info bar shows
   whether or not the artwork is (the spec's first open question); the take
   count has no tooltip or menu (its second).
+- **Window fits added and removed tracks** (after the info-bar variant):
+  v2.9.0's resize, in both modes. Adding tracks grows a window too short
+  to show every row (playlist: item rows and expanded version rows;
+  compare: one lane per version); removing tracks shrinks a window taller
+  than the rest need, never below the minimum. A window the user made
+  taller than its content needs keeps its height as tracks are added. The
+  top edge stays put and growth stops at the bottom of the screen. Mode
+  switches, restoring the playlist, expanding or collapsing an item, and
+  full screen don't trigger the fit (mode switches have their own rule,
+  below). Lanes keep their fixed height; only the
+  window changes. In the background, the playlist dims like compare.
+- **The playlist remembers its height; compare fits its lanes** (after the
+  track fit). Entering compare stores the playlist's window height and
+  sizes the window to the item's lanes, growing or shrinking; within
+  compare, the track fit applies. Leaving compare restores the playlist's
+  height. Both keep the top edge fixed and stay on screen; the width is
+  shared. The playlist height is stored without the cover, so toggling the
+  artwork in compare carries over. Until a playlist height is stored, the
+  playlist keeps the current height. (Briefly, compare remembered its own
+  height too; it was dropped for fitting its lanes.)

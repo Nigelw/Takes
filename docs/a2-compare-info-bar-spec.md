@@ -1,10 +1,13 @@
-# A2 compare: title bar instead of the readout
+# A2 compare: info bar instead of the readout
 
 A variant of A2's compare mode ([a2-redesign-spec.md](a2-redesign-spec.md),
 §5.2 and §8). The compare control bar loses its readout and back button. A
-32 pt title bar takes their place directly above the ruler: the take count on
+32 pt info bar takes their place directly above the ruler: the take count on
 the left, the elapsed time in a small Glass frame in the centre, and a Done
 button on the right.
+
+The canvas calls it the title bar; the app calls it the info bar so it isn't
+confused with the window's titlebar.
 
 Design reference: the "A2 · Compare, title bar instead of the readout"
 artboard (`A2-CompareTitle.dc.html`) on the Design page of the canvas,
@@ -24,27 +27,27 @@ Playlist mode does not change.
    `readoutBottomPadding` for compare; the bar ends at the transport row's
    bottom padding (10 pt).
 3. The control bar's divider: unchanged.
-4. **Title bar, new, 32 pt.**
+4. **Info bar, new, 32 pt.**
 5. Ruler (26 pt plus its 1 pt bottom border), lanes, bottom bar: unchanged
    apart from the ruler labels (§3).
 
 Net effect with the default sizes: the content below the divider starts
 10 pt higher in compare than today (the 30 pt readout and its 12 pt gap go;
-the 32 pt title bar arrives below the divider instead). Lanes keep their
+the 32 pt info bar arrives below the divider instead). Lanes keep their
 fixed 96 pt height; the extra space shows more of the lanes. Below the
 transport row the playlist bar keeps 64 pt (10 + 42 pt readout + 12) and the
 compare bar now keeps 10, so the compare bar is 54 pt shorter rather than
 12; update the "control-bar heights differ by mode" decision accordingly.
 The transport row itself doesn't move between modes.
 
-## 2. Title bar
+## 2. Info bar
 
 - **Height** 32 pt, full width, 10 pt edge insets.
 - **Background:** the same as the ruler's, with no line between them, so the
-  title bar and ruler read as one band. In the app the ruler has no fill of
+  info bar and ruler read as one band. In the app the ruler has no fill of
   its own and shares the well with the lanes (a2-redesign-spec §13, "Lane
-  waveform"), so the title bar uses the well colour too. The canvas draws the
-  ruler and title bar `#27272a` on a `#1f1f21` well; follow the app, not the
+  waveform"), so the info bar uses the well colour too. The canvas draws the
+  ruler and info bar `#27272a` on a `#1f1f21` well; follow the app, not the
   canvas.
 - **Three columns:** left and right take equal flexible widths and the centre
   takes its natural width, so the time stays centred in the window whatever
@@ -119,7 +122,7 @@ are.
 ## 5. Done when
 
 - The canonical `xcodebuild test` passes. Update or add tests for the
-  compare control-bar height, the title bar's height, the take-count text
+  compare control-bar height, the info bar's height, the take-count text
   (singular and plural), and the ruler label inset against the grabber's
   top (`labelTopInset` plus the label height ≤ `CompareLaneLayout.seatBottom
   - 16 - 1`).
@@ -134,7 +137,7 @@ are.
 
 ## 6. Open questions
 
-- Should the title bar also appear when the artwork is hidden? This document
+- Should the info bar also appear when the artwork is hidden? This document
   assumes yes: it sits below the control bar, so the artwork state doesn't
   affect it.
 - Does the take count need a tooltip or menu (for example the item's title)?

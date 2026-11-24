@@ -253,9 +253,9 @@ enum CompareLaneLayout {
     static var stripFrameHeight: CGFloat { waveformBand().minY }
 }
 
-// MARK: - Compare title bar
+// MARK: - Compare info bar
 
-/// The compare title bar (A2 compare title-bar variant §2): 32 pt between
+/// The compare info bar (A2 compare info-bar variant §2): 32 pt between
 /// the control bar's divider and the ruler, on the well with no line to the
 /// ruler. The take count on the left, the elapsed time centred in the
 /// window, Done on the right.
@@ -263,31 +263,31 @@ enum CompareLaneLayout {
 /// The bar's own body reads nothing from the controller. The count and the
 /// time are leaves: the count re-renders when the session changes, the time
 /// (`ControlBarElapsedDigits`) once per displayed second.
-struct CompareTitleBar: View {
+struct CompareInfoBar: View {
     let controller: PlaybackController
     let done: () -> Void
 
     var body: some View {
-        CompareTitleBarRow {
+        CompareInfoBarRow {
             CompareTakeCount(controller: controller)
-            CompareTitleBarTime(controller: controller)
+            CompareInfoBarTime(controller: controller)
             Button("Done", action: done)
                 .buttonStyle(CompareDoneButtonStyle())
                 .help("Back to Playlist")
                 .accessibilityLabel("Back to Playlist")
         }
-        .padding(.horizontal, CompareTitleBarMetrics.edgeInset)
-        .frame(height: CompareTitleBarMetrics.height)
+        .padding(.horizontal, CompareInfoBarMetrics.edgeInset)
+        .frame(height: CompareInfoBarMetrics.height)
         .frame(maxWidth: .infinity)
     }
 }
 
-enum CompareTitleBarMetrics {
+enum CompareInfoBarMetrics {
     static let height: CGFloat = 32
     static let edgeInset: CGFloat = 10
 }
 
-enum CompareTitleBarText {
+enum CompareInfoBarText {
     /// `3 takes`; `1 take` (removal can leave compare with one version).
     /// Unchanged in Blind Listening Mode: the count reveals nothing.
     static func takeCount(_ count: Int) -> String {
@@ -301,7 +301,7 @@ private struct CompareTakeCount: View {
     let controller: PlaybackController
 
     var body: some View {
-        Text(CompareTitleBarText.takeCount(controller.displayedTrackRowCount))
+        Text(CompareInfoBarText.takeCount(controller.displayedTrackRowCount))
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(.secondary)
             .lineLimit(1)
@@ -309,11 +309,11 @@ private struct CompareTakeCount: View {
     }
 }
 
-/// The title bar's three columns: the centre at its natural width, centred
+/// The info bar's three columns: the centre at its natural width, centred
 /// in the bar whatever the sides hold; the sides each get the equal width
 /// left beside it, the first leading-aligned and the last trailing-aligned.
 /// Expects three subviews.
-struct CompareTitleBarRow: Layout {
+struct CompareInfoBarRow: Layout {
     static let columnSpacing: CGFloat = 8
 
     /// The width each side column may take beside a centre of `centerWidth`.
@@ -421,7 +421,7 @@ struct CompareDoneButtonStyle: ButtonStyle {
 /// notches hang from the bottom edge, and each label sits 4 pt right of its
 /// major notch (`TimelineHeaderLabelLayout.leading`) with its digits' tops
 /// level with the notch's top. The playhead grabber overlaps the labels; that
-/// is accepted (it replaced the title-bar variant's §3 rule, which kept them
+/// is accepted (it replaced the info-bar variant's §3 rule, which kept them
 /// clear of it on a 26 pt ruler).
 enum TimelineRulerMetrics {
     /// v2.9.0's notch heights.
@@ -1301,16 +1301,16 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             controlBar
             VStack(spacing: 0) {
-                CompareTitleBar(controller: controller) {
+                CompareInfoBar(controller: controller) {
                     Task { await coordinator.backToPlaylist() }
                 }
-                .componentDebugLabel("Title Bar", enabled: settings.showsComponentDebugLabels)
+                .componentDebugLabel("Info Bar", enabled: settings.showsComponentDebugLabels)
                 trackTimelineSection
                     .frame(maxHeight: .infinity)
             }
-            // Recess the title bar, ruler and lanes beneath the lighter
+            // Recess the info bar, ruler and lanes beneath the lighter
             // transport surface. The control bar's groove is the only divider
-            // between them: no line between the title bar and the ruler, and
+            // between them: no line between the info bar and the ruler, and
             // the ruler has no top border (A2 §3), so the two read as one band.
             .background(Theme.timelineWellShade)
             // Below the lanes, which it shortens; the lanes keep their fixed
@@ -1324,7 +1324,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Color.clear
                 .frame(
-                    height: controlBarHeight + CompareTitleBarMetrics.height
+                    height: controlBarHeight + CompareInfoBarMetrics.height
                         + (controller.displayedTrackRowCount == 0 ? 0 : CompareLaneLayout.seatBottom)
                 )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
@@ -1336,8 +1336,8 @@ struct ContentView: View {
     }
 
     /// Compare control bar (spec §5.1): Blind · Play · Switch Track · Repeat,
-    /// with no readout. The elapsed time and Done are in the title bar below
-    /// the divider (A2 compare title-bar variant).
+    /// with no readout. The elapsed time and Done are in the info bar below
+    /// the divider (A2 compare info-bar variant).
     private var controlBar: some View {
         ControlBarLayout {
             blindListeningButton
@@ -3013,7 +3013,10 @@ struct InactiveWindowInteractionShield: NSViewRepresentable {
     }
 }
 
-private struct WindowActivityAppearanceModifier: ViewModifier {
+/// Dims a mode's content (control bar, list or lanes, bottom bar) while the
+/// main window is in the background, like an inactive AppKit window. Both
+/// modes use it; the cover above them stays at full colour.
+struct WindowActivityAppearanceModifier: ViewModifier {
     let isActive: Bool
 
     func body(content: Content) -> some View {
@@ -3031,7 +3034,7 @@ private struct WindowActivityAppearanceModifier: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
     func windowActivityAppearance(isActive: Bool) -> some View {
         modifier(WindowActivityAppearanceModifier(isActive: isActive))
     }

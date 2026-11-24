@@ -610,7 +610,6 @@ struct PlaylistCoordinatorTests {
 
         #expect(imported.count == 2)
         #expect(coordinator.workspace.items.map(\.versions.count) == [2, 2])
-        #expect(coordinator.importSummaryMessage?.contains("4 files added as 2 playlist items") == true)
         undoManager.undo()
         #expect(coordinator.workspace.items.isEmpty)
     }
