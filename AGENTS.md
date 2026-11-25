@@ -175,8 +175,11 @@ Key ownership:
   modification date; least recently used evicted past 64 MB), which
   outlives compare's view and its `WaveformStore`, so re-entering an item
   already compared, or any item sharing a file, draws its lanes without
-  decoding. Unfinished, cancelled and empty (read-error) results are never
-  cached.
+  decoding. Only a full read is cached (`WaveformProgress.decoded`); a
+  cancelled decode, or one that stopped early (`.stoppedEarly`: the file
+  wouldn't open or a read failed or came up short), is not, so the next
+  activation retries it. The identity reads size and date from the
+  symlink-resolved file, so rewriting a link's target misses the cache.
 - `AudioFileLoader.swift`: local file metadata through `AVAudioFile`, embedded
   title/artist/album tags and cover art (`embeddedArtworkData(for:)`) through
   `AVURLAsset`, and audio-runtime file preparation.
@@ -757,8 +760,9 @@ these reintroduces the exact regressions it fixed):
   and automatic event-save observation rearming.
 - `PlaylistWaveformContextTests.swift`: stale waveform rejection across
   activations, finished waveforms kept when the same item re-activates, and
-  `WaveformCache` (reuse across stores and items, unfinished results left
-  out, LRU eviction by byte budget).
+  `WaveformCache` (reuse across stores and items, unfinished and
+  stopped-early results left out, the identity following a symlink's
+  target, LRU eviction by byte budget).
 - `PlaylistWorkspaceTests.swift`: playlist value encoding/validation, stable
   ownership, canonical duplicates, atomic organization operations, the
   key-version rule (first non-rejected, all-rejected fallback, missing key
