@@ -1031,9 +1031,16 @@ private struct FileCommands: Commands {
 private struct EditCommands: Commands {
     let coordinator: PlaylistCoordinator
     @FocusedValue(\.playlistCommandContext) private var playlistContext
+    @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
+    @FocusedValue(\.mainWindowCommandState) private var mainWindowCommandState
     @FocusedValue(\.canDeselect) private var canDeselect
 
     private var isComparison: Bool { coordinator.mode.itemID != nil }
+
+    private var selectsPlaylistRows: Bool {
+        playlistContext != nil && canUseGlobalMenuShortcuts == true
+            && mainWindowCommandState?.visibility.showsPlaylist == true
+    }
 
     var body: some Commands {
         CommandGroup(replacing: .pasteboard) {
@@ -1041,7 +1048,13 @@ private struct EditCommands: Commands {
             responderCommand("Copy", key: "c", action: #selector(NSText.copy(_:)))
             responderCommand("Paste", key: "v", action: #selector(NSText.paste(_:)))
             Divider()
-            responderCommand("Select All", key: "a", action: #selector(NSText.selectAll(_:)))
+            if selectsPlaylistRows {
+                Button("Select All") { playlistContext?.selectAll() }
+                    .keyboardShortcut("a", modifiers: [.command])
+                    .disabled(coordinator.workspace.items.isEmpty)
+            } else {
+                responderCommand("Select All", key: "a", action: #selector(NSText.selectAll(_:)))
+            }
             Button(isComparison ? "Deselect" : "Deselect All") {
                 if isComparison {
                     coordinator.deselectLoop()

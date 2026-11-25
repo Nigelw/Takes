@@ -178,7 +178,8 @@ private struct ControlBarReadoutTitleField: View {
             .frame(maxWidth: .infinity)
             .frame(height: metrics.lineHeight)
             .overlay(alignment: .leading) {
-                DotMatrixMarqueeText(text: title, columns: columns, metrics: metrics)
+                DotMatrixMarqueeText(text: title.isEmpty ? "READY" : title, columns: columns, metrics: metrics)
+                    .opacity(title.isEmpty ? 0.65 : 1)
             }
             .onGeometryChange(for: Int.self) { proxy in
                 // A line of n cells is n advances minus the trailing cell gap.
@@ -186,7 +187,7 @@ private struct ControlBarReadoutTitleField: View {
             } action: { columns = $0 }
             .accessibilityElement()
             .accessibilityLabel("Title")
-            .accessibilityValue(title)
+            .accessibilityValue(title.isEmpty ? "No track loaded" : title)
     }
 }
 

@@ -68,6 +68,10 @@ struct PlaylistCommandContext {
     var canRemove: Bool { !itemIDs.isEmpty || !versionIDs.isEmpty }
     var canSeparate: Bool { !versionsToSeparate.isEmpty }
 
+    func selectAll() {
+        presentation.selection = Set(presentation.visibleRows(in: coordinator.workspace))
+    }
+
     func deselectAll() {
         presentation.selection = []
     }
@@ -381,6 +385,7 @@ struct PlaylistView: View {
     @ObservedObject var presentation: PlaylistPresentationState
     @ObservedObject var openFiles: OpenFileCommandState
     let artworkStore: PlaylistArtworkStore
+    let isDropTargeted: Bool
     @Environment(\.undoManager) private var undoManager
     @EnvironmentObject private var settings: AppSettings
 
@@ -388,14 +393,12 @@ struct PlaylistView: View {
         let items = coordinator.workspace.items
         Group {
             if items.isEmpty {
-                ContentUnavailableView {
-                    Label("Your Playlist", systemImage: "music.note.list")
-                } description: {
-                    Text("Add audio files, then group versions of a song to compare them.")
-                } actions: {
-                    Button("Add Files…") { openFiles.presentOpenDialog() }
+                FileImportEmptyState(
+                    icon: "music.note.list", dragPrompt: "Drag Files Here to Play", clickPrompt: "Click Here to Play",
+                    accessibilityLabel: "Add audio files to the playlist", isDropTargeted: isDropTargeted
+                ) {
+                    openFiles.presentOpenDialog()
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 PlaylistOutline(
                     playlist: coordinator,
