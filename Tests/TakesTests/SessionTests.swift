@@ -129,7 +129,7 @@ struct SessionTests {
         let cell = PlaylistVersionCellView()
 
         light.performAsCurrentDrawingAppearance {
-            cell.configure(title: "Alternate Mix", format: "FLAC", duration: "2:41", mark: .none, toolTip: "")
+            cell.configure(title: "Alternate Mix", format: "FLAC", duration: "2:41", marks: .none, toolTip: "")
         }
         let titleColor = try #require(cell.textField?.textColor)
 
@@ -702,13 +702,73 @@ struct SessionTests {
         #expect(!session.isPlayable)
         session.tracks.append(SessionTrack(loadedTrack: present))
         #expect(session.isPlayable)
-        // The error band covers the track's extent, clamped to the lane.
-        #expect(LaneWaveformRenderer.trackExtent(width: 200, trackStart: 0, trackDuration: 10,
-                                                 visibleStart: 0, visibleSpan: 20) == 0...100)
-        #expect(LaneWaveformRenderer.trackExtent(width: 200, trackStart: -5, trackDuration: 30,
-                                                 visibleStart: 0, visibleSpan: 20) == -1...201)
-        #expect(LaneWaveformRenderer.trackExtent(width: 200, trackStart: 30, trackDuration: 10,
-                                                 visibleStart: 0, visibleSpan: 20) == nil)
+        // Missing lanes stay in the switch order (silent while active).
+        session.activeTrackID = session.tracks[1].id
+        #expect(session.canSwitchPlayback)
+        #expect(session.switchTarget(forward: true) == session.tracks[0].id)
+    }
+
+    @MainActor
+    @Test
+    func rejectedAndMissingLanesShareTheHatchingAcrossTheWholeLane() {
+        // 2 pt stripes every 8 pt, covering the lane edge to edge.
+        let size = CGSize(width: 360, height: 95)
+        let stripes = LaneHatching.stripes(in: size)
+        #expect(LaneHatching.stripeWidth == 2 && LaneHatching.period == 8)
+        let bounds = stripes.boundingRect
+        #expect(bounds.minX <= 0 && bounds.maxX >= size.width)
+        #expect(bounds.minY == 0 && bounds.maxY == size.height)
+        // Stripes start every 8 pt along the top (…, 1, 9, …) and lean right
+        // as they go down.
+        #expect(stripes.contains(CGPoint(x: 2.5, y: 0.5)))
+        #expect(!stripes.contains(CGPoint(x: 6, y: 0.5)))
+        #expect(stripes.contains(CGPoint(x: 12.5, y: 2.5)))
+    }
+
+    // MARK: Culling in compare
+
+    private func makeSwitchSession(rejected: Set<Int>, count: Int = 4, active: Int = 0) -> ComparisonSession {
+        let tracks = (0..<count).map { index -> SessionTrack in
+            var track = makeTrack(name: "\(index).wav")
+            track.isRejected = rejected.contains(index)
+            return SessionTrack(loadedTrack: track)
+        }
+        return ComparisonSession(tracks: tracks, activeTrackID: tracks[active].id, timelineEnd: 10)
+    }
+
+    @Test
+    func switchTrackSkipsRejectedLanesInBothDirectionsAndWraps() {
+        let session = makeSwitchSession(rejected: [1, 2])
+        let ids = session.tracks.map(\.id)
+        #expect(session.switchTarget(forward: true) == ids[3])
+        #expect(session.switchTarget(forward: false) == ids[3])
+        var fromLast = session
+        fromLast.activeTrackID = ids[3]
+        #expect(fromLast.switchTarget(forward: true) == ids[0])
+        #expect(fromLast.switchTarget(forward: false) == ids[0])
+
+        // From a rejected active lane: the next non-rejected lane that way.
+        var fromRejected = session
+        fromRejected.activeTrackID = ids[1]
+        #expect(fromRejected.switchTarget(forward: true) == ids[3])
+        #expect(fromRejected.switchTarget(forward: false) == ids[0])
+    }
+
+    @Test
+    func canSwitchPlaybackNeedsANonRejectedLaneOtherThanTheActiveOne() {
+        #expect(!makeSwitchSession(rejected: [1, 2, 3]).canSwitchPlayback)
+        // The active lane's own flag doesn't count.
+        #expect(makeSwitchSession(rejected: [0, 1, 2]).canSwitchPlayback)
+        #expect(!makeSwitchSession(rejected: [1], count: 2).canSwitchPlayback)
+        // Align still sees every lane.
+        #expect(makeSwitchSession(rejected: [1], count: 2).hasMultipleTracks)
+        // Switch & Repeat with only rejected others behaves like Repeat One.
+        #expect(PlaybackController.advanceAtEnd(
+            mode: .switchAndRepeat, canSwitch: makeSwitchSession(rejected: [1, 2, 3]).canSwitchPlayback
+        ) == .restart)
+        #expect(PlaybackController.advanceAtEnd(
+            mode: .switchAndRepeat, canSwitch: makeSwitchSession(rejected: [1, 2]).canSwitchPlayback
+        ) == .switchThenRestart)
     }
 
     @MainActor
@@ -2497,10 +2557,10 @@ struct SessionTests {
             )
         }
         let mono = version("mono.flac"), stereo = version("stereo.flac")
-        let item = PlaylistItem(title: "Taxman", versions: [mono, stereo], selectedVersionID: mono.id)
+        let item = PlaylistItem(title: "Taxman", versions: [mono, stereo])
 
         #expect(CoverVersionRule.comparison(item: item, audibleVersionID: stereo.id, isBlind: false)?.id == stereo.id)
-        // Blind: the playback version stays up whichever version is audible.
+        // Blind: the key version stays up whichever version is audible.
         #expect(CoverVersionRule.comparison(item: item, audibleVersionID: stereo.id, isBlind: true)?.id == mono.id)
         #expect(CoverVersionRule.comparison(item: item, audibleVersionID: nil, isBlind: false)?.id == mono.id)
 
@@ -2610,13 +2670,15 @@ struct SessionTests {
     // MARK: A2 bottom bars (milestone 5)
 
     private func makeSummaryItem(_ title: String, durations: [TimeInterval], playback: Int = 0) -> PlaylistItem {
+        // Versions above the playback one are rejected, so it is the key.
         let versions = durations.enumerated().map { index, duration in
             PlaylistVersion(
                 file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/\(title)-\(index).flac")),
-                metadata: PlaylistMetadata(duration: duration, fileFormatDescription: "FLAC", displayName: "\(title)-\(index).flac")
+                metadata: PlaylistMetadata(duration: duration, fileFormatDescription: "FLAC", displayName: "\(title)-\(index).flac"),
+                isRejected: index < playback
             )
         }
-        return PlaylistItem(title: title, versions: versions, selectedVersionID: versions[playback].id)
+        return PlaylistItem(title: title, versions: versions)
     }
 
     @Test
@@ -2637,6 +2699,18 @@ struct SessionTests {
         // A version without a known duration adds nothing.
         let unknown = makeSummaryItem("Unknown", durations: [.nan])
         #expect(PlaylistSummaryText.totalDuration(of: [rigby, unknown]) == 127.4)
+    }
+
+    @Test
+    func playlistSummaryLeavesOutRejectedTracks() {
+        // Culling §8 Q2: rejected tracks are excluded from the count and the
+        // total; rejected versions only change which version counts (the key).
+        let taxman = makeSummaryItem("Taxman", durations: [159, 161], playback: 1)
+        var rigby = makeSummaryItem("Eleanor Rigby", durations: [127.4])
+        rigby.isRejected = true
+        #expect(PlaylistSummaryText.text(for: [taxman, rigby]) == "1 track · 2:41")
+        #expect(PlaylistSummaryText.accessibilityText(for: [taxman, rigby]) == "1 track, 2:41 in total")
+        #expect(PlaylistSummaryText.text(for: [rigby]) == "0 tracks · 0:00")
     }
 
     @MainActor
@@ -2672,20 +2746,20 @@ struct SessionTests {
 
     @Test
     func compareBottomBarFollowsTheCompareCommands() {
-        let ready = CompareBottomBarState(hasActiveVersion: true, canSwitchPlayback: true, isAligning: false, canZoomTimeline: true)
+        let ready = CompareBottomBarState(hasActiveVersion: true, hasMultipleTracks: true, isAligning: false, canZoomTimeline: true)
         #expect(ready.canRemove && ready.canAlign && ready.canZoom)
 
         // Remove Active Version stays available on an item's last version, as
         // the lane strip's Remove Version and Delete are.
-        let single = CompareBottomBarState(hasActiveVersion: true, canSwitchPlayback: false, isAligning: false, canZoomTimeline: true)
+        let single = CompareBottomBarState(hasActiveVersion: true, hasMultipleTracks: false, isAligning: false, canZoomTimeline: true)
         #expect(single.canRemove)
         #expect(!single.canAlign)
 
-        let aligning = CompareBottomBarState(hasActiveVersion: true, canSwitchPlayback: true, isAligning: true, canZoomTimeline: true)
+        let aligning = CompareBottomBarState(hasActiveVersion: true, hasMultipleTracks: true, isAligning: true, canZoomTimeline: true)
         #expect(!aligning.canAlign)
         #expect(aligning.canRemove)
 
-        let empty = CompareBottomBarState(hasActiveVersion: false, canSwitchPlayback: false, isAligning: false, canZoomTimeline: false)
+        let empty = CompareBottomBarState(hasActiveVersion: false, hasMultipleTracks: false, isAligning: false, canZoomTimeline: false)
         #expect(!empty.canRemove && !empty.canAlign && !empty.canZoom)
     }
 
@@ -2693,7 +2767,7 @@ struct SessionTests {
     @Test
     func compareBottomBarReadsAnEmptyControllerAsDisabled() {
         let state = CompareBottomBarState(controller: PlaybackController())
-        #expect(state == CompareBottomBarState(hasActiveVersion: false, canSwitchPlayback: false, isAligning: false, canZoomTimeline: false))
+        #expect(state == CompareBottomBarState(hasActiveVersion: false, hasMultipleTracks: false, isAligning: false, canZoomTimeline: false))
     }
 
     @Test
@@ -2946,7 +3020,8 @@ struct SessionTests {
         let untagged = version(title: nil, file: "Alternate Mix.wav")
         var item = PlaylistItem(title: "Original Track Title", versions: [tagged, untagged])
         #expect(PlaylistRowText.itemTitle(item) == "Stereo Mix")
-        item.selectedVersionID = untagged.id
+        // Rejecting the first version makes the next one the key.
+        item.versions[0].isRejected = true
         #expect(PlaylistRowText.itemTitle(item) == "Alternate Mix")
     }
 
@@ -2985,10 +3060,102 @@ struct SessionTests {
         #expect(thumbnail.toolTip == nil)
 
         let version = PlaylistVersionCellView()
-        version.configure(title: "Missing", format: "WAV", duration: "0:35", mark: .warning(message), toolTip: "")
+        version.configure(title: "Missing", format: "WAV", duration: "0:35", marks: .init(warning: message), toolTip: "")
         #expect(version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
-        version.configure(title: "Available", format: "WAV", duration: "0:35", mark: .key, toolTip: "")
+        version.configure(title: "Available", format: "WAV", duration: "0:35", marks: .none, toolTip: "")
         #expect(!version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
+    }
+
+    // MARK: Culling visuals
+
+    @MainActor
+    @Test
+    func rejectedAndMissingRowsDimAlikeAndNowPlayingTintReplacesTheDimming() {
+        typealias S = PlaylistRowTextStyle
+        let plain = S.resolve(emphasized: false, nowPlaying: false, dimmed: false)
+        #expect(plain.title == .labelColor && plain.detail == .secondaryLabelColor)
+        let dimmed = S.resolve(emphasized: false, nowPlaying: false, dimmed: true)
+        #expect(dimmed.title == PlaylistRowPalette.dimmedTitle && dimmed.detail == PlaylistRowPalette.dimmedDetail)
+        // Rejected and missing are one dimmed state on version rows too.
+        #expect(PlaylistVersionCellView.Marks(isRejected: true).isDimmed)
+        #expect(PlaylistVersionCellView.Marks(warning: "Missing").isDimmed)
+        // Now playing tints title and details, and wins over the dimming.
+        let playing = S.resolve(emphasized: false, nowPlaying: true, dimmed: true)
+        #expect(playing.title == PlaylistRowPalette.nowPlayingTitle && playing.detail == PlaylistRowPalette.nowPlayingDetail)
+        // Selected rejected rows keep the selection colours at 65%.
+        let selected = S.resolve(emphasized: true, nowPlaying: false, dimmed: true)
+        #expect(selected.title.alphaComponent == PlaylistRowPalette.selectedDimmedTextOpacity)
+        #expect(abs(selected.detail.alphaComponent - 0.75 * PlaylistRowPalette.selectedDimmedTextOpacity) < 0.001)
+        #expect(S.resolve(emphasized: true, nowPlaying: true, dimmed: false).title.alphaComponent == 1)
+    }
+
+    @MainActor
+    @Test
+    func versionMarkColumnShowsSpeakerWarningAndRejectionSideBySide() {
+        let cell = PlaylistVersionCellView()
+        cell.frame = NSRect(x: 0, y: 0, width: 360, height: PlaylistRowMetrics.versionHeight)
+        cell.configure(title: "Take 9", format: "WAV", duration: "4:12",
+                       marks: .init(warning: "Missing", isRejected: true), toolTip: "")
+        cell.layoutSubtreeIfNeeded()
+        var frames = cell.visibleMarkFrames
+        #expect(frames.count == 2)
+        #expect(frames[0].maxX + PlaylistVersionCellView.markSpacing == frames[1].minX)
+        // Centred together in the 34 pt column under the thumbnail.
+        let column = PlaylistRowMetrics.thumbnailX + PlaylistRowMetrics.thumbnailSide / 2
+        #expect(abs((frames[0].minX + frames[1].maxX) / 2 - column) < 0.5)
+        #expect(cell.accessibilityValue() as? String == "Rejected")
+
+        // A playing rejected version shows the speaker and the × together.
+        cell.configure(title: "Take 1", format: "MP3", duration: "2:34",
+                       marks: .init(isRejected: true, nowPlaying: .playing), toolTip: "")
+        cell.layoutSubtreeIfNeeded()
+        frames = cell.visibleMarkFrames
+        #expect(frames.count == 2)
+        #expect(cell.textField?.textColor == PlaylistRowPalette.nowPlayingTitle)
+
+        cell.configure(title: "Take 2", format: "FLAC", duration: "3:28", marks: .none, toolTip: "")
+        cell.layoutSubtreeIfNeeded()
+        #expect(cell.visibleMarkFrames.isEmpty)
+        #expect(cell.accessibilityValue() == nil)
+    }
+
+    @MainActor
+    @Test
+    func rejectedThumbnailGoesGreyWithABadgeThatStaysInsideTheRow() {
+        let thumbnail = PlaylistThumbnailView(frame: .zero)
+        thumbnail.configure(image: nil, isStacked: true, status: .none, isDimmed: true, isRejected: true)
+        #expect(thumbnail.isDimmed)
+        #expect(thumbnail.showsRejectionBadge)
+        // A playing rejected track: not dimmed, still badged.
+        thumbnail.configure(image: nil, isStacked: true, status: .playing, isDimmed: false, isRejected: true)
+        #expect(!thumbnail.isDimmed)
+        #expect(thumbnail.showsRejectionBadge)
+        // Missing dims without a badge.
+        thumbnail.configure(image: nil, isStacked: false, status: .warning("Missing"), isDimmed: true, isRejected: false)
+        #expect(thumbnail.isDimmed)
+        #expect(!thumbnail.showsRejectionBadge)
+
+        typealias M = PlaylistRowMetrics
+        typealias T = PlaylistThumbnailView
+        let thumbnailTop = (M.itemHeight - M.thumbnailSide) / 2 - T.stackExtent
+        let ringBottom = thumbnailTop + T.badgeFrame.maxY + T.badgeRing
+        #expect(T.badgeFrame.width == 14)
+        #expect(ringBottom <= M.itemHeight)
+        #expect(ringBottom > thumbnailTop + T.stackExtent + M.thumbnailSide)
+    }
+
+    @Test
+    func expandedNowPlayingTrackMovesTheSpeakerToItsVersionRow() {
+        var content = PlaylistItemCellView.Content(
+            title: "Strawberry Fields", metadata: "", duration: "3:28", hasVersions: true, isExpanded: false,
+            nowPlaying: .playing, warning: nil, isDimmed: false, thumbnail: nil
+        )
+        #expect(content.showsSpeakerOnArtwork)
+        content.isExpanded = true
+        #expect(!content.showsSpeakerOnArtwork)
+        // A single-version track has no version rows, so it keeps the speaker.
+        content.hasVersions = false
+        #expect(content.showsSpeakerOnArtwork)
     }
 
     // MARK: Record placeholder

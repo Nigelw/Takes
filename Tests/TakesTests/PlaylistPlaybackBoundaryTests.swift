@@ -13,7 +13,7 @@ struct PlaylistPlaybackBoundaryTests {
 
     @Test func enteringComparisonRetainsIDsAndDeselectsExcludingLoop() {
         let version = makeVersion(offset: -5)
-        var item = PlaylistItem(title: "Song", versions: [version], selectedVersionID: version.id)
+        var item = PlaylistItem(title: "Song", versions: [version])
         item.comparison.loopRegion = LoopRegion(start: 30, end: 40)
         item.comparison.repeatMode = .switchAndRepeat
         let session = PlaylistPlaybackBoundary.session(
@@ -54,7 +54,7 @@ struct PlaylistPlaybackBoundaryTests {
 
     @Test func enteringWithinSavedLoopKeepsLoopAndPausedState() {
         let version = makeVersion(offset: 5)
-        var item = PlaylistItem(title: "Song", versions: [version], selectedVersionID: version.id)
+        var item = PlaylistItem(title: "Song", versions: [version])
         item.comparison.loopRegion = LoopRegion(start: 10, end: 30)
         let session = PlaylistPlaybackBoundary.session(for: item, incomingFilePosition: 10)
         #expect(session.transportPosition == 15)
@@ -65,7 +65,7 @@ struct PlaylistPlaybackBoundaryTests {
     @Test func capturePreservesOrganizationDespiteBlindRuntimeOrder() {
         let first = makeVersion(offset: 0)
         let second = makeVersion(offset: 3)
-        var item = PlaylistItem(title: "Song", versions: [first, second], selectedVersionID: first.id)
+        var item = PlaylistItem(title: "Song", versions: [first, second])
         var session = PlaylistPlaybackBoundary.session(for: item)
         session.tracks.reverse()
         session.tracks[0].loadedTrack.gainDB = -4
@@ -74,7 +74,8 @@ struct PlaylistPlaybackBoundaryTests {
         PlaylistPlaybackBoundary.capture(session, into: &item)
         #expect(item.versions.map(\.id) == [first.id, second.id])
         #expect(item.versions[1].gainDB == -4)
-        #expect(item.selectedVersionID == second.id)
+        // The audible version is listening state, never a stored key.
+        #expect(item.keyVersion?.id == first.id)
         #expect(item.comparison.isBlindListeningModeEnabled)
     }
 

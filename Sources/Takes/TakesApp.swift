@@ -1160,7 +1160,7 @@ private struct PlaybackCommands: Commands {
                 controller.autoAlignTracks()
             }
             .keyboardShortcut("a", modifiers: [.command, .option])
-            .disabled(!isComparison || !controller.session.canSwitchPlayback || controller.isAligning)
+            .disabled(!isComparison || !controller.session.hasMultipleTracks || controller.isAligning)
 
             Menu("Nudge Track") {
                 Button("Nudge Left") {

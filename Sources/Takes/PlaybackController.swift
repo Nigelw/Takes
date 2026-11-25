@@ -931,20 +931,33 @@ final class PlaybackController {
         }
     }
 
+    /// Switch Track (and Switch & Repeat's wrap): the next lane in displayed
+    /// order that isn't rejected (`ComparisonSession.switchTarget`).
     func selectNextTrack() {
-        guard session.canSwitchPlayback else { return }
-        let currentIndex = session.activeTrackIndex ?? -1
-        let nextIndex = currentIndex + 1 < session.tracks.count ? currentIndex + 1 : 0
-        session.activeTrackID = session.tracks[nextIndex].id
+        guard let target = session.switchTarget(forward: true) else { return }
+        session.activeTrackID = target
         applyAudibility()
     }
 
     func selectPreviousTrack() {
-        guard session.canSwitchPlayback else { return }
-        let currentIndex = session.activeTrackIndex ?? 0
-        let previousIndex = currentIndex > 0 ? currentIndex - 1 : session.tracks.count - 1
-        session.activeTrackID = session.tracks[previousIndex].id
+        guard let target = session.switchTarget(forward: false) else { return }
+        session.activeTrackID = target
         applyAudibility()
+    }
+
+    /// Apply the versions' rejection flags to the loaded lanes in place, so a
+    /// rejection edit re-renders only the affected lane and strip. Nothing is
+    /// rescheduled, and the active lane stays active and audible. The gapless
+    /// pre-queue needs no re-arming: it queues every player, and the wrap
+    /// picks the switch target (`selectNextTrack`) when it happens.
+    func setRejectedTracks(_ rejected: Set<SessionTrack.ID>) {
+        var tracks = session.tracks
+        for index in tracks.indices {
+            let isRejected = rejected.contains(tracks[index].id)
+            if tracks[index].loadedTrack.isRejected != isRejected { tracks[index].loadedTrack.isRejected = isRejected }
+        }
+        guard tracks != session.tracks else { return }
+        session.tracks = tracks
     }
 
     func selectActiveTrack(_ trackID: SessionTrack.ID) {
@@ -1176,7 +1189,7 @@ final class PlaybackController {
     /// indeterminate spinner). Tracks with no confident match keep their offsets
     /// and surface the tempo-analysis offer.
     func autoAlignTracks() {
-        guard !isAligning, session.canSwitchPlayback, let anchor = session.activeTrack,
+        guard !isAligning, session.hasMultipleTracks, let anchor = session.activeTrack,
               !anchor.loadedTrack.isMissing else { return }
         // Missing versions have no audio to align.
         let others = session.tracks.filter { $0.id != anchor.id && !$0.loadedTrack.isMissing }

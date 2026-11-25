@@ -113,17 +113,21 @@ struct BottomBarAddRemoveControl: NSViewRepresentable {
 // MARK: - Playlist
 
 /// The playlist bar's summary (A2 §7): `6 tracks · 19:35`, one track per
-/// playlist item. The total adds up each item's playback version, the duration its row shows. An empty
-/// playlist shows no summary; its empty state already says so.
+/// playlist item. The total adds up each item's key version, the duration
+/// its row shows. Rejected tracks are left out of both the count and the
+/// total (culling spec §8, question 2). An empty playlist shows no summary;
+/// its empty state already says so.
 enum PlaylistSummaryText {
     static func text(for items: [PlaylistItem]) -> String {
         guard !items.isEmpty else { return "" }
-        return "\(count(items.count)) · \(PlaylistRowText.duration(totalDuration(of: items)))"
+        let counted = items.filter { !$0.isRejected }
+        return "\(count(counted.count)) · \(PlaylistRowText.duration(totalDuration(of: counted)))"
     }
 
     static func accessibilityText(for items: [PlaylistItem]) -> String {
         guard !items.isEmpty else { return "" }
-        return "\(count(items.count)), \(PlaylistRowText.duration(totalDuration(of: items))) in total"
+        let counted = items.filter { !$0.isRejected }
+        return "\(count(counted.count)), \(PlaylistRowText.duration(totalDuration(of: counted))) in total"
     }
 
     static func count(_ count: Int) -> String {
@@ -132,7 +136,7 @@ enum PlaylistSummaryText {
 
     static func totalDuration(of items: [PlaylistItem]) -> TimeInterval {
         items.reduce(0) { total, item in
-            let duration = item.selectedVersion?.metadata.duration ?? 0
+            let duration = item.keyVersion?.metadata.duration ?? 0
             return total + (duration.isFinite && duration > 0 ? duration : 0)
         }
     }
@@ -182,7 +186,8 @@ struct PlaylistBottomBar: View {
             .fixedSize()
             Menu {
                 playlistOrganizationMenuItems(
-                    context: context, availability: PlaylistOrganizationAvailability(context), move: context.moveSelection
+                    context: context, availability: PlaylistOrganizationAvailability(context), move: context.moveSelection,
+                    toggleRejection: context.toggleRejection
                 )
             } label: {
                 Image(systemName: "ellipsis")
@@ -219,9 +224,9 @@ struct CompareBottomBarState: Equatable {
     /// ⌘+ / ⌘−: content longer than the smallest visible window.
     var canZoom: Bool
 
-    init(hasActiveVersion: Bool, canSwitchPlayback: Bool, isAligning: Bool, canZoomTimeline: Bool) {
+    init(hasActiveVersion: Bool, hasMultipleTracks: Bool, isAligning: Bool, canZoomTimeline: Bool) {
         canRemove = hasActiveVersion
-        canAlign = canSwitchPlayback && !isAligning
+        canAlign = hasMultipleTracks && !isAligning
         canZoom = canZoomTimeline
     }
 
@@ -229,7 +234,7 @@ struct CompareBottomBarState: Equatable {
     init(controller: PlaybackController) {
         self.init(
             hasActiveVersion: controller.session.activeTrackID != nil,
-            canSwitchPlayback: controller.session.canSwitchPlayback,
+            hasMultipleTracks: controller.session.hasMultipleTracks,
             isAligning: controller.isAligning,
             canZoomTimeline: controller.canZoomTimeline
         )

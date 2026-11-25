@@ -116,6 +116,33 @@ struct PlaylistCommandContext {
         presentation.prune(in: coordinator.workspace)
     }
 
+    /// Reject / Clear Rejection targets (culling spec §4.1, §5.2). In the
+    /// playlist a selected item row targets the track only, not its
+    /// versions; selected version rows target those versions. In compare the
+    /// target is the active lane.
+    var rejectionTargets: (items: [UUID], versions: [UUID]) {
+        if let active = coordinator.activeComparisonVersionID { return ([], [active]) }
+        guard coordinator.mode == .playlist else { return ([], []) }
+        let rows = targetRows
+        return (itemIDs, coordinator.workspace.allVersions.filter { rows.contains(.version($0.id)) }.map(\.id))
+    }
+
+    var canToggleRejection: Bool {
+        let targets = rejectionTargets
+        return !targets.items.isEmpty || !targets.versions.isEmpty
+    }
+
+    /// Every target is already rejected, so the command reads Clear Rejection.
+    var rejectionClears: Bool {
+        let targets = rejectionTargets
+        return coordinator.rejectionClears(itemIDs: targets.items, versionIDs: targets.versions)
+    }
+
+    func toggleRejection() {
+        let targets = rejectionTargets
+        coordinator.toggleRejection(itemIDs: targets.items, versionIDs: targets.versions, undoManager: undoManager)
+    }
+
     /// View ▸ Compare (⌘]): the one multi-version item the selection points
     /// at, as the row's Compare pill and context menu allow.
     var compareItemID: UUID? {
@@ -193,6 +220,17 @@ struct PlaylistCommandContext {
     }
 }
 
+/// Culling's Reject / Clear Rejection command, shared by the Playlist menu,
+/// the bottom bar's pull-down, the row and lane-strip context menus, and the
+/// key monitor.
+enum PlaylistRejectionCommand {
+    static let key: KeyEquivalent = "r"
+    /// The R key's virtual key code, for the workspace key monitor.
+    static let keyCode: UInt16 = 15
+
+    static func title(clears: Bool) -> String { clears ? "Clear Rejection" : "Reject" }
+}
+
 /// Publish validation by value so the scene menu updates as selection and order change.
 struct PlaylistOrganizationAvailability: Equatable {
     let canGroup: Bool
@@ -200,6 +238,8 @@ struct PlaylistOrganizationAvailability: Equatable {
     let canMoveUp: Bool
     let canMoveDown: Bool
     let canClear: Bool
+    let canReject: Bool
+    let rejectionClears: Bool
 
     @MainActor
     init(_ context: PlaylistCommandContext) {
@@ -209,7 +249,13 @@ struct PlaylistOrganizationAvailability: Equatable {
         canMoveUp = isPlaylist ? context.canMove(.up) : context.coordinator.canMoveActiveComparisonVersion(.up)
         canMoveDown = isPlaylist ? context.canMove(.down) : context.coordinator.canMoveActiveComparisonVersion(.down)
         canClear = isPlaylist && !context.coordinator.workspace.items.isEmpty
+        canReject = context.canToggleRejection
+        rejectionClears = context.rejectionClears
     }
+
+    /// The Reject command's title: Clear Rejection when every target is
+    /// already rejected.
+    var rejectionTitle: String { PlaylistRejectionCommand.title(clears: rejectionClears) }
 }
 
 private struct PlaylistCommandContextKey: FocusedValueKey {
@@ -239,13 +285,19 @@ struct PlaylistCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Playlist") {
-            playlistOrganizationMenuItems(context: context, availability: availability) { direction in
+            playlistOrganizationMenuItems(context: context, availability: availability, move: { direction in
                 if coordinator.mode == .playlist {
                     context?.moveSelection(direction)
                 } else {
                     coordinator.moveActiveComparisonVersion(direction, undoManager: NSApp.mainWindow?.undoManager)
                 }
-            }
+            }, toggleRejection: {
+                if let context {
+                    context.toggleRejection()
+                } else if let active = coordinator.activeComparisonVersionID {
+                    coordinator.toggleRejection(versionIDs: [active], undoManager: NSApp.mainWindow?.undoManager)
+                }
+            })
         }
     }
 }
@@ -255,8 +307,14 @@ struct PlaylistCommands: Commands {
 @MainActor @ViewBuilder
 func playlistOrganizationMenuItems(
     context: PlaylistCommandContext?, availability: PlaylistOrganizationAvailability?,
-    move: @escaping (RowMoveDirection) -> Void
+    move: @escaping (RowMoveDirection) -> Void, toggleRejection: @escaping () -> Void
 ) -> some View {
+    // Plain R, like compare's X: the workspace key monitor handles the key
+    // first (so the outline's type-select never takes it); the menu shows it.
+    Button(availability?.rejectionTitle ?? PlaylistRejectionCommand.title(clears: false)) { toggleRejection() }
+        .keyboardShortcut(PlaylistRejectionCommand.key, modifiers: [])
+        .disabled(availability?.canReject != true)
+    Divider()
     Button("Group as Versions") { context?.group() }
         .keyboardShortcut("g", modifiers: [.command])
         .disabled(availability?.canGroup != true)
@@ -307,6 +365,7 @@ struct PlaylistView: View {
                     metadataFields: settings.playlistMetadataFields,
                     fileIssues: coordinator.fileIssues,
                     currentItemID: coordinator.currentItemID,
+                    currentVersionID: coordinator.currentVersionID,
                     isPlaying: coordinator.isPlaying,
                     isActive: coordinator.mode == .playlist,
                     moveRevision: coordinator.rowMoveRevision,

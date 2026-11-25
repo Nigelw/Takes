@@ -88,14 +88,18 @@ Key ownership:
   artwork sleeve glyph.
 - `PlaylistView.swift`: the playlist list's SwiftUI host (empty state, no
   header bar), selection/expansion presentation state, the Playlist menu, and
-  the selection-aware organization commands (`PlaylistCommandContext`); the
+  the selection-aware organization commands (`PlaylistCommandContext`,
+  including Reject / Clear Rejection's targets, `rejectionTargets`); the
   shared organization menu builder (`playlistOrganizationMenuItems`) and
   focused validation (`PlaylistOrganizationAvailability`) for the Playlist
-  menu and the bottom bar's `…` pull-down.
+  menu and the bottom bar's `…` pull-down; and `PlaylistRejectionCommand`
+  (the command's title rule and its R key).
 - `PlaylistOutlineView.swift`: the playlist table — an `NSOutlineView` wrapped
   in `NSViewRepresentable` (items with versions as children), the A2 rows
   (`PlaylistRowMetrics`, `PlaylistRowView`, `PlaylistItemCellView`,
-  `PlaylistVersionCellView`, the thumbnail, chevron and Compare pill views),
+  `PlaylistVersionCellView` and its mark column, the thumbnail with its
+  rejection badge, chevron and Compare pill views), the row text colours
+  (`PlaylistRowTextStyle`), the rejection glyph (`RejectionGlyph`),
   visible-row thumbnail requests, context menu, keyboard
   handling, and row drag and drop. Row colors are `PlaylistRowPalette` in
   `Theme.swift`.
@@ -109,20 +113,31 @@ Key ownership:
   playhead (`PlayheadGeometry`, `TimelinePlayheadVisual`), the full-width
   lanes (`TrackRowView` → `LaneView` → `WaveformLaneView`), their info
   strips (`LaneStripView`, `LaneOffsetField`, `LaneStripText`, the strip's
-  drag source and context menu), loop gestures, and reorder drag-and-drop.
+  drag source and context menu, `RejectionBadgeView`), the rejected and
+  missing lanes' hatching (`LaneHatching`), loop gestures, and reorder
+  drag-and-drop.
   The compare bottom bar sits below the lanes; it lives in `BottomBar.swift`.
 - `AppSettings.swift` and `SettingsView.swift`: persisted user preferences
   (including `WorkspaceVisibility`, the titlebar toggles' state) and the Settings
   window.
 - `PlaybackController.swift`: loading files, session state, transport control,
-  playback scheduling, and audibility.
-- `Models.swift`: `LoadedTrack`, `SessionTrack`, `ComparisonSession`,
-  `PlaybackError`, repeat modes, loop regions, and timeline marker helpers.
-- `PlaylistWorkspace.swift`: playlist value model, stable version ownership,
-  organization operations, and snapshot validation.
+  playback scheduling, audibility, compare switching, and applying
+  rejection to loaded lanes in place (`setRejectedTracks`).
+- `Models.swift`: `LoadedTrack` (including `isMissing` and `isRejected`),
+  `SessionTrack`, `ComparisonSession` (switching: `canSwitchPlayback`,
+  `switchTarget(forward:)`; Align's `hasMultipleTracks`), `PlaybackError`,
+  repeat modes, loop regions, and timeline marker helpers.
+- `PlaylistWorkspace.swift`: playlist value model (the culling flags
+  `PlaylistItem.isRejected` and `PlaylistVersion.isRejected`, the derived
+  `PlaylistItem.keyVersion`, schema-1 decoding of the retired stored key),
+  stable version ownership, organization operations (`setRejected`
+  included), and snapshot validation.
 - `PlaylistCoordinator.swift`: mode transitions, captured-destination imports,
-  playlist traversal, organization/Undo, and active runtime coordination.
-- `PlaylistWorkspaceStore.swift`: versioned atomic snapshots, recovery protection,
+  playlist traversal (skipping rejected and unavailable tracks),
+  organization/Undo (Reject / Clear Rejection: `toggleRejection`), and active
+  runtime coordination.
+- `PlaylistWorkspaceStore.swift`: versioned atomic snapshots (schema 2;
+  schema 1 still decodes, `migratableSchemaVersions`), recovery protection,
   bookmarks, and retained download storage.
 - `PlaylistPersistenceController.swift`: startup restoration, event saves,
   playback checkpoints, and quit-time flushing.
@@ -165,8 +180,8 @@ Key ownership:
 ## Playback Model
 
 Takes keeps an ordered playlist with up to 32 versions per item and no global
-32-file cap. Playlist playback loads only the selected version, at original
-gain and file time. Comparison loads only the current item's versions on a
+32-file cap. Playlist playback loads only one version (the item's key
+version, or the version named explicitly), at original gain and file time. Comparison loads only the current item's versions on a
 shared signed timeline. Playback uses one
 `AVAudioEngine`, one `AVAudioPlayerNode` per loaded track, and one per-track
 mixer node per loaded track. All loaded tracks are scheduled against the same
@@ -184,8 +199,9 @@ Comparison transport behavior to preserve:
 - Repeat Off parks the playhead at the end of the playable range; the next Play
   starts from the beginning of the range.
 - Repeat One restarts the current track at the beginning of the playable range.
-- Switch & Repeat advances to the next track and restarts; with one track it
-  behaves like Repeat One.
+- Switch & Repeat advances to the next track that isn't rejected and
+  restarts; with one track, or no other non-rejected track, it behaves like
+  Repeat One.
 - A selected loop constrains the playable range until the loop is deselected.
 - Timeline zoom changes the visible window, not the underlying session range.
 - `AVAudioEngineConfigurationChange` should reschedule playback after output
@@ -214,10 +230,12 @@ These are here to prevent parallel implementations and subtle regressions:
   metadata) but gets no audio nodes (`replaceRuntimeSession` skips it), no
   waveform decode (`WaveformStore.sync`), and no alignment; it is silent
   like a track out of range, and `ComparisonSession.isPlayable` needs at
-  least one available track. Its lane draws the error state
-  (`WaveformLaneView.missingExtent`: the track's extent as a dashed warning
-  band, blind or not), its strip shows `File Not Found` in place of the
-  format, and the strip menu adds Locate File… (the playlist's Locate
+  least one available track. It stays in the switch order. Its lane draws
+  no waveform and shows the rejected lanes' neutral hatching across the
+  whole lane (`LaneHatching`, drawn by `TrackRowView`, blind or not; there
+  is no dashed warning band), its strip dims like a rejected lane's and
+  shows `File Not Found` in place of the format, and the strip menu adds
+  Locate File… (the playlist's Locate
   dialog, through `ContentView.locateVersion`) and disables Reveal in
   Finder. Locating any version of the compared item rebuilds compare
   (`locateFile`), keeping the audible version.
@@ -276,20 +294,32 @@ These are here to prevent parallel implementations and subtle regressions:
   AppKit's disclosure triangle and indentation are suppressed
   (`frameOfOutlineCell`, `frameOfCell`); item rows (46 pt) draw their own
   chevron in an always-reserved 12 pt slot, only on multi-version items.
-  `PlaylistRowView` draws every background (selection, now-playing tint,
-  hover, the drop-on-item ring) inside the 10 pt edge inset with a 6 pt
-  radius; the geometry lives in `PlaylistRowMetrics`. Item and version
+  `PlaylistRowView` draws every background (selection, hover, the
+  drop-on-item ring) inside the 10 pt edge inset with a 6 pt radius; the
+  geometry lives in `PlaylistRowMetrics`. Now playing draws no row
+  background. Item and version
   titles truncate in the middle; item metadata truncates at the tail.
   Item rows use their key version's title tag or filename stem, duration,
   thumbnail, and metadata. The Metadata tab in Settings controls which fields
   appear on the second line (`TrackMetadataField`, Artist by default).
   `PlaylistRowText.metadataLine` joins enabled, available values with ` • `.
+- The key version is derived, never stored ([docs/culling-spec.md](docs/culling-spec.md)
+  §2–3): `PlaylistItem.keyVersion` is the first version that isn't
+  rejected, else the first version. Availability doesn't enter into it (a
+  missing key stays key, so unplugging a drive never changes a row). To
+  change it, reorder versions or reject the ones above it; there is no Set
+  as Key Version command or control. A key change never touches playback:
+  the current version keeps playing until the track is next reached by
+  sequential navigation or played from its item row. Snapshot schema 2
+  dropped `selectedVersionID`; decoding a schema-1 item moves its stored
+  key to the front of `versions`.
 - Version rows (30 pt) are named by their title tag, else the filename
   without its extension (`PlaylistRowText.versionName`). A single click
-  selects the row. Double-clicking a version plays it from the beginning
-  and preserves the key version. Click the empty circle on a hovered
-  version row or choose Set as Key Version from its context menu to change
-  the key version. Unavailable files show a warning triangle with the load
+  selects the row. Double-clicking (or Return on) an item row plays its key
+  version, resuming a track that is already current on its current
+  version; on a version row it plays that version from the beginning,
+  rejected or not, and leaves the key alone. Unavailable files show a
+  warning triangle with the load
   error in its tooltip. The warning shows the plain tile instead of the record placeholder.
   A failed play attempt leaves playback alone. Locate
   File… is available explicitly in the menus. The hover Compare pill
@@ -297,11 +327,50 @@ These are here to prevent parallel implementations and subtle regressions:
   into compare from a row; neither asks to locate missing files first.
 - Entering compare never starts an item: another item's playback stops, and
   only the item already playing keeps playing
-  (`PlaylistCoordinator.enterComparison`).
+  (`PlaylistCoordinator.enterComparison`). It starts on the playing version
+  if that item is playing, otherwise on the key version.
+- Culling ([docs/culling-spec.md](docs/culling-spec.md)): tracks and
+  versions carry independent `isRejected` flags, saved by stable ID and
+  carried by every organization operation (Separate Versions starts the new
+  track unrejected). Reject / Clear Rejection is one toggle
+  (`PlaylistCoordinator.toggleRejection`, one undoable organization edit
+  rebased by ID): it reads Clear Rejection only when every target is
+  rejected. Targets: the selection or clicked row
+  (`PlaylistCommandContext.rejectionTargets`), where a selected item row
+  targets the track only and version rows their versions; in compare the
+  active lane, or the right-clicked lane from the strip menu. It appears in
+  the Playlist menu, the row context menu, the bottom bar's `…` (one builder)
+  and the lane strip's menu; plain R runs it in both modes through the key
+  monitor (`PlaylistRejectionCommand.keyCode`), which always takes R so the
+  outline's type-select never does. Rejecting never moves rows, never
+  changes the selection and never refreshes the audio runtime
+  (`runtimeRequiresRefresh` ignores the flags): the current track or version
+  keeps playing, and compare's lanes take the flag in place
+  (`syncRuntimeRejection` → `PlaybackController.setRejectedTracks`).
+- Rejected and missing rows dim to the same grey
+  (`PlaylistRowTextStyle`, `PlaylistRowPalette.dimmedTitle`/`dimmedDetail`);
+  the × marks a rejection and the triangle a missing file. A dimmed item's
+  thumbnail goes greyscale at 45% (a Core Image filter on the tile layer),
+  and a rejected track carries the 14 pt × badge (`RejectionGlyph`) at its
+  artwork's bottom-right, its 2 pt ring cut out of the tile and stack
+  (`PlaylistCardsView`'s mask) so the row shows through. A version row's
+  34 pt mark column holds the speaker, the warning and the ×, side by side.
+  Selected dimmed rows keep the selection colours at 65%. Rejected rows add
+  "Rejected" to their accessibility value. The item row shows its own flag
+  only; a track whose every version is rejected shows nothing extra.
+- Now playing has no row background: the speaker over the artwork, the
+  title, the metadata and the duration take the tint
+  (`PlaylistRowPalette.nowPlayingTitle`/`nowPlayingDetail`), which replaces
+  rejected dimming (a playing rejected track keeps its badge). An expanded
+  track splits the state: the item row keeps its tinted text and the speaker
+  moves to the playing version's mark column, whose text takes the tint
+  (`PlaylistItemCellView.Content.showsSpeakerOnArtwork`); collapsing moves it
+  back. The outline gets the current version (`currentVersionID`) for this.
 - The playlist has no header bar. Its bottom bar (A2 §7) has Add Files…
   (⌘O's dialog) and Remove Selected (Delete's selection-aware removal), the
   `…` pull-down with the Playlist menu's organization commands, and the
-  `N tracks · m:ss` summary (one track per item). The File menu (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M), Delete, the
+  `N tracks · m:ss` summary (one track per item, at its key version's
+  duration; rejected tracks are left out of the count and the total). The File menu (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M), Delete, the
   context menu and the Playlist menu keep every one of those commands; the
   bar is another way in, not a replacement.
 - Help ▸ Debug ▸ Reset Window Size (`WorkspaceView.resetWindowSize`) turns
@@ -322,13 +391,25 @@ These are here to prevent parallel implementations and subtle regressions:
   `previousTrackRestartThreshold` (3 s), else walks back through listening
   history, then list order (wrapping with Repeat All), else restarts; Next
   wraps with Repeat All, and past the last track returns to the first
-  playable track, paused. Previous, Next and natural advancement skip
-  unavailable files without adding the skipped items to listening history.
-  The control bar's buttons and the media keys use the same
+  track that is neither rejected nor unavailable, paused (or does nothing
+  if there is none). Sequential navigation (Previous through history and
+  list order, Next, natural advancement, Repeat All, Shuffle, the media
+  keys, the cover's Previous/Next) skips rejected tracks and unavailable
+  files without adding the skipped items to listening history; natural
+  advancement with only rejected tracks left ends playback. Explicit play
+  (double-click, Return) ignores the flag, and Repeat One repeats a
+  rejected current track. Space resumes the current track, rejected or
+  not; with none, Play starts the first track that is neither rejected nor
+  unavailable. The control bar's buttons and the media keys use the same
   commands. ⌥← / ⌥→ skip (⇧ for 10 s), since plain arrows move through the
-  list; Esc clears the selection. Compare: X / ⇧X Switch Track, ⌘← / ⌘→
+  list; Esc clears the selection. Compare: X / ⇧X Switch Track (passing
+  over rejected lanes in displayed order, Blind Listening's included,
+  wrapping; disabled when `ComparisonSession.canSwitchPlayback` finds no
+  non-rejected lane other than the active one), ⌘← / ⌘→
   Jump to Beginning / End, plain arrows skip, ⌘D Deselect (the loop; disabled
-  in the playlist), Esc leaves. Both: ⌘R Change Repeat Mode, ⇧⌘A Show/Hide
+  in the playlist), Esc leaves; clicking a lane and the number hotkeys
+  select rejected lanes too. Both: R Reject / Clear Rejection, ⌘R Change
+  Repeat Mode, ⇧⌘A Show/Hide
   Artwork (`MainWindowCommandState.toggleVisibility`, the titlebar toggle's
   animated path). Playlist only: ⌘] Compare (`PlaylistCommandContext.compare`,
   one multi-version item), ⌥⌘S Shuffle, ⌘G / ⇧⌘G Group / Separate Versions,
@@ -391,7 +472,7 @@ These are here to prevent parallel implementations and subtle regressions:
   `TakesWindowPolicy.controlBarTopPadding(showsArtwork:)`
   (12 under the cover, 24 under the titlebar). The cover's version comes from
   `CoverVersionRule`: in compare it follows the audible version, except in
-  Blind Listening Mode, where it stays on the item's playback version so it
+  Blind Listening Mode, where it stays on the item's key version so it
   can't reveal which version is audible. The previous cover stays up until
   the next one has loaded (`shownCoverVersionID`), so switching never
   flashes the placeholder.
@@ -414,7 +495,7 @@ These are here to prevent parallel implementations and subtle regressions:
 - Artwork is in-memory only (no disk caches); the readouts carry none. The
   cover loads only the version on display, capped at
   `PlaylistArtworkStore.capacity` decoded images. Playlist item rows show a
-  34 pt thumbnail of their playback version from a separate bounded cache
+  34 pt thumbnail of their key version from a separate bounded cache
   (`thumbnailPixelSize` 68 px, `thumbnailCapacity`, at most
   `maximumConcurrentThumbnailLoads` decodes at once). Decoding sizes come
   from `ArtworkDecodeTarget` (`.cover` 720 px, `.thumbnail` 68 px): Image I/O
@@ -429,7 +510,10 @@ These are here to prevent parallel implementations and subtle regressions:
   their turn — and rows AppKit prepares off screen — are never decoded. A
   version whose cover is decoded (or decoding) is scaled from that image
   instead of reading its file again. Finished thumbnails are pushed into the
-  visible cell (`onThumbnailLoaded`), never by reloading the table.
+  visible cell (`onThumbnailLoaded`), never by reloading the table. A key
+  version change (a rejection, a reorder) updates the item row's title,
+  thumbnail, duration and metadata through the same content path, never a
+  table reload.
 - Both modes build their control bar from one `ControlBarLayout` (A2 §5):
   the centre group centred with 12 pt gaps; the 30 × 40 pt side buttons each
   centred midway between its window edge and the playlist's Previous · Play
@@ -470,8 +554,12 @@ These are here to prevent parallel implementations and subtle regressions:
   time in a 24 pt Glass frame centred in the window
   (`CompareInfoBarRow` gives both sides equal widths), and Done on the
   right. Compare leaves through Done, Esc, or ⌘[ — all
-  `PlaylistCoordinator.backToPlaylist`, so the audible version becomes the
-  playback version. Zoom's
+  `PlaylistCoordinator.backToPlaylist`, which keeps the audible version as
+  the current version of the playlist's current track, at the translated
+  file time. It is listening state, not a stored choice:
+  `PlaylistPlaybackBoundary.capture` writes no key version, so the item row
+  may show its key version while the readout and cover show the one
+  playing. Zoom's
   on-screen control is in the bottom bar (magnifier − · slider · magnifier
   +, no Fit); ⌘+/⌘−, Zoom to Selection, Zoom to Fit and pinch also zoom.
 - Both modes dim their content (control bar, list or lanes, bottom bar)
@@ -500,7 +588,8 @@ These are here to prevent parallel implementations and subtle regressions:
   visuals below them; it has no background. Only the badge, title and format
   (the drag source: reorder, drag-out to Finder, and the context menu —
   Remove Version, Reveal in Finder, Reset Offset) and the offset field take
-  clicks; the strip's empty middle passes clicks through. Don't fold the
+  clicks; the strip's empty middle passes clicks through. The context menu
+  starts with Reject / Clear Rejection for that lane. Don't fold the
   strip into `TrackRowView` or put it under the gesture surface: its controls
   would stop receiving clicks and the playhead line would cross them. The
   strip's frame runs from the lane's top to the waveform band
@@ -515,6 +604,12 @@ These are here to prevent parallel implementations and subtle regressions:
   Compare, all enabled by default. `LaneStripText.format` joins available,
   enabled values with ` • ` for the strip, tooltip, and drag preview. Blind Listening Mode
   shows `Track n`, no format or tooltip, and disables Reveal in Finder.
+- A rejected lane (culling §5.4, §9.1) shows the grey × badge
+  (`RejectionBadgeView`) in place of its index, a dimmed title and format,
+  `LaneHatching` across the whole lane behind its visuals, and the inactive
+  waveform colour, active or not; the active tint stays. Blind Listening
+  shows it too: it reveals only that the lane was rejected, never which file
+  it is. Rejecting the active lane doesn't switch away from it.
 - Compare has no header. Its bottom bar (A2 §7) has Add Version… (⌘O's
   dialog, importing into the captured item), Remove Active Version (File ▸
   Remove Version, Delete), Align (⌥⌘A) and zoom. Remove All Versions is
@@ -568,7 +663,8 @@ these reintroduces the exact regressions it fixed):
   is written only on real change (equality-guarded).
 - **Keep the track-row / lane-leaf isolation.** `TrackRowView` and
   `LaneStripView` are `Equatable` and must not receive any per-scroll or
-  per-zoom value (the bottom bar's zoom slider included: it is its own leaf,
+  per-zoom value (their `isRejected` and `isMissing` inputs change only on
+  a rejection edit or a runtime rebuild) (the bottom bar's zoom slider included: it is its own leaf,
   `CompareZoomControl`, the only bar view that reads `visibleSpan`, and it
   zooms through `setZoomSliderValue`, never `withAnimation`); the
   zoom/scroll-varying lane window flows through `LaneViewportStore` →
@@ -589,20 +685,33 @@ these reintroduces the exact regressions it fixed):
   Undo, missing-file repair/advancement, 100-item/32-version runtime isolation,
   automatic-grouping transactions/cancellation, entering compare without
   starting another item, compare opening (and restoring) with missing
-  versions as error lanes, media-player Previous/Next Track, and workspace/runtime integration.
+  versions as error lanes, media-player Previous/Next Track, leaving compare
+  keeping the audible version current without changing the key, culling
+  (Next/Previous/natural advance/Shuffle/Repeat All skipping rejected
+  tracks and keeping them out of history, explicit play, Play with no
+  current track, rejecting the current track or version without
+  interrupting it, Reject targets and title, Undo/Redo of Reject, compare
+  switching past rejected lanes and rejecting the active lane in place),
+  and workspace/runtime integration.
 - `PlaylistRuntimeTests.swift`: runtime replacement, stable IDs, stale imports,
   teardown, preparation failure, and natural-end callbacks.
-- `PlaylistWorkspaceStoreTests.swift`: snapshot round trips, recovery protection,
-  schema handling, file references, and retained downloads.
+- `PlaylistWorkspaceStoreTests.swift`: snapshot round trips (rejection flags
+  included), recovery protection, schema handling (the schema-1 migration
+  moving the stored key version to the front), file references, and
+  retained downloads.
 - `PlaylistPersistenceControllerTests.swift`: restoration/save gating, failures,
   and automatic event-save observation rearming.
 - `PlaylistWaveformContextTests.swift`: stale waveform rejection across
   activations, and finished waveforms kept when the same item re-activates.
 - `PlaylistWorkspaceTests.swift`: playlist value encoding/validation, stable
-  ownership, canonical duplicates, and atomic organization operations.
+  ownership, canonical duplicates, atomic organization operations, the
+  key-version rule (first non-rejected, all-rejected fallback, missing key
+  stays key), and the rejection flags through reject, move, group, separate
+  and coding.
 - `PlaylistPlaybackBoundaryTests.swift`: signed position conversion, session
-  identity, loop entry, playlist gain isolation, blind-order-safe capture, and
-  descriptive tags reaching comparison tracks.
+  identity, loop entry, playlist gain isolation, blind-order-safe capture
+  (which never stores a key version), and descriptive tags reaching
+  comparison tracks.
 - `TransportMappingTests.swift`: transport math and range behavior, plus
   loop-wrap anchor math and gapless pre-queue segment mapping.
 - `SessionTests.swift`: higher-level state, import behavior, Music/Finder
@@ -610,8 +719,13 @@ these reintroduces the exact regressions it fixed):
   policy (sizes, minimums, artwork-toggle frames, clamping, fitting
   heights and the grow/shrink rules for added and removed tracks, the stored
   playlist height, compare sizing to its lanes on entry, and the debug
-  reset frame), missing versions as silent lanes and their error band's
-  extent, persisted window visibility, compact heights, the artwork/player
+  reset frame), missing versions as silent lanes that stay in the switch
+  order, compare switching past rejected lanes (`switchTarget`,
+  `canSwitchPlayback`, Switch & Repeat degrading to Repeat One, Align's
+  `hasMultipleTracks`), the rejected/missing lane hatching, the playlist
+  culling visuals (row text styles, the version mark column, the
+  thumbnail's dimming and badge, the expanded now-playing split),
+  persisted window visibility, compact heights, the artwork/player
   invariant, retired control-bar preferences loading as defaults, the
   A2 readout title rule (tag, filename), the compare control bar's height
   and the info bar (its geometry, centring and take-count text), the
@@ -626,7 +740,8 @@ these reintroduces the exact regressions it fixed):
   reuse, the cover's crop-or-fit rule and decode sizes), the A2 compact compare geometry (ruler and seat, the fixed lane
   height, the waveform band, ruler notches and labels, the playhead's line
   and grabber), the lane strip's text and blind rules, the offset field's
-  width, the bottom bars (the playlist summary's count and total, both
+  width, the bottom bars (the playlist summary's count and total, rejected
+  tracks left out, both
   bars' enablement, the zoom slider sharing the timeline zoom model, the
   alignment offer's blind names), the settled minimum height, and other
   non-UI logic.
@@ -660,6 +775,11 @@ these reintroduces the exact regressions it fixed):
   [docs/playlist-upgrade-validation.md](docs/playlist-upgrade-validation.md).
   Read the linked contracts before extending it.
 
+- [docs/culling-spec.md](docs/culling-spec.md): rejecting tracks and
+  versions, and the derived key version. Implemented, with the R shortcut
+  (§8 question 1) and the summary leaving rejected tracks out (question 2).
+  Questions 3–5 (Move to Top, Hide Rejected, Accept flags) and the
+  now-playing emphasis in §9.2 are not implemented.
 - [docs/performance-plan-status.md](docs/performance-plan-status.md): status
   of the playback/UI performance improvement effort (what's landed, what's
   measured, what's left). Check this before starting new perf work so it

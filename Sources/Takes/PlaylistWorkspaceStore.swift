@@ -109,7 +109,13 @@ private actor PlaylistWorkspaceWriteQueue {
 /// left untouched and subsequent automatic saves are blocked.
 @MainActor
 final class PlaylistWorkspaceStore: PlaylistWorkspacePersisting {
-    nonisolated static let currentSchemaVersion = 1
+    /// Schema 2 adds the culling flags (`isRejected` on items and versions)
+    /// and drops the stored key version (`selectedVersionID`).
+    nonisolated static let currentSchemaVersion = 2
+    /// Older schemas that still decode. A schema-1 item's stored key version
+    /// moves to the front of its versions (`PlaylistItem.init(from:)`), and
+    /// the next save writes the current schema.
+    nonisolated static let migratableSchemaVersions: Set<Int> = [1]
     nonisolated static let snapshotFileName = "workspace.json"
     nonisolated static let lastKnownGoodFileName = "workspace.last-known-good.json"
     nonisolated static let downloadsDirectoryName = "Downloads"
@@ -404,7 +410,8 @@ final class PlaylistWorkspaceStore: PlaylistWorkspacePersisting {
         } catch {
             return .failure(.corrupt)
         }
-        guard header.schemaVersion == Self.currentSchemaVersion else {
+        guard header.schemaVersion == Self.currentSchemaVersion
+                || Self.migratableSchemaVersions.contains(header.schemaVersion) else {
             return .failure(.unsupportedSchema(header.schemaVersion))
         }
 
@@ -413,9 +420,6 @@ final class PlaylistWorkspaceStore: PlaylistWorkspacePersisting {
             envelope = try decoder.decode(PlaylistWorkspaceSnapshotEnvelope.self, from: data)
         } catch {
             return .failure(.corrupt)
-        }
-        guard envelope.schemaVersion == Self.currentSchemaVersion else {
-            return .failure(.unsupportedSchema(envelope.schemaVersion))
         }
         do {
             try envelope.workspace.validate()

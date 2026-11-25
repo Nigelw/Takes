@@ -31,7 +31,6 @@ struct PlaylistWorkspaceStoreTests {
                     id: itemID,
                     title: "Song",
                     versions: [makeVersion("song", id: versionID, offsetSeconds: 2)],
-                    selectedVersionID: versionID,
                     comparison: PlaylistComparisonConfiguration(
                         repeatMode: .one,
                         loopRegion: LoopRegion(start: 2, end: 6),
@@ -280,6 +279,82 @@ struct PlaylistWorkspaceStoreTests {
         #expect(FileManager.default.fileExists(atPath: downloadsURL.path))
         #expect(FileManager.default.fileExists(atPath: retainedFile.path))
         #expect(store.directoryURL == root.standardizedFileURL)
+    }
+
+    @Test
+    func schemaOneSnapshotMovesTheStoredKeyVersionToTheFrontAndSavesSchemaTwo() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { removeTemporaryDirectory(root) }
+        let first = makeVersion("first"), second = makeVersion("second"), third = makeVersion("third")
+        let item = PlaylistItem(title: "Song", versions: [first, second, third])
+        let untouched = PlaylistItem(title: "Untouched", versions: [makeVersion("untouched-a"), makeVersion("untouched-b")])
+        let workspace = PlaylistWorkspace(
+            items: [item, untouched],
+            listeningState: PlaylistListeningState(itemID: item.id, versionID: third.id, filePosition: 4)
+        )
+
+        // Write the schema-1 shape: a stored key version, no culling flags.
+        let encoded = try JSONEncoder().encode(PlaylistWorkspaceSnapshotEnvelope(schemaVersion: 1, workspace: workspace))
+        var envelope = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var body = try #require(envelope["workspace"] as? [String: Any])
+        var items = try #require(body["items"] as? [[String: Any]])
+        let storedKeys = [third.id, untouched.versions[0].id]
+        for index in items.indices {
+            items[index].removeValue(forKey: "isRejected")
+            items[index]["selectedVersionID"] = storedKeys[index].uuidString
+            var versions = try #require(items[index]["versions"] as? [[String: Any]])
+            for versionIndex in versions.indices { versions[versionIndex].removeValue(forKey: "isRejected") }
+            items[index]["versions"] = versions
+        }
+        body["items"] = items
+        envelope["workspace"] = body
+        let store = PlaylistWorkspaceStore(rootURL: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: envelope).write(to: store.snapshotURL)
+
+        let result = try await store.load()
+        guard case let .restored(restored) = result else {
+            Issue.record("Expected a schema-1 snapshot to restore")
+            return
+        }
+        // The track keeps playing the version the user chose.
+        #expect(restored.items[0].versions.map(\.id) == [third.id, first.id, second.id])
+        #expect(restored.items[0].keyVersion?.id == third.id)
+        // A stored key that was already first leaves the order alone.
+        #expect(restored.items[1].versions.map(\.id) == untouched.versions.map(\.id))
+        #expect(restored.items.allSatisfy { !$0.isRejected && $0.versions.allSatisfy { !$0.isRejected } })
+        #expect(restored.listeningState == workspace.listeningState)
+
+        try await store.save(restored)
+        let saved = try JSONDecoder().decode(
+            PlaylistWorkspaceSnapshotEnvelope.self, from: Data(contentsOf: store.snapshotURL)
+        )
+        #expect(saved.schemaVersion == 2)
+        #expect(saved.workspace == restored)
+        #expect(try !String(decoding: Data(contentsOf: store.snapshotURL), as: UTF8.self).contains("selectedVersionID"))
+    }
+
+    @Test
+    func rejectionFlagsRoundTripThroughTheStore() async throws {
+        let root = try makeTemporaryDirectory()
+        defer { removeTemporaryDirectory(root) }
+        var rejected = makeVersion("rejected")
+        rejected.isRejected = true
+        let workspace = PlaylistWorkspace(items: [
+            PlaylistItem(title: "Rejected track", versions: [makeVersion("kept")], isRejected: true),
+            PlaylistItem(title: "Rejected version", versions: [rejected, makeVersion("key")])
+        ])
+        try await PlaylistWorkspaceStore(rootURL: root).save(workspace)
+
+        let result = try await PlaylistWorkspaceStore(rootURL: root).load()
+        guard case let .restored(restored) = result else {
+            Issue.record("Expected a restored workspace")
+            return
+        }
+        #expect(restored == workspace)
+        #expect(restored.items[0].isRejected)
+        #expect(restored.items[1].versions.map(\.isRejected) == [true, false])
+        #expect(restored.items[1].keyVersion?.id == restored.items[1].versions[1].id)
     }
 
     private func makeWorkspace(_ name: String) -> PlaylistWorkspace {

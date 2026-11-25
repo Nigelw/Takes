@@ -143,6 +143,12 @@ enum Theme {
     )
 
     /// Waveform color for inactive (non-selected) tracks.
+    /// Rejected and missing compare lanes' hatching (culling §9.1): white
+    /// 6% in dark, black 6% in light.
+    static let laneHatch = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(white: 1, alpha: 0.06) : NSColor(white: 0, alpha: 0.06)
+    }
+
     static let waveformInactive = dynamic(
         light: (0.52, 0.52, 0.56),
         dark: (0.60, 0.60, 0.64)
@@ -253,11 +259,29 @@ enum PlaylistRowPalette {
         )
     }
 
-    /// Behind the now-playing item row.
-    static let nowPlayingFill = primary(lightAlpha: 0.12, darkAlpha: 0.14)
-    /// The now-playing item's title: a light primary tint in dark, a deep
-    /// one in light so it keeps its contrast on the tinted row.
+    /// Now playing has no row background (culling spec §9.1): the title,
+    /// metadata, duration and speaker take the tint instead. The title is
+    /// #4F46C8 light, #C4BFFF dark.
     static let nowPlayingTitle = dynamic(light: (0.310, 0.275, 0.784, 1), dark: (0.769, 0.749, 1.0, 1))
+    /// The now-playing row's metadata, format and duration: #7A73D6 / #9C97D6.
+    static let nowPlayingDetail = dynamic(light: (0.478, 0.451, 0.839, 1), dark: (0.612, 0.592, 0.839, 1))
+    /// The speaker over the now-playing artwork's scrim: #E4E1FF / #C4BFFF.
+    /// In a version row's mark column it takes `nowPlayingTitle`.
+    static let nowPlayingSpeaker = dynamic(light: (0.894, 0.882, 1.0, 1), dark: (0.769, 0.749, 1.0, 1))
+
+    /// Rejected and missing rows dim to the same level (culling §4.3):
+    /// title #9E9EA4 / #6E6E74, details #B2B2B7 / #56565B.
+    static let dimmedTitle = dynamic(light: (0.620, 0.620, 0.643, 1), dark: (0.431, 0.431, 0.455, 1))
+    static let dimmedDetail = dynamic(light: (0.698, 0.698, 0.718, 1), dark: (0.337, 0.337, 0.357, 1))
+    /// A dimmed item's thumbnail goes greyscale at this opacity.
+    static let dimmedThumbnailOpacity: CGFloat = 0.45
+    /// A selected rejected or missing row keeps the selection colours with
+    /// its text at this opacity.
+    static let selectedDimmedTextOpacity: CGFloat = 0.65
+    /// The rejection indicator: a filled grey circle with a knocked-out ×
+    /// (#8E8E93 light, #C7C7CC dark), on track artwork, in a version row's
+    /// mark column and in a compare lane's strip.
+    static let rejectionBadge = dynamic(light: (0.557, 0.557, 0.576, 1), dark: (0.780, 0.780, 0.800, 1))
     /// Behind the hovered row.
     static let hoverFill = dynamic(light: (0, 0, 0, 0.04), dark: (1, 1, 1, 0.05))
     /// Drop-on-item target: a tinted fill inside a 2 pt primary ring.

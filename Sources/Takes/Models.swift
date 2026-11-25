@@ -21,6 +21,12 @@ struct LoadedTrack: Equatable {
     /// the lane shows an error state instead and stays silent.
     var isMissing = false
 
+    /// The user rejected this version (culling, `PlaylistVersion.isRejected`).
+    /// Switch Track and Switch & Repeat pass over it; clicking its lane or its
+    /// number hotkey still selects it. Updated in place on a rejection edit,
+    /// never by rebuilding the runtime.
+    var isRejected = false
+
     /// Embedded descriptive tags, independent of the comparison's file label.
     var title: String?
     var artist: String?
@@ -165,8 +171,31 @@ struct ComparisonSession: Equatable {
         !tracks.isEmpty
     }
 
+    /// Switch Track, and Switch & Repeat's switch: there is a track other
+    /// than the active one that isn't rejected (culling §5.3). Missing tracks
+    /// stay in the switch order; they are silent while active.
     var canSwitchPlayback: Bool {
+        tracks.contains { $0.id != activeTrackID && !$0.loadedTrack.isRejected }
+    }
+
+    /// Two or more tracks, rejected or not: what Align needs.
+    var hasMultipleTracks: Bool {
         tracks.count >= 2
+    }
+
+    /// The track Switch Track moves to, in displayed order (Blind
+    /// Listening's shuffled order when it is on), wrapping, and passing over
+    /// rejected tracks. From a rejected active track it is the next
+    /// non-rejected one in that direction. Nil when there is none.
+    func switchTarget(forward: Bool) -> SessionTrack.ID? {
+        guard !tracks.isEmpty else { return nil }
+        let start = activeTrackIndex ?? (forward ? -1 : tracks.count)
+        for step in 1...tracks.count {
+            let index = ((start + (forward ? step : -step)) % tracks.count + tracks.count) % tracks.count
+            let track = tracks[index]
+            if track.id != activeTrackID, !track.loadedTrack.isRejected { return track.id }
+        }
+        return nil
     }
 
     var activeTrackIndex: Int? {

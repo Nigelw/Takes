@@ -24,7 +24,7 @@ enum PlaylistPlaybackBoundary {
         let range = TransportMapping.timelineRange(tracks: tracks.map(\.loadedTrack)) ?? 0...0
         let selectedID = incomingVersionID.flatMap { id in
             item.versions.contains(where: { $0.id == id }) ? id : nil
-        } ?? item.selectedVersionID ?? tracks.first?.id
+        } ?? item.keyVersion?.id
         let selected = item.versions.first { $0.id == selectedID }
         let position: TimeInterval
         if let incomingFilePosition, let selected {
@@ -62,6 +62,7 @@ enum PlaylistPlaybackBoundary {
             bitRate: metadata.bitRate,
             gainDB: playlistMode ? 0 : version.gainDB,
             offsetSeconds: playlistMode ? 0 : version.offsetSeconds,
+            isRejected: version.isRejected,
             title: metadata.title,
             artist: metadata.artist,
             album: metadata.album
@@ -69,15 +70,14 @@ enum PlaylistPlaybackBoundary {
     }
 
     /// Blind-listening order is transient; transfer adjustments by ID only.
+    /// The active track is listening state, never a stored key version: the
+    /// key stays the item's first non-rejected version.
     static func capture(_ session: ComparisonSession, into item: inout PlaylistItem) {
         let tracks = Dictionary(session.tracks.map { ($0.id, $0.loadedTrack) }, uniquingKeysWith: { first, _ in first })
         for index in item.versions.indices {
             guard let track = tracks[item.versions[index].id] else { continue }
             item.versions[index].gainDB = track.gainDB
             item.versions[index].offsetSeconds = track.offsetSeconds
-        }
-        if let active = session.activeTrackID, item.versions.contains(where: { $0.id == active }) {
-            item.selectedVersionID = active
         }
         item.comparison.repeatMode = session.repeatMode
         item.comparison.loopRegion = session.loopRegion

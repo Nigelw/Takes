@@ -32,7 +32,6 @@ struct PlaylistWorkspaceTests {
             id: itemID,
             title: "Song",
             versions: [version],
-            selectedVersionID: versionID,
             comparison: comparison
         )
         let workspace = PlaylistWorkspace(
@@ -111,7 +110,6 @@ struct PlaylistWorkspaceTests {
             id: firstID,
             title: "Destination title",
             versions: [firstReference, firstOther],
-            selectedVersionID: firstReference.id,
             comparison: PlaylistComparisonConfiguration(
                 repeatMode: .one,
                 loopRegion: LoopRegion(start: 4, end: 9),
@@ -123,8 +121,7 @@ struct PlaylistWorkspaceTests {
         let secondOther = makeVersion("second-other", offsetSeconds: 3)
         let second = PlaylistItem(
             title: "Incoming title",
-            versions: [secondReference, secondOther],
-            selectedVersionID: secondReference.id
+            versions: [secondReference, secondOther]
         )
         let untouched = PlaylistItem(title: "Untouched", versions: [makeVersion("untouched")])
         var workspace = PlaylistWorkspace(items: [first, untouched, second])
@@ -138,12 +135,12 @@ struct PlaylistWorkspaceTests {
         #expect(workspace.items[0].versions.map(\.id) == [firstReference.id, firstOther.id, secondReference.id, secondOther.id])
         #expect(workspace.items[0].versions[2].offsetSeconds == 5)
         #expect(workspace.items[0].versions[3].offsetSeconds == 7)
-        #expect(workspace.items[0].selectedVersionID == firstReference.id)
+        #expect(workspace.items[0].keyVersion?.id == firstReference.id)
         try workspace.validate()
     }
 
     @Test
-    func groupingSelectsPlayingVersionAndMovesWorkspaceState() throws {
+    func groupingKeepsDestinationKeyAndMovesWorkspaceState() throws {
         let first = PlaylistItem(title: "First", versions: [makeVersion("first")])
         let playing = makeVersion("playing", offsetSeconds: -2)
         let second = PlaylistItem(title: "Second", versions: [playing])
@@ -153,10 +150,10 @@ struct PlaylistWorkspaceTests {
             listeningState: PlaylistListeningState(itemID: second.id, versionID: playing.id, filePosition: 19)
         )
 
-        try workspace.groupItems([second.id, first.id], playingVersionID: playing.id)
+        try workspace.groupItems([second.id, first.id])
 
         #expect(workspace.items.count == 1)
-        #expect(workspace.items[0].selectedVersionID == playing.id)
+        #expect(workspace.items[0].keyVersion?.id == first.versions[0].id)
         #expect(workspace.activeView == .comparison(itemID: first.id))
         #expect(workspace.listeningState == PlaylistListeningState(itemID: first.id, versionID: playing.id, filePosition: 19))
     }
@@ -166,7 +163,7 @@ struct PlaylistWorkspaceTests {
         let firstVersion = makeVersion("first")
         let secondVersion = makeVersion("second")
         let first = PlaylistItem(title: "First", versions: [firstVersion])
-        let second = PlaylistItem(title: "Second", versions: [secondVersion], selectedVersionID: secondVersion.id)
+        let second = PlaylistItem(title: "Second", versions: [secondVersion])
         var workspace = PlaylistWorkspace(
             items: [first, second],
             listeningState: PlaylistListeningState(itemID: second.id, versionID: secondVersion.id, filePosition: 10)
@@ -174,7 +171,7 @@ struct PlaylistWorkspaceTests {
 
         try workspace.groupItems([first.id, second.id])
 
-        #expect(workspace.items[0].selectedVersionID == firstVersion.id)
+        #expect(workspace.items[0].keyVersion?.id == firstVersion.id)
         #expect(workspace.listeningState?.versionID == secondVersion.id)
     }
 
@@ -201,8 +198,7 @@ struct PlaylistWorkspaceTests {
         let remaining = makeVersion("remaining")
         let source = PlaylistItem(
             title: "Source",
-            versions: [moved, remaining],
-            selectedVersionID: moved.id
+            versions: [moved, remaining]
         )
         let destinationVersion = makeVersion("destination")
         let destination = PlaylistItem(title: "Destination", versions: [destinationVersion])
@@ -215,9 +211,9 @@ struct PlaylistWorkspaceTests {
         try workspace.moveVersion(moved.id, from: source.id, to: destination.id, at: 0)
 
         #expect(workspace.items[0].versions.map(\.id) == [remaining.id])
-        #expect(workspace.items[0].selectedVersionID == remaining.id)
+        #expect(workspace.items[0].keyVersion?.id == remaining.id)
         #expect(workspace.items[1].versions.map(\.id) == [moved.id, destinationVersion.id])
-        #expect(workspace.items[1].selectedVersionID == moved.id)
+        #expect(workspace.items[1].keyVersion?.id == moved.id)
         #expect(workspace.items[1].versions[0].gainDB == -2)
         #expect(workspace.items[1].versions[0].offsetSeconds == 0)
         #expect(workspace.listeningState == PlaylistListeningState(itemID: destination.id, versionID: moved.id, filePosition: 15))
@@ -245,14 +241,14 @@ struct PlaylistWorkspaceTests {
         let source = PlaylistItem(title: "Source", versions: [reference, other, kept])
         let destRef = makeVersion("destination-ref", offsetSeconds: -2)
         let anchor = makeVersion("anchor")
-        let destination = PlaylistItem(title: "Destination", versions: [anchor, destRef], selectedVersionID: destRef.id)
+        let destination = PlaylistItem(title: "Destination", versions: [destRef, anchor])
         var workspace = PlaylistWorkspace(items: [source, destination])
         let ids = [reference.id, destRef.id, other.id]
-        try workspace.moveVersions(ids, to: destination.id, before: anchor.id, playingVersionID: other.id)
-        #expect(workspace.items[0].selectedVersionID == kept.id)
+        try workspace.moveVersions(ids, to: destination.id, before: anchor.id)
+        #expect(workspace.items[0].keyVersion?.id == kept.id)
         #expect(workspace.items[1].versions.map(\.id) == ids + [anchor.id])
         #expect(workspace.items[1].versions.map(\.offsetSeconds) == [-2, -2, 3, 0])
-        #expect(workspace.items[1].selectedVersionID == other.id)
+        #expect(workspace.items[1].keyVersion?.id == reference.id)
     }
 
     @Test func dragGroupingPreservesExplicitDestinationAndSourceOrder() throws {
@@ -266,7 +262,7 @@ struct PlaylistWorkspaceTests {
         #expect(workspace.items.map(\.id) == [target.id])
         #expect(workspace.items[0].versions.map(\.id) == (target.versions + second.versions + first.versions).map(\.id))
         #expect(workspace.items[0].versions.map(\.offsetSeconds) == [-1, -1, -1, 2])
-        #expect(workspace.items[0].selectedVersionID == target.selectedVersionID)
+        #expect(workspace.items[0].keyVersion?.id == target.versions[0].id)
     }
 
     @Test
@@ -283,7 +279,6 @@ struct PlaylistWorkspaceTests {
         let source = PlaylistItem(
             title: "Group",
             versions: [kept, separated],
-            selectedVersionID: separated.id,
             comparison: configuration
         )
         var workspace = PlaylistWorkspace(items: [source])
@@ -293,7 +288,7 @@ struct PlaylistWorkspaceTests {
 
         #expect(workspace.items.map(\.id) == [source.id, separatedItemID])
         #expect(workspace.items[0].versions.map(\.id) == [kept.id])
-        #expect(workspace.items[0].selectedVersionID == kept.id)
+        #expect(workspace.items[0].keyVersion?.id == kept.id)
         #expect(separatedItem.versions[0].id == separated.id)
         #expect(separatedItem.versions[0].gainDB == 1.75)
         #expect(separatedItem.versions[0].offsetSeconds == 0)
@@ -388,17 +383,6 @@ struct PlaylistWorkspaceTests {
     @Test
     func validationRejectsBadReferencesAndNonFiniteValues() throws {
         let version = makeVersion("version")
-        let itemID = UUID()
-        let invalidSelection = PlaylistItem(
-            id: itemID,
-            title: "Item",
-            versions: [version],
-            selectedVersionID: UUID()
-        )
-        let invalidWorkspace = PlaylistWorkspace(items: [invalidSelection])
-        #expect(throws: PlaylistWorkspaceError.selectedVersionNotFound(itemID: itemID, versionID: invalidSelection.selectedVersionID!)) {
-            try invalidWorkspace.validate()
-        }
 
         var invalidAdjustment = version
         invalidAdjustment.offsetSeconds = .infinity
@@ -433,6 +417,161 @@ struct PlaylistWorkspaceTests {
         #expect(throws: PlaylistWorkspaceError.invalidValue("listeningState.filePosition")) {
             try outOfBoundsPosition.validate()
         }
+    }
+
+    // MARK: Culling
+
+    @Test
+    func keyVersionIsFirstNonRejectedVersion() {
+        var first = makeVersion("first")
+        let second = makeVersion("second")
+        let third = makeVersion("third")
+        var item = PlaylistItem(title: "Song", versions: [first, second, third])
+        #expect(item.keyVersion?.id == first.id)
+
+        first.isRejected = true
+        item.versions[0] = first
+        #expect(item.keyVersion?.id == second.id)
+
+        // Rejecting a later version doesn't change the key.
+        item.versions[2].isRejected = true
+        #expect(item.keyVersion?.id == second.id)
+    }
+
+    @Test
+    func keyVersionFallsBackToFirstWhenEveryVersionIsRejected() {
+        let versions = ["a", "b"].map { makeVersion($0) }.map { version -> PlaylistVersion in
+            var rejected = version
+            rejected.isRejected = true
+            return rejected
+        }
+        let item = PlaylistItem(title: "Song", versions: versions)
+        #expect(item.keyVersion?.id == versions[0].id)
+        #expect(!item.isRejected)
+    }
+
+    @Test
+    func missingKeyVersionStaysKey() {
+        // Availability does not enter into the rule: a version whose file is
+        // gone stays the key, so unplugging a drive never moves the row.
+        let missing = makeVersion("missing", url: URL(fileURLWithPath: "/nonexistent/Takes/missing.wav"))
+        let present = makeVersion("present")
+        let item = PlaylistItem(title: "Song", versions: [missing, present])
+        #expect(PlaylistWorkspaceStore.resolveFileReference(missing.file).isMissing)
+        #expect(item.keyVersion?.id == missing.id)
+    }
+
+    @Test
+    func rejectingSetsOnlyTheNamedFlagsAndMovesNothing() throws {
+        let a = makeVersion("a"), b = makeVersion("b")
+        let item = PlaylistItem(title: "Song", versions: [a, b])
+        let other = PlaylistItem(title: "Other", versions: [makeVersion("other")])
+        var workspace = PlaylistWorkspace(items: [item, other])
+
+        try workspace.setRejected(true, itemIDs: [item.id])
+        #expect(workspace.items[0].isRejected)
+        #expect(workspace.items[0].versions.allSatisfy { !$0.isRejected })
+        #expect(workspace.items.map(\.id) == [item.id, other.id])
+
+        try workspace.setRejected(true, versionIDs: [a.id])
+        #expect(workspace.items[0].versions.map(\.isRejected) == [true, false])
+        #expect(workspace.items[0].versions.map(\.id) == [a.id, b.id])
+        #expect(workspace.items[0].keyVersion?.id == b.id)
+
+        // Clearing one flag never clears the other.
+        try workspace.setRejected(false, itemIDs: [item.id])
+        #expect(!workspace.items[0].isRejected)
+        #expect(workspace.items[0].versions[0].isRejected)
+
+        let before = workspace
+        #expect(throws: PlaylistWorkspaceError.versionNotFound(other.id)) {
+            try workspace.setRejected(true, versionIDs: [other.id])
+        }
+        #expect(workspace == before)
+    }
+
+    @Test
+    func movingVersionsKeepsEveryFlag() throws {
+        var moved = makeVersion("moved")
+        moved.isRejected = true
+        let staying = makeVersion("staying")
+        let source = PlaylistItem(title: "Source", versions: [moved, staying], isRejected: true)
+        let destination = PlaylistItem(title: "Destination", versions: [makeVersion("destination")])
+        var workspace = PlaylistWorkspace(items: [source, destination])
+
+        try workspace.moveVersions([moved.id], to: destination.id)
+
+        #expect(workspace.items[0].isRejected)
+        #expect(!workspace.items[1].isRejected)
+        #expect(workspace.items[1].versions.last?.id == moved.id)
+        #expect(workspace.items[1].versions.last?.isRejected == true)
+        #expect(workspace.items[1].keyVersion?.id == destination.versions[0].id)
+    }
+
+    @Test
+    func groupingKeepsVersionFlagsAndOnlyTheDestinationFlag() throws {
+        var rejectedVersion = makeVersion("rejected-version")
+        rejectedVersion.isRejected = true
+        let destination = PlaylistItem(title: "Destination", versions: [makeVersion("destination")])
+        let absorbed = PlaylistItem(title: "Absorbed", versions: [rejectedVersion], isRejected: true)
+        var workspace = PlaylistWorkspace(items: [destination, absorbed])
+
+        try workspace.groupItems([destination.id, absorbed.id])
+
+        #expect(workspace.items.count == 1)
+        #expect(!workspace.items[0].isRejected)
+        #expect(workspace.items[0].versions.map(\.isRejected) == [false, true])
+
+        var rejectedDestination = PlaylistWorkspace(items: [
+            PlaylistItem(title: "Destination", versions: [makeVersion("d2")], isRejected: true),
+            PlaylistItem(title: "Incoming", versions: [makeVersion("i2")])
+        ])
+        try rejectedDestination.groupItems(rejectedDestination.items.map(\.id))
+        #expect(rejectedDestination.items[0].isRejected)
+    }
+
+    @Test
+    func separatingStartsTheNewTrackUnrejectedAndKeepsTheVersionFlag() throws {
+        var separated = makeVersion("separated")
+        separated.isRejected = true
+        let kept = makeVersion("kept")
+        let source = PlaylistItem(title: "Group", versions: [kept, separated], isRejected: true)
+        var workspace = PlaylistWorkspace(items: [source])
+
+        let newID = try workspace.separateVersion(separated.id, from: source.id)
+        let newItem = try #require(workspace.items.first { $0.id == newID })
+
+        #expect(workspace.items[0].isRejected)
+        #expect(!newItem.isRejected)
+        #expect(newItem.versions[0].isRejected)
+    }
+
+    @Test
+    func flagsRoundTripThroughCodingAndDefaultToFalse() throws {
+        var version = makeVersion("version")
+        version.isRejected = true
+        let item = PlaylistItem(title: "Song", versions: [version, makeVersion("other")], isRejected: true)
+        let workspace = PlaylistWorkspace(items: [item])
+        let data = try JSONEncoder().encode(workspace)
+        #expect(try JSONDecoder().decode(PlaylistWorkspace.self, from: data) == workspace)
+
+        // Encoding never writes the retired stored key version.
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(!json.contains("selectedVersionID"))
+
+        // Older values without the flags decode as not rejected.
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var items = try #require(object["items"] as? [[String: Any]])
+        items[0].removeValue(forKey: "isRejected")
+        var versions = try #require(items[0]["versions"] as? [[String: Any]])
+        versions[0].removeValue(forKey: "isRejected")
+        items[0]["versions"] = versions
+        object["items"] = items
+        let stripped = try JSONDecoder().decode(
+            PlaylistWorkspace.self, from: JSONSerialization.data(withJSONObject: object)
+        )
+        #expect(!stripped.items[0].isRejected)
+        #expect(stripped.items[0].versions.allSatisfy { !$0.isRejected })
     }
 
     private func makeVersion(
