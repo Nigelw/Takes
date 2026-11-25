@@ -735,10 +735,16 @@ struct LaneStripMenuActions {
     /// The version's file can't be found: Locate File… replaces nothing, it
     /// is added, and Reveal in Finder turns off.
     var isMissing = false
+    /// The lane's version is rejected: the menu reads Clear Rejection.
+    var isRejected = false
     var remove: () -> Void
     var revealInFinder: () -> Void
     var resetOffset: () -> Void
     var locate: () -> Void = {}
+    /// Reject / Clear Rejection for the right-clicked lane (culling §5.2).
+    var toggleRejection: () -> Void = {}
+
+    var rejectionTitle: String { PlaylistRejectionCommand.title(clears: isRejected) }
 
     /// Reveal in Finder would show the file's name, so blind listening turns
     /// it off; a missing file has nothing to reveal.
@@ -794,6 +800,11 @@ final class DragSourceNSView: NSView, NSDraggingSource {
         guard let actions = menuActions else { return nil }
         let menu = NSMenu()
         menu.autoenablesItems = false
+        let reject = ClosureMenuItem(title: actions.rejectionTitle, action: actions.toggleRejection)
+        reject.keyEquivalent = String(PlaylistRejectionCommand.key.character)
+        reject.keyEquivalentModifierMask = []
+        menu.addItem(reject)
+        menu.addItem(.separator())
         menu.addItem(ClosureMenuItem(title: "Remove Version", action: actions.remove))
         menu.addItem(.separator())
         if actions.isMissing {
@@ -1768,6 +1779,7 @@ struct ContentView: View {
             isActive: controller.session.activeTrackID == sessionTrack.id,
             isBlind: isBlind,
             isMissing: sessionTrack.loadedTrack.isMissing,
+            isRejected: sessionTrack.loadedTrack.isRejected,
             isRenderable: renderableRows.contains(index),
             laneHeight: laneHeight,
             wideWidth: wideWidth,
@@ -1796,6 +1808,7 @@ struct ContentView: View {
             isActive: controller.session.activeTrackID == trackID,
             isBlind: isBlind,
             isMissing: track.isMissing,
+            isRejected: track.isRejected,
             isOffsetFocused: focusedOffsetTrackID == trackID,
             offsetConfiguration: settings.offsetConfiguration,
             indexBadgeAppearance: settings.indexBadgeAppearance,
@@ -1804,10 +1817,12 @@ struct ContentView: View {
                 isBlind: isBlind,
                 hasOffset: offsetMs != 0,
                 isMissing: track.isMissing,
+                isRejected: track.isRejected,
                 remove: { _ = coordinator.removeVersion(trackID, undoManager: undoManager) },
                 revealInFinder: { NSWorkspace.shared.activateFileViewerSelecting([track.url]) },
                 resetOffset: { coordinator.setOffset(trackID, seconds: 0) },
-                locate: { locateVersion(trackID) }
+                locate: { locateVersion(trackID) },
+                toggleRejection: { coordinator.toggleRejection(versionIDs: [trackID], undoManager: undoManager) }
             ),
             onSelect: { controller.selectActiveTrack(trackID) },
             onSetOffsetMs: { coordinator.setOffset(trackID, seconds: Double($0) / 1000) },
@@ -3284,6 +3299,8 @@ private struct TrackRowView: View, Equatable {
     var isActive: Bool
     var isBlind: Bool
     var isMissing: Bool
+    /// Changes only on a rejection edit, never on scroll or zoom.
+    var isRejected: Bool
     /// Whether this lane may rasterize (it intersects the vertical viewport
     /// ± overscan). Culled lanes draw nothing.
     var isRenderable: Bool
@@ -3308,6 +3325,7 @@ private struct TrackRowView: View, Equatable {
             && lhs.isActive == rhs.isActive
             && lhs.isBlind == rhs.isBlind
             && lhs.isMissing == rhs.isMissing
+            && lhs.isRejected == rhs.isRejected
             && lhs.isRenderable == rhs.isRenderable
             && lhs.laneHeight == rhs.laneHeight
             && lhs.wideWidth == rhs.wideWidth
@@ -3327,6 +3345,7 @@ private struct TrackRowView: View, Equatable {
             isActive: isActive,
             isBlind: isBlind,
             isMissing: isMissing,
+            isRejected: isRejected,
             isRenderable: isRenderable,
             trackStart: trackStart,
             trackDuration: trackDuration,
@@ -3338,7 +3357,13 @@ private struct TrackRowView: View, Equatable {
         // whenever the timeline starts at 0:00; the active tint shows there.
         .mask(TimelineLeadingEdgeMask())
         .frame(height: laneHeight)
-        // Active lane (A2 §8): a primary tint, with no leading accent bar.
+        // Rejected and missing lanes (culling §5.4, §9.1): neutral hatching
+        // across the whole lane, fixed in place (it never scrolls or zooms).
+        .background {
+            if isRejected || isMissing { LaneHatching() }
+        }
+        // Active lane (A2 §8): a primary tint, with no leading accent bar. It
+        // stays on an active rejected lane.
         .background(isActive ? Theme.activeLaneFill : Color.clear)
         .allowsHitTesting(false)
     }
@@ -3365,6 +3390,8 @@ private struct LaneStripView: View, Equatable {
     var isActive: Bool
     var isBlind: Bool
     var isMissing: Bool
+    /// Changes only on a rejection edit, never on scroll or zoom.
+    var isRejected: Bool
     var isOffsetFocused: Bool
     var offsetConfiguration: NumericControlConfiguration
     var indexBadgeAppearance: IndexBadgeAppearance
@@ -3396,6 +3423,7 @@ private struct LaneStripView: View, Equatable {
             && lhs.isActive == rhs.isActive
             && lhs.isBlind == rhs.isBlind
             && lhs.isMissing == rhs.isMissing
+            && lhs.isRejected == rhs.isRejected
             && lhs.isOffsetFocused == rhs.isOffsetFocused
             && lhs.offsetConfiguration == rhs.offsetConfiguration
             && lhs.indexBadgeAppearance == rhs.indexBadgeAppearance
@@ -3444,10 +3472,18 @@ private struct LaneStripView: View, Equatable {
     /// the format truncates first; titles truncate in the middle (§13).
     private var identity: some View {
         HStack(spacing: Self.spacing) {
-            TrackIndexBadgeView(index: index, isActive: isActive, appearance: indexBadgeAppearance)
+            // A rejected lane's × badge replaces its index (culling §9.1);
+            // blind listening shows it too: it says only that this lane was
+            // rejected, never which file it is.
+            if isRejected {
+                RejectionBadgeView(side: TrackIndexBadgeView.side)
+            } else {
+                TrackIndexBadgeView(index: index, isActive: isActive, appearance: indexBadgeAppearance)
+            }
 
             Text(name)
                 .font(.system(size: Self.titleFontSize, weight: .semibold))
+                .foregroundStyle(isDimmed ? AnyShapeStyle(Color(nsColor: PlaylistRowPalette.dimmedTitle)) : AnyShapeStyle(.primary))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .layoutPriority(1)
@@ -3462,11 +3498,78 @@ private struct LaneStripView: View, Equatable {
             } else if !format.isEmpty {
                 Text(format)
                     .font(.system(size: Self.formatFontSize))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isDimmed ? AnyShapeStyle(Color(nsColor: PlaylistRowPalette.dimmedDetail)) : AnyShapeStyle(.secondary))
                     .lineLimit(1)
             }
         }
         .allowsHitTesting(false)
+    }
+
+    /// Rejected and missing lanes dim their strip alike, as the playlist does.
+    private var isDimmed: Bool { isRejected || isMissing }
+}
+
+/// The rejection indicator in a lane strip: the playlist's grey circle with
+/// a knocked-out × (`RejectionGlyph`), drawn in SwiftUI so its dynamic
+/// colour follows the appearance.
+struct RejectionBadgeView: View {
+    var side: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Color(nsColor: PlaylistRowPalette.rejectionBadge))
+            RejectionCross()
+                .stroke(style: StrokeStyle(lineWidth: side * 3 / 24, lineCap: .round))
+                .blendMode(.destinationOut)
+        }
+        .compositingGroup()
+        .frame(width: side, height: side)
+        .accessibilityLabel(PlaylistRowText.rejectedAccessibilityValue)
+    }
+}
+
+/// The × on the design's 24-unit grid, from 8 to 16 on both axes.
+private struct RejectionCross: Shape {
+    func path(in rect: CGRect) -> Path {
+        let unit = rect.width / 24
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + 8 * unit, y: rect.minY + 8 * unit))
+        path.addLine(to: CGPoint(x: rect.minX + 16 * unit, y: rect.minY + 16 * unit))
+        path.move(to: CGPoint(x: rect.minX + 16 * unit, y: rect.minY + 8 * unit))
+        path.addLine(to: CGPoint(x: rect.minX + 8 * unit, y: rect.minY + 16 * unit))
+        return path
+    }
+}
+
+/// Rejected and missing lanes' hatching (culling §9.1): thin neutral
+/// stripes at 135°, 2 pt on and 6 pt off, across the whole lane. Static
+/// Canvas drawing; it depends only on the lane's size.
+struct LaneHatching: View {
+    static let stripeWidth: CGFloat = 2
+    static let period: CGFloat = 8
+
+    var body: some View {
+        Canvas { context, size in
+            context.fill(Self.stripes(in: size), with: .color(Color(nsColor: Theme.laneHatch)))
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// Parallelogram stripes running top-left to bottom-right, one every
+    /// `period` along the x axis, covering `size`.
+    static func stripes(in size: CGSize) -> Path {
+        var path = Path()
+        let height = size.height
+        var x = -height
+        while x < size.width {
+            path.move(to: CGPoint(x: x, y: 0))
+            path.addLine(to: CGPoint(x: x + stripeWidth, y: 0))
+            path.addLine(to: CGPoint(x: x + stripeWidth + height, y: height))
+            path.addLine(to: CGPoint(x: x + height, y: height))
+            path.closeSubpath()
+            x += period
+        }
+        return path
     }
 }
 
@@ -3685,6 +3788,7 @@ private struct LaneView: View {
     var isActive: Bool
     var isBlind: Bool
     var isMissing: Bool
+    var isRejected: Bool
     var isRenderable: Bool
     var trackStart: TimeInterval
     var trackDuration: TimeInterval
@@ -3709,6 +3813,7 @@ private struct LaneView: View {
                     waveform: waveform,
                     isBlindListening: isBlind,
                     isMissing: isMissing,
+                    isRejected: isRejected,
                     isActive: isActive,
                     isRenderable: isRenderable,
                     trackStart: trackStart,
@@ -4101,9 +4206,12 @@ private struct WaveformLaneView: View, Equatable {
     /// generation starts.
     var waveform: Waveform?
     var isBlindListening: Bool
-    /// The file can't be found: the track's extent shows the error state
-    /// in place of a waveform, blind or not (the lane is silent either way).
+    /// The file can't be found: no waveform, blind or not (the lane is
+    /// silent either way). The hatching behind the lane (`LaneHatching`,
+    /// drawn by `TrackRowView`) is its error state.
     var isMissing: Bool
+    /// Rejected: the envelope takes the inactive colour, active or not.
+    var isRejected: Bool
     var isActive: Bool
     /// Whether the lane intersects the vertical viewport (± overscan) and may
     /// kick renders; culled lanes keep showing their last image.
@@ -4136,9 +4244,8 @@ private struct WaveformLaneView: View, Equatable {
             }
 
             if isMissing {
-                missingExtent
-                    .frame(width: width, height: band.height)
-                    .offset(y: band.minY)
+                // Nothing to draw: the lane's hatching says it is missing.
+                EmptyView()
             } else if isBlindListening {
                 blindHatch
                     .frame(width: width, height: band.height)
@@ -4176,7 +4283,7 @@ private struct WaveformLaneView: View, Equatable {
     /// `isActive` is a color-only distinction, so an A/B switch only re-tints —
     /// the pyramid path build is identical either way.
     private var tint: Color {
-        isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7)
+        isActive && !isRejected ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7)
     }
 
     /// The real-waveform branch (never reached while blind). Drawn synchronously
@@ -4227,33 +4334,11 @@ private struct WaveformLaneView: View, Equatable {
         }
     }
 
-    /// The missing-file error state: the track's extent as a faint warning
-    /// band with a dashed outline, so the lane keeps its place on the
-    /// timeline. Static Canvas drawing, like the waveform.
-    private var missingExtent: some View {
-        Canvas { context, size in
-            guard isRenderable, let extent = LaneWaveformRenderer.trackExtent(
-                width: size.width, trackStart: trackStart, trackDuration: trackDuration,
-                visibleStart: visibleStart, visibleSpan: visibleSpan
-            ) else { return }
-            // The stroke sits inside the extent, and the start clears the
-            // lane's masked first point (`TimelineLeadingEdgeMask`), so a
-            // track starting at 0:00 keeps its left edge.
-            let startX = extent.lowerBound + TimelineLeadingEdgeMask.width + 0.5
-            let rect = CGRect(x: startX, y: 0.5, width: max(extent.upperBound - 0.5 - startX, 0), height: size.height - 1)
-            let band = Path(roundedRect: rect, cornerRadius: 4)
-            let color = Color(nsColor: PlaylistRowPalette.warningFill)
-            context.fill(band, with: .color(color.opacity(isActive ? 0.16 : 0.10)))
-            context.stroke(band, with: .color(color.opacity(0.6)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-        }
-        .accessibilityLabel("File not found")
-    }
-
     /// Base tint for the masked-lane treatments: the same active/inactive
     /// distinction as the real envelope, muted further so the lane reads as a
     /// placeholder rather than data.
     private var blindTint: Color {
-        isActive ? Theme.primary : Theme.waveformInactive
+        isActive && !isRejected ? Theme.primary : Theme.waveformInactive
     }
 
     /// The blind branch: a redaction-bar diagonal hatch, static Canvas
@@ -4298,21 +4383,6 @@ private struct WaveformLaneView: View, Equatable {
 /// a `Canvas`'s `GraphicsContext` during the frame's render pass (WP-7 — no
 /// async pipeline, no cached `NSImage`).
 enum LaneWaveformRenderer {
-    /// The x range a track covers in a lane `width` wide showing
-    /// `visibleStart ..< visibleStart + visibleSpan`, clamped a point past
-    /// each edge; `nil` when it is off screen.
-    static func trackExtent(
-        width: CGFloat, trackStart: TimeInterval, trackDuration: TimeInterval,
-        visibleStart: TimeInterval, visibleSpan: TimeInterval
-    ) -> ClosedRange<CGFloat>? {
-        guard width > 0, visibleSpan > 0, trackDuration > 0 else { return nil }
-        let scale = Double(width) / visibleSpan
-        let start = CGFloat((trackStart - visibleStart) * scale)
-        let end = CGFloat((trackStart + trackDuration - visibleStart) * scale)
-        guard end > 0, start < width else { return nil }
-        return max(start, -1)...min(end, width + 1)
-    }
-
     #if DEBUG
     private static let renderLog = Logger(subsystem: "com.nigelwarren.Takes", category: "waveform-render")
     #endif

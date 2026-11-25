@@ -702,13 +702,73 @@ struct SessionTests {
         #expect(!session.isPlayable)
         session.tracks.append(SessionTrack(loadedTrack: present))
         #expect(session.isPlayable)
-        // The error band covers the track's extent, clamped to the lane.
-        #expect(LaneWaveformRenderer.trackExtent(width: 200, trackStart: 0, trackDuration: 10,
-                                                 visibleStart: 0, visibleSpan: 20) == 0...100)
-        #expect(LaneWaveformRenderer.trackExtent(width: 200, trackStart: -5, trackDuration: 30,
-                                                 visibleStart: 0, visibleSpan: 20) == -1...201)
-        #expect(LaneWaveformRenderer.trackExtent(width: 200, trackStart: 30, trackDuration: 10,
-                                                 visibleStart: 0, visibleSpan: 20) == nil)
+        // Missing lanes stay in the switch order (silent while active).
+        session.activeTrackID = session.tracks[1].id
+        #expect(session.canSwitchPlayback)
+        #expect(session.switchTarget(forward: true) == session.tracks[0].id)
+    }
+
+    @MainActor
+    @Test
+    func rejectedAndMissingLanesShareTheHatchingAcrossTheWholeLane() {
+        // 2 pt stripes every 8 pt, covering the lane edge to edge.
+        let size = CGSize(width: 360, height: 95)
+        let stripes = LaneHatching.stripes(in: size)
+        #expect(LaneHatching.stripeWidth == 2 && LaneHatching.period == 8)
+        let bounds = stripes.boundingRect
+        #expect(bounds.minX <= 0 && bounds.maxX >= size.width)
+        #expect(bounds.minY == 0 && bounds.maxY == size.height)
+        // Stripes start every 8 pt along the top (…, 1, 9, …) and lean right
+        // as they go down.
+        #expect(stripes.contains(CGPoint(x: 2.5, y: 0.5)))
+        #expect(!stripes.contains(CGPoint(x: 6, y: 0.5)))
+        #expect(stripes.contains(CGPoint(x: 12.5, y: 2.5)))
+    }
+
+    // MARK: Culling in compare
+
+    private func makeSwitchSession(rejected: Set<Int>, count: Int = 4, active: Int = 0) -> ComparisonSession {
+        let tracks = (0..<count).map { index -> SessionTrack in
+            var track = makeTrack(name: "\(index).wav")
+            track.isRejected = rejected.contains(index)
+            return SessionTrack(loadedTrack: track)
+        }
+        return ComparisonSession(tracks: tracks, activeTrackID: tracks[active].id, timelineEnd: 10)
+    }
+
+    @Test
+    func switchTrackSkipsRejectedLanesInBothDirectionsAndWraps() {
+        let session = makeSwitchSession(rejected: [1, 2])
+        let ids = session.tracks.map(\.id)
+        #expect(session.switchTarget(forward: true) == ids[3])
+        #expect(session.switchTarget(forward: false) == ids[3])
+        var fromLast = session
+        fromLast.activeTrackID = ids[3]
+        #expect(fromLast.switchTarget(forward: true) == ids[0])
+        #expect(fromLast.switchTarget(forward: false) == ids[0])
+
+        // From a rejected active lane: the next non-rejected lane that way.
+        var fromRejected = session
+        fromRejected.activeTrackID = ids[1]
+        #expect(fromRejected.switchTarget(forward: true) == ids[3])
+        #expect(fromRejected.switchTarget(forward: false) == ids[0])
+    }
+
+    @Test
+    func canSwitchPlaybackNeedsANonRejectedLaneOtherThanTheActiveOne() {
+        #expect(!makeSwitchSession(rejected: [1, 2, 3]).canSwitchPlayback)
+        // The active lane's own flag doesn't count.
+        #expect(makeSwitchSession(rejected: [0, 1, 2]).canSwitchPlayback)
+        #expect(!makeSwitchSession(rejected: [1], count: 2).canSwitchPlayback)
+        // Align still sees every lane.
+        #expect(makeSwitchSession(rejected: [1], count: 2).hasMultipleTracks)
+        // Switch & Repeat with only rejected others behaves like Repeat One.
+        #expect(PlaybackController.advanceAtEnd(
+            mode: .switchAndRepeat, canSwitch: makeSwitchSession(rejected: [1, 2, 3]).canSwitchPlayback
+        ) == .restart)
+        #expect(PlaybackController.advanceAtEnd(
+            mode: .switchAndRepeat, canSwitch: makeSwitchSession(rejected: [1, 2]).canSwitchPlayback
+        ) == .switchThenRestart)
     }
 
     @MainActor
@@ -2686,20 +2746,20 @@ struct SessionTests {
 
     @Test
     func compareBottomBarFollowsTheCompareCommands() {
-        let ready = CompareBottomBarState(hasActiveVersion: true, canSwitchPlayback: true, isAligning: false, canZoomTimeline: true)
+        let ready = CompareBottomBarState(hasActiveVersion: true, hasMultipleTracks: true, isAligning: false, canZoomTimeline: true)
         #expect(ready.canRemove && ready.canAlign && ready.canZoom)
 
         // Remove Active Version stays available on an item's last version, as
         // the lane strip's Remove Version and Delete are.
-        let single = CompareBottomBarState(hasActiveVersion: true, canSwitchPlayback: false, isAligning: false, canZoomTimeline: true)
+        let single = CompareBottomBarState(hasActiveVersion: true, hasMultipleTracks: false, isAligning: false, canZoomTimeline: true)
         #expect(single.canRemove)
         #expect(!single.canAlign)
 
-        let aligning = CompareBottomBarState(hasActiveVersion: true, canSwitchPlayback: true, isAligning: true, canZoomTimeline: true)
+        let aligning = CompareBottomBarState(hasActiveVersion: true, hasMultipleTracks: true, isAligning: true, canZoomTimeline: true)
         #expect(!aligning.canAlign)
         #expect(aligning.canRemove)
 
-        let empty = CompareBottomBarState(hasActiveVersion: false, canSwitchPlayback: false, isAligning: false, canZoomTimeline: false)
+        let empty = CompareBottomBarState(hasActiveVersion: false, hasMultipleTracks: false, isAligning: false, canZoomTimeline: false)
         #expect(!empty.canRemove && !empty.canAlign && !empty.canZoom)
     }
 
@@ -2707,7 +2767,7 @@ struct SessionTests {
     @Test
     func compareBottomBarReadsAnEmptyControllerAsDisabled() {
         let state = CompareBottomBarState(controller: PlaybackController())
-        #expect(state == CompareBottomBarState(hasActiveVersion: false, canSwitchPlayback: false, isAligning: false, canZoomTimeline: false))
+        #expect(state == CompareBottomBarState(hasActiveVersion: false, hasMultipleTracks: false, isAligning: false, canZoomTimeline: false))
     }
 
     @Test

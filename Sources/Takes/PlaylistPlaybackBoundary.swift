@@ -62,6 +62,7 @@ enum PlaylistPlaybackBoundary {
             bitRate: metadata.bitRate,
             gainDB: playlistMode ? 0 : version.gainDB,
             offsetSeconds: playlistMode ? 0 : version.offsetSeconds,
+            isRejected: version.isRejected,
             title: metadata.title,
             artist: metadata.artist,
             album: metadata.album

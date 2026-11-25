@@ -143,6 +143,12 @@ enum Theme {
     )
 
     /// Waveform color for inactive (non-selected) tracks.
+    /// Rejected and missing compare lanes' hatching (culling §9.1): white
+    /// 6% in dark, black 6% in light.
+    static let laneHatch = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(white: 1, alpha: 0.06) : NSColor(white: 0, alpha: 0.06)
+    }
+
     static let waveformInactive = dynamic(
         light: (0.52, 0.52, 0.56),
         dark: (0.60, 0.60, 0.64)

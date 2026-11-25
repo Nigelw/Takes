@@ -224,9 +224,9 @@ struct CompareBottomBarState: Equatable {
     /// ⌘+ / ⌘−: content longer than the smallest visible window.
     var canZoom: Bool
 
-    init(hasActiveVersion: Bool, canSwitchPlayback: Bool, isAligning: Bool, canZoomTimeline: Bool) {
+    init(hasActiveVersion: Bool, hasMultipleTracks: Bool, isAligning: Bool, canZoomTimeline: Bool) {
         canRemove = hasActiveVersion
-        canAlign = canSwitchPlayback && !isAligning
+        canAlign = hasMultipleTracks && !isAligning
         canZoom = canZoomTimeline
     }
 
@@ -234,7 +234,7 @@ struct CompareBottomBarState: Equatable {
     init(controller: PlaybackController) {
         self.init(
             hasActiveVersion: controller.session.activeTrackID != nil,
-            canSwitchPlayback: controller.session.canSwitchPlayback,
+            hasMultipleTracks: controller.session.hasMultipleTracks,
             isAligning: controller.isAligning,
             canZoomTimeline: controller.canZoomTimeline
         )

@@ -1856,6 +1856,7 @@ final class PlaylistCoordinator {
             workspace = candidate
             let modeBeforeMutation = mode
             synchronizeModeWithWorkspaceView()
+            syncRuntimeRejection()
             registerUndo(before: before, undoManager: undoManager, actionName: actionName)
             rebuildTraversal()
             let listeningVersionMoved = playback.versionID != nil
@@ -1988,6 +1989,7 @@ final class PlaylistCoordinator {
             return
         }
         workspace = candidate
+        syncRuntimeRejection()
         registerUndo(before: live, undoManager: manager, actionName: actionName)
         rebuildTraversal()
         let targetMode: Mode = candidate.activeItemID.map { .comparison(itemID: $0) } ?? .playlist
@@ -2131,6 +2133,15 @@ final class PlaylistCoordinator {
         }
         return oldItem?.versions != newItem?.versions
             || oldItem?.comparison != newItem?.comparison
+    }
+
+    /// Push the versions' rejection flags into the loaded compare lanes in
+    /// place (spec §5.1: one flag, shown in both modes). A runtime that is
+    /// rebuilt picks them up from the workspace instead.
+    private func syncRuntimeRejection() {
+        guard let itemID = runtimeContext?.itemID,
+              let item = workspace.items.first(where: { $0.id == itemID }) else { return }
+        controller.setRejectedTracks(Set(item.versions.filter(\.isRejected).map(\.id)))
     }
 
     private static func ignoringRejection(_ item: PlaylistItem) -> PlaylistItem {

@@ -1607,6 +1607,78 @@ struct PlaylistCoordinatorTests {
     }
 
     @MainActor
+    @Test func compareSwitchingSkipsRejectedLanesAndRejectingKeepsTheActiveLane() async throws {
+        let urls = try ["lane-a.wav", "lane-b.wav", "lane-c.wav"].map { try makeTemporaryAudioFile(name: $0) }
+        defer { urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
+        let versions = urls.map { makePlaylistVersion(url: $0, title: $0.lastPathComponent) }
+        let ids = versions.map(\.id)
+        let item = PlaylistItem(title: "Takes", versions: versions)
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
+        let controller = coordinator.controller
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        await coordinator.enterComparison(itemID: item.id)
+        let context = coordinator.runtimeContext
+        #expect(controller.session.activeTrackID == ids[0])
+
+        // The lane menu targets the right-clicked lane.
+        undo.beginUndoGrouping()
+        #expect(coordinator.toggleRejection(versionIDs: [ids[1]], undoManager: undo))
+        undo.endUndoGrouping()
+        #expect(controller.session.tracks.map(\.loadedTrack.isRejected) == [false, true, false])
+        #expect(coordinator.runtimeContext == context)
+
+        coordinator.next()
+        #expect(controller.session.activeTrackID == ids[2])
+        coordinator.next()
+        #expect(controller.session.activeTrackID == ids[0])
+        coordinator.previous()
+        #expect(controller.session.activeTrackID == ids[2])
+        // A number hotkey names a lane by position, rejected or not.
+        controller.selectTrackForHotkey(2)
+        #expect(controller.session.activeTrackID == ids[1])
+
+        // The Playlist menu's command targets the active lane, which stays
+        // active and audible.
+        controller.selectActiveTrack(ids[0])
+        let command = PlaylistCommandContext(
+            coordinator: coordinator, presentation: PlaylistPresentationState(), undoManager: undo
+        )
+        #expect(command.rejectionTargets.versions == [ids[0]])
+        undo.beginUndoGrouping()
+        command.toggleRejection()
+        undo.endUndoGrouping()
+        #expect(controller.session.activeTrackID == ids[0])
+        #expect(coordinator.runtimeContext == context)
+        #expect(coordinator.workspace.items[0].versions.map(\.isRejected) == [true, true, false])
+        // From a rejected active lane, Switch Track goes to the next
+        // non-rejected lane; with none left to switch to, it is disabled.
+        coordinator.next()
+        #expect(controller.session.activeTrackID == ids[2])
+        #expect(!controller.session.canSwitchPlayback)
+        #expect(!coordinator.canNext)
+
+        // Undo clears the flag on the lane in place.
+        undo.undo()
+        #expect(controller.session.tracks.map(\.loadedTrack.isRejected) == [false, true, false])
+        #expect(coordinator.runtimeContext == context)
+        #expect(controller.session.canSwitchPlayback)
+
+        // Blind Listening switches in its shuffled, displayed order.
+        controller.setBlindListeningMode(true) { Array($0.reversed()) }
+        let displayed = controller.session.tracks.map(\.id)
+        controller.selectActiveTrack(displayed[0])
+        let expected = displayed.dropFirst().first { $0 != ids[1] }
+        controller.selectNextTrack()
+        #expect(controller.session.activeTrackID == expected)
+        #expect(controller.session.activeTrackID != ids[1])
+
+        // Leaving compare: the playlist shows the lane's rejection.
+        await coordinator.backToPlaylist()
+        #expect(coordinator.workspace.items[0].versions.map(\.isRejected) == [false, true, false])
+    }
+
+    @MainActor
     private func waitFor(_ condition: @MainActor () -> Bool) async throws {
         for _ in 0..<200 {
             if condition() { return }
