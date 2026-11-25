@@ -188,8 +188,10 @@ Key ownership:
 - `StreamingTrackImport.swift`: streaming URL metadata, yt-dlp management, and
   downloaded audio import.
 - `SoftwareUpdater.swift`: Sparkle and yt-dlp update state, including the
-  opt-in `beta` channel. `scripts/build-release.sh` assigns beta builds to
-  that channel in the signed appcast.
+  opt-in `beta` channel. `scripts/build-release.sh --beta-notes` prepares
+  local beta artifacts and a separate signed appcast candidate for that
+  channel. The [beta release workflow](.agents/skills/release/beta.md)
+  publishes the GitHub prerelease and appcast.
 - `Analysis/`: the experimental single-file Analysis window (Debug → Analysis,
   ⌘⌥Z) and the experimental multi-track Compare Quality window
   (Debug → Compare Quality, ⇧⌘L). Both are debug-only and deliberately not

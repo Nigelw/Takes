@@ -3,9 +3,11 @@ name: release
 description: Cut and publish a new direct-distribution release of Takes — bump the version, draft user-facing release notes, build/notarize/staple, and publish the Sparkle appcast + GitHub release. Use when asked to release, ship a new build, cut a release, or publish an update of Takes.
 ---
 
+For a **beta**, follow [Beta releases](beta.md). It covers the GitHub prerelease, Sparkle channel, beta notes, screenshots, and private archive. The steps below are for regular releases.
+
 Releases Takes as a notarized, Developer ID–signed DMG with a signed Sparkle appcast served from GitHub Pages, and a matching GitHub release. The heavy lifting (archive → export → notarize → staple → DMG → appcast → release) is done by `scripts/build-release.sh`; this skill drives the human-judgment parts around it (versioning, `CHANGELOG.md` release notes) and the git ordering.
 
-Background: see [docs/direct-distribution-plan.md](../../../docs/direct-distribution-plan.md). All paths are relative to the repo root (`Takes/`).
+All paths are relative to the repo root (`Takes/`).
 
 ## Versioning model (do not deviate)
 
@@ -28,7 +30,7 @@ The script runs its own checks for the Developer ID cert, notary profile, Sparkl
 ## Step 1 — Find the last release
 
 ```bash
-git describe --tags --abbrev=0 2>/dev/null   # last tag, e.g. v2.0a2
+git describe --tags --exclude 'v*b[0-9]*' --exclude 'v*-beta*' --exclude 'v*.beta*' --abbrev=0 2>/dev/null
 ```
 
 Use it as the commit range for notes and to read the current versions:
@@ -42,7 +44,7 @@ grep -m1 'CURRENT_PROJECT_VERSION'  Takes.xcodeproj/project.pbxproj
 
 1. **Build number:** read current `CURRENT_PROJECT_VERSION`, add 1. Edit `project.pbxproj`, replacing **both** Takes-target occurrences (use the exact `CURRENT_PROJECT_VERSION = <old>` string with replace-all; the tests target is `= 1`, so it's untouched).
 2. **Marketing version:** look at the commits since the last tag and **suggest** a new `MARKETING_VERSION`, then **ask the user to confirm or override**:
-   - If the current version is a pre-release (contains a letter, e.g. `2.0a2`), suggest the next in that series (`2.0a3`) or graduating to the stable string (`2.0`).
+   - If the current version is a beta, suggest the corresponding stable version (for example `2.10.0b2` becomes `2.10.0`). For an alpha, suggest the next alpha or the stable version.
    - If stable, suggest a semver bump matching the change scope (patch/minor/major).
    - Reject any choice whose tag `v<version>` already exists (`git tag | grep`).
    Edit `project.pbxproj`, replacing both Takes-target `MARKETING_VERSION` occurrences.
@@ -131,7 +133,7 @@ for THEME in light dark; do
   open -a "$APP" "${TRACKS[@]}" --args --appearance-theme "$THEME" --default-window-layout
   sleep 3
 
-  read WID _REST < <(swift .claude/skills/release/window-info.swift Takes)
+  read WID _REST < <(swift .agents/skills/release/window-info.swift Takes)
   screencapture -l"$WID" "build/screenshot_${THEME}_shadow.png"
   screencapture -o -l"$WID" "build/screenshot_${THEME}_noshadow.png"
 done
