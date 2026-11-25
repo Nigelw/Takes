@@ -97,12 +97,12 @@ enum AppOpenedURLResolver {
 
 @MainActor
 final class AppFileOpenRouter {
-    typealias AudioFileHandler = @MainActor ([URL]) -> Void
+    typealias AudioFileHandler = @MainActor ([URL], PlaylistImportDestination) -> Void
     typealias StreamingURLHandler = @MainActor ([String]) -> Void
 
     private var audioFileHandler: AudioFileHandler?
     private var streamingURLHandler: StreamingURLHandler?
-    private var pendingURLBatches: [[URL]] = []
+    private var pendingURLBatches: [(urls: [URL], destination: PlaylistImportDestination)] = []
     private var pendingStreamingURLBatches: [[String]] = []
 
     func setHandler(_ handler: @escaping AudioFileHandler) {
@@ -110,7 +110,9 @@ final class AppFileOpenRouter {
 
         let pendingURLBatches = self.pendingURLBatches
         self.pendingURLBatches.removeAll()
-        pendingURLBatches.forEach(handler)
+        for batch in pendingURLBatches {
+            handler(batch.urls, batch.destination)
+        }
     }
 
     func setStreamingURLHandler(_ handler: @escaping StreamingURLHandler) {
@@ -121,13 +123,15 @@ final class AppFileOpenRouter {
         pendingStreamingURLBatches.forEach(handler)
     }
 
-    func open(_ urls: [URL]) {
+    func open(_ urls: [URL], modifierFlags: NSEvent.ModifierFlags = []) {
+        let destination: PlaylistImportDestination = modifierFlags.contains(.shift) && urls.allSatisfy(\.isFileURL)
+            ? .newComparison : .playlist
         let audioFileURLs = AppOpenedURLResolver.audioFileURLs(from: urls)
         if !audioFileURLs.isEmpty {
             if let audioFileHandler {
-                audioFileHandler(audioFileURLs)
+                audioFileHandler(audioFileURLs, destination)
             } else {
-                pendingURLBatches.append(audioFileURLs)
+                pendingURLBatches.append((audioFileURLs, destination))
             }
         }
 
@@ -164,7 +168,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        fileOpenRouter.open(urls)
+        // Icon drops arrive as document opens. Read Shift before the request
+        // can wait for workspace restoration or another import.
+        fileOpenRouter.open(urls, modifierFlags: NSEvent.modifierFlags)
     }
 }
 
@@ -495,8 +501,7 @@ enum TakesWindowPolicy {
     /// scrolling, never below the minimum.
     @MainActor
     static func playlistFittingHeight(itemRows: Int, versionRows: Int, showsArtwork: Bool, width: CGFloat) -> CGFloat {
-        let list = PlaylistRowMetrics.listVerticalInset * 2
-            + PlaylistRowMetrics.itemHeight * CGFloat(itemRows)
+        let list = PlaylistRowMetrics.itemHeight * CGFloat(itemRows)
             + PlaylistRowMetrics.versionHeight * CGFloat(versionRows)
         let height = (showsArtwork ? width : 0) + playlistControlBarHeight(showsArtwork: showsArtwork)
             + list + BottomBarMetrics.height

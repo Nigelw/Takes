@@ -26,7 +26,7 @@ enum AppearanceTheme: String, CaseIterable, Identifiable {
     }
 }
 
-/// Whether playlist imports group tracks using title, artist, filename, and duration.
+/// Whether playlist imports group tracks by title.
 enum AutomaticGroupingMode: String {
     case off
     case automatic
@@ -36,7 +36,7 @@ enum AutomaticGroupingMode: String {
         case .off:
             return "Add every file as a separate playlist item."
         case .automatic:
-            return "Group tracks with matching title and artist tags, falling back to filenames."
+            return "Group tracks with similar titles, using filenames when title tags are missing."
         }
     }
 }

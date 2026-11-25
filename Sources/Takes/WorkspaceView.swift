@@ -62,7 +62,7 @@ struct WorkspaceView: View {
     private var commandContext: PlaylistCommandContext {
         .init(coordinator: coordinator, presentation: presentation, undoManager: undoManager)
     }
-    private var imports: WorkspaceImports { .init(coordinator: coordinator, presentation: presentation) }
+    private var imports: WorkspaceImports { .init(coordinator: coordinator) }
 
     init(
         coordinator: PlaylistCoordinator,
@@ -75,7 +75,7 @@ struct WorkspaceView: View {
         self.appFileOpenRouter = appFileOpenRouter
         self.usesTemporaryDefaultWindowLayout = usesTemporaryDefaultWindowLayout
         let presentation = PlaylistPresentationState()
-        let imports = WorkspaceImports(coordinator: coordinator, presentation: presentation)
+        let imports = WorkspaceImports(coordinator: coordinator)
         _presentation = StateObject(wrappedValue: presentation)
         let state = OpenFileCommandState(
             loadStreamingURL: { rawURL, state in
@@ -536,28 +536,26 @@ struct WorkspaceView: View {
     }
 
     private func configureOpenRouter() {
-        appFileOpenRouter.setHandler { urls in
+        appFileOpenRouter.setHandler { urls, destination in
             let previous = externalOpenTask
             externalOpenTask = Task { @MainActor in
                 await previous?.value
-                await imports.submit(urls, destination: .playlist, undoManager: undoManager)
+                await submitExternalAudio(urls, destination: destination, undoManager: undoManager)
             }
         }
         appFileOpenRouter.setStreamingURLHandler { urls in
             let previous = externalOpenTask
             externalOpenTask = Task { @MainActor in
                 await previous?.value
-                var importedIDs: [PlaylistItem.ID] = []
                 for rawURL in urls {
                     do {
                         let url = try await PlaylistStreamingImporter().download(from: rawURL)
-                        importedIDs.append(contentsOf: await imports.submit(
+                        await imports.submit(
                             [url], destination: .playlist, isWorkspaceOwned: true,
-                            undoManager: undoManager, expandResults: false
-                        ))
+                            undoManager: undoManager
+                        )
                     } catch { coordinator.reportError(error.localizedDescription) }
                 }
-                imports.expand(importedIDs)
             }
         }
     }
@@ -572,7 +570,8 @@ struct WorkspaceView: View {
         }) else { return false }
         let files = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
         guard !files.isEmpty, persistence.restorationComplete else { return false }
-        let destination = coordinator.captureImportDestination()
+        let destination: PlaylistImportDestination = NSEvent.modifierFlags.contains(.shift)
+            ? .newComparison : coordinator.captureImportDestination()
         let undoManager = undoManager ?? mainWindow?.undoManager
         Task { @MainActor in
             var urls: [URL] = []
@@ -589,12 +588,24 @@ struct WorkspaceView: View {
                 }
                 if let url { urls.append(url) }
             }
-            await imports.submit(
+            await submitExternalAudio(
                 AppOpenedURLResolver.audioFileURLs(from: urls), destination: destination,
                 undoManager: undoManager
             )
         }
         return true
+    }
+
+    private func submitExternalAudio(
+        _ urls: [URL], destination: PlaylistImportDestination, undoManager: UndoManager?
+    ) async {
+        let importedIDs = await imports.submit(urls, destination: destination, undoManager: undoManager)
+        if destination == .newComparison,
+           let itemID = importedIDs.first,
+           coordinator.mode.itemID == itemID,
+           !visibility.showsPlaylist {
+            toggleVisibility(.playlist)
+        }
     }
 
     private func toggleVisibility(_ region: WorkspaceVisibility.Region) {
@@ -872,9 +883,8 @@ struct WorkspaceView: View {
     }
 
     /// Adds and removes resize the window as in v2.9.0; mode switches,
-    /// restoration and the artwork toggle's resize don't. The fit waits a
-    /// moment so an import's row expansion lands first and a run of changes
-    /// resizes once.
+    /// restoration and the artwork toggle's resize don't. The fit waits for
+    /// playlist presentation to settle so a run of changes resizes once.
     private func scheduleContentFit(from old: ContentFitKey, to new: ContentFitKey) {
         guard old.mode == new.mode else {
             contentFitTask?.cancel()
@@ -1000,28 +1010,19 @@ struct WorkspaceView: View {
 @MainActor
 private struct WorkspaceImports {
     let coordinator: PlaylistCoordinator
-    let presentation: PlaylistPresentationState
 
     @discardableResult
     func submit(
         _ urls: [URL],
         destination: PlaylistImportDestination,
         isWorkspaceOwned: Bool = false,
-        undoManager: UndoManager? = nil,
-        expandResults: Bool = true
+        undoManager: UndoManager? = nil
     ) async -> [PlaylistItem.ID] {
-        let itemIDs = await coordinator.importFiles(
+        await coordinator.importFiles(
             urls, destination: destination, isWorkspaceOwned: isWorkspaceOwned,
             automaticGroupingMode: AppSettings.shared.automaticGroupingMode,
             undoManager: undoManager ?? NSApp.mainWindow?.undoManager
         )
-        if expandResults { expand(itemIDs) }
-        return itemIDs
-    }
-
-    func expand(_ itemIDs: [PlaylistItem.ID]) {
-        guard !itemIDs.isEmpty else { return }
-        presentation.expanded.formUnion(itemIDs)
     }
 }
 

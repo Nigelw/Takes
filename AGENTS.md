@@ -157,8 +157,8 @@ Key ownership:
   transport-to-file mapping, audibility checks, and gain conversion.
 - `TrackAligner.swift`: audio-derived quick alignment and deeper tempo
   analysis.
-- `TrackMetadataMatcher.swift`: normalized title/artist/filename matching and
-  duration safeguards for automatic playlist grouping.
+- `TrackMetadataMatcher.swift`: normalized title matching with filename
+  fallback for automatic playlist grouping.
 - `TrackSimilarityClustering.swift`: deterministic conservative grouping and
   existing-item admission from pairwise metadata evidence.
 - `RejectedMark.swift`: the rejection mark, a broken heart drawn in code
@@ -283,12 +283,13 @@ These are here to prevent parallel implementations and subtle regressions:
   and destination references from before the edit for offset translation.
   Undo and Redo rebase the recorded edit against current versions and retain
   live playback by stable ID when that version survives.
-- Keep automatic grouping conservative: missing metadata or incompatible
-  duration must not create a match; incoming and existing tracks use the same
-  rules, existing items require an unambiguous all-member witness, and imports
-  never merge existing items. Normalize each version once per matching pass,
-  check performance qualifiers before fuzzy matching, and recheck the matching
-  inputs before committing evidence computed off the main actor.
+- Automatic grouping uses the normalized title alone. Strip recognized
+  performance markers and trailing performance descriptions before matching.
+  Incoming and existing versions use the same rules. Each incoming version
+  needs a match and no conflicts within a unique existing item, and imports
+  never merge existing items. Normalize each version once per matching pass
+  and recheck the matching inputs before committing evidence computed off the
+  main actor.
 - Preserve canonical duplicate detection by standardized, symlink-resolved file
   URL.
 - Keep removal behavior state-safe: removing one version from an active
@@ -303,15 +304,25 @@ These are here to prevent parallel implementations and subtle regressions:
   insertion indicator, drop-on-row, or multi-row drag image.
   `PlaylistPresentationState` stays the source of truth for selection and
   expansion; the outline controller mirrors it in both directions.
-  Imports preserve the playlist selection, including an empty selection.
+  Imports preserve playlist selection and expansion. Newly imported groups
+  start collapsed, including those opened in Compare by Shift-drop.
 - Playlist row drags are in-app only for organization (reorder, drop on an
   item to group, drag versions between items or out to separate) and carry a
   file URL for dragging out to Finder. An item row dragged out copies every
   version whose file is there: `PlaylistNSOutlineView.beginDraggingSession`
   adds the other versions as image-less, file-URL-only dragging items
-  (`extraDraggingItems`); in-app drops read `draggedNodes`, never those. Finder file drops are position
+  (`extraDraggingItems`); in-app drops read `draggedNodes`, never those.
+  During playlist row drags, `PlaylistNSOutlineView.adjustScroll` caps AppKit's
+  vertical autoscroll step by elapsed time and bypasses that cap during
+  trackpad and wheel scrolling. The scroll view has zero vertical content
+  insets so the drag-scroll zones extend to the top and bottom edges.
+  Finder file drops are position
   independent: they go through the shared import path, which merges into a
-  metadata match or appends.
+  metadata match or appends. Holding Shift at drop time creates one new
+  comparison in drop order, even for a single audio file and with automatic
+  grouping disabled. App icon drops use the same destination when Shift is
+  held as AppKit delivers the document-open event. A regular drop onto the
+  Compare window adds versions to that item.
 - An external file drag over the window lights the visible list or waveform
   area with the v2.9.0 wash and edge glow, and shades the cover and the
   control bar, buttons included (`FileDropShade`, `Theme.fileDropShade`:
@@ -335,7 +346,8 @@ These are here to prevent parallel implementations and subtle regressions:
   animate the active lane in Compare. Compare keeps the audio runtime in place, and
   a Blind Listening move changes only the displayed order. Both animations
   respect Reduce Motion.
-  Group Versions uses the first selected track as the destination.
+  Group Versions uses the first selected track as the destination and selects
+  its collapsed group row. Grouping via row drops also starts collapsed.
   Ungroup Versions splits all versions of each selected track and any
   individually selected versions into standalone tracks, then selects the
   resulting track rows.
@@ -768,7 +780,8 @@ these reintroduces the exact regressions it fixed):
 
 - `PlaylistCoordinatorTests.swift`: traversal, import destinations, organization,
   Undo, missing-file repair/advancement, 100-item/32-version runtime isolation,
-  automatic-grouping transactions/cancellation, entering compare without
+  automatic-grouping transactions/cancellation, forced single- and multi-file
+  comparison imports, entering compare without
   starting another item, compare opening (and restoring) with missing
   versions as error lanes, consecutive removals preserving the surviving
   comparison runtime, media-player Previous/Next Track, leaving compare
@@ -853,10 +866,11 @@ these reintroduces the exact regressions it fixed):
 - `LoopingTests.swift`, `TimelineHeaderMarkerTests.swift`, and
   `TrackAlignerTests.swift`: their named subsystems.
 - `TrackDropHighlightTests.swift`: drop targeting, the playlist outline's
-  32-version limit alerts for item and version row drops, and import command routing.
+  row-drag autoscroll cap and manual scrolling during a drag, 32-version
+  limit alerts for item and version row drops, and import command routing.
 - `TrackMetadataMatcherTests.swift` and
-  `TrackSimilarityClusteringTests.swift`: metadata normalization, duration
-  safeguards, and deterministic conservative grouping. Coordinator integration
+  `TrackSimilarityClusteringTests.swift`: title normalization and matching,
+  and deterministic grouping. Coordinator integration
   coverage lives in `PlaylistCoordinatorTests.swift`.
 
 ## Ongoing Work

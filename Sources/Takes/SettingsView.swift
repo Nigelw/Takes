@@ -65,14 +65,14 @@ private struct GeneralSettingsView: View {
                     LabeledContent("Nudge") {
                         OffsetAmountField(value: $settings.offsetStep, stepperIncrement: 10)
                     }
-                    SettingsHint("Offset adjustment when pressing the Up or Down arrow key in a track’s offset field.")
+                    SettingsHint("Use ↑ and ↓ in the offset input field for small adjustments")
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     LabeledContent("Large nudge") {
                         OffsetAmountField(value: $settings.offsetLargeStep, stepperIncrement: 50)
                     }
-                    SettingsHint("Hold Shift while pressing the Up or Down arrow key to adjust by a larger amount.")
+                    SettingsHint("Use ⇧↑ and ⇧↓ in the offset input field for larger adjustments")
                 }
             } header: {
                 Text("Track Alignment")

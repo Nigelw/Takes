@@ -37,13 +37,11 @@ struct TrackMetadataMatcherTests {
     }
 
     @Test
-    func smallTitleTyposCanMatchButDifferentArtistsCannot() {
+    func smallTitleTyposCanMatchAcrossArtists() {
         let original = version(title: "Here There and Everywhere", artist: "The Beatles", duration: 145)
-        let typo = version(title: "Here, There and Everywher", artist: "Beatles", duration: 146)
-        let cover = version(title: "Here There and Everywhere", artist: "Another Artist", duration: 145)
+        let typo = version(title: "Here, There and Everywher", artist: "Another Artist", duration: 146)
 
         #expect(TrackMetadataMatcher.decision(between: original, and: typo) == .match)
-        #expect(TrackMetadataMatcher.decision(between: original, and: cover) == .mismatch)
     }
 
     @Test
@@ -54,60 +52,65 @@ struct TrackMetadataMatcherTests {
         #expect(TrackMetadataMatcher.decision(between: credited, and: plain) == .match)
     }
 
-    @Test
-    func filenameFallbackParsesTrackNumberArtistAndTitle() {
+    @Test(arguments: [
+        "Another Artist - Example Song (Live 2019.11.12 Colosseum).mp3",
+        "Example Song (Live 2019.11.12 - Colosseum).mp3"
+    ])
+    func filenameFallbackParsesTrackNumberArtistAndTitle(_ filename: String) {
         let first = version(filename: "01 - Artist - Example Song (Remastered 2020).flac", duration: 240)
-        let second = version(filename: "Artist - Example Song.mp3", duration: 242)
+        let second = version(filename: filename, duration: 242)
 
         #expect(TrackMetadataMatcher.decision(between: first, and: second) == .match)
     }
 
-    @Test
-    func performanceChangingQualifiersRemainPartOfTheTitle() {
-        let studio = version(title: "Where to Begin", artist: "My Morning Jacket", duration: 230)
-        let live = version(title: "Where to Begin (Live)", artist: "My Morning Jacket", duration: 231)
+    @Test(arguments: ["Live", "Demo", "Acoustic", "Cover", "Alternate Take 2", "Alt Take 3"])
+    func performanceMarkersAreStripped(_ marker: String) {
+        let studio = version(title: "Where to Begin", duration: 230)
+        let alternate = version(title: "Where to Begin - \(marker)", duration: 231)
 
-        #expect(TrackMetadataMatcher.decision(between: studio, and: live) == .mismatch)
+        #expect(TrackMetadataMatcher.decision(between: studio, and: alternate) == .match)
     }
 
-    @Test(arguments: ["Live", "Demo", "Acoustic", "Cover", "Alternate Take 2"])
-    func fuzzyMatchingCannotAbsorbAPerformanceQualifier(_ qualifier: String) {
-        let title = "A Very Long Song Title That Easily Crosses the Fuzzy Matching Threshold"
-        let studio = version(title: title, artist: "Artist", duration: 200)
-        let alternate = version(title: "\(title) (\(qualifier))", artist: "Artist", duration: 201)
-        let remaster = version(title: "\(title) (\(qualifier)) (Remastered 2009)", artist: "Artist", duration: 201)
+    @Test(arguments: [
+        "(Live 2019.11.12 Colosseum)",
+        "(2019.11.12 Live at the Colosseum)",
+        "[Demo recorded in 2019]",
+        "[2019 studio demo]",
+        "(Acoustic session at KEXP) (Remastered 2024)",
+        "(Alternate Take 2 from the vault) [Live at the Colosseum]"
+    ])
+    func trailingPerformanceDescriptionsAreStripped(_ annotation: String) {
+        let studio = version(title: "Where to Begin", duration: 230)
+        let alternate = version(title: "Where to Begin \(annotation)", duration: 231)
 
-        #expect(TrackMetadataMatcher.decision(between: studio, and: alternate) == .mismatch)
-        #expect(TrackMetadataMatcher.decision(between: alternate, and: remaster) == .match)
+        #expect(TrackMetadataMatcher.decision(between: studio, and: alternate) == .match)
+    }
+
+    @Test(arguments: ["Part III", "Alive"])
+    func parentheticalTitleTextIsPreserved(_ annotation: String) {
+        let first = version(title: "Example (Part I)", duration: 200)
+        let second = version(title: "Example (\(annotation)) (2019 Live at the Colosseum)", duration: 200)
+
+        #expect(TrackMetadataMatcher.normalizedTitle(for: second) == "example \(annotation.lowercased())")
+        #expect(TrackMetadataMatcher.decision(between: first, and: second) == .mismatch)
     }
 
     @Test
-    func ordinaryVersionsUseFiveSecondOrFivePercentDurationTolerance() {
-        let first = version(title: "Example", artist: "Artist", duration: 200)
-        let atLimit = version(title: "Example", artist: "Artist", duration: 210)
-        let beyondLimit = version(title: "Example", artist: "Artist", duration: 211)
-
-        #expect(TrackMetadataMatcher.decision(between: first, and: atLimit) == .match)
-        #expect(TrackMetadataMatcher.decision(between: first, and: beyondLimit) == .mismatch)
-    }
-
-    @Test
-    func explicitEditsUseTwoMinuteOrThirtyFivePercentDurationTolerance() {
+    func titleMatchIgnoresArtistAndDuration() {
         let original = version(title: "Example", artist: "Artist", duration: 200)
-        let withinLimit = version(title: "Example (Extended Mix)", artist: "Artist", duration: 320)
-        let beyondLimit = version(title: "Example (Extended Mix)", artist: "Artist", duration: 330)
+        let longCover = version(title: "Example (Extended Mix)", artist: "Another Artist", duration: 600)
+        let unmeasured = version(title: "Example", duration: 0)
 
-        #expect(TrackMetadataMatcher.decision(between: original, and: withinLimit) == .match)
-        #expect(TrackMetadataMatcher.decision(between: original, and: beyondLimit) == .mismatch)
+        #expect(TrackMetadataMatcher.decision(between: original, and: longCover) == .match)
+        #expect(TrackMetadataMatcher.decision(between: original, and: unmeasured) == .match)
     }
 
     @Test
-    func unusableDurationAbstains() {
-        let valid = version(title: "Example", artist: "Artist", duration: 200)
-        let invalid = version(title: "Example", artist: "Artist", duration: 0)
+    func emptyNormalizedTitleAbstains() {
+        let valid = version(title: "Example", duration: 200)
+        let invalid = version(title: "(Live at the Colosseum)", duration: 200)
 
         #expect(TrackMetadataMatcher.decision(between: valid, and: invalid) == .unknown)
-        #expect(!TrackMetadataMatcher.canAttemptMatch(invalid))
     }
 
     private func version(

@@ -881,7 +881,7 @@ struct PlaylistWorkspace: Codable, Equatable {
         return PlaylistListeningState(itemID: item.id, versionID: version.id, filePosition: 0)
     }
 
-    private static func defaultTitle(for version: PlaylistVersion) -> String {
+    static func defaultTitle(for version: PlaylistVersion) -> String {
         if let title = version.metadata.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
             return title
         }

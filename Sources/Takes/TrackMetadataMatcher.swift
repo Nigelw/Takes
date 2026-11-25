@@ -1,95 +1,40 @@
 import Foundation
 
-/// Fast, deterministic evidence for automatic playlist grouping. Embedded
-/// title and artist tags are preferred; the filename is used when tags are
-/// absent. Duration can reject a match but never establishes one.
+/// Title matching for automatic playlist grouping, with a filename fallback.
 struct TrackMetadataMatcher {
-    struct Identity {
-        let artist: String?
-        let title: String
-        let duration: TimeInterval
-        let isExplicitEdit: Bool
-        let performanceQualifiers: Set<String>
-
-        var isUsable: Bool {
-            !title.isEmpty && duration.isFinite && duration > 0
-        }
-    }
+    private static let performanceMarker = #"(?<![\p{L}\p{N}])(?:live|demo|acoustic|cover|(?:alternate|alt)[\s_-]+take(?:[\s_#-]+\d+)?)(?![\p{L}\p{N}])"#
 
     static func decision(
         between first: PlaylistVersion,
         and second: PlaylistVersion
     ) -> TrackSimilarityClusterDecision {
-        decision(between: identity(for: first), and: identity(for: second))
-    }
-
-    static func canAttemptMatch(_ version: PlaylistVersion) -> Bool {
-        identity(for: version).isUsable
+        decision(between: normalizedTitle(for: first), and: normalizedTitle(for: second))
     }
 
     static func decision(
-        between first: Identity,
-        and second: Identity
+        between first: String,
+        and second: String
     ) -> TrackSimilarityClusterDecision {
-        guard first.isUsable, second.isUsable else { return .unknown }
-        guard durationsAreCompatible(first, second) else { return .mismatch }
-        guard first.performanceQualifiers == second.performanceQualifiers else { return .mismatch }
+        guard !first.isEmpty, !second.isEmpty else { return .unknown }
+        if first == second { return .match }
 
-        switch (first.artist, second.artist) {
-        case let (.some(lhs), .some(rhs)) where lhs != rhs:
-            return .mismatch
-        case (.some, .none), (.none, .some):
-            return .unknown
-        default:
-            break
-        }
-
-        if first.title == second.title { return .match }
-
-        let firstCount = first.title.count
-        let secondCount = second.title.count
+        let firstCount = first.count
+        let secondCount = second.count
         let longestCount = max(firstCount, secondCount)
         guard longestCount >= 6,
               1 - Double(abs(firstCount - secondCount)) / Double(longestCount) >= 0.92 else { return .mismatch }
-        return similarity(first.title, second.title) >= 0.92 ? .match : .mismatch
+        return similarity(first, second) >= 0.92 ? .match : .mismatch
     }
 
-    private static func durationsAreCompatible(_ first: Identity, _ second: Identity) -> Bool {
-        let difference = abs(first.duration - second.duration)
-        let longest = max(first.duration, second.duration)
-        let tolerance: TimeInterval
-        if first.isExplicitEdit || second.isExplicitEdit {
-            tolerance = max(120, longest * 0.35)
-        } else {
-            tolerance = max(5, longest * 0.05)
+    static func normalizedTitle(for version: PlaylistVersion) -> String {
+        if let title = meaningful(version.metadata.title) {
+            return normalizeTitle(removingPerformanceDescriptions(from: folded(title)))
         }
-        return difference <= tolerance
-    }
-
-    static func identity(for version: PlaylistVersion) -> Identity {
-        let taggedTitle = meaningful(version.metadata.title)
-        let taggedArtist = meaningful(version.metadata.artist)
-        let parsedFilename: (artist: String?, title: String)
-        if taggedTitle == nil || taggedArtist == nil {
-            let filename = version.metadata.displayName.isEmpty
-                ? version.file.storedURL.lastPathComponent
-                : version.metadata.displayName
-            parsedFilename = parseFilename(filename)
-        } else {
-            parsedFilename = (nil, "")
-        }
-        let rawTitle = taggedTitle ?? parsedFilename.title
-        let rawArtist = taggedArtist ?? parsedFilename.artist
-        let normalizedTitle = normalizeTitle(rawTitle)
-        let qualifierPattern = #/\b(?:live|demo|acoustic|cover|(?:alternate|alt)\s+take(?:\s+\d+)?)\b/#
-
-        return Identity(
-            artist: rawArtist.map(normalizeArtist).flatMap { $0.isEmpty ? nil : $0 },
-            title: normalizedTitle.base,
-            duration: version.metadata.duration,
-            isExplicitEdit: normalizedTitle.isExplicitEdit,
-            performanceQualifiers: Set(normalizedTitle.base.matches(of: qualifierPattern).map { String($0.0) })
-        )
+        let filename = version.metadata.displayName.isEmpty
+            ? version.file.storedURL.lastPathComponent
+            : version.metadata.displayName
+        let stem = folded((filename as NSString).deletingPathExtension)
+        return normalizeTitle(titleFromFilenameStem(removingPerformanceDescriptions(from: stem)))
     }
 
     private static func meaningful(_ value: String?) -> String? {
@@ -98,45 +43,39 @@ struct TrackMetadataMatcher {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private static func parseFilename(_ filename: String) -> (artist: String?, title: String) {
-        var stem = (filename as NSString).deletingPathExtension
-        stem = replacing(
+    private static func titleFromFilenameStem(_ filenameStem: String) -> String {
+        let stem = replacing(
             #"^\s*(?:cd|disc)?\s*\d{1,3}(?:[.-]\d{1,3})?\s*[-._)]*\s*"#,
-            in: stem,
+            in: filenameStem,
             with: ""
         )
         for separator in [" - ", " – ", " — "] {
             let parts = stem.components(separatedBy: separator)
-            if parts.count >= 2,
-               let artist = meaningful(parts.first) {
-                return (artist, parts.dropFirst().joined(separator: separator))
+            if parts.count >= 2, meaningful(parts.first) != nil {
+                return parts.dropFirst().joined(separator: separator)
             }
         }
-        return (nil, stem)
+        return stem
     }
 
-    private static func normalizeArtist(_ value: String) -> String {
-        var result = folded(value)
-        result = replacing(#"\b(?:feat|featuring|ft)\b.*$"#, in: result, with: "")
-        result = result.replacingOccurrences(of: "&", with: " and ")
-        result = wordsOnly(result)
-        if result.hasPrefix("the ") { result.removeFirst(4) }
-        return result
+    private static func removingPerformanceDescriptions(from title: String) -> String {
+        let annotation = #"(?:\([^()]*\)|\[[^\[\]]*\])"#
+        let performanceAnnotation = #"(?:\([^()]*\#(performanceMarker)[^()]*\)|\[[^\[\]]*\#(performanceMarker)[^\[\]]*\])"#
+        // Allow other trailing annotations, such as a remaster credit, after a performance description.
+        let trailingPerformanceAnnotation = #"\#(performanceAnnotation)(?=(?:\s*\#(annotation))*\s*$)"#
+        return replacing(trailingPerformanceAnnotation, in: title, with: " ")
     }
 
-    private static func normalizeTitle(_ value: String) -> (base: String, isExplicitEdit: Bool) {
-        var result = folded(value)
-        let explicitEditPatterns = [
+    private static func normalizeTitle(_ value: String) -> String {
+        var result = value
+        let removablePatterns = [
+            performanceMarker,
             #"\bradio\s+edit\b"#,
             #"\bsingle\s+edit\b"#,
             #"\balbum\s+edit\b"#,
             #"\bextended\s+(?:mix|version|edit)\b"#,
             #"\b(?:19|20)\d{2}\s+(?:mono|stereo)\s+(?:mix|remix)\b"#,
-            #"\b(?:mono|stereo)\s+(?:mix|remix|version)\b"#
-        ]
-        let isExplicitEdit = explicitEditPatterns.contains { contains($0, in: result) }
-
-        let removablePatterns = explicitEditPatterns + [
+            #"\b(?:mono|stereo)\s+(?:mix|remix|version)\b"#,
             #"\b(?:feat|featuring|ft)\b.*$"#,
             #"\b(?:19|20)\d{2}\s+(?:re)?master(?:ed)?\b"#,
             #"\b(?:re)?master(?:ed)?(?:\s+(?:19|20)\d{2})?\b"#,
@@ -147,7 +86,7 @@ struct TrackMetadataMatcher {
         for pattern in removablePatterns {
             result = replacing(pattern, in: result, with: " ")
         }
-        return (wordsOnly(result), isExplicitEdit)
+        return wordsOnly(result)
     }
 
     private static func folded(_ value: String) -> String {
@@ -163,10 +102,6 @@ struct TrackMetadataMatcher {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
-    }
-
-    private static func contains(_ pattern: String, in value: String) -> Bool {
-        value.range(of: pattern, options: .regularExpression) != nil
     }
 
     private static func replacing(_ pattern: String, in value: String, with replacement: String) -> String {

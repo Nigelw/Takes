@@ -476,7 +476,7 @@ final class PlaylistCoordinator {
                 }
                 acceptedVersions.append(version)
             }
-            guard !acceptedVersions.isEmpty else {
+            guard let firstVersion = acceptedVersions.first else {
                 if operationGeneration == importGeneration {
                     reportError(failures.joined(separator: "\n"))
                 }
@@ -496,6 +496,12 @@ final class PlaylistCoordinator {
                 }
             case let .item(itemID):
                 newItemIDs = try appendVersions(acceptedVersions, to: itemID)
+            case .newComparison:
+                let item = PlaylistItem(
+                    title: PlaylistWorkspace.defaultTitle(for: firstVersion),
+                    versions: acceptedVersions
+                )
+                newItemIDs = try workspace.appendItems([item])
             }
 
             registerUndo(before: before, undoManager: undoManager, actionName: "Import Tracks")
@@ -515,6 +521,14 @@ final class PlaylistCoordinator {
                     autoAlignAfterActivation: true
                 )
             }
+            if destination == .newComparison,
+               let itemID = newItemIDs.first,
+               navigationGeneration == navigationGenerationAtStart {
+                let activation = await enterComparison(
+                    itemID: itemID, from: capturePlaybackSnapshot(), autoAlignAfterActivation: true
+                )
+                guard activation == .activated else { return newItemIDs }
+            }
             if operationGeneration == importGeneration, !failures.isEmpty {
                 reportError(failures.joined(separator: "\n"))
             } else if operationGeneration == importGeneration {
@@ -533,7 +547,7 @@ final class PlaylistCoordinator {
         } catch {
             if operationGeneration == importGeneration,
                case let PlaylistWorkspaceError.versionLimitExceeded(_, limit) = error,
-               case .item = destination {
+               destination != .playlist {
                 versionLimitAlert = .comparison(limit: limit)
             }
             if operationGeneration == importGeneration, !failures.isEmpty {
@@ -1794,8 +1808,8 @@ final class PlaylistCoordinator {
         versions: [PlaylistVersion],
         existingVersions: [PlaylistVersion]
     ) async -> AutomaticImportPlan {
-        let incoming = versions.map { (id: $0.id, identity: TrackMetadataMatcher.identity(for: $0)) }
-        let existing = existingVersions.map { (id: $0.id, identity: TrackMetadataMatcher.identity(for: $0)) }
+        let incoming = versions.map { (id: $0.id, title: TrackMetadataMatcher.normalizedTitle(for: $0)) }
+        let existing = existingVersions.map { (id: $0.id, title: TrackMetadataMatcher.normalizedTitle(for: $0)) }
         var decisions: [TrackSimilarityClusterEvidence<UUID>] = []
         for index in incoming.indices {
             if Task.isCancelled { break }
@@ -1803,13 +1817,13 @@ final class PlaylistCoordinator {
             for second in incoming[(index + 1)...] {
                 decisions.append(.init(
                     first: first.id, second: second.id,
-                    decision: TrackMetadataMatcher.decision(between: first.identity, and: second.identity)
+                    decision: TrackMetadataMatcher.decision(between: first.title, and: second.title)
                 ))
             }
             for second in existing {
                 decisions.append(.init(
                     first: first.id, second: second.id,
-                    decision: TrackMetadataMatcher.decision(between: first.identity, and: second.identity)
+                    decision: TrackMetadataMatcher.decision(between: first.title, and: second.title)
                 ))
             }
         }

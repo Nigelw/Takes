@@ -2895,8 +2895,8 @@ struct SessionTests {
         #expect(TakesWindowPolicy.playlistControlBarHeight(showsArtwork: true) == 130)
         #expect(TakesWindowPolicy.playlistControlBarHeight(showsArtwork: false) == 142)
         // 360 + 130 + 6 + 4 × 46 + 2 × 30 + 6 + 30.
-        #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 4, versionRows: 2, showsArtwork: true, width: 360) == 776)
-        #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 4, versionRows: 2, showsArtwork: false, width: 360) == 428)
+        #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 4, versionRows: 2, showsArtwork: true, width: 360) == 764)
+        #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 4, versionRows: 2, showsArtwork: false, width: 360) == 416)
         // Few or no rows never go below the minimum.
         #expect(TakesWindowPolicy.playlistFittingHeight(itemRows: 0, versionRows: 0, showsArtwork: true, width: 260) == 519)
         #expect(TakesWindowPolicy.compareFittingHeight(laneCount: 0, showsArtwork: true, width: 360) == 619)

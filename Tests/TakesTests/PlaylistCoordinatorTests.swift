@@ -549,13 +549,14 @@ struct PlaylistCoordinatorTests {
     }
 
     @MainActor
-    @Test func groupUsesTheSelectedTrackAndOnlyTheSelectedLooseVersions() {
+    @Test func groupUsesTheSelectedTrackAndOnlyTheSelectedLooseVersionsAndCollapsesTheGroup() {
         let target = PlaylistItem(title: "Target", versions: ["a", "b"].map { makeVersion("\($0).wav") })
         let source = PlaylistItem(title: "Source", versions: ["c", "d"].map { makeVersion("\($0).wav") })
         let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [target, source]))
         let presentation = PlaylistPresentationState()
         let context = PlaylistCommandContext(coordinator: coordinator, presentation: presentation, undoManager: nil)
 
+        presentation.expanded = [target.id, source.id]
         presentation.selection = [.item(target.id), .version(target.versions[1].id)]
         #expect(!context.canGroup)
         presentation.selection.insert(.version(source.versions[0].id))
@@ -566,7 +567,7 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.workspace.items[0].versions == target.versions + [source.versions[0]])
         #expect(coordinator.workspace.items[1].versions == [source.versions[1]])
         #expect(presentation.selection == [.item(target.id)])
-        #expect(presentation.expanded == [target.id])
+        #expect(presentation.expanded == [source.id])
         #expect(!context.canGroup)
     }
 
@@ -806,6 +807,54 @@ struct PlaylistCoordinatorTests {
 
     @MainActor
     @Test
+    func forcedComparisonImportGroupsDroppedFilesAndOpensCompare() async throws {
+        let firstURL = try makeTemporaryAudioFile(name: "first.wav")
+        defer { try? FileManager.default.removeItem(at: firstURL.deletingLastPathComponent()) }
+        let secondURL = try makeTemporaryAudioFile(name: "second.wav")
+        defer { try? FileManager.default.removeItem(at: secondURL.deletingLastPathComponent()) }
+        let existing = PlaylistItem(title: "Existing", versions: [makeVersion("existing.wav")])
+        let coordinator = PlaylistCoordinator(
+            workspace: PlaylistWorkspace(items: [existing]),
+            loader: CoordinatorTestAudioLoader(tracks: [
+                firstURL: makeLoadedTrack(for: firstURL, title: "First Song"),
+                secondURL: makeLoadedTrack(for: secondURL, title: "Unrelated Song")
+            ])
+        )
+
+        let imported = await coordinator.importFiles(
+            [secondURL, firstURL], destination: .newComparison, automaticGroupingMode: .off
+        )
+
+        let itemID = try #require(imported.first)
+        #expect(coordinator.workspace.items.map(\.id) == [existing.id, itemID])
+        #expect(coordinator.workspace.items.last?.versions.map(\.metadata.title) == ["Unrelated Song", "First Song"])
+        #expect(coordinator.mode == .comparison(itemID: itemID))
+        #expect(coordinator.runtimeTrackCount == 2)
+        #expect(!coordinator.isPlaying)
+    }
+
+    @MainActor
+    @Test
+    func forcedComparisonImportOpensOneFileAndAcceptsMoreVersions() async throws {
+        let firstURL = try makeTemporaryAudioFile(name: "single.wav")
+        defer { try? FileManager.default.removeItem(at: firstURL.deletingLastPathComponent()) }
+        let secondURL = try makeTemporaryAudioFile(name: "additional.wav")
+        defer { try? FileManager.default.removeItem(at: secondURL.deletingLastPathComponent()) }
+        let coordinator = PlaylistCoordinator()
+
+        let imported = await coordinator.importFiles([firstURL], destination: .newComparison)
+        let itemID = try #require(imported.first)
+        #expect(coordinator.mode == .comparison(itemID: itemID))
+        #expect(coordinator.runtimeTrackCount == 1)
+
+        let appended = await coordinator.importFiles([secondURL])
+        #expect(appended == [itemID])
+        #expect(coordinator.workspace.items.map(\.versions.count) == [2])
+        try await waitFor { coordinator.runtimeTrackCount == 2 }
+    }
+
+    @MainActor
+    @Test
     func automaticImportGroupsTwoPairsAndUndoesAsOneTransaction() async {
         let urls = ["song-a-master.wav", "song-a-mp3.wav", "song-b-master.wav", "song-b-mp3.wav"]
             .map { URL(fileURLWithPath: "/tmp/\(UUID().uuidString)-\($0)") }
@@ -924,7 +973,9 @@ struct PlaylistCoordinatorTests {
         let tracks = [
             existingURL: makeLoadedTrack(for: existingURL, title: "Existing", artist: "Artist"),
             unrelatedURL: makeLoadedTrack(for: unrelatedURL, title: "Unrelated", artist: "Artist"),
-            incomingURL: makeLoadedTrack(for: incomingURL, title: "Existing (Remastered)", artist: "Artist")
+            incomingURL: makeLoadedTrack(
+                for: incomingURL, title: "Existing (Live 2019.11.12 Colosseum)", artist: "Another Artist", duration: 120
+            )
         ]
         let coordinator = PlaylistCoordinator(
             workspace: PlaylistWorkspace(items: [target, unrelated]),

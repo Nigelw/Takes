@@ -24,6 +24,11 @@ final class PlaylistPresentationState: ObservableObject {
         }
     }
 
+    func selectCollapsedGroup(_ itemID: UUID) {
+        selection = [.item(itemID)]
+        expanded.remove(itemID)
+    }
+
     func prune(in workspace: PlaylistWorkspace) {
         let remainingExpansion = expanded.intersection(workspace.items.map(\.id))
         if expanded != remainingExpansion { expanded = remainingExpansion }
@@ -89,8 +94,7 @@ struct PlaylistCommandContext {
               let destination = coordinator.groupItems(
                 sources.items, looseVersionIDs: sources.versions, undoManager: undoManager
               ) else { return }
-        presentation.selection = [.item(destination)]
-        presentation.expanded.insert(destination)
+        presentation.selectCollapsedGroup(destination)
     }
 
     func remove() {

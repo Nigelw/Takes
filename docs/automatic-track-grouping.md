@@ -1,25 +1,21 @@
 # Automatic track grouping
 
-When **Group similar tracks** is set to **Automatic**, Takes groups imported
-files using their descriptive metadata. It does not analyze the audio.
+When **Group similar tracks** is on, Takes groups imported files by title.
 
 ## How matching works
 
-1. Takes prefers the embedded title and artist tags. If they are missing, it
-   reads the same information from filenames such as `Artist - Title.mp3`.
-2. Comparison ignores capitalization, accents, punctuation, track numbers,
-   codec labels, mastering labels, and ordinary mono/stereo mix labels.
-3. Small title spelling differences are accepted when the artist matches.
-4. Terms that can identify another performance—such as `live`, `demo`,
-   `acoustic`, `alternate take`, or `cover`—remain part of the title and
-   therefore prevent an unsafe match.
-5. Duration is a safeguard, not a reason to match. Ordinary versions may
-   differ by at most `max(5 seconds, 5%)`. Explicit radio, single, album, or
-   extended edits and recognized mono/stereo mix variants may differ by at
-   most `max(2 minutes, 35%)`.
-6. The same rules apply whether related files arrive together, in later
-   imports, or match an existing playlist item.
+1. Takes prefers the embedded title tag and falls back to the title in filenames
+   such as `Artist - Title.mp3`. Artist and duration do not affect grouping.
+2. Comparison ignores capitalization, accents, punctuation, leading filename
+   track numbers, and recognized codec, mastering, and mix labels.
+3. Takes strips performance markers such as `live`, `demo`, `acoustic`,
+   `alternate take`, and `cover`. A trailing parenthetical or bracketed
+   description that contains one of these markers is removed in full, as in
+   `Title (2019.11.12 Live at the Colosseum)`.
+4. Normalized titles match exactly or at 92% edit-distance similarity.
+5. The same rules apply to files imported together and to files added in
+   later imports.
 
-If metadata is insufficient, durations conflict, or more than one existing
-item is a possible destination, Takes leaves the track separate. Imports remain
-one Undo operation, and existing playlist items are never merged automatically.
+An empty normalized title cannot match. If more than one existing item qualifies,
+Takes creates a new item for the incoming file or group. Imports remain one Undo
+operation, and existing playlist items are never merged automatically.

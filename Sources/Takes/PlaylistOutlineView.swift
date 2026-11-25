@@ -77,8 +77,6 @@ private enum PlaylistColumn {
 enum PlaylistRowMetrics {
     static let itemHeight: CGFloat = 46
     static let versionHeight: CGFloat = 30
-    /// Top and bottom inset of the list inside its scroll view.
-    static let listVerticalInset: CGFloat = 6
     /// Edge inset of every row background and the selection highlight.
     static let edgeInset: CGFloat = 10
     static let highlightRadius: CGFloat = 6
@@ -291,15 +289,14 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
+        // Vertical content insets leave dead strips in AppKit's drag-scroll zone.
         scrollView.automaticallyAdjustsContentInsets = false
-        scrollView.contentInsets = NSEdgeInsets(
-            top: PlaylistRowMetrics.listVerticalInset, left: 0, bottom: PlaylistRowMetrics.listVerticalInset, right: 0
-        )
         scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.contentView.postsFrameChangedNotifications = true
         outlineView = outline
 
         let center = NotificationCenter.default
+        scrollView.observeLiveScrolling()
         center.addObserver(
             self, selector: #selector(clipViewBoundsChanged),
             name: NSView.boundsDidChangeNotification, object: scrollView.contentView
@@ -978,6 +975,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         willBeginAt screenPoint: NSPoint, forItems draggedItems: [Any]
     ) {
         draggedNodes = draggedItems.compactMap { $0 as? PlaylistNode }
+        if !draggedNodes.isEmpty { self.outlineView.beginRowDrag() }
         updateDragSourceRows()
     }
 
@@ -986,6 +984,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         endedAt screenPoint: NSPoint, operation: NSDragOperation
     ) {
         draggedNodes = []
+        self.outlineView.endRowDrag()
         updateDragSourceRows()
     }
 
@@ -1098,8 +1097,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             return playlist.reorderItems(order, undoManager: undoManager)
         case let .group(itemIDs, into: destination):
             guard playlist.groupItems(itemIDs, into: destination, undoManager: undoManager) != nil else { return false }
-            presentation.selection = [.item(destination)]
-            presentation.expanded.insert(destination)
+            presentation.selectCollapsedGroup(destination)
         case let .separate(versionIDs, beforeItem: anchor):
             guard let created = playlist.separateVersions(
                 versionIDs, placement: .beforeItem(anchor), undoManager: undoManager
@@ -1116,11 +1114,16 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     /// are reordered in place.
     @discardableResult
     private func moveVersions(_ versionIDs: [UUID], to destination: UUID, before anchor: UUID?) -> Bool {
+        let createsGroup = itemsByID[destination]?.versions.count == 1
         guard canInteract, playlist.moveVersions(versionIDs, to: destination, before: anchor, undoManager: undoManager) else {
             return false
         }
-        presentation.expanded.insert(destination)
-        presentation.selection = Set(versionIDs.map(PlaylistRowID.version))
+        if createsGroup {
+            presentation.selectCollapsedGroup(destination)
+        } else {
+            presentation.expanded.insert(destination)
+            presentation.selection = Set(versionIDs.map(PlaylistRowID.version))
+        }
         return true
     }
 }
@@ -1129,6 +1132,25 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
 private final class PlaylistScrollView: NSScrollView {
     weak var controller: PlaylistOutlineController?
+    private var isHandlingScrollWheel = false
+    private var isLiveScrolling = false
+
+    var isManuallyScrolling: Bool { isHandlingScrollWheel || isLiveScrolling }
+
+    func observeLiveScrolling() {
+        let center = NotificationCenter.default
+        center.addObserver(
+            self, selector: #selector(liveScrollStarted),
+            name: NSScrollView.willStartLiveScrollNotification, object: self
+        )
+        center.addObserver(
+            self, selector: #selector(liveScrollEnded),
+            name: NSScrollView.didEndLiveScrollNotification, object: self
+        )
+    }
+
+    @objc private func liveScrollStarted() { isLiveScrolling = true }
+    @objc private func liveScrollEnded() { isLiveScrolling = false }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard controller?.canInteract == true else { return nil }
@@ -1137,12 +1159,44 @@ private final class PlaylistScrollView: NSScrollView {
 
     override func scrollWheel(with event: NSEvent) {
         guard controller?.canInteract == true else { return }
+        // Discrete mouse wheels can scroll without a live-scroll notification pair.
+        isHandlingScrollWheel = true
+        defer { isHandlingScrollWheel = false }
         super.scrollWheel(with: event)
     }
 }
 
 final class PlaylistNSOutlineView: NSOutlineView {
     weak var controller: PlaylistOutlineController?
+    private var lastDragScrollTime: TimeInterval?
+
+    func beginRowDrag() {
+        lastDragScrollTime = ProcessInfo.processInfo.systemUptime
+    }
+
+    func endRowDrag() {
+        lastDragScrollTime = nil
+    }
+
+    override func adjustScroll(_ newVisible: NSRect) -> NSRect {
+        var adjusted = super.adjustScroll(newVisible)
+        guard let lastDragScrollTime, controller?.canInteract == true,
+              let scrollView = enclosingScrollView as? PlaylistScrollView,
+              !scrollView.isManuallyScrolling else { return adjusted }
+
+        let clipView = scrollView.contentView
+        let visibleY = convert(clipView.bounds, from: clipView).minY
+        let proposedDelta = adjusted.minY - visibleY
+        guard proposedDelta != 0 else { return adjusted }
+
+        // AppKit still picks the edge zone and direction. Cap its vertical
+        // step by elapsed time, with no large catch-up step after a pause.
+        let now = ProcessInfo.processInfo.systemUptime
+        self.lastDragScrollTime = now
+        let maximumStep = 600 * min(now - lastDragScrollTime, 1.0 / 20)
+        adjusted.origin.y = visibleY + min(max(proposedDelta, -maximumStep), maximumStep)
+        return adjusted
+    }
 
     /// Rows draw their own chevron in a reserved slot (A2 §6), so AppKit's
     /// disclosure triangle and its indentation are suppressed: every cell

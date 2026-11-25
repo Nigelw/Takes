@@ -4,6 +4,7 @@ import Foundation
 enum PlaylistImportDestination: Equatable, Sendable {
     case playlist
     case item(UUID)
+    case newComparison
 }
 
 /// A new identity is issued even when reactivating the same item.

@@ -49,6 +49,53 @@ struct TrackDropHighlightTests {
     }
 
     @MainActor
+    @Test(arguments: [-1.0, 1.0])
+    func playlistRowDragLimitsAutoscrollStep(direction: Double) async throws {
+        let items = (0..<30).map { index in
+            PlaylistItem(title: "Track \(index)", versions: [
+                PlaylistVersion(
+                    file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/autoscroll-\(index).wav")),
+                    metadata: PlaylistMetadata(displayName: "Track \(index)")
+                )
+            ])
+        }
+        let playlist = PlaylistCoordinator(workspace: PlaylistWorkspace(items: items))
+        let controller = PlaylistOutlineController(
+            playlist: playlist, presentation: PlaylistPresentationState(), artworkStore: PlaylistArtworkStore()
+        )
+        let scroll = controller.makeScrollView()
+        scroll.frame = NSRect(x: 0, y: 0, width: 360, height: 220)
+        let outline = try #require(scroll.documentView as? PlaylistNSOutlineView)
+        controller.update(
+            items: items, fileIssues: [:], currentItemID: nil, currentVersionID: nil,
+            isPlaying: false, isActive: true, moveRevision: 0, reduceMotion: true, metadataFields: []
+        )
+        let clipView = scroll.contentView
+        #expect(clipView.contentInsets.top == 0)
+        #expect(clipView.contentInsets.bottom == 0)
+        clipView.scroll(to: NSPoint(x: 0, y: 500))
+        let visible = outline.convert(clipView.bounds, from: clipView)
+        let proposed = visible.offsetBy(dx: 0, dy: 200 * direction)
+        let baseline = outline.adjustScroll(proposed)
+        let session = NSDraggingSession()
+        let row = try #require(outline.item(atRow: 10))
+
+        controller.outlineView(outline, draggingSession: session, willBeginAt: .zero, forItems: [row])
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(outline.adjustScroll(proposed).minY == visible.minY + 30 * direction)
+
+        let center = NotificationCenter.default
+        center.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        #expect(outline.adjustScroll(proposed) == baseline)
+        center.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        #expect(direction * (outline.adjustScroll(proposed).minY - visible.minY) <= 30)
+
+        controller.outlineView(outline, draggingSession: session, endedAt: .zero, operation: [])
+        #expect(outline.adjustScroll(proposed) == baseline)
+    }
+
+    @MainActor
     @Test(arguments: [false, true])
     func playlistOutlineShowsAnAlertForDropsPastVersionLimit(dragVersionRows: Bool) throws {
         func makeVersion(_ name: String) -> PlaylistVersion {
@@ -91,16 +138,20 @@ struct TrackDropHighlightTests {
         #expect(playlist.versionLimitAlert == .group(limit: limit))
         playlist.dismissVersionLimitAlert()
 
-        let singleRow = try #require(outline.item(atRow: 2))
-        controller.outlineView(outline, draggingSession: session, willBeginAt: .zero, forItems: [singleRow])
+        let oneSourceRow = try #require(outline.item(atRow: 2))
+        controller.outlineView(outline, draggingSession: session, willBeginAt: .zero, forItems: [oneSourceRow])
 
         #expect(controller.outlineView(outline, validateDrop: info, proposedItem: target, proposedChildIndex: onItem) == .move)
         #expect(controller.outlineView(outline, acceptDrop: info, item: target, childIndex: onItem))
         #expect(playlist.workspace.items.first?.versions.count == limit)
         if dragVersionRows {
+            #expect(presentation.selection == [.version(source.versions[0].id)])
+            #expect(presentation.expanded.contains(destination.id))
             #expect(playlist.workspace.items[1].versions == Array(source.versions.dropFirst()))
             #expect(playlist.workspace.items.last == single)
         } else {
+            #expect(presentation.selection == [.item(destination.id)])
+            #expect(!presentation.expanded.contains(destination.id))
             #expect(playlist.workspace.items.last == source)
         }
     }
@@ -445,25 +496,31 @@ struct TrackDropHighlightTests {
 
     @MainActor
     @Test
-    func appFileOpenRouterQueuesURLsUntilHandlerIsConfigured() {
+    func appFileOpenRouterQueuesURLsWithTheirDestinationUntilHandlerIsConfigured() {
         let router = AppFileOpenRouter()
         let earlyURL = URL(fileURLWithPath: "/tmp/early.wav")
+        let earlySecondURL = URL(fileURLWithPath: "/tmp/early-second.wav")
         let laterURL = URL(fileURLWithPath: "/tmp/later.mp3")
         var handledURLBatches: [[URL]] = []
+        var destinations: [PlaylistImportDestination] = []
 
-        router.open([earlyURL])
+        router.open([earlySecondURL, earlyURL], modifierFlags: .shift)
+        router.open([laterURL])
 
         #expect(handledURLBatches.isEmpty)
 
-        router.setHandler { urls in
+        router.setHandler { urls, destination in
             handledURLBatches.append(urls)
+            destinations.append(destination)
         }
 
-        #expect(handledURLBatches == [[earlyURL]])
+        #expect(handledURLBatches == [[earlySecondURL, earlyURL], [laterURL]])
+        #expect(destinations == [.newComparison, .playlist])
 
-        router.open([laterURL])
+        router.open([earlyURL], modifierFlags: .shift)
 
-        #expect(handledURLBatches == [[earlyURL], [laterURL]])
+        #expect(handledURLBatches == [[earlySecondURL, earlyURL], [laterURL], [earlyURL]])
+        #expect(destinations == [.newComparison, .playlist, .newComparison])
     }
 
     @MainActor
@@ -474,11 +531,12 @@ struct TrackDropHighlightTests {
         let laterURL = URL(string: "takes://open-file?url=file%3A%2F%2F%2Ftmp%2Flater.mp3&url=file%3A%2F%2F%2Ftmp%2Fthird.m4a")!
         var handledURLBatches: [[URL]] = []
 
-        router.open([earlyURL])
+        router.open([earlyURL], modifierFlags: .shift)
 
         #expect(handledURLBatches.isEmpty)
 
-        router.setHandler { urls in
+        router.setHandler { urls, destination in
+            #expect(destination == .playlist)
             handledURLBatches.append(urls)
         }
 
