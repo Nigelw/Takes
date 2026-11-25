@@ -136,8 +136,9 @@ always available to explicit play.
 Both row types get a rejected treatment, specified in §9.1. Rules that
 hold across it:
 
-- Rejected and missing dim to the same level. The × marks a rejection
-  and the warning triangle a missing file; a row that is both shows both.
+- Rejected and missing dim to the same level. The broken heart marks a
+  rejection and the warning triangle a missing file; a row that is both
+  shows both.
 - It must survive selection (emphasized background) and now playing. A
   rejected track can be now playing (explicit play).
 - A rejected track whose versions are not rejected shows the track
@@ -201,7 +202,7 @@ not offer it.
   in place of today's dashed warning band
   (`WaveformLaneView.missingExtent`), across the whole lane as on a
   rejected lane, and keep `File Not Found` in the strip. A missing lane and a rejected missing
-  lane look the same apart from the strip's × badge.
+  lane look the same apart from the strip's broken heart.
 - Blind Listening Mode shows the treatment too. It reveals only that the
   user rejected this lane, never which file it is, and rejected lanes are
   out of the switching set anyway, which is how a blind cull narrows
@@ -254,6 +255,8 @@ not offer it.
   `playlistOrganizationMenuItems`.
 - `ContentView.swift`: lane and strip treatment, strip context menu item.
 - `Theme.swift`: rejected colors in `PlaylistRowPalette` and the lane theme.
+- `RejectedMark.swift` (new, added to the Takes target): the broken-heart
+  geometry, the cached template images and `RejectedBadgeView` (§9.1).
 - `AGENTS.md`: the key-version, double-click, compare-exit and switching
   invariants, and the Test Map.
 
@@ -272,6 +275,10 @@ Tests:
 - `SessionTests` (or a compare test): switching skips rejected lanes in
   normal and blind order, `canSwitchPlayback`, Switch & Repeat with only
   rejected others, number hotkeys select rejected lanes.
+- `SessionTests`: `RejectedMark` geometry. Sizes of 18 pt and below use the
+  three-turn zigzag, larger sizes the six-turn one; the horizontal gap at
+  the notch is 1.5× the base gap and at the tip 0.45×; the halves never
+  overlap and stay inside the 24-unit box at 12, 15 and 16 pt.
 
 ## 8. Open questions
 
@@ -316,23 +323,65 @@ Options on the canvas:
 The canvas's Final page holds one artboard, "Culling · Final designs",
 with the decided playlist and compare states in dark and light; it is the
 design reference for §9.1. Every exploration, including the options
-above, the "Indicators" icon pairs and rounds 2–4, is on its Archive page.
+above, the "Indicators" icon pairs, rounds 2–4 and "Broken heart ·
+refined", is on its Archive page.
 
 ### 9.1 Decisions
 
-- **Indicator.** A filled circle with a knocked-out × (Indicators, option
-  2). Only rejection is designed for now; a picked state is out of scope.
+- **Indicator.** A broken heart: Indicators option 7, refined on the
+  "Broken heart · refined" artboard (variant Cracked). It replaces the
+  filled circle with a knocked-out ×, which was the earlier choice. Only
+  rejection is designed for now; a picked state is out of scope.
+  Construction, on a 24-unit grid:
+  - Outline: full lobes, a deep notch at (12, 6.4), convex sides curving
+    into the tip at (12, 21.2); 20 × 18.4 units. Path
+    `M12 21.2C9.5 19.6 2 14.8 2 8.6C2 5.3 4.5 2.8 7.5 2.8C9.5 2.8 11.2 4 12 6.4C12.8 4 14.5 2.8 16.5 2.8C19.5 2.8 22 5.3 22 8.6C22 14.8 14.5 19.6 12 21.2Z`.
+  - Split along a zigzag from the notch to the tip, with no straight run
+    at either end: (10.6, 9.4), (13.2, 12.1), (10.9, 15), (12.9, 17.9),
+    (11.7, 19.6) at 32 pt and up; (10.3, 10.4), (13.6, 13.5), (11.4, 17.3)
+    at 18 pt and below.
+  - Each half is its own closed path (its side of the outline, then back
+    along the zigzag). The gap comes from moving the halves apart, never
+    from cutting a shape out: each half shifts sideways by half the
+    tip gap and tilts outward about the tip, so the gap is widest at the
+    notch (1.5× a base gap) and narrowest at the tip (0.45×). The base gap
+    is `1.1 + 0.028 × size` px, so about 1.4 px at 12 pt. The gap is
+    transparent and shows whatever is behind the glyph, the selection
+    included.
+  - The badge ring is each half's own path stroked in the ring colour with
+    mitred joins (miter limit 1.5), drawn under the fills, so the ring is
+    an even offset that keeps the notch's V and a pointed tip, and the
+    crack shows the ring colour.
+  - Draw it in code (`RejectedMark`, a new `RejectedMark.swift`), not as an
+    asset or a custom SF Symbol. It appears at three fixed sizes only:
+    12 pt in the version mark column, 15 pt in the compare strip and 16 pt
+    as the artwork badge. Drawing gives each size its exact gap and zigzag,
+    which a symbol's three scales or PDF templates would not, and lets the
+    badge ring take the row's background (selection included) at draw
+    time.
+    - `RejectedMark.halves(size:)` returns the two half `CGPath`s, already
+      moved apart, on the 24-unit grid scaled to `size`. Everything else
+      draws from it.
+    - `RejectedMark.image(size:)` returns a template `NSImage`
+      (`NSImage(size:flipped:drawingHandler:)`, `isTemplate = true`),
+      cached per size. The mark column tints it with `contentTintColor`;
+      the strip uses `Image(nsImage:)` with `.renderingMode(.template)`.
+    - The artwork badge is a small `NSView` (`RejectedBadgeView`) over the
+      thumbnail tile that strokes the halves in `ringColor`, then fills
+      them in the badge grey. The cell sets `ringColor` from the row's
+      background whenever selection or emphasis changes; the view redraws
+      only then, never per frame.
 - **Playlist colour.** Grey (Round 2 · Playlist, grey columns), not red.
 - **Track rows.** Option C: the thumbnail goes greyscale at 45% and carries
-  the × badge (14 pt, a 2 pt ring in the row's background) at its
-  bottom-right corner, inset so the badge and its ring stay inside the
+  the broken-heart badge (16 pt, a 2 pt ring in the row's background) at
+  its bottom-right corner, inset so the badge and its ring stay inside the
   46 pt row. Title and metadata use the dimmed colours.
-- **Version rows.** Option C: the × in the 34 pt mark column, dimmed title,
+- **Version rows.** Option C: a 12 pt broken heart in the 34 pt mark column, dimmed title,
   format and duration. No hover affordance; rejecting happens through the
   commands in §4.1, never a control on the row.
 - **Missing files** dim exactly as much as rejected rows. The warning
   triangle is the only thing that tells them apart. A version that is both
-  shows the triangle and the × side by side in the mark column.
+  shows the triangle and the heart side by side in the mark column.
 - **Selected rejected rows** keep the selection colours with their text at
   65% opacity.
 - **Now playing** (changes the current design):
@@ -344,11 +393,11 @@ above, the "Indicators" icon pairs and rounds 2–4, is on its Archive page.
   - **Expanded tracks split the state.** The item row keeps its tinted
     text; the speaker moves from its artwork to the playing version's mark
     column, and that version's title, format and duration take the tint. A
-    playing rejected version shows the speaker and the × together.
+    playing rejected version shows the speaker and the heart together.
     Collapsing the track moves the speaker back to the artwork.
-- **Compare lanes.** The strip from option C (an × badge in place of the
+- **Compare lanes.** The strip from option C (a mark in place of the
   index, a dimmed title) over the hatching from option B, in grey to match
-  the playlist: the playlist's grey badge with the knocked-out ×, the
+  the playlist: a 15 pt grey broken heart in place of the index badge, the
   dimmed title and format colours, neutral hatching, and the inactive
   waveform colour (Round 3 · Compare, grey; Round 2 · Compare is the
   same layout in red). Missing lanes take the same hatching and dimmed
