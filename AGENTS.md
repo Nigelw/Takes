@@ -178,7 +178,9 @@ Key ownership:
   loading.
 - `StreamingTrackImport.swift`: streaming URL metadata, yt-dlp management, and
   downloaded audio import.
-- `SoftwareUpdater.swift`: Sparkle and yt-dlp update state.
+- `SoftwareUpdater.swift`: Sparkle and yt-dlp update state, including the
+  opt-in `beta` channel. `scripts/build-release.sh` assigns beta builds to
+  that channel in the signed appcast.
 - `Analysis/`: the experimental single-file Analysis window (Debug → Analysis,
   ⌘⌥Z) and the experimental multi-track Compare Quality window
   (Debug → Compare Quality, ⇧⌘L). Both are debug-only and deliberately not
@@ -764,6 +766,7 @@ these reintroduces the exact regressions it fixed):
   thumbnail's dimming and badge, the expanded now-playing split, the
   broken heart's geometry: turns per size, the gap at notch and tip, and
   halves that never overlap),
+  the beta update preference and Sparkle channel selection,
   persisted window visibility, compact heights, the artwork/player
   invariant, retired control-bar preferences loading as defaults, the
   A2 readout title rule (tag, filename), the compare control bar's height

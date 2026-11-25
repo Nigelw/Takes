@@ -87,6 +87,10 @@ MARKETING_VERSION="$(awk -F' = ' '/ MARKETING_VERSION =/{print $2; exit}' <<<"$S
 BUILD_NUMBER="$(awk -F' = ' '/ CURRENT_PROJECT_VERSION =/{print $2; exit}' <<<"$SETTINGS")"
 [[ -n "$MARKETING_VERSION" && -n "$BUILD_NUMBER" ]] || die "could not read version from project"
 TAG="v${MARKETING_VERSION}"
+APPCAST_CHANNEL_ARGS=()
+if [[ "$MARKETING_VERSION" =~ b[0-9]+$|[.-]beta([.-]?[0-9]+)?$ ]]; then
+  APPCAST_CHANNEL_ARGS=(--channel beta)
+fi
 echo "  marketing version : $MARKETING_VERSION"
 echo "  build number      : $BUILD_NUMBER  (Sparkle comparison key)"
 echo "  release tag       : $TAG"
@@ -179,6 +183,7 @@ echo "  using release notes from $CHANGELOG"
 # CHANGELOG.md; the appcast is the signed update feed served to Sparkle.
 "$GENERATE_APPCAST" \
   --embed-release-notes \
+  ${APPCAST_CHANNEL_ARGS[@]+"${APPCAST_CHANNEL_ARGS[@]}"} \
   --download-url-prefix "${GITHUB_DOWNLOAD_BASE}/${TAG}/" \
   -o "$WEBSITE_DIR/appcast.xml" \
   "$APPCAST_SRC/"

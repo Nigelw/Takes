@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.0b1 (2026-11-25)
+
+### New
+
+- Overhauled the app to add playlists, track versions, and culling.
+  - The old version was great for comparing multiple versions of a single track. Now you can use it to compare multiple versions of entire albums.
+  - The playlist also makes it a handy little audio player in its own right.
+- Major redesign. Collapsed the UI into a compact window with prominent artwork display.
+  - Toggle the artwork, playback controls, and playlist to make the player more compact as needed.
+- Added a playlist with versions.
+  - Any track in the playlist can have multiple versions.
+  - Takes auto-groups likely versions of the same track by default, and you can group, ungroup, and reorder them yourself.
+  - The auto-grouping logic needs testing.
+- Added support for culling tracks.
+  - Mark items as rejected, which skips them during playback and comparison.
+  - Still to come are features to build on top of this: adding non-rejected tracks to an iTunes playlist, copying them, deleting rejected tracks.
+  - Do we need the ability to pick as well as reject? What would you do with picked tracks vs. standard tracks that haven't been rejected?
+
 ## 2.9.0 (2026-07-16)
 
 ### New
