@@ -1031,18 +1031,30 @@ final class PlaybackController {
         }
     }
 
-    func removeTrack(_ trackID: SessionTrack.ID) {
+    func removeTrack(
+        _ trackID: SessionTrack.ID,
+        replacingActiveWith replacement: (id: SessionTrack.ID, position: TimeInterval?)? = nil
+    ) {
         guard let removedIndex = session.tracks.firstIndex(where: { $0.id == trackID }) else { return }
 
-        let wasPlaying = session.isPlaying
         let wasActive = session.activeTrackID == trackID
+        let activeReplacement = wasActive ? replacement : nil
+        let savedLoop = session.loopRegion
+        let savedRepeatMode = session.repeatMode
+        let wasWrapping = wrappingModeActive
+        invalidatePendingRuntimeWork()
+        stopScrollAnimation()
+        if activeReplacement != nil { pause() }
+        let wasPlaying = session.isPlaying
         let resumePosition = wasPlaying ? currentTransportPosition() : nil
 
         session.tracks.remove(at: removedIndex)
         detachRuntimeTrack(for: trackID)
         deleteStreamingCacheFile(for: trackID)
 
-        if wasActive {
+        if let activeReplacement {
+            session.activeTrackID = activeReplacement.id
+        } else if wasActive {
             if session.tracks.indices.contains(removedIndex) {
                 session.activeTrackID = session.tracks[removedIndex].id
             } else {
@@ -1051,6 +1063,21 @@ final class PlaybackController {
         }
 
         recalculateSessionDuration()
+
+        if let activeReplacement {
+            let position = activeReplacement.position ?? session.timelineStart
+            session.transportPosition = position
+            transportStoppedAtTimelineStart = position == session.timelineStart
+            if let savedLoop,
+               savedLoop.start >= session.timelineStart, savedLoop.end <= session.timelineEnd,
+               position >= savedLoop.start, position < savedLoop.end {
+                session.loopRegion = savedLoop
+            } else {
+                session.loopRegion = nil
+            }
+            session.repeatMode = savedRepeatMode
+            playingReadoutText = position.formattedSignedTimestamp
+        }
 
         if wasPlaying, let resumePosition {
             let restoredPosition = TransportMapping.clampedTransport(
@@ -1067,7 +1094,7 @@ final class PlaybackController {
             // Removing a track can shrink the timeline (and so the wrap point)
             // and detaches its player; a wrapping session's pre-queue was padded
             // to the old bounds, so rebuild it against the new range.
-            if engineConfigured, wrappingModeActive {
+            if engineConfigured, wasWrapping || wrappingModeActive {
                 do {
                     try rescheduleAndStart(from: restoredPosition)
                 } catch let error as PlaybackError {

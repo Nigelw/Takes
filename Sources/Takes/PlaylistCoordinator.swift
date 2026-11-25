@@ -1106,7 +1106,7 @@ final class PlaylistCoordinator {
         from itemID: PlaylistItem.ID? = nil,
         undoManager: UndoManager? = nil
     ) -> Bool {
-        mutateWorkspace(beforeAction: "Remove Version", undoManager: undoManager) {
+        mutateWorkspace(beforeAction: "Remove Version", undoManager: undoManager, removedVersionID: versionID) {
             _ = try $0.removeVersion(versionID, from: itemID)
         }
     }
@@ -1884,6 +1884,7 @@ final class PlaylistCoordinator {
         beforeAction actionName: String,
         undoManager: UndoManager?,
         displayedComparisonOrder: [UUID]? = nil,
+        removedVersionID: PlaylistVersion.ID? = nil,
         _ mutation: (inout PlaylistWorkspace) throws -> Void
     ) -> Bool {
         let playback = capturePlaybackSnapshot()
@@ -1896,8 +1897,13 @@ final class PlaylistCoordinator {
             let modeBeforeMutation = mode
             synchronizeModeWithWorkspaceView()
             syncRuntimeRejection()
+            let removedFromRuntime = removedVersionID.map { removeComparisonVersionFromRuntime($0) } ?? false
             registerUndo(before: before, undoManager: undoManager, actionName: actionName)
             rebuildTraversal()
+            if removedFromRuntime {
+                clearError()
+                return true
+            }
             let listeningVersionMoved = playback.versionID != nil
                 && candidate.listeningState?.versionID == playback.versionID
                 && candidate.listeningState?.itemID != before.listeningState?.itemID
@@ -1934,6 +1940,35 @@ final class PlaylistCoordinator {
             reportError(error.localizedDescription)
             return false
         }
+    }
+
+    private func removeComparisonVersionFromRuntime(_ versionID: PlaylistVersion.ID) -> Bool {
+        guard let itemID = mode.itemID,
+              let context = runtimeContext, context.itemID == itemID,
+              controller.runtimeContext == context, pendingRuntimeRefreshTask == nil,
+              let item = workspace.items.first(where: { $0.id == itemID }),
+              let key = item.keyVersion else { return false }
+        let tracks = controller.session.tracks
+        let remaining = tracks.filter { $0.id != versionID }
+        guard remaining.count + 1 == tracks.count,
+              Set(remaining.map(\.id)) == Set(item.versions.map(\.id)) else { return false }
+
+        // Preserve surviving nodes and waveform tasks. When deleting the
+        // active version, pick the same fallback as a comparison activation.
+        var replacement: (id: PlaylistVersion.ID, position: TimeInterval?)?
+        if controller.session.activeTrackID == versionID {
+            let available = Set(remaining.filter { !$0.loadedTrack.isMissing }.map(\.id))
+            let next = available.contains(key.id)
+                ? key
+                : item.versions.first { available.contains($0.id) } ?? key
+            replacement = (next.id, next.id == key.id ? key.offsetSeconds : nil)
+        }
+        beginNavigation()
+        controller.removeTrack(versionID, replacingActiveWith: replacement)
+        runtimeTrackCount = controller.runtimeTrackCount
+        currentVersionID = controller.session.activeTrackID
+        captureRuntimeEdits()
+        return true
     }
 
     private func registerUndo(before: PlaylistWorkspace, undoManager: UndoManager?, actionName: String) {

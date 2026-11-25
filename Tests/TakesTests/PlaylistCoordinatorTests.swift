@@ -469,6 +469,52 @@ struct PlaylistCoordinatorTests {
     }
 
     @MainActor
+    @Test func compareRemovesVersionsWithoutClearingTheSurvivingRuntime() async throws {
+        let urls = try (0..<4).map { try makeTemporaryAudioFile(name: "compare-remove-\($0).wav", duration: 6) }
+        defer { urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
+        let versions = urls.map { makePlaylistVersion(url: $0, title: $0.lastPathComponent, duration: 6) }
+        let ids = versions.map(\.id)
+        let item = PlaylistItem(title: "Compare", versions: versions)
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
+        let controller = coordinator.controller
+        await coordinator.enterComparison(itemID: item.id)
+        let context = try #require(coordinator.runtimeContext)
+        coordinator.play()
+        defer { coordinator.pause() }
+        try #require(coordinator.isPlaying)
+
+        #expect(coordinator.removeVersion(ids[3]))
+        #expect(controller.session.tracks.map(\.id) == Array(ids.prefix(3)))
+        #expect(coordinator.isPlaying)
+        #expect(coordinator.activeComparisonVersionID == ids[0])
+
+        // The same entry point as repeated Delete presses, with no yield
+        // between commands. Each press can see the next active lane.
+        let first = try #require(coordinator.activeComparisonVersionID)
+        #expect(coordinator.removeVersion(first))
+        #expect(controller.session.tracks.map(\.id) == Array(ids[1...2]))
+        #expect(controller.session.isPlayable)
+        #expect(!coordinator.isPlaying)
+        #expect(coordinator.activeComparisonVersionID == ids[1])
+        #expect(controller.displayTransportPosition() == 0)
+        coordinator.setOffset(ids[2], seconds: 0.25)
+        let second = try #require(coordinator.activeComparisonVersionID)
+        #expect(coordinator.removeVersion(second))
+        #expect(controller.session.tracks.map(\.id) == [ids[2]])
+        #expect(controller.session.isPlayable)
+        #expect(coordinator.currentVersionID == ids[2])
+        #expect(controller.displayTransportPosition() == 0.25)
+        #expect(coordinator.runtimeTrackCount == 1)
+        #expect(controller.runtimeContext == context)
+        #expect(coordinator.runtimeContext == context)
+        #expect(coordinator.mode == .comparison(itemID: item.id))
+
+        #expect(coordinator.removeVersion(ids[2]))
+        #expect(coordinator.mode == .playlist)
+        #expect(controller.session.tracks.isEmpty)
+    }
+
+    @MainActor
     @Test func separateCommandsSelectResultingTracksInPlace() {
         let versions = ["first", "second", "third", "fourth", "fifth"].map { makeVersion("\($0).wav") }
         let item = PlaylistItem(title: "Song", versions: versions)

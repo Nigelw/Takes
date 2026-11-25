@@ -168,8 +168,8 @@ Key ownership:
   bounded to 2 concurrent decodes in session (top-first) order — plus the
   multi-resolution peak pyramid (`Waveform.reducedLevels`) the lanes draw
   from. No disk caches. A new runtime context restarts in-flight generations;
-  finished waveforms survive a re-activation of the same item (Remove
-  Version, reorder and regroup rebuild the runtime), so lanes don't redraw
+  finished waveforms survive a re-activation of the same item (for example,
+  regrouping can rebuild the runtime), so lanes don't redraw
   from scratch. Finished waveforms also go into `WaveformCache.shared`
   (process lifetime, keyed by `WaveformSource.Identity`: path, size and
   modification date; least recently used evicted past 64 MB), which
@@ -291,8 +291,11 @@ These are here to prevent parallel implementations and subtle regressions:
   inputs before committing evidence computed off the main actor.
 - Preserve canonical duplicate detection by standardized, symlink-resolved file
   URL.
-- Keep removal behavior state-safe: removing one track preserves remaining
-  offsets, while removing all tracks clears session-wide state.
+- Keep removal behavior state-safe: removing one version from an active
+  comparison with surviving versions detaches only its audio nodes and
+  preserves the runtime context, waveform work, and remaining offsets.
+  Removing the active version pauses and selects a replacement immediately.
+  Removing all tracks clears session-wide state.
 - Preserve Blind Listening Mode as a runtime anonymization/shuffle layer that
   reapplies when importing while the mode is already enabled.
 - The playlist table is an `NSOutlineView`, not a SwiftUI `List`. Do not move
@@ -767,7 +770,8 @@ these reintroduces the exact regressions it fixed):
   Undo, missing-file repair/advancement, 100-item/32-version runtime isolation,
   automatic-grouping transactions/cancellation, entering compare without
   starting another item, compare opening (and restoring) with missing
-  versions as error lanes, media-player Previous/Next Track, leaving compare
+  versions as error lanes, consecutive removals preserving the surviving
+  comparison runtime, media-player Previous/Next Track, leaving compare
   keeping the audible version current without changing the key, culling
   (Next/Previous/natural advance/Shuffle/Repeat All skipping rejected
   tracks and keeping them out of history, explicit play, Play with no
