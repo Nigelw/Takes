@@ -932,7 +932,7 @@ final class PlaybackController {
     }
 
     /// Switch Track (and Switch & Repeat's wrap): the next lane in displayed
-    /// order that isn't rejected (`ComparisonSession.switchTarget`).
+    /// order that isn't rejected or missing (`ComparisonSession.switchTarget`).
     func selectNextTrack() {
         guard let target = session.switchTarget(forward: true) else { return }
         session.activeTrackID = target

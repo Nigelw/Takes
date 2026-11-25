@@ -267,7 +267,15 @@ enum PlaylistRowPalette {
     static let nowPlayingDetail = dynamic(light: (0.478, 0.451, 0.839, 1), dark: (0.612, 0.592, 0.839, 1))
     /// The speaker over the now-playing artwork's scrim: #E4E1FF / #C4BFFF.
     /// In a version row's mark column it takes `nowPlayingTitle`.
-    static let nowPlayingSpeaker = dynamic(light: (0.894, 0.882, 1.0, 1), dark: (0.769, 0.749, 1.0, 1))
+    static let nowPlayingSpeaker = dynamic(light: (1, 1, 1, 1), dark: (0.957, 0.949, 1.0, 1))
+    /// The speaker's glow over the artwork's scrim.
+    static let nowPlayingSpeakerGlow: NSShadow = {
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor(srgbRed: 0.769, green: 0.749, blue: 1.0, alpha: 0.95)
+        shadow.shadowBlurRadius = 4
+        shadow.shadowOffset = .zero
+        return shadow
+    }()
 
     /// Rejected and missing rows dim to the same level (culling §4.3):
     /// title #9E9EA4 / #6E6E74, details #B2B2B7 / #56565B.
@@ -302,6 +310,12 @@ enum PlaylistRowPalette {
     /// The hover Compare pill.
     static let comparePillFill = primary(lightAlpha: 0.14, darkAlpha: 0.2)
     static let comparePillText = nowPlayingTitle
+    /// On a selected (blue) row: a white pill with the selection's accent as
+    /// its text.
+    static let comparePillSelectedFill = NSColor.white.withAlphaComponent(0.95)
+    static let comparePillSelectedText = NSColor.selectedContentBackgroundColor
+    /// Darkens the pill while it is pressed, in either state.
+    static let comparePillPressedFill = NSColor.black.withAlphaComponent(0.12)
 
     /// Warning triangle: yellow with a dark mark, in both appearances.
     static let warningFill = NSColor(srgbRed: 0.957, green: 0.773, blue: 0.141, alpha: 1)

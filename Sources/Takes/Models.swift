@@ -105,6 +105,9 @@ struct SessionTrack: Identifiable, Equatable {
         self.id = id
         self.loadedTrack = loadedTrack
     }
+
+    /// Switch Track stops here: not rejected, and its file is available.
+    var isSwitchable: Bool { !loadedTrack.isRejected && !loadedTrack.isMissing }
 }
 
 struct ComparisonSession: Equatable {
@@ -172,10 +175,10 @@ struct ComparisonSession: Equatable {
     }
 
     /// Switch Track, and Switch & Repeat's switch: there is a track other
-    /// than the active one that isn't rejected (culling §5.3). Missing tracks
-    /// stay in the switch order; they are silent while active.
+    /// than the active one that isn't rejected (culling §5.3) or missing.
+    /// Clicking a lane or its number hotkey still selects either.
     var canSwitchPlayback: Bool {
-        tracks.contains { $0.id != activeTrackID && !$0.loadedTrack.isRejected }
+        tracks.contains { $0.id != activeTrackID && $0.isSwitchable }
     }
 
     /// Two or more tracks, rejected or not: what Align needs.
@@ -185,15 +188,15 @@ struct ComparisonSession: Equatable {
 
     /// The track Switch Track moves to, in displayed order (Blind
     /// Listening's shuffled order when it is on), wrapping, and passing over
-    /// rejected tracks. From a rejected active track it is the next
-    /// non-rejected one in that direction. Nil when there is none.
+    /// rejected tracks and missing files. From a skipped active track it is
+    /// the next switchable one in that direction. Nil when there is none.
     func switchTarget(forward: Bool) -> SessionTrack.ID? {
         guard !tracks.isEmpty else { return nil }
         let start = activeTrackIndex ?? (forward ? -1 : tracks.count)
         for step in 1...tracks.count {
             let index = ((start + (forward ? step : -step)) % tracks.count + tracks.count) % tracks.count
             let track = tracks[index]
-            if track.id != activeTrackID, !track.loadedTrack.isRejected { return track.id }
+            if track.id != activeTrackID, track.isSwitchable { return track.id }
         }
         return nil
     }

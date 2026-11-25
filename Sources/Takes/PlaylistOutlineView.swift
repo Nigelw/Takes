@@ -1492,6 +1492,7 @@ final class PlaylistItemCellView: NSTableCellView {
         metadataField.textColor = style.detail
         durationField.textColor = style.detail
         disclosure.isEmphasized = emphasized
+        comparePill.isEmphasized = emphasized
     }
 
     override func layout() {
@@ -1752,7 +1753,10 @@ final class PlaylistThumbnailView: NSView {
     static let badgeCutout = RejectedMark.ringOutline(size: badgeSide, ring: badgeRing, in: badgeFrame)
 
     var image: NSImage? {
-        didSet { tile.contentsImage = Self.tileImage(artwork: image, status: status) }
+        didSet {
+            tile.contentsImage = Self.tileImage(artwork: image, status: status)
+            applyDimming()
+        }
     }
 
     /// What the tile shows: the artwork, else the record placeholder,
@@ -1769,6 +1773,7 @@ final class PlaylistThumbnailView: NSView {
     var showsRejectionBadge: Bool { !badge.isHidden }
 
     private var status: Status = .none
+    private var wantsDimming = false
     /// The tile and its stack, masked to cut the badge's heart-shaped ring
     /// out of them so the row (and its selection) shows around the badge and
     /// through its crack.
@@ -1839,8 +1844,8 @@ final class PlaylistThumbnailView: NSView {
             scrim.isHidden = false
             scrim.fillColor = PlaylistRowPalette.playingScrim
             let playing = status == .playing
-            statusGlyph.image = PlaylistGlyph.symbol(playing ? "speaker.wave.2.fill" : "speaker.fill", size: 13,
-                                                     label: playing ? "Playing" : "Current")
+            statusGlyph.image = PlaylistGlyph.symbol(playing ? "speaker.wave.2.fill" : "speaker.fill", size: 14,
+                                                     weight: .semibold, label: playing ? "Playing" : "Current")
             statusGlyph.contentTintColor = PlaylistRowPalette.nowPlayingSpeaker
         case let .warning(warning):
             // Dimming the tile already says "unavailable"; the triangle says
@@ -1854,10 +1859,19 @@ final class PlaylistThumbnailView: NSView {
         }
         statusGlyph.setAccessibilityElement(statusGlyph.image != nil)
         statusGlyph.setAccessibilityHelp(toolTip)
-        setDimmed(isDimmed)
+        let isCurrent = status == .playing || status == .paused
+        statusGlyph.shadow = isCurrent ? PlaylistRowPalette.nowPlayingSpeakerGlow : nil
+        wantsDimming = isDimmed
+        applyDimming()
         badge.isHidden = !isRejected
         badge.setAccessibilityElement(isRejected)
         cards.cutout = isRejected ? Self.badgeCutout : nil
+    }
+
+    /// A missing file's empty tile stays at full strength, so it reads as
+    /// empty artwork in the column rather than a gap; artwork still dims.
+    private func applyDimming() {
+        setDimmed(wantsDimming && tile.contentsImage != nil)
     }
 
     private func setDimmed(_ dimmed: Bool) {
@@ -1977,8 +1991,15 @@ final class PlaylistComparePill: NSButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// On a selected row the pill turns white with accent text: the tinted
+    /// pill disappeared into the selection's blue.
+    var isEmphasized = false {
+        didSet { if isEmphasized != oldValue { needsDisplay = true } }
+    }
+
     private var label: NSAttributedString {
-        NSAttributedString(string: "Compare", attributes: [.font: Self.font, .foregroundColor: PlaylistRowPalette.comparePillText])
+        let color = isEmphasized ? PlaylistRowPalette.comparePillSelectedText : PlaylistRowPalette.comparePillText
+        return NSAttributedString(string: "Compare", attributes: [.font: Self.font, .foregroundColor: color])
     }
 
     var preferredWidth: CGFloat { ceil(label.size().width) + 2 * PlaylistRowMetrics.comparePillPadding }
@@ -1989,10 +2010,11 @@ final class PlaylistComparePill: NSButton {
 
     override func draw(_ dirtyRect: NSRect) {
         let radius = bounds.height / 2
-        PlaylistRowPalette.comparePillFill.setFill()
+        let fill = isEmphasized ? PlaylistRowPalette.comparePillSelectedFill : PlaylistRowPalette.comparePillFill
+        fill.setFill()
         NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
         if isHighlighted {
-            PlaylistRowPalette.comparePillFill.setFill()
+            PlaylistRowPalette.comparePillPressedFill.setFill()
             NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
         }
         let text = label

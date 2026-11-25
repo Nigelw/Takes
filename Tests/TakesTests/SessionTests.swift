@@ -702,10 +702,21 @@ struct SessionTests {
         #expect(!session.isPlayable)
         session.tracks.append(SessionTrack(loadedTrack: present))
         #expect(session.isPlayable)
-        // Missing lanes stay in the switch order (silent while active).
+        // Switch Track passes over missing lanes, so with one present lane
+        // there is nothing to switch to.
         session.activeTrackID = session.tracks[1].id
-        #expect(session.canSwitchPlayback)
-        #expect(session.switchTarget(forward: true) == session.tracks[0].id)
+        #expect(!session.canSwitchPlayback)
+        #expect(session.switchTarget(forward: true) == nil)
+        // From a missing active lane it moves to the next present one,
+        // skipping other missing lanes.
+        session.tracks.insert(SessionTrack(loadedTrack: missing), at: 1)
+        session.tracks.append(SessionTrack(loadedTrack: present))
+        session.activeTrackID = session.tracks[0].id
+        #expect(session.switchTarget(forward: true) == session.tracks[2].id)
+        #expect(session.switchTarget(forward: false) == session.tracks[3].id)
+        session.activeTrackID = session.tracks[2].id
+        #expect(session.switchTarget(forward: true) == session.tracks[3].id)
+        #expect(session.switchTarget(forward: false) == session.tracks[3].id)
     }
 
     @MainActor
@@ -3129,10 +3140,16 @@ struct SessionTests {
         thumbnail.configure(image: nil, isStacked: true, status: .playing, isDimmed: false, isRejected: true)
         #expect(!thumbnail.isDimmed)
         #expect(thumbnail.showsRejectionBadge)
-        // Missing dims without a badge.
+        // Missing, without artwork: the empty tile stays at full strength,
+        // without a badge.
         thumbnail.configure(image: nil, isStacked: false, status: .warning("Missing"), isDimmed: true, isRejected: false)
-        #expect(thumbnail.isDimmed)
+        #expect(!thumbnail.isDimmed)
+        #expect(thumbnail.displayedImage == nil)
         #expect(!thumbnail.showsRejectionBadge)
+        // Missing with artwork still dims it.
+        let artwork = NSImage(size: NSSize(width: 4, height: 4))
+        thumbnail.configure(image: artwork, isStacked: false, status: .warning("Missing"), isDimmed: true, isRejected: false)
+        #expect(thumbnail.isDimmed)
 
         typealias M = PlaylistRowMetrics
         typealias T = PlaylistThumbnailView

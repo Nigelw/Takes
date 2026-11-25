@@ -57,7 +57,7 @@ Key ownership:
   (`PlaylistTransportView`) with the playlist bottom bar placed below the
   list, window-wide file drops (`WorkspaceFileDropDelegate`), the shared
   `FileImportEmptyState` badge and `FileImportHighlight` glow, keyboard focus
-  handling (including Esc leaving compare), when the
+  handling (including Esc clearing compare's loop), when the
   window fits its tracks (`scheduleContentFit`), and the
   window chrome both modes share: the cover above the control bar and the
   titlebar Artwork, Player, and Playlist toggles.
@@ -211,9 +211,9 @@ Comparison transport behavior to preserve:
 - Repeat Off parks the playhead at the end of the playable range; the next Play
   starts from the beginning of the range.
 - Repeat One restarts the current track at the beginning of the playable range.
-- Switch & Repeat advances to the next track that isn't rejected and
-  restarts; with one track, or no other non-rejected track, it behaves like
-  Repeat One.
+- Switch & Repeat advances to the next track that isn't rejected or
+  missing and restarts; with one track, or no other such track, it behaves
+  like Repeat One.
 - A selected loop constrains the playable range until the loop is deselected.
 - Timeline zoom changes the visible window, not the underlying session range.
 - `AVAudioEngineConfigurationChange` should reschedule playback after output
@@ -242,7 +242,9 @@ These are here to prevent parallel implementations and subtle regressions:
   metadata) but gets no audio nodes (`replaceRuntimeSession` skips it), no
   waveform decode (`WaveformStore.sync`), and no alignment; it is silent
   like a track out of range, and `ComparisonSession.isPlayable` needs at
-  least one available track. It stays in the switch order. Its lane draws
+  least one available track. Switch Track passes over it
+  (`SessionTrack.isSwitchable`); clicking its lane or its number hotkey
+  still selects it. Its lane draws
   no waveform and shows the rejected lanes' neutral hatching across the
   whole lane (`LaneHatching`, drawn by `TrackRowView`, blind or not; there
   is no dashed warning band), its strip dims like a rejected lane's and
@@ -339,7 +341,8 @@ These are here to prevent parallel implementations and subtle regressions:
 - Version rows (30 pt) are named by their title tag, else the filename
   without its extension (`PlaylistRowText.versionName`). The row shows the
   duration. The title tooltip includes the filename and format details.
-  A single click selects the row. Double-clicking (or Return on) an item row plays its key
+  A single click selects the row. The hover Compare pill turns white with
+  accent text on a selected row (`PlaylistComparePill.isEmphasized`). Double-clicking (or Return on) an item row plays its key
   version, resuming a track that is already current on its current
   version; on a version row it plays that version from the beginning,
   rejected or not, and leaves the key alone. Unavailable files show a
@@ -374,7 +377,8 @@ These are here to prevent parallel implementations and subtle regressions:
 - Rejected and missing rows dim to the same grey
   (`PlaylistRowTextStyle`, `PlaylistRowPalette.dimmedTitle`/`dimmedDetail`);
   the broken heart (`RejectedMark`) marks a rejection and the triangle a
-  missing file. A dimmed item's
+  missing file. A missing file's empty tile (no artwork) stays at full
+  strength so it reads as empty artwork; otherwise a dimmed item's
   thumbnail goes greyscale at 45% (a Core Image filter on the tile layer),
   and a rejected track carries the 16 pt broken-heart badge at its
   artwork's bottom-right, its 2 pt heart-shaped ring
@@ -385,7 +389,8 @@ These are here to prevent parallel implementations and subtle regressions:
   Selected dimmed rows keep the selection colours at 65%. Rejected rows add
   "Rejected" to their accessibility value. The item row shows its own flag
   only; a track whose every version is rejected shows nothing extra.
-- Now playing has no row background: the speaker over the artwork, the
+- Now playing has no row background: the white speaker over the artwork
+  carries a glow (`PlaylistRowPalette.nowPlayingSpeakerGlow`); the speaker over the artwork, the
   title, the metadata and the duration take the tint
   (`PlaylistRowPalette.nowPlayingTitle`/`nowPlayingDetail`), which replaces
   rejected dimming (a playing rejected track keeps its badge). An expanded
@@ -438,11 +443,11 @@ These are here to prevent parallel implementations and subtle regressions:
   list. Edit ▸ Select All (⌘A) selects all visible rows when the playlist is
   shown and has tracks. Edit ▸ Deselect All (⌘D) and Esc clear the selection. Playlist ▸ Go
   to Current Song (⌘L) selects the current item. Compare: X / ⇧X Switch Track (passing
-  over rejected lanes in displayed order, Blind Listening's included,
+  over rejected and missing lanes in displayed order, Blind Listening's included,
   wrapping; disabled when `ComparisonSession.canSwitchPlayback` finds no
-  non-rejected lane other than the active one), ⌘← / ⌘→
-  Jump to Beginning / End, plain arrows skip, Edit ▸ Deselect (⌘D) clears
-  the loop, and Esc leaves. Clicking a lane and the number hotkeys select
+  switchable lane other than the active one), ⌘← / ⌘→
+  Jump to Beginning / End, plain arrows skip, and Edit ▸ Deselect (⌘D) and
+  Esc clear the loop (Esc does nothing without one). Clicking a lane and the number hotkeys select
   rejected lanes too. Both modes use ⌘R for Reject / Clear Rejection,
   ⌥⌘R for Change Repeat Mode (Playback ▸ Repeat), and ⌥⌘A / ⌥⌘P / ⌥⌘L
   for Show/Hide Artwork, Player and Playlist
@@ -596,7 +601,7 @@ These are here to prevent parallel implementations and subtle regressions:
   `CompareInfoBarText`, unchanged when blind) on the left, the elapsed
   time in a 24 pt Glass frame centred in the window
   (`CompareInfoBarRow` gives both sides equal widths), and Done on the
-  right. Compare leaves through Done, Esc, or ⌘[ — all
+  right. Compare leaves through Done or ⌘[ — both
   `PlaylistCoordinator.backToPlaylist`, which keeps the audible version as
   the current version of the playlist's current track, at the translated
   file time. It is listening state, not a stored choice:
@@ -763,7 +768,7 @@ these reintroduces the exact regressions it fixed):
   heights and the grow/shrink rules for added and removed tracks, the stored
   playlist height, compare sizing to its lanes on entry, and the debug
   reset frame), missing versions as silent lanes that stay in the switch
-  order, compare switching past rejected lanes (`switchTarget`,
+  order, compare switching past rejected and missing lanes (`switchTarget`,
   `canSwitchPlayback`, Switch & Repeat degrading to Repeat One, Align's
   `hasMultipleTracks`), the rejected/missing lane hatching, the playlist
   culling visuals (row text styles, the version mark column, the

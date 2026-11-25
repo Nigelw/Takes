@@ -924,10 +924,11 @@ struct WorkspaceView: View {
             guard !isEditingText, shortcutsAreAvailable else { return false }
             let flags = event.modifierFlags.intersection([.command, .shift, .control, .option])
             if isComparison {
-                // Esc leaves compare, like the readout's back button (§9).
+                // Esc clears the loop, like Edit ▸ Deselect (⌘D). It no
+                // longer leaves compare: Done and ⌘[ do that.
                 if event.keyCode == 53 && flags.isEmpty {
-                    guard visibility.showsPlaylist else { return false }
-                    Task { await coordinator.backToPlaylist() }; return true
+                    guard controller.session.loopRegion != nil else { return false }
+                    coordinator.deselectLoop(); return true
                 }
                 if let key = TrackNumberHotkey.hotkey(forKeyCode: event.keyCode, modifierFlags: flags), controller.canSelectTrackForHotkey(key) {
                     controller.selectTrackForHotkey(key); return true
