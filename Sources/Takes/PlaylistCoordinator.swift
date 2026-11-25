@@ -302,7 +302,7 @@ final class PlaylistCoordinator {
         self.mode = workspace.activeView.itemID.map { .comparison(itemID: $0) } ?? .playlist
         self.currentItemID = workspace.listeningState?.itemID ?? workspace.activeItemID
         self.currentVersionID = workspace.listeningState?.versionID
-            ?? workspace.items.first(where: { $0.id == workspace.activeItemID })?.selectedVersionID
+            ?? workspace.items.first(where: { $0.id == workspace.activeItemID })?.keyVersion?.id
         self.traversal = PlaylistTraversal(
             itemIDs: workspace.items.map(\.id),
             shuffleEnabled: workspace.isShuffleEnabled,
@@ -326,7 +326,7 @@ final class PlaylistCoordinator {
     var canPlay: Bool {
         controller.session.isPlayable
             || workspace.items.contains { item in
-                guard let version = item.selectedVersion ?? item.versions.first else { return false }
+                guard let version = item.keyVersion else { return false }
                 return version.metadata.duration > 0
             }
     }
@@ -553,7 +553,7 @@ final class PlaylistCoordinator {
             }
             targetVersionID = versionID
         } else {
-            guard let selected = item.selectedVersion?.id ?? item.versions.first?.id else {
+            guard let selected = item.keyVersion?.id else {
                 reportError(PlaylistWorkspaceError.emptyItem(itemID).localizedDescription)
                 return
             }
@@ -601,7 +601,7 @@ final class PlaylistCoordinator {
         let sameItem = oldSnapshot.itemID == itemID
         let versionID = (sameItem ? oldSnapshot.versionID : nil)
             .flatMap { id in item.versions.contains(where: { $0.id == id }) ? id : nil }
-            ?? item.selectedVersion?.id
+            ?? item.keyVersion?.id
             ?? item.versions.first?.id
         guard let versionID else {
             reportError(PlaylistWorkspaceError.emptyItem(itemID).localizedDescription)
@@ -646,7 +646,7 @@ final class PlaylistCoordinator {
         }
         let versionID = snapshot.versionID
             .flatMap { id in item.versions.contains(where: { $0.id == id }) ? id : nil }
-            ?? item.selectedVersion?.id
+            ?? item.keyVersion?.id
             ?? item.versions.first?.id
         guard let versionID else { return }
         let nextSnapshot = PlaybackSnapshot(
@@ -660,48 +660,6 @@ final class PlaylistCoordinator {
         }
     }
 
-    /// Select the version used for playlist playback or, when the item is the
-    /// active comparison, replace the runtime at the same file position.
-    func selectPlaybackVersion(_ versionID: PlaylistVersion.ID, in itemID: PlaylistItem.ID) async {
-        guard let item = workspace.items.first(where: { $0.id == itemID }) else {
-            reportError(PlaylistWorkspaceError.itemNotFound(itemID).localizedDescription)
-            return
-        }
-        guard item.versions.contains(where: { $0.id == versionID }) else {
-            reportError(PlaylistWorkspaceError.versionNotInItem(versionID: versionID, itemID: itemID).localizedDescription)
-            return
-        }
-
-        let oldSnapshot = capturePlaybackSnapshot()
-        captureRuntimeEdits()
-        guard let index = workspace.items.firstIndex(where: { $0.id == itemID }) else { return }
-        workspace.items[index].selectedVersionID = versionID
-
-        let isActiveComparisonItem = mode.itemID == itemID
-        let isActivePlaylistItem = mode == .playlist
-            && currentItemID == itemID
-            && runtimeContext?.itemID == itemID
-        if isActiveComparisonItem || isActivePlaylistItem {
-            let snapshot = PlaybackSnapshot(
-                itemID: itemID,
-                versionID: versionID,
-                filePosition: oldSnapshot.itemID == itemID ? oldSnapshot.filePosition : 0,
-                isPlaying: oldSnapshot.isPlaying
-            )
-            if isActiveComparisonItem {
-                await activateComparison(itemID: itemID, versionID: versionID, snapshot: snapshot)
-            } else {
-                await activatePlaylist(itemID: itemID, versionID: versionID, snapshot: snapshot)
-            }
-        } else if mode == .playlist, currentItemID == itemID {
-            currentVersionID = versionID
-        } else if currentItemID == nil {
-            currentItemID = itemID
-            currentVersionID = versionID
-        }
-        clearError()
-    }
-
     func play() {
         let runtimeBelongsToCurrentMode = mode.itemID != nil
             ? runtimeContext?.itemID == mode.itemID
@@ -713,7 +671,7 @@ final class PlaylistCoordinator {
         }
         guard let itemID = currentItemID ?? workspace.items.first?.id else { return }
         let versionID = currentVersionID
-            ?? workspace.items.first(where: { $0.id == itemID })?.selectedVersion?.id
+            ?? workspace.items.first(where: { $0.id == itemID })?.keyVersion?.id
         Task { await playItem(id: itemID, versionID: versionID) }
     }
 
@@ -822,18 +780,16 @@ final class PlaylistCoordinator {
         into destination: PlaylistItem.ID? = nil,
         undoManager: UndoManager? = nil
     ) -> PlaylistItem.ID? {
-        let playingID = controller.session.isPlaying ? currentVersionID : nil
         var result: UUID?
         let succeeded = mutateWorkspace(beforeAction: "Group Items", undoManager: undoManager) {
-            result = try $0.groupItems(itemIDs, looseVersionIDs: looseVersionIDs, into: destination, playingVersionID: playingID)
+            result = try $0.groupItems(itemIDs, looseVersionIDs: looseVersionIDs, into: destination)
         }
         return succeeded ? result : nil
     }
 
     func moveVersions(_ ids: [UUID], to destination: UUID, before anchor: UUID?, undoManager: UndoManager?) -> Bool {
-        let playingID = controller.session.isPlaying ? currentVersionID : nil
         return mutateWorkspace(beforeAction: ids.count == 1 ? "Move Version" : "Move Versions", undoManager: undoManager) {
-            try $0.moveVersions(ids, to: destination, before: anchor, playingVersionID: playingID)
+            try $0.moveVersions(ids, to: destination, before: anchor)
         }
     }
 
@@ -982,14 +938,12 @@ final class PlaylistCoordinator {
         at destinationIndex: Int? = nil,
         undoManager: UndoManager? = nil
     ) -> Bool {
-        let playingID = controller.session.isPlaying ? currentVersionID : nil
         return mutateWorkspace(beforeAction: "Move Version", undoManager: undoManager) {
             try $0.moveVersion(
                 versionID,
                 from: sourceItemID,
                 to: destinationItemID,
-                at: destinationIndex,
-                playingVersionID: playingID
+                at: destinationIndex
             )
         }
     }
@@ -1025,8 +979,7 @@ final class PlaylistCoordinator {
                 versionID,
                 from: item.id,
                 to: item.id,
-                at: destinationIndex,
-                playingVersionID: self.controller.session.isPlaying ? self.controller.session.activeTrackID : nil
+                at: destinationIndex
             )
         }
     }
@@ -1038,13 +991,11 @@ final class PlaylistCoordinator {
         at destinationIndex: Int? = nil,
         undoManager: UndoManager? = nil
     ) -> Bool {
-        let playingID = controller.session.isPlaying ? currentVersionID : nil
         return mutateWorkspace(beforeAction: "Move Version", undoManager: undoManager) {
             try $0.moveVersion(
                 versionID,
                 to: destinationItemID,
-                at: destinationIndex,
-                playingVersionID: playingID
+                at: destinationIndex
             )
         }
     }
@@ -1055,10 +1006,9 @@ final class PlaylistCoordinator {
         from itemID: PlaylistItem.ID? = nil,
         undoManager: UndoManager? = nil
     ) -> PlaylistItem.ID? {
-        let playingID = controller.session.isPlaying ? currentVersionID : nil
         var result: PlaylistItem.ID?
         let succeeded = mutateWorkspace(beforeAction: "Separate Version", undoManager: undoManager) {
-            result = try $0.separateVersion(versionID, from: itemID, playingVersionID: playingID)
+            result = try $0.separateVersion(versionID, from: itemID)
         }
         return succeeded ? result : nil
     }
@@ -1200,7 +1150,7 @@ final class PlaylistCoordinator {
         mode = restored.activeView.itemID.map { .comparison(itemID: $0) } ?? .playlist
         currentItemID = restored.listeningState?.itemID ?? restored.activeItemID
         currentVersionID = restored.listeningState?.versionID
-            ?? restored.items.first(where: { $0.id == restored.activeItemID })?.selectedVersion?.id
+            ?? restored.items.first(where: { $0.id == restored.activeItemID })?.keyVersion?.id
         traversal = PlaylistTraversal(
             itemIDs: restored.items.map(\.id),
             shuffleEnabled: restored.isShuffleEnabled,
@@ -1215,7 +1165,7 @@ final class PlaylistCoordinator {
             return
         }
         let versionID = currentVersionID.flatMap { id in item.versions.contains { $0.id == id } ? id : nil }
-            ?? item.selectedVersion?.id ?? item.versions.first?.id
+            ?? item.keyVersion?.id
         guard let versionID else { return }
         let filePosition = restored.listeningState?.itemID == item.id
             && restored.listeningState?.versionID == versionID
@@ -1606,7 +1556,7 @@ final class PlaylistCoordinator {
                 continue
             }
             cursor = itemID
-            let versionID = tryRepeatCurrent ? currentVersionID : selectedVersion(for: itemID)?.id
+            let versionID = tryRepeatCurrent ? currentVersionID : keyVersion(for: itemID)?.id
             tryRepeatCurrent = false
             guard attempted.insert(itemID).inserted, let versionID else { continue }
             let snapshot = PlaybackSnapshot(
@@ -1646,7 +1596,7 @@ final class PlaylistCoordinator {
         }
         let versionID = snapshot.versionID.flatMap { id in item.versions.contains(where: { $0.id == id }) ? id : nil }
             ?? workspace.listeningState.flatMap { state in item.versions.contains(where: { $0.id == state.versionID }) ? state.versionID : nil }
-            ?? item.selectedVersion?.id
+            ?? item.keyVersion?.id
         guard let versionID else {
             currentItemID = item.id
             currentVersionID = nil
@@ -1685,8 +1635,8 @@ final class PlaylistCoordinator {
 
     // MARK: - Workspace helpers
 
-    private func selectedVersion(for itemID: PlaylistItem.ID) -> PlaylistVersion? {
-        workspace.items.first(where: { $0.id == itemID })?.selectedVersion
+    private func keyVersion(for itemID: PlaylistItem.ID) -> PlaylistVersion? {
+        workspace.items.first(where: { $0.id == itemID })?.keyVersion
     }
 
     private func currentVersion() -> PlaylistVersion? {
@@ -1696,7 +1646,7 @@ final class PlaylistCoordinator {
            let version = item.versions.first(where: { $0.id == currentVersionID }) {
             return version
         }
-        return item.selectedVersion
+        return item.keyVersion
     }
 
     private func appendVersions(_ versions: [PlaylistVersion], to itemID: PlaylistItem.ID) throws -> [PlaylistItem.ID] {
@@ -1718,7 +1668,6 @@ final class PlaylistCoordinator {
             }
         }
         item.versions.append(contentsOf: versions)
-        if item.selectedVersionID == nil { item.selectedVersionID = versions.first?.id }
         candidate.items[index] = item
         try candidate.validate()
         workspace = candidate
@@ -1802,9 +1751,6 @@ final class PlaylistCoordinator {
                 continue
             }
             candidate.items[index].versions.append(contentsOf: assignedVersions)
-            if candidate.items[index].selectedVersionID == nil {
-                candidate.items[index].selectedVersionID = assignedVersions.first?.id
-            }
             for version in assignedVersions { itemIDByVersionID[version.id] = assignment.groupID }
         }
 
@@ -1921,6 +1867,7 @@ final class PlaylistCoordinator {
         let targetItemIDs = Set(target.items.map(\.id))
         let recordedIDs = Set(originalVersions.keys)
         let targetIDs = Set(target.allVersions.map(\.id))
+        let targetVersions = Dictionary(uniqueKeysWithValues: target.allVersions.map { ($0.id, $0) })
 
         candidate.items = target.items.compactMap { recorded in
             let prior = originalItems[recorded.id]
@@ -1937,11 +1884,15 @@ final class PlaylistCoordinator {
                 }
                 item.versions += (current?.versions ?? []).filter { !recordedIDs.contains($0.id) && !targetIDs.contains($0.id) }
             }
-            if item.selectedVersionID == prior?.selectedVersionID {
-                item.selectedVersionID = recorded.selectedVersionID
-            }
-            if !item.versions.contains(where: { $0.id == item.selectedVersionID }) {
-                item.selectedVersionID = item.versions.first?.id
+            // Rejection rebases like the title: the recorded flag applies
+            // unless the live flag changed since the command.
+            if current?.isRejected == prior?.isRejected { item.isRejected = recorded.isRejected }
+            item.versions = item.versions.map { version in
+                guard let old = originalVersions[version.id], let recordedVersion = targetVersions[version.id],
+                      version.isRejected == old.isRejected else { return version }
+                var rebased = version
+                rebased.isRejected = recordedVersion.isRejected
+                return rebased
             }
             return item.versions.isEmpty ? nil : item
         }
@@ -1949,9 +1900,6 @@ final class PlaylistCoordinator {
             var retained = item
             if originalItems[item.id] != nil {
                 retained.versions.removeAll { recordedIDs.contains($0.id) || targetIDs.contains($0.id) }
-                if !retained.versions.contains(where: { $0.id == retained.selectedVersionID }) {
-                    retained.selectedVersionID = retained.versions.first?.id
-                }
             }
             if !retained.versions.isEmpty { candidate.items.append(retained) }
         }
@@ -2067,14 +2015,14 @@ final class PlaylistCoordinator {
             candidate.items[index].comparison.visibleSpan = controller.visibleSpan
         }
         captureListeningState(into: &candidate)
-        return controller.session.activeTrackID ?? candidate.items[index].selectedVersionID
+        return controller.session.activeTrackID ?? candidate.items[index].keyVersion?.id
     }
 
     private func captureListeningState(into candidate: inout PlaylistWorkspace) {
         guard let itemID = currentItemID ?? mode.itemID,
               runtimeContext?.itemID == itemID,
               let item = candidate.items.first(where: { $0.id == itemID }),
-              let versionID = controller.session.activeTrackID ?? currentVersionID ?? item.selectedVersion?.id,
+              let versionID = controller.session.activeTrackID ?? currentVersionID ?? item.keyVersion?.id,
               let version = item.versions.first(where: { $0.id == versionID }) else {
             return
         }

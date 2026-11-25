@@ -20,8 +20,8 @@ struct PlaylistCoordinatorTests {
         let imported = await coordinator.importFiles([firstURL, secondURL], destination: .playlist)
         let firstItemID = try #require(imported.first)
         let secondItemID = try #require(imported.last)
-        let firstVersionID = try #require(coordinator.workspace.items.first?.selectedVersionID)
-        let secondVersionID = try #require(coordinator.workspace.items.last?.selectedVersionID)
+        let firstVersionID = try #require(coordinator.workspace.items.first?.keyVersion?.id)
+        let secondVersionID = try #require(coordinator.workspace.items.last?.keyVersion?.id)
         await coordinator.playItem(id: firstItemID)
 
         #expect(coordinator.removeItem(firstItemID))
@@ -229,7 +229,7 @@ struct PlaylistCoordinatorTests {
             title: "32 versions",
             versions: Array(versions.prefix(PlaylistWorkspace.maximumVersionsPerItem))
         )
-        let comparisonVersionID = try #require(comparisonItem.selectedVersionID)
+        let comparisonVersionID = try #require(comparisonItem.keyVersion?.id)
         let playlistVersion = try #require(versions.last)
         let playlistItem = PlaylistItem(title: "Playlist item", versions: [playlistVersion])
         let missingItems = (0..<98).map { index in
@@ -354,8 +354,7 @@ struct PlaylistCoordinatorTests {
         let second = makeVersion("second.wav")
         let item = PlaylistItem(
             title: "Song",
-            versions: [first, second],
-            selectedVersionID: first.id
+            versions: [first, second]
         )
         let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
         let before = coordinator.workspace
@@ -401,7 +400,8 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.workspace.items.map(\.id) == [b.id, c.id, a.id])
         #expect(coordinator.workspace.items.last?.versions.map(\.id) ==
                 [a.versions[1].id, a.versions[0].id, a.versions[2].id])
-        #expect(coordinator.workspace.items.last?.selectedVersionID == a.selectedVersionID)
+        // Reordering versions moves the derived key with the order.
+        #expect(coordinator.workspace.items.last?.keyVersion?.id == a.versions[1].id)
         #expect(!PlaylistOrganizationAvailability(context).canMoveUp)
         #expect(PlaylistOrganizationAvailability(context).canMoveDown)
         undo.undo()
@@ -443,7 +443,7 @@ struct PlaylistCoordinatorTests {
     @MainActor
     @Test func separateCommandsSelectResultingTracksInPlace() {
         let versions = ["first", "second", "third", "fourth", "fifth"].map { makeVersion("\($0).wav") }
-        let item = PlaylistItem(title: "Song", versions: versions, selectedVersionID: versions[1].id)
+        let item = PlaylistItem(title: "Song", versions: versions)
         let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
         let presentation = PlaylistPresentationState()
         let context = PlaylistCommandContext(coordinator: coordinator, presentation: presentation, undoManager: nil)
@@ -571,7 +571,7 @@ struct PlaylistCoordinatorTests {
 
     @MainActor
     @Test
-    func selectingActivePlaylistVersionReloadsRuntimeAndBackKeepsChoice() async throws {
+    func leavingCompareKeepsTheAudibleVersionCurrentWithoutChangingTheKey() async throws {
         let firstURL = try makeTemporaryAudioFile(name: "coordinator-first.wav")
         let secondURL = try makeTemporaryAudioFile(name: "coordinator-second.wav")
         defer {
@@ -611,7 +611,6 @@ struct PlaylistCoordinatorTests {
             id: UUID(),
             title: "Song",
             versions: [firstVersion, secondVersion],
-            selectedVersionID: firstID,
             comparison: PlaylistComparisonConfiguration(
                 repeatMode: .one,
                 loopRegion: LoopRegion(start: 0.5, end: 1.5),
@@ -636,18 +635,6 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.isPlaying)
 
         coordinator.pause()
-        await coordinator.selectPlaybackVersion(secondID, in: item.id)
-        #expect(!coordinator.isPlaying)
-        #expect(controller.session.activeTrackID == secondID)
-        #expect(coordinator.workspace.items[0].selectedVersionID == secondID)
-
-        coordinator.play()
-        #expect(coordinator.isPlaying)
-        await coordinator.selectPlaybackVersion(firstID, in: item.id)
-        #expect(coordinator.isPlaying)
-        #expect(controller.session.activeTrackID == firstID)
-
-        coordinator.pause()
         coordinator.seek(to: 1)
         await coordinator.enterComparison(itemID: item.id)
         #expect(coordinator.mode == .comparison(itemID: item.id))
@@ -655,11 +642,26 @@ struct PlaylistCoordinatorTests {
         #expect(controller.session.loopRegion == LoopRegion(start: 0.5, end: 1.5))
         #expect(controller.visibleStart == 0.25)
         #expect(controller.visibleSpan == 1.25)
-        await coordinator.selectPlaybackVersion(secondID, in: item.id)
+        #expect(controller.session.activeTrackID == firstID)
+        controller.selectActiveTrack(secondID)
         await coordinator.backToPlaylist()
         #expect(coordinator.mode == .playlist)
-        #expect(coordinator.workspace.items[0].selectedVersionID == secondID)
+        // The audible version stays the current version, at its file time,
+        // but is not stored as the key: the key is still the first version.
         #expect(controller.session.activeTrackID == secondID)
+        #expect(coordinator.currentVersionID == secondID)
+        #expect(coordinator.workspace.listeningState?.versionID == secondID)
+        #expect(coordinator.workspace.items[0].versions.map(\.id) == [firstID, secondID])
+        #expect(coordinator.workspace.items[0].keyVersion?.id == firstID)
+
+        // Resuming keeps the current version; playing the track from its
+        // row plays the key.
+        coordinator.play()
+        #expect(controller.session.activeTrackID == secondID)
+        coordinator.pause()
+        await coordinator.playItem(id: item.id)
+        #expect(controller.session.activeTrackID == firstID)
+        coordinator.pause()
     }
 
     @MainActor
@@ -685,7 +687,7 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.isPlaying)
         #expect(coordinator.currentVersionID == alternate.id)
         #expect(coordinator.workspace.listeningState?.filePosition ?? 1 < 0.5)
-        #expect(coordinator.workspace.items.first?.selectedVersionID == key.id)
+        #expect(coordinator.workspace.items.first?.keyVersion?.id == key.id)
 
         await coordinator.playItem(id: item.id)
         #expect(coordinator.currentVersionID == key.id)
@@ -1179,7 +1181,7 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.workspace.items.first?.title == "Original")
         #expect(coordinator.workspace.items.first?.versions.first?.file.storedURL == first)
         #expect(coordinator.mode == .comparison(itemID: playing.id))
-        #expect(coordinator.currentVersionID == playing.selectedVersionID)
+        #expect(coordinator.currentVersionID == playing.keyVersion?.id)
         #expect(coordinator.runtimeContext == context)
         #expect(coordinator.isPlaying)
         #expect(coordinator.controller.displayTransportPosition() >= 1)
@@ -1204,7 +1206,7 @@ struct PlaylistCoordinatorTests {
         let group = try #require(grouped)
         undo.endUndoGrouping()
         await coordinator.enterComparison(itemID: group)
-        await coordinator.selectPlaybackVersion(moved.id, in: group)
+        coordinator.controller.selectActiveTrack(moved.id)
         coordinator.seek(to: 1)
         undo.undo()
         for _ in 0..<100 where coordinator.runtimeContext?.itemID != other.id { await Task.yield() }

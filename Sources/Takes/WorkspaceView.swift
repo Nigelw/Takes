@@ -488,7 +488,7 @@ struct WorkspaceView: View {
             return coordinator.workspace.allVersions.first { $0.id == coordinator.controller.session.activeTrackID }
         }
         for item in coordinator.workspace.items {
-            if presentation.selection.contains(.item(item.id)) { return item.selectedVersion }
+            if presentation.selection.contains(.item(item.id)) { return item.keyVersion }
             if let version = item.versions.first(where: { presentation.selection.contains(.version($0.id)) }) { return version }
         }
         return coordinator.workspace.allVersions.first { $0.id == coordinator.currentVersionID }
@@ -967,10 +967,10 @@ private struct PlaylistTransportView: View {
     private var showsLabels: Bool { settings.showsComponentDebugLabels }
 
     /// The version the transport is showing: the current one, else the
-    /// item's selected version (same fallback the coordinator uses).
+    /// item's key version (same fallback the coordinator uses).
     private var currentVersion: PlaylistVersion? {
         guard let item = coordinator.workspace.items.first(where: { $0.id == coordinator.currentItemID }) else { return nil }
-        return item.versions.first { $0.id == coordinator.currentVersionID } ?? item.selectedVersion
+        return item.versions.first { $0.id == coordinator.currentVersionID } ?? item.keyVersion
     }
 }
 
@@ -999,15 +999,15 @@ private struct WorkspaceFileDropDelegate: DropDelegate {
 enum CoverVersionRule {
     /// Playlist: the playing (or current) version, as the readout shows.
     static func playlist(item: PlaylistItem, currentVersionID: PlaylistVersion.ID?) -> PlaylistVersion? {
-        item.versions.first(where: { $0.id == currentVersionID }) ?? item.selectedVersion
+        item.versions.first(where: { $0.id == currentVersionID }) ?? item.keyVersion
     }
 
     /// Compare: the audible version, so Switch Track swaps the cover. Blind
-    /// Listening Mode keeps the item's playback version up instead, so the
+    /// Listening Mode keeps the item's key version up instead, so the
     /// cover can't reveal which version is audible.
     static func comparison(item: PlaylistItem, audibleVersionID: PlaylistVersion.ID?, isBlind: Bool) -> PlaylistVersion? {
         guard !isBlind, let audible = item.versions.first(where: { $0.id == audibleVersionID }) else {
-            return item.selectedVersion
+            return item.keyVersion
         }
         return audible
     }

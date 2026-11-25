@@ -2497,10 +2497,10 @@ struct SessionTests {
             )
         }
         let mono = version("mono.flac"), stereo = version("stereo.flac")
-        let item = PlaylistItem(title: "Taxman", versions: [mono, stereo], selectedVersionID: mono.id)
+        let item = PlaylistItem(title: "Taxman", versions: [mono, stereo])
 
         #expect(CoverVersionRule.comparison(item: item, audibleVersionID: stereo.id, isBlind: false)?.id == stereo.id)
-        // Blind: the playback version stays up whichever version is audible.
+        // Blind: the key version stays up whichever version is audible.
         #expect(CoverVersionRule.comparison(item: item, audibleVersionID: stereo.id, isBlind: true)?.id == mono.id)
         #expect(CoverVersionRule.comparison(item: item, audibleVersionID: nil, isBlind: false)?.id == mono.id)
 
@@ -2610,13 +2610,15 @@ struct SessionTests {
     // MARK: A2 bottom bars (milestone 5)
 
     private func makeSummaryItem(_ title: String, durations: [TimeInterval], playback: Int = 0) -> PlaylistItem {
+        // Versions above the playback one are rejected, so it is the key.
         let versions = durations.enumerated().map { index, duration in
             PlaylistVersion(
                 file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/\(title)-\(index).flac")),
-                metadata: PlaylistMetadata(duration: duration, fileFormatDescription: "FLAC", displayName: "\(title)-\(index).flac")
+                metadata: PlaylistMetadata(duration: duration, fileFormatDescription: "FLAC", displayName: "\(title)-\(index).flac"),
+                isRejected: index < playback
             )
         }
-        return PlaylistItem(title: title, versions: versions, selectedVersionID: versions[playback].id)
+        return PlaylistItem(title: title, versions: versions)
     }
 
     @Test
@@ -2946,7 +2948,8 @@ struct SessionTests {
         let untagged = version(title: nil, file: "Alternate Mix.wav")
         var item = PlaylistItem(title: "Original Track Title", versions: [tagged, untagged])
         #expect(PlaylistRowText.itemTitle(item) == "Stereo Mix")
-        item.selectedVersionID = untagged.id
+        // Rejecting the first version makes the next one the key.
+        item.versions[0].isRejected = true
         #expect(PlaylistRowText.itemTitle(item) == "Alternate Mix")
     }
 
@@ -2987,7 +2990,7 @@ struct SessionTests {
         let version = PlaylistVersionCellView()
         version.configure(title: "Missing", format: "WAV", duration: "0:35", mark: .warning(message), toolTip: "")
         #expect(version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
-        version.configure(title: "Available", format: "WAV", duration: "0:35", mark: .key, toolTip: "")
+        version.configure(title: "Available", format: "WAV", duration: "0:35", mark: .none, toolTip: "")
         #expect(!version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
     }
 

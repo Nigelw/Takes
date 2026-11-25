@@ -138,19 +138,38 @@ struct PlaylistVersion: Identifiable, Codable, Equatable {
     var metadata: PlaylistMetadata
     var gainDB: Float
     var offsetSeconds: TimeInterval
+    /// Culling: a rejected version is passed over by the key-version rule and
+    /// by compare's sequential switching. Independent of the item's flag.
+    var isRejected: Bool
 
     init(
         id: UUID = UUID(),
         file: PlaylistFileReference,
         metadata: PlaylistMetadata,
         gainDB: Float = 0,
-        offsetSeconds: TimeInterval = 0
+        offsetSeconds: TimeInterval = 0,
+        isRejected: Bool = false
     ) {
         self.id = id
         self.file = file
         self.metadata = metadata
         self.gainDB = gainDB
         self.offsetSeconds = offsetSeconds
+        self.isRejected = isRejected
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, file, metadata, gainDB, offsetSeconds, isRejected
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        file = try container.decode(PlaylistFileReference.self, forKey: .file)
+        metadata = try container.decode(PlaylistMetadata.self, forKey: .metadata)
+        gainDB = try container.decode(Float.self, forKey: .gainDB)
+        offsetSeconds = try container.decode(TimeInterval.self, forKey: .offsetSeconds)
+        isRejected = try container.decodeIfPresent(Bool.self, forKey: .isRejected) ?? false
     }
 }
 
@@ -159,26 +178,63 @@ struct PlaylistItem: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String
     var versions: [PlaylistVersion]
-    var selectedVersionID: UUID?
     var comparison: PlaylistComparisonConfiguration
+    /// Culling: a rejected track is skipped by sequential navigation and
+    /// still plays when named explicitly. Independent of its versions' flags.
+    var isRejected: Bool
 
     init(
         id: UUID = UUID(),
         title: String,
         versions: [PlaylistVersion] = [],
-        selectedVersionID: UUID? = nil,
-        comparison: PlaylistComparisonConfiguration = .init()
+        comparison: PlaylistComparisonConfiguration = .init(),
+        isRejected: Bool = false
     ) {
         self.id = id
         self.title = title
         self.versions = versions
-        self.selectedVersionID = selectedVersionID ?? versions.first?.id
         self.comparison = comparison
+        self.isRejected = isRejected
     }
 
-    var selectedVersion: PlaylistVersion? {
-        guard let selectedVersionID else { return versions.first }
-        return versions.first { $0.id == selectedVersionID } ?? versions.first
+    /// The version that represents the item and plays when the item is
+    /// played: the first version that isn't rejected, else the first version.
+    /// Derived, never stored; availability deliberately does not enter into
+    /// it, so unplugging a drive never changes a row's title or artwork.
+    var keyVersion: PlaylistVersion? {
+        versions.first { !$0.isRejected } ?? versions.first
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, versions, comparison, isRejected
+        /// Schema 1 only. Read for migration, never written.
+        case legacySelectedVersionID = "selectedVersionID"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        var versions = try container.decode([PlaylistVersion].self, forKey: .versions)
+        // Schema 1 stored an explicit key version. Moving it to the front
+        // keeps the track playing the version the user chose under the
+        // derived first-non-rejected rule.
+        if let selected = try container.decodeIfPresent(UUID.self, forKey: .legacySelectedVersionID),
+           let index = versions.firstIndex(where: { $0.id == selected }), index > 0 {
+            versions.insert(versions.remove(at: index), at: 0)
+        }
+        self.versions = versions
+        comparison = try container.decode(PlaylistComparisonConfiguration.self, forKey: .comparison)
+        isRejected = try container.decodeIfPresent(Bool.self, forKey: .isRejected) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(versions, forKey: .versions)
+        try container.encode(comparison, forKey: .comparison)
+        try container.encode(isRejected, forKey: .isRejected)
     }
 }
 
@@ -193,7 +249,6 @@ enum PlaylistWorkspaceError: Error, Equatable, LocalizedError {
     case duplicateFile(URL)
     case emptyItem(UUID)
     case versionLimitExceeded(itemID: UUID, limit: Int)
-    case selectedVersionNotFound(itemID: UUID, versionID: UUID)
     case invalidActiveItem(UUID)
     case invalidListeningItem(UUID)
     case invalidListeningVersion(itemID: UUID, versionID: UUID)
@@ -222,8 +277,6 @@ enum PlaylistWorkspaceError: Error, Equatable, LocalizedError {
             return "Playlist item \(id.uuidString) has no versions."
         case let .versionLimitExceeded(itemID, limit):
             return "Playlist item \(itemID.uuidString) cannot contain more than \(limit) versions."
-        case let .selectedVersionNotFound(itemID, versionID):
-            return "Selected version \(versionID.uuidString) is not in item \(itemID.uuidString)."
         case let .invalidActiveItem(id):
             return "The comparison view refers to missing item \(id.uuidString)."
         case let .invalidListeningItem(id):
@@ -295,13 +348,6 @@ struct PlaylistWorkspace: Codable, Equatable {
                 throw PlaylistWorkspaceError.versionLimitExceeded(
                     itemID: item.id,
                     limit: Self.maximumVersionsPerItem
-                )
-            }
-            if let selectedVersionID = item.selectedVersionID,
-               !item.versions.contains(where: { $0.id == selectedVersionID }) {
-                throw PlaylistWorkspaceError.selectedVersionNotFound(
-                    itemID: item.id,
-                    versionID: selectedVersionID
                 )
             }
             try Self.validate(comparison: item.comparison)
@@ -398,8 +444,7 @@ struct PlaylistWorkspace: Codable, Equatable {
     mutating func groupItems(
         _ itemIDs: [PlaylistItem.ID],
         looseVersionIDs: [PlaylistVersion.ID] = [],
-        into explicitDestination: PlaylistItem.ID? = nil,
-        playingVersionID: PlaylistVersion.ID? = nil
+        into explicitDestination: PlaylistItem.ID? = nil
     ) throws -> PlaylistItem.ID {
         let selected = Set(itemIDs)
         guard selected.count == itemIDs.count else { throw PlaylistWorkspaceError.invalidItemOrder }
@@ -414,21 +459,15 @@ struct PlaylistWorkspace: Codable, Equatable {
             throw PlaylistWorkspaceError.noItemsSelected
         }
         let incoming = ordered.filter { $0.id != destination }.flatMap { $0.versions.map(\.id) } + looseVersionIDs
-        try transferVersions(incoming, to: destination, before: nil, playingVersionID: playingVersionID,
-                             preserveDestinationSelection: true)
+        try moveVersions(incoming, to: destination, before: nil)
         return destination
     }
 
+    /// Move versions into a destination item, translating their offsets.
+    /// Each version keeps its rejection flag; the destination keeps its own,
+    /// and sources emptied by the move are dropped along with theirs.
     mutating func moveVersions(
-        _ versionIDs: [UUID], to destination: UUID, before anchor: UUID? = nil, playingVersionID: UUID? = nil
-    ) throws {
-        try transferVersions(versionIDs, to: destination, before: anchor, playingVersionID: playingVersionID,
-                             preserveDestinationSelection: false)
-    }
-
-    private mutating func transferVersions(
-        _ versionIDs: [UUID], to destinationID: UUID, before anchor: UUID?, playingVersionID: UUID?,
-        preserveDestinationSelection: Bool
+        _ versionIDs: [UUID], to destinationID: UUID, before anchor: UUID? = nil
     ) throws {
         try validate()
         guard var destination = items.first(where: { $0.id == destinationID }) else {
@@ -437,7 +476,6 @@ struct PlaylistWorkspace: Codable, Equatable {
         let moving = Set(versionIDs)
         guard moving.count == versionIDs.count else { throw PlaylistWorkspaceError.invalidItemOrder }
         var translated = [UUID: PlaylistVersion]()
-        var selectedIncoming = Set<UUID>()
         let destinationOffset = Self.referenceOffset(for: destination)
         var candidate = self
         candidate.items = items.compactMap { source in
@@ -454,12 +492,6 @@ struct PlaylistWorkspace: Codable, Equatable {
                 destination.versions = remaining.versions
                 return source
             }
-            if let selected = source.selectedVersionID, moving.contains(selected),
-               let index = source.versions.firstIndex(where: { $0.id == selected }) {
-                selectedIncoming.insert(selected)
-                remaining.selectedVersionID = source.versions[index...].first { !moving.contains($0.id) }?.id
-                    ?? remaining.versions.last?.id
-            }
             return remaining.versions.isEmpty ? nil : remaining
         }
         let ordered = try versionIDs.map { id in
@@ -475,12 +507,6 @@ struct PlaylistWorkspace: Codable, Equatable {
             return index
         } ?? destination.versions.endIndex
         destination.versions.insert(contentsOf: ordered, at: insertion)
-        if let playingVersionID, destination.versions.contains(where: { $0.id == playingVersionID }) {
-            destination.selectedVersionID = playingVersionID
-        } else if !preserveDestinationSelection, let selected = versionIDs.last(where: selectedIncoming.contains) {
-            destination.selectedVersionID = selected
-        }
-        destination.selectedVersionID = destination.selectedVersionID ?? destination.versions.first?.id
         guard let index = candidate.items.firstIndex(where: { $0.id == destinationID }) else {
             throw PlaylistWorkspaceError.itemNotFound(destinationID)
         }
@@ -500,8 +526,7 @@ struct PlaylistWorkspace: Codable, Equatable {
         _ versionID: PlaylistVersion.ID,
         from sourceItemID: PlaylistItem.ID,
         to destinationItemID: PlaylistItem.ID,
-        at destinationIndex: Int? = nil,
-        playingVersionID: PlaylistVersion.ID? = nil
+        at destinationIndex: Int? = nil
     ) throws {
         guard let source = items.first(where: { $0.id == sourceItemID }) else {
             throw PlaylistWorkspaceError.itemNotFound(sourceItemID)
@@ -515,16 +540,14 @@ struct PlaylistWorkspace: Codable, Equatable {
         let remaining = destination.versions.filter { $0.id != versionID }
         let index = destinationIndex ?? remaining.count
         guard (0...remaining.count).contains(index) else { throw PlaylistWorkspaceError.invalidDestinationIndex(index) }
-        try moveVersions([versionID], to: destinationItemID, before: index < remaining.count ? remaining[index].id : nil,
-                         playingVersionID: playingVersionID)
+        try moveVersions([versionID], to: destinationItemID, before: index < remaining.count ? remaining[index].id : nil)
     }
 
     /// Move a version when its source item can be inferred from its ID.
     mutating func moveVersion(
         _ versionID: PlaylistVersion.ID,
         to destinationItemID: PlaylistItem.ID,
-        at destinationIndex: Int? = nil,
-        playingVersionID: PlaylistVersion.ID? = nil
+        at destinationIndex: Int? = nil
     ) throws {
         guard let sourceItemID = items.first(where: { item in
             item.versions.contains(where: { $0.id == versionID })
@@ -535,18 +558,17 @@ struct PlaylistWorkspace: Codable, Equatable {
             versionID,
             from: sourceItemID,
             to: destinationItemID,
-            at: destinationIndex,
-            playingVersionID: playingVersionID
+            at: destinationIndex
         )
     }
 
-    /// Split a version into a new adjacent item. The version ID and gain are
-    /// retained; its offset and the new item's loop are reset.
+    /// Split a version into a new adjacent item. The version ID, gain and
+    /// rejection flag are retained; its offset and the new item's loop are
+    /// reset, and the new item starts out not rejected.
     @discardableResult
     mutating func separateVersion(
         _ versionID: PlaylistVersion.ID,
-        from itemID: PlaylistItem.ID? = nil,
-        playingVersionID: PlaylistVersion.ID? = nil
+        from itemID: PlaylistItem.ID? = nil
     ) throws -> PlaylistItem.ID {
         var candidate = self
         try candidate.validate()
@@ -571,17 +593,8 @@ struct PlaylistWorkspace: Codable, Equatable {
             throw PlaylistWorkspaceError.cannotSeparateOnlyVersion(versionID)
         }
 
-        if let playingVersionID,
-           !candidate.allVersions.contains(where: { $0.id == playingVersionID }) {
-            throw PlaylistWorkspaceError.versionNotFound(playingVersionID)
-        }
-
         var source = candidate.items[sourceIndex]
         var separatedVersion = source.versions.remove(at: versionIndex)
-        let sourceWasSelected = source.selectedVersionID == versionID
-        if sourceWasSelected {
-            source.selectedVersionID = Self.fallbackVersionID(in: source, preferredIndex: versionIndex)
-        }
         separatedVersion.offsetSeconds = 0
         candidate.items[sourceIndex] = source
 
@@ -590,7 +603,6 @@ struct PlaylistWorkspace: Codable, Equatable {
         let newItem = PlaylistItem(
             title: Self.defaultTitle(for: separatedVersion),
             versions: [separatedVersion],
-            selectedVersionID: separatedVersion.id,
             comparison: comparison
         )
         candidate.items.insert(newItem, at: sourceIndex + 1)
@@ -617,18 +629,34 @@ struct PlaylistWorkspace: Codable, Equatable {
         self = candidate
     }
 
-    /// Select a version within an item, retaining both stable IDs.
-    mutating func selectVersion(_ versionID: PlaylistVersion.ID, in itemID: PlaylistItem.ID) throws {
+    /// Set the rejection flag on items and versions (culling). The item and
+    /// version flags are independent: rejecting a track never touches its
+    /// versions, and the reverse. Nothing moves; the key version follows.
+    mutating func setRejected(
+        _ isRejected: Bool,
+        itemIDs: [PlaylistItem.ID] = [],
+        versionIDs: [PlaylistVersion.ID] = []
+    ) throws {
         var candidate = self
-        try candidate.validate()
-        guard let index = candidate.items.firstIndex(where: { $0.id == itemID }) else {
-            throw PlaylistWorkspaceError.itemNotFound(itemID)
+        let items = Set(itemIDs)
+        let versions = Set(versionIDs)
+        var foundItems = Set<UUID>()
+        var foundVersions = Set<UUID>()
+        for index in candidate.items.indices {
+            if items.contains(candidate.items[index].id) {
+                candidate.items[index].isRejected = isRejected
+                foundItems.insert(candidate.items[index].id)
+            }
+            for versionIndex in candidate.items[index].versions.indices
+            where versions.contains(candidate.items[index].versions[versionIndex].id) {
+                candidate.items[index].versions[versionIndex].isRejected = isRejected
+                foundVersions.insert(candidate.items[index].versions[versionIndex].id)
+            }
         }
-        guard candidate.items[index].versions.contains(where: { $0.id == versionID }) else {
-            throw PlaylistWorkspaceError.versionNotInItem(versionID: versionID, itemID: itemID)
+        if let missing = items.subtracting(foundItems).first { throw PlaylistWorkspaceError.itemNotFound(missing) }
+        if let missing = versions.subtracting(foundVersions).first {
+            throw PlaylistWorkspaceError.versionNotFound(missing)
         }
-        candidate.items[index].selectedVersionID = versionID
-        try candidate.validate()
         self = candidate
     }
 
@@ -788,13 +816,9 @@ struct PlaylistWorkspace: Codable, Equatable {
                 )
             }
         } else {
-            if source.selectedVersionID == versionID {
-                source.selectedVersionID = Self.fallbackVersionID(in: source, preferredIndex: versionIndex)
-            }
             candidate.items[sourceIndex] = source
             if wasListeningVersion {
-                let replacementID = source.selectedVersionID ?? source.versions.first?.id
-                if let replacementID {
+                if let replacementID = source.keyVersion?.id {
                     candidate.listeningState = PlaylistListeningState(
                         itemID: sourceItemID,
                         versionID: replacementID,
@@ -843,13 +867,7 @@ struct PlaylistWorkspace: Codable, Equatable {
     }
 
     private static func referenceOffset(for item: PlaylistItem) -> TimeInterval {
-        item.selectedVersion?.offsetSeconds ?? 0
-    }
-
-    private static func fallbackVersionID(in item: PlaylistItem, preferredIndex: Int) -> UUID? {
-        guard !item.versions.isEmpty else { return nil }
-        let index = min(max(preferredIndex, 0), item.versions.count - 1)
-        return item.versions[index].id
+        item.keyVersion?.offsetSeconds ?? 0
     }
 
     private static func replacementListeningState(
@@ -859,7 +877,7 @@ struct PlaylistWorkspace: Codable, Equatable {
         guard !items.isEmpty else { return nil }
         let index = min(max(preferredIndex, 0), items.count - 1)
         let item = items[index]
-        guard let version = item.selectedVersion ?? item.versions.first else { return nil }
+        guard let version = item.keyVersion else { return nil }
         return PlaylistListeningState(itemID: item.id, versionID: version.id, filePosition: 0)
     }
 

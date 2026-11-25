@@ -132,7 +132,7 @@ enum PlaylistSummaryText {
 
     static func totalDuration(of items: [PlaylistItem]) -> TimeInterval {
         items.reduce(0) { total, item in
-            let duration = item.selectedVersion?.metadata.duration ?? 0
+            let duration = item.keyVersion?.metadata.duration ?? 0
             return total + (duration.isFinite && duration > 0 ? duration : 0)
         }
     }
