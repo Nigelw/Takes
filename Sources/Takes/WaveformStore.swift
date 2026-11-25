@@ -88,6 +88,65 @@ struct FileWaveformGenerator: WaveformGenerating {
     }
 }
 
+/// Finished waveforms, kept for the life of the process so returning to a
+/// compared item (or opening another item that shares a file) draws its lanes
+/// at once instead of decoding again. Keyed by file identity, so a changed
+/// file misses. Least recently used entries go first once the total passes
+/// `byteBudget`. In memory only: users open different files each launch.
+@MainActor
+final class WaveformCache {
+    static let shared = WaveformCache()
+
+    /// About 200 four-minute tracks; a waveform tops out near 800 KB
+    /// (`WaveformSource.maximumBuckets` floats plus its pyramid).
+    static let defaultByteBudget = 64 * 1024 * 1024
+
+    let byteBudget: Int
+    private var entries: [WaveformSource.Identity: Waveform] = [:]
+    /// Least recently used first.
+    private var recency: [WaveformSource.Identity] = []
+    private(set) var totalBytes = 0
+
+    init(byteBudget: Int = WaveformCache.defaultByteBudget) {
+        self.byteBudget = byteBudget
+    }
+
+    var count: Int { entries.count }
+
+    /// The finished waveform for this file, if cached. Marks it recently used.
+    func waveform(for identity: WaveformSource.Identity) -> Waveform? {
+        guard let waveform = entries[identity] else { return nil }
+        markRecent(identity)
+        return waveform
+    }
+
+    /// Caches a finished waveform. Incomplete and empty ones (a read error)
+    /// are ignored, so a later activation tries the file again.
+    func insert(_ waveform: Waveform, for identity: WaveformSource.Identity) {
+        guard waveform.isComplete, !waveform.peaks.isEmpty else { return }
+        let bytes = Self.bytes(of: waveform)
+        guard bytes <= byteBudget else { return }
+        if let old = entries[identity] { totalBytes -= Self.bytes(of: old) }
+        entries[identity] = waveform
+        totalBytes += bytes
+        markRecent(identity)
+        while totalBytes > byteBudget, let oldest = recency.first {
+            recency.removeFirst()
+            if let evicted = entries.removeValue(forKey: oldest) { totalBytes -= Self.bytes(of: evicted) }
+        }
+    }
+
+    static func bytes(of waveform: Waveform) -> Int {
+        (waveform.peaks.count + waveform.reducedLevels.reduce(0) { $0 + $1.count }) * MemoryLayout<Float>.stride
+    }
+
+    private func markRecent(_ identity: WaveformSource.Identity) {
+        if recency.last == identity { return }
+        recency.removeAll { $0 == identity }
+        recency.append(identity)
+    }
+}
+
 /// Owns waveform generation for the loaded session tracks.
 ///
 /// Generation runs on a detached background task per track so the main thread
@@ -108,9 +167,11 @@ final class WaveformStore: ObservableObject {
     private var generationIDs: [SessionTrack.ID: UUID] = [:]
     private var runtimeContext: PlaylistRuntimeContext?
     private let generator: any WaveformGenerating
+    private let cache: WaveformCache
 
-    init(generator: any WaveformGenerating = FileWaveformGenerator()) {
+    init(generator: any WaveformGenerating = FileWaveformGenerator(), cache: WaveformCache = .shared) {
         self.generator = generator
+        self.cache = cache
     }
     /// Identity (url + size + mod date) the in-flight/finished waveform was built
     /// from, so we can detect when a track's file changes and regenerate.
@@ -159,6 +220,11 @@ final class WaveformStore: ObservableObject {
                 continue
             }
             cancel(id: track.id)
+            if let cached = cache.waveform(for: identity) {
+                sourceIdentities[track.id] = identity
+                waveforms[track.id] = cached
+                continue
+            }
             enqueue(trackID: track.id, url: track.loadedTrack.url, identity: identity)
         }
 
@@ -245,14 +311,16 @@ final class WaveformStore: ObservableObject {
         guard sourceIdentities[trackID] == identity,
               generationIDs[trackID] == generationID else { return }
 
-        waveforms[trackID] = Waveform(
+        let waveform = Waveform(
             peaks: peaks,
             bucketCount: bucketCount,
             isComplete: isComplete,
             reducedLevels: reducedLevels
         )
+        waveforms[trackID] = waveform
 
         if isComplete {
+            cache.insert(waveform, for: identity)
             tasks[trackID] = nil
             // A generation slot opened up — start the next queued track.
             pump()
@@ -266,7 +334,7 @@ final class WaveformStore: ObservableObject {
 enum WaveformSource {
     /// Lightweight fingerprint of a file used to decide whether a cached/in-flight
     /// waveform is still valid for a given track.
-    struct Identity: Equatable {
+    struct Identity: Hashable {
         let path: String
         let size: Int
         let modified: Date?

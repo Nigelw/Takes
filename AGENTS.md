@@ -170,7 +170,13 @@ Key ownership:
   from. No disk caches. A new runtime context restarts in-flight generations;
   finished waveforms survive a re-activation of the same item (Remove
   Version, reorder and regroup rebuild the runtime), so lanes don't redraw
-  from scratch.
+  from scratch. Finished waveforms also go into `WaveformCache.shared`
+  (process lifetime, keyed by `WaveformSource.Identity`: path, size and
+  modification date; least recently used evicted past 64 MB), which
+  outlives compare's view and its `WaveformStore`, so re-entering an item
+  already compared, or any item sharing a file, draws its lanes without
+  decoding. Unfinished, cancelled and empty (read-error) results are never
+  cached.
 - `AudioFileLoader.swift`: local file metadata through `AVAudioFile`, embedded
   title/artist/album tags and cover art (`embeddedArtworkData(for:)`) through
   `AVURLAsset`, and audio-runtime file preparation.
@@ -750,7 +756,9 @@ these reintroduces the exact regressions it fixed):
 - `PlaylistPersistenceControllerTests.swift`: restoration/save gating, failures,
   and automatic event-save observation rearming.
 - `PlaylistWaveformContextTests.swift`: stale waveform rejection across
-  activations, and finished waveforms kept when the same item re-activates.
+  activations, finished waveforms kept when the same item re-activates, and
+  `WaveformCache` (reuse across stores and items, unfinished results left
+  out, LRU eviction by byte budget).
 - `PlaylistWorkspaceTests.swift`: playlist value encoding/validation, stable
   ownership, canonical duplicates, atomic organization operations, the
   key-version rule (first non-rejected, all-rejected fallback, missing key
