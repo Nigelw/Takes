@@ -24,7 +24,7 @@ Keep one main window and automatically restore the last workspace. No document-b
 - Show **Compare** for items containing two or more versions.
 - Expand items to inspect versions, choose the playback version, move versions between items, or separate them into individual items.
 - Single-click selects rows for organization; double-click starts playback. Support multiselection, drag reordering, and keyboard navigation.
-- Provide **Group as Versions**, rename, separate, move, and remove actions, with Undo/Redo.
+- Provide **Group Versions**, rename, separate, move, and remove actions, with Undo/Redo.
 - Grouping places the result at the earliest selected row and preserves version order. Use that row’s title and version as defaults, unless one selected version is currently playing.
 - General playlist imports follow the automatic-grouping preference. Imports inside comparison add versions to the current item. Capture the destination when import begins so navigation cannot redirect an unfinished import.
 - Preserve canonical file duplicate detection across the workspace.

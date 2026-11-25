@@ -211,8 +211,8 @@ struct PlaylistBottomBar: View {
             )
             Menu {
                 playlistOrganizationMenuItems(
-                    context: context, availability: availability, move: context.moveSelection,
-                    toggleRejection: context.toggleRejection
+                    // Reject has its own button beside the pull-down.
+                    context: context, availability: availability, move: context.moveSelection, toggleRejection: nil
                 )
             } label: {
                 Image(systemName: "ellipsis")

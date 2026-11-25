@@ -97,7 +97,9 @@ Key ownership:
   shared organization menu builder (`playlistOrganizationMenuItems`) and
   focused validation (`PlaylistOrganizationAvailability`) for the Playlist
   menu and the bottom bar's `…` pull-down (Move Up/Down, Group/Ungroup
-  Versions, Reject, in that order); and `PlaylistRejectionCommand`
+  Versions, Reject, in that order; the pull-down passes no
+  `toggleRejection` and leaves Reject out, since the bar has a Reject
+  button); and `PlaylistRejectionCommand`
   (the command's title rule and its R key).
 - `PlaylistOutlineView.swift`: the playlist table — an `NSOutlineView` wrapped
   in `NSViewRepresentable` (items with versions as children), the A2 rows
@@ -305,7 +307,7 @@ These are here to prevent parallel implementations and subtle regressions:
   animate the active lane in Compare. Compare keeps the audio runtime in place, and
   a Blind Listening move changes only the displayed order. Both animations
   respect Reduce Motion.
-  Group as Versions uses the first selected track as the destination.
+  Group Versions uses the first selected track as the destination.
   Ungroup Versions splits all versions of each selected track and any
   individually selected versions into standalone tracks, then selects the
   resulting track rows.
@@ -359,9 +361,10 @@ These are here to prevent parallel implementations and subtle regressions:
   (`PlaylistCommandContext.rejectionTargets`), where a selected item row
   targets the track only and version rows their versions; in compare the
   active lane, or the right-clicked lane from the strip menu. It appears in
-  the Playlist menu, the row context menu, the bottom bar's `…` (one builder),
-  both bottom bars' Reject button and the lane strip's menu. ⌘R runs it
-  in both modes through the key monitor (`PlaylistRejectionCommand.keyCode`). Rejecting never moves rows, never
+  the Playlist menu (`playlistOrganizationMenuItems`), the row context
+  menu, both bottom bars' Reject button and the lane strip's menu, not the
+  bottom bar's `…`. ⌘R runs it in both modes through the key monitor
+  (`PlaylistRejectionCommand.keyCode`). Rejecting never moves rows, never
   changes the selection and never refreshes the audio runtime
   (`runtimeRequiresRefresh` ignores the flags): the current track or version
   keeps playing, and compare's lanes take the flag in place
@@ -391,7 +394,8 @@ These are here to prevent parallel implementations and subtle regressions:
 - The playlist has no header bar. Its bottom bar (A2 §7) has Add Files…
   (⌘O's dialog) and Remove Selected (Delete's selection-aware removal),
   Reject (`BottomBarRejectButton`, the menu's targets), the
-  `…` pull-down with the Playlist menu's organization commands, and the
+  `…` pull-down with the Playlist menu's organization commands except
+  Reject, and the
   `N tracks · m:ss` summary (one track per item, at its key version's
   duration; rejected tracks are left out of the count and the total). The File
   menu has the import commands (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M). The Playlist menu has

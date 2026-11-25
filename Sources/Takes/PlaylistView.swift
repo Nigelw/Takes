@@ -352,11 +352,12 @@ struct PlaylistCommands: Commands {
 }
 
 /// The organisation commands, acting on the selection. The Playlist menu and
-/// the bottom bar's `…` pull-down (A2 §7) both show this one list.
+/// the bottom bar's `…` pull-down (A2 §7) both show this one list; the
+/// pull-down leaves out Reject, which has its own button beside it.
 @MainActor @ViewBuilder
 func playlistOrganizationMenuItems(
     context: PlaylistCommandContext?, availability: PlaylistOrganizationAvailability?,
-    move: @escaping (RowMoveDirection) -> Void, toggleRejection: @escaping () -> Void
+    move: @escaping (RowMoveDirection) -> Void, toggleRejection: (() -> Void)?
 ) -> some View {
     Button("Move Up") { move(.up) }
         .keyboardShortcut(.upArrow, modifiers: [.command, .option])
@@ -365,16 +366,18 @@ func playlistOrganizationMenuItems(
         .keyboardShortcut(.downArrow, modifiers: [.command, .option])
         .disabled(availability?.canMoveDown != true)
     Divider()
-    Button("Group as Versions") { context?.group() }
+    Button("Group Versions") { context?.group() }
         .keyboardShortcut("g", modifiers: [.command])
         .disabled(availability?.canGroup != true)
     Button("Ungroup Versions") { context?.separate() }
         .keyboardShortcut("g", modifiers: [.command, .shift])
         .disabled(availability?.canSeparate != true)
-    Divider()
-    Button(availability?.rejectionTitle ?? PlaylistRejectionCommand.title(clears: false)) { toggleRejection() }
-        .keyboardShortcut(PlaylistRejectionCommand.key, modifiers: PlaylistRejectionCommand.modifiers)
-        .disabled(availability?.canReject != true)
+    if let toggleRejection {
+        Divider()
+        Button(availability?.rejectionTitle ?? PlaylistRejectionCommand.title(clears: false)) { toggleRejection() }
+            .keyboardShortcut(PlaylistRejectionCommand.key, modifiers: PlaylistRejectionCommand.modifiers)
+            .disabled(availability?.canReject != true)
+    }
 }
 
 /// The playlist list (A2 §6). There is no header bar: the bottom bar below

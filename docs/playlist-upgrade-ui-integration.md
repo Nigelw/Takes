@@ -72,7 +72,7 @@ menu actions and Command-arrow jumps remain available. Comparison retains its
 current numeric version hotkeys and arrow-switch behavior. Text editing takes
 precedence in either mode, including rename and Locate File sheets.
 
-The header/context menu offers Group as Versions, Rename, Separate, Move To,
+The header/context menu offers Group Versions, Rename, Separate, Move To,
 Remove, and Clear Playlist. Group actions accept selected
 item rows in workspace order. Version operations accept selected version IDs;
 mixed selections normalize away children whose parent is selected. Move To

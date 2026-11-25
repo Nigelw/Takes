@@ -562,11 +562,12 @@ None open. The version check for a missing file was decided in milestone 3
   dialog, whose import destination is captured as usual (new items in the
   playlist, the compared item in compare); − runs Delete's command.
 - **`…` pull-down** (milestone 5). A standard pull-down button (ellipsis and
-  indicator) holding exactly the Playlist menu's list, shared as one view
+  indicator) holding the Playlist menu's list, shared as one view
   (`playlistOrganizationMenuItems`): Move Up, Move Down, Group as
-  Versions, Ungroup Versions and Reject (or Clear Rejection), acting
-  on the selection with the menu's validation. It is disabled while the
-  playlist is empty, when every command in it is.
+  Versions and Ungroup Versions. It leaves out Reject, which has its own
+  button beside the pull-down. The commands act on the selection with the
+  menu's validation. The pull-down is disabled while the playlist is
+  empty, when every command in it is.
 - **Reject button** (after milestone 5). A small bordered button with the
   broken heart (`RejectedMark.templateImage`, 12 pt) in both bars
   (`BottomBarRejectButton`): in the playlist between the +/− control and

@@ -829,7 +829,7 @@ final class PlaylistCoordinator {
         undoManager: UndoManager? = nil
     ) -> PlaylistItem.ID? {
         var result: UUID?
-        let succeeded = mutateWorkspace(beforeAction: "Group Items", undoManager: undoManager) {
+        let succeeded = mutateWorkspace(beforeAction: "Group Versions", undoManager: undoManager) {
             result = try $0.groupItems(itemIDs, looseVersionIDs: looseVersionIDs, into: destination)
         }
         return succeeded ? result : nil

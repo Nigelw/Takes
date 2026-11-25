@@ -864,7 +864,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
         var organize: [NSMenuItem] = []
         if rows.count > 1, !itemIDs.isEmpty {
-            organize.append(ClosureMenuItem("Group as Versions", enabled: context.canGroup) { context.group() })
+            organize.append(ClosureMenuItem("Group Versions", enabled: context.canGroup) { context.group() })
         }
         if context.canSeparate {
             organize.append(ClosureMenuItem("Ungroup Versions") { context.separate() })
