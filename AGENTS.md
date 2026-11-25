@@ -473,6 +473,10 @@ These are here to prevent parallel implementations and subtle regressions:
   artwork or player and preserves the expanded playlist height. The
   player toggle removes or restores the control bar height above the divider.
   The lower region owns the divider, so hiding it hides the divider too.
+  The Player and Playlist toggles animate the window with the cover held at
+  its height in the final frame (`WorkspaceView.regionResize`), since the
+  room reserved below the cover changes before the window reaches its new
+  height; the window and content minimums allow both layouts meanwhile.
   Track fit, in both modes
   (`TakesWindowPolicy.frameFittingContent`): adding tracks grows a window
   too short to show every row (`playlistFittingHeight`: item rows and

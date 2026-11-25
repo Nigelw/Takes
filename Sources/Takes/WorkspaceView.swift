@@ -15,6 +15,10 @@ struct WorkspaceView: View {
     @State private var mainWindow: NSWindow?
     @State private var didConfigure = false
     @State private var artworkResize: TakesWindowPolicy.ArtworkResize?
+    /// Player and Playlist toggles change the room reserved below the cover
+    /// before the window reaches its new height; the cover holds its final
+    /// height for the duration of that resize instead of following it.
+    @State private var regionResize: RegionResize?
     @State private var didStart = false
     @State private var keyMonitor: KeyMonitor?
     @State private var externalOpenTask: Task<Void, Never>?
@@ -216,12 +220,13 @@ struct WorkspaceView: View {
     private var windowContent: some View {
         GeometryReader { proxy in
             let fraction = artworkResize?.fraction(at: proxy.size.height) ?? (visibility.showsArtwork ? 1 : 0)
-            let coverHeight = artworkResize?.coverHeight ?? (heightBelowArtwork == 0 ? proxy.size.height
-                : TakesWindowPolicy.artworkHeight(in: proxy.size, reserving: heightBelowArtwork))
+            let coverHeight = artworkResize?.coverHeight ?? regionResize?.coverHeight
+                ?? coverHeight(in: proxy.size)
             workspaceContent(artworkFraction: fraction, coverHeight: coverHeight)
         }
             .frame(minWidth: TakesWindowPolicy.minimumWidth,
-                   minHeight: (artworkResize == nil ? windowMinimumSize.height : minimumHeightWithoutArtwork)
+                   minHeight: (artworkResize != nil ? minimumHeightWithoutArtwork
+                       : regionResize?.minimumHeight ?? windowMinimumSize.height)
                        - TakesWindowPolicy.hiddenTitlebarSafeAreaInset)
             .ignoresSafeArea(.container, edges: .top)
             .background(WindowBackground().ignoresSafeArea())
@@ -584,18 +589,56 @@ struct WorkspaceView: View {
         }
         finishArtworkResize()
         if region == .playlist && previous.showsPlaylist { storePlaylistHeight() }
+        let previousMinimumHeight = windowMinimumSize.height
         settings.windowVisibility = updated
-        updateWindowMinimumSize()
-        guard let mainWindow, !mainWindow.styleMask.contains(.fullScreen) else { return }
+        guard let mainWindow, !mainWindow.styleMask.contains(.fullScreen) else {
+            regionResize = nil
+            updateWindowMinimumSize()
+            return
+        }
+        let frame: CGRect?
         if region == .player && updated.showsPlaylist {
             let reduction = TakesWindowPolicy.playerHeightWithoutDivider(showsArtwork: updated.showsArtwork, isComparison: isComparison)
-            let height = mainWindow.frame.height + (updated.showsPlayer ? reduction : -reduction)
-            if let frame = frameSettingHeight(height, for: mainWindow) {
-                mainWindow.setFrame(frame, display: true, animate: !reduceMotion)
-            }
+            frame = frameSettingHeight(mainWindow.frame.height + (updated.showsPlayer ? reduction : -reduction), for: mainWindow)
         } else {
-            applyModeHeight(useDefaultPlaylistHeight: true)
+            frame = modeHeightFrame(useDefaultPlaylistHeight: true)
         }
+        guard let frame, !reduceMotion else {
+            regionResize = nil
+            updateWindowMinimumSize()
+            if let frame { mainWindow.setFrame(frame, display: true) }
+            return
+        }
+        // Allow the heights between both layouts while the window travels.
+        let resize = RegionResize(
+            coverHeight: coverHeight(in: frame.size),
+            minimumHeight: min(previousMinimumHeight, windowMinimumSize.height)
+        )
+        regionResize = resize
+        mainWindow.minSize = CGSize(width: windowMinimumSize.width, height: resize.minimumHeight)
+        Task { @MainActor in
+            await NSAnimationContext.runAnimationGroup { context in
+                context.duration = TakesWindowPolicy.artworkResizeDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                mainWindow.animator().setFrame(frame, display: true)
+            }
+            guard regionResize?.id == resize.id else { return }
+            regionResize = nil
+            updateWindowMinimumSize()
+        }
+    }
+
+    private struct RegionResize: Equatable {
+        let id = UUID()
+        let coverHeight: CGFloat
+        let minimumHeight: CGFloat
+    }
+
+    /// The cover's height in a window of this size under the current
+    /// visibility.
+    private func coverHeight(in size: CGSize) -> CGFloat {
+        heightBelowArtwork == 0 ? size.height
+            : TakesWindowPolicy.artworkHeight(in: size, reserving: heightBelowArtwork)
     }
 
     private func setArtworkVisibility(_ updated: WorkspaceVisibility) {
@@ -622,7 +665,7 @@ struct WorkspaceView: View {
     }
 
     private func updateWindowMinimumSize() {
-        guard let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen) else { return }
+        guard let mainWindow, artworkResize == nil, regionResize == nil, !mainWindow.styleMask.contains(.fullScreen) else { return }
         mainWindow.minSize = windowMinimumSize
     }
 
@@ -747,7 +790,14 @@ struct WorkspaceView: View {
     }
 
     private func applyModeHeight(useDefaultPlaylistHeight: Bool = false, animate: Bool = true) {
-        guard let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen) else { return }
+        guard regionResize == nil, let mainWindow,
+              let frame = modeHeightFrame(useDefaultPlaylistHeight: useDefaultPlaylistHeight) else { return }
+        mainWindow.setFrame(frame, display: true, animate: animate && !reduceMotion)
+    }
+
+    /// The window frame `applyModeHeight` resizes to.
+    private func modeHeightFrame(useDefaultPlaylistHeight: Bool) -> CGRect? {
+        guard let mainWindow, artworkResize == nil, !mainWindow.styleMask.contains(.fullScreen) else { return nil }
         let width = mainWindow.frame.width
         let height: CGFloat
         if !visibility.showsPlaylist {
@@ -756,13 +806,11 @@ struct WorkspaceView: View {
             height = compareFittingHeight(width: width)
         } else {
             let defaultHeight = useDefaultPlaylistHeight ? TakesWindowPolicy.defaultHeight(showsArtwork: false) : nil
-            guard let stored = TakesWindowPolicy.storedPlaylistHeight() ?? defaultHeight else { return }
+            guard let stored = TakesWindowPolicy.storedPlaylistHeight() ?? defaultHeight else { return nil }
             height = TakesWindowPolicy.playlistHeight(restoring: stored, coverWidth: visibility.showsArtwork ? width : 0)
                 - playerHeightReduction
         }
-        if let frame = frameSettingHeight(height, for: mainWindow) {
-            mainWindow.setFrame(frame, display: true, animate: animate && !reduceMotion)
-        }
+        return frameSettingHeight(height, for: mainWindow)
     }
 
     private func compactHeight(width: CGFloat) -> CGFloat {
