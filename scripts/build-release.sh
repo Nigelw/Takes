@@ -144,6 +144,10 @@ if [[ $PUBLISH -eq 1 ]] && gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1
   die "release $TAG already exists — bump CURRENT_PROJECT_VERSION / MARKETING_VERSION first"
 fi
 
+# Betas carry their own app icon so they can be told apart in the Dock.
+APP_ICON_SET="AppIcon"
+[[ -n "$BETA_NOTES" ]] && APP_ICON_SET="AppIconBeta"
+
 ARCHIVE="$BUILD_DIR/$APP_NAME.xcarchive"
 EXPORT_DIR="$BUILD_DIR/export"
 APP="$EXPORT_DIR/$APP_NAME.app"
@@ -153,8 +157,11 @@ ZIP="$BUILD_DIR/$APP_NAME.zip"
 # ---- Archive + export -----------------------------------------------------
 step "Archiving (Release)"
 rm -rf "$ARCHIVE" "$EXPORT_DIR"
+echo "  app icon set      : $APP_ICON_SET"
 xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
-  -archivePath "$ARCHIVE" archive
+  -archivePath "$ARCHIVE" \
+  ASSETCATALOG_COMPILER_APPICON_NAME="$APP_ICON_SET" \
+  archive
 
 step "Exporting with Developer ID"
 xcodebuild -exportArchive -archivePath "$ARCHIVE" \

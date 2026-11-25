@@ -190,7 +190,10 @@ Key ownership:
 - `SoftwareUpdater.swift`: Sparkle and yt-dlp update state, including the
   opt-in `beta` channel. `scripts/build-release.sh --beta-notes` prepares
   local beta artifacts and a separate signed appcast candidate for that
-  channel. The [beta release workflow](.agents/skills/release/beta.md)
+  channel, archived with the `AppIconBeta` icon set
+  (`ASSETCATALOG_COMPILER_APPICON_NAME`; Release builds use `AppIcon`,
+  Debug builds `AppIconInternal`). The
+  [beta release workflow](.agents/skills/release/beta.md)
   publishes the GitHub prerelease and appcast.
 - `Analysis/`: the experimental single-file Analysis window (Debug → Analysis,
   ⌘⌥Z) and the experimental multi-track Compare Quality window
