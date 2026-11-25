@@ -201,8 +201,8 @@ macOS **small** controls (`.controlSize(.small)`, 20 pt tall, 10 pt glyphs).
 
 | Mode | Left | Right |
 |---|---|---|
-| Playlist | `+`/`−` segmented (Add Files / Remove Selected) · `…` pull-down menu (the organisation commands from `PlaylistCommandContext`) | `6 tracks · 19:35` (item count and total duration) |
-| Compare | `+`/`−` segmented (Add Version / Remove Active Version) · Align button | Zoom: magnifier − · small slider · magnifier + (no Fit button) |
+| Playlist | `+`/`−` segmented (Add Files / Remove Selected) · Reject button · `…` pull-down menu (the organisation commands from `PlaylistCommandContext`) | `6 tracks · 19:35` (item count and total duration) |
+| Compare | `+`/`−` segmented (Add Version / Remove Active Version) · Align button · Reject button | Zoom: magnifier − · small slider · magnifier + (no Fit button) |
 
 Built in milestone 5; the decisions it settled (surface and light values,
 the pull-down's contents, the summary, Remove Active Version, Align, zoom,
@@ -563,10 +563,17 @@ None open. The version check for a missing file was decided in milestone 3
   playlist, the compared item in compare); − runs Delete's command.
 - **`…` pull-down** (milestone 5). A standard pull-down button (ellipsis and
   indicator) holding exactly the Playlist menu's list, shared as one view
-  (`playlistOrganizationMenuItems`): Group as Versions,
-  Separate Versions, Move Up, Move Down and Clear Playlist, acting
+  (`playlistOrganizationMenuItems`): Move Up, Move Down, Group as
+  Versions, Ungroup Versions and Reject (or Clear Rejection), acting
   on the selection with the menu's validation. It is disabled while the
   playlist is empty, when every command in it is.
+- **Reject button** (after milestone 5). A small bordered button with the
+  broken heart (`RejectedMark.templateImage`, 12 pt) in both bars
+  (`BottomBarRejectButton`): in the playlist between the +/− control and
+  the `…` pull-down, in compare after Align. It runs Reject / Clear
+  Rejection (culling §4.1) with the menu's targets and validation: the
+  selection in the playlist, the active lane in compare. Its tooltip and
+  VoiceOver label carry the command's current title.
 - **Remove Active Version** (milestone 5, decided in review). Follows the
   lane strip's Remove Version and File ▸ Remove Version: enabled whenever a
   version is active, including an item's last version, whose removal removes
@@ -581,7 +588,7 @@ None open. The version check for a missing file was decided in milestone 3
   outcome flash a green check or red cross with a static glow of the same
   colour. The pre-A2 glow pulsed with `withAnimation`; it no longer animates,
   since continuous motion in Takes is Core Animation's job. It is disabled
-  with fewer than two versions and while a run is in flight (⌥⌘A's rule).
+  with fewer than two versions and while a run is in flight (⇧⌘A's rule).
   "Couldn't Align Tracks" opens as a popover anchored above it and offers
   Analyze Further; closing it dismisses the offer. In Blind Listening Mode
   the popover lists the unaligned versions as `Track n`, their lane

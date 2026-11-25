@@ -110,6 +110,27 @@ struct BottomBarAddRemoveControl: NSViewRepresentable {
     }
 }
 
+/// Reject / Clear Rejection (culling §4.1) as a bar button: the broken
+/// heart, running the same command as the menus and ⌘R. Its tooltip and
+/// VoiceOver label carry the command's current title.
+struct BottomBarRejectButton: View {
+    static let glyphSize: CGFloat = 12
+    var clears: Bool
+    var isEnabled: Bool
+    var action: () -> Void
+
+    var body: some View {
+        let title = PlaylistRejectionCommand.title(clears: clears)
+        Button(action: action) {
+            Image(nsImage: RejectedMark.templateImage(size: Self.glyphSize))
+                .frame(width: 16, height: 14)
+        }
+        .disabled(!isEnabled)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+}
+
 // MARK: - Playlist
 
 /// The playlist bar's summary (A2 §7): `6 tracks · 19:35`, one track per
@@ -161,8 +182,8 @@ struct PlaylistBottomBarState: Equatable {
     }
 }
 
-/// The playlist's bottom bar (A2 §7): Add Files… / Remove Selected, the `…`
-/// pull-down with the Playlist menu's organisation commands, and the summary.
+/// The playlist's bottom bar (A2 §7): Add Files… / Remove Selected, Reject,
+/// the `…` pull-down with the Playlist menu's organisation commands, and the summary.
 struct PlaylistBottomBar: View {
     let coordinator: PlaylistCoordinator
     @ObservedObject var presentation: PlaylistPresentationState
@@ -172,6 +193,7 @@ struct PlaylistBottomBar: View {
     var body: some View {
         let context = PlaylistCommandContext(coordinator: coordinator, presentation: presentation, undoManager: undoManager)
         let state = PlaylistBottomBarState(context: context)
+        let availability = PlaylistOrganizationAvailability(context)
         let items = coordinator.workspace.items
         BottomBarLayout {
             BottomBarAddRemoveControl(
@@ -184,9 +206,12 @@ struct PlaylistBottomBar: View {
                 remove: { openFiles.removeActiveTrack() }
             )
             .fixedSize()
+            BottomBarRejectButton(
+                clears: availability.rejectionClears, isEnabled: availability.canReject, action: context.toggleRejection
+            )
             Menu {
                 playlistOrganizationMenuItems(
-                    context: context, availability: PlaylistOrganizationAvailability(context), move: context.moveSelection,
+                    context: context, availability: availability, move: context.moveSelection,
                     toggleRejection: context.toggleRejection
                 )
             } label: {
@@ -242,7 +267,7 @@ struct CompareBottomBarState: Equatable {
 }
 
 /// The compare bottom bar (A2 §7): Add Version… / Remove Active Version, the
-/// Align button, and the zoom control.
+/// Align button, Reject (the active lane, as ⌘R), and the zoom control.
 ///
 /// The zoom control and the Align button are leaves of their own, so a zoom
 /// step or an alignment progress update re-runs only them. Nothing here
@@ -250,10 +275,12 @@ struct CompareBottomBarState: Equatable {
 struct CompareBottomBar: View {
     let coordinator: PlaylistCoordinator
     @ObservedObject var openFiles: OpenFileCommandState
+    @Environment(\.undoManager) private var undoManager
     private var controller: PlaybackController { coordinator.controller }
 
     var body: some View {
         let state = CompareBottomBarState(controller: controller)
+        let active = coordinator.activeComparisonVersionID
         BottomBarLayout {
             BottomBarAddRemoveControl(
                 addLabel: "Add Version…",
@@ -266,6 +293,13 @@ struct CompareBottomBar: View {
             )
             .fixedSize()
             CompareAlignButton(controller: controller, isEnabled: state.canAlign)
+            BottomBarRejectButton(
+                clears: active.map { coordinator.rejectionClears(itemIDs: [], versionIDs: [$0]) } ?? false,
+                isEnabled: active != nil
+            ) {
+                guard let active else { return }
+                coordinator.toggleRejection(versionIDs: [active], undoManager: undoManager)
+            }
         } trailing: {
             CompareZoomControl(controller: controller, isEnabled: state.canZoom)
         }

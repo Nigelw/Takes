@@ -251,7 +251,6 @@ struct WorkspaceView: View {
             .overlay {
                 if !mainWindowIsKey { InactiveWindowInteractionShield(window: mainWindow).ignoresSafeArea() }
             }
-            .contentShape(Rectangle())
             .onDrop(of: [UTType.fileURL], delegate: WorkspaceFileDropDelegate(
                 isTargeted: $isDropTargeted, perform: importProviders
             ))

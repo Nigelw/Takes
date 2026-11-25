@@ -358,23 +358,23 @@ func playlistOrganizationMenuItems(
     context: PlaylistCommandContext?, availability: PlaylistOrganizationAvailability?,
     move: @escaping (RowMoveDirection) -> Void, toggleRejection: @escaping () -> Void
 ) -> some View {
-    Button(availability?.rejectionTitle ?? PlaylistRejectionCommand.title(clears: false)) { toggleRejection() }
-        .keyboardShortcut(PlaylistRejectionCommand.key, modifiers: PlaylistRejectionCommand.modifiers)
-        .disabled(availability?.canReject != true)
-    Divider()
-    Button("Group as Versions") { context?.group() }
-        .keyboardShortcut("g", modifiers: [.command])
-        .disabled(availability?.canGroup != true)
-    Button("Separate Versions") { context?.separate() }
-        .keyboardShortcut("g", modifiers: [.command, .shift])
-        .disabled(availability?.canSeparate != true)
-    Divider()
     Button("Move Up") { move(.up) }
         .keyboardShortcut(.upArrow, modifiers: [.command, .option])
         .disabled(availability?.canMoveUp != true)
     Button("Move Down") { move(.down) }
         .keyboardShortcut(.downArrow, modifiers: [.command, .option])
         .disabled(availability?.canMoveDown != true)
+    Divider()
+    Button("Group as Versions") { context?.group() }
+        .keyboardShortcut("g", modifiers: [.command])
+        .disabled(availability?.canGroup != true)
+    Button("Ungroup Versions") { context?.separate() }
+        .keyboardShortcut("g", modifiers: [.command, .shift])
+        .disabled(availability?.canSeparate != true)
+    Divider()
+    Button(availability?.rejectionTitle ?? PlaylistRejectionCommand.title(clears: false)) { toggleRejection() }
+        .keyboardShortcut(PlaylistRejectionCommand.key, modifiers: PlaylistRejectionCommand.modifiers)
+        .disabled(availability?.canReject != true)
 }
 
 /// The playlist list (A2 §6). There is no header bar: the bottom bar below
