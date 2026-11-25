@@ -3,6 +3,31 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>3.0b1</title>
+            <pubDate>Wed, 25 Nov 2026 11:21:31 -0500</pubDate>
+            <sparkle:channel>beta</sparkle:channel>
+            <sparkle:version>15</sparkle:version>
+            <sparkle:shortVersionString>3.0b1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## New
+
+- Overhauled the app to add playlists, track versions, and culling.
+  - The old version was great for comparing multiple versions of a single track. Now you can use it to compare multiple versions of entire albums.
+  - The playlist also makes it a handy little audio player in its own right.
+- Major redesign. Collapsed the UI into a compact window with prominent artwork display.
+  - Toggle the artwork, playback controls, and playlist to make the player more compact as needed.
+- Added a playlist with versions.
+  - Any track in the playlist can have multiple versions.
+  - Takes auto-groups likely versions of the same track by default, and you can group, ungroup, and reorder them yourself.
+  - The auto-grouping logic needs testing.
+- Added support for culling tracks.
+  - Mark items as rejected, which skips them during playback and comparison.
+  - Still to come are features to build on top of this: adding non-rejected tracks to an iTunes playlist, copying them, deleting rejected tracks.
+  - Do we need the ability to pick as well as reject? What would you do with picked tracks vs. standard tracks that haven't been rejected?
+]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v3.0b1/Takes.dmg" length="7677970" type="application/octet-stream" sparkle:edSignature="QJN3tccU7D5qQw8KJoJjAYqYyxZoDOYNkHp+D8+Xb1SJiyAwp6yhYk/vV+mky23ZPRjCFrmQgNOohnRwJN3UDg=="/>
+        </item>
+        <item>
             <title>2.9.0</title>
             <pubDate>Thu, 16 Jul 2026 15:26:11 -0400</pubDate>
             <sparkle:version>14</sparkle:version>

@@ -17,7 +17,7 @@
   <img src="website/screenshot_light_shadow.png" alt="Takes main UI" width="800">
 </p>
 
-Takes is a macOS app for comparing audio tracks with instant A/B switching, waveform alignment, and blind listening mode.
+Takes is a macOS audio player that organizes tracks and their versions in a playlist. Open a track in Compare for instant A/B switching, waveform alignment, and blind listening. Mark tracks or versions as rejected to skip them during sequential playback or comparison.
 
 ## Build From Source
 
