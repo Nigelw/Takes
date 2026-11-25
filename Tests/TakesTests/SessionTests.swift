@@ -2641,6 +2641,18 @@ struct SessionTests {
         #expect(PlaylistSummaryText.totalDuration(of: [rigby, unknown]) == 127.4)
     }
 
+    @Test
+    func playlistSummaryLeavesOutRejectedTracks() {
+        // Culling §8 Q2: rejected tracks are excluded from the count and the
+        // total; rejected versions only change which version counts (the key).
+        let taxman = makeSummaryItem("Taxman", durations: [159, 161], playback: 1)
+        var rigby = makeSummaryItem("Eleanor Rigby", durations: [127.4])
+        rigby.isRejected = true
+        #expect(PlaylistSummaryText.text(for: [taxman, rigby]) == "1 track · 2:41")
+        #expect(PlaylistSummaryText.accessibilityText(for: [taxman, rigby]) == "1 track, 2:41 in total")
+        #expect(PlaylistSummaryText.text(for: [rigby]) == "0 tracks · 0:00")
+    }
+
     @MainActor
     @Test
     func playlistBottomBarFollowsTheSelectionCommands() {

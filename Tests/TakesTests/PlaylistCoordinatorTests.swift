@@ -1327,6 +1327,285 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.errorMessage == nil)
     }
 
+    // MARK: Culling
+
+    @MainActor
+    private func makeCullingPlaylist(
+        _ names: [String], rejected: Set<Int>, duration: TimeInterval = 6,
+        repeatMode: PlaylistRepeatMode = .off
+    ) throws -> (PlaylistCoordinator, [PlaylistItem], [URL]) {
+        let urls = try names.map { try makeTemporaryAudioFile(name: "cull-\($0).wav", duration: duration) }
+        let items = names.enumerated().map { index, name in
+            PlaylistItem(
+                title: name, versions: [makePlaylistVersion(url: urls[index], title: name, duration: duration)],
+                isRejected: rejected.contains(index)
+            )
+        }
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: items, playlistRepeatMode: repeatMode))
+        return (coordinator, items, urls)
+    }
+
+    @MainActor
+    @Test func nextAndPreviousSkipRejectedTracksAndKeepThemOutOfHistory() async throws {
+        let (coordinator, items, urls) = try makeCullingPlaylist(["a", "b", "c", "d"], rejected: [1, 3])
+        defer {
+            coordinator.pause()
+            urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+        }
+        await coordinator.playItem(id: items[0].id)
+
+        coordinator.next()
+        try await waitFor { coordinator.currentItemID == items[2].id && coordinator.runtimeContext?.itemID == items[2].id }
+        #expect(coordinator.isPlaying)
+        #expect(!coordinator.listeningHistory.contains(items[1].id))
+
+        // Previous (within the restart threshold) walks back past B.
+        coordinator.previous()
+        try await waitFor { coordinator.currentItemID == items[0].id && coordinator.runtimeContext?.itemID == items[0].id }
+        #expect(!coordinator.listeningHistory.contains(items[1].id))
+
+        // Next past the last track returns to the first track that isn't
+        // rejected, paused; the rejected last track is passed over.
+        coordinator.next()
+        try await waitFor { coordinator.currentItemID == items[2].id && coordinator.runtimeContext?.itemID == items[2].id }
+        coordinator.next()
+        try await waitFor { coordinator.currentItemID == items[0].id && coordinator.runtimeContext?.itemID == items[0].id }
+        #expect(!coordinator.isPlaying)
+        #expect(!coordinator.listeningHistory.contains(items[3].id))
+    }
+
+    @MainActor
+    @Test func previousInListOrderSkipsRejectedTracks() async throws {
+        let (coordinator, items, urls) = try makeCullingPlaylist(["a", "b", "c"], rejected: [1])
+        defer {
+            coordinator.pause()
+            urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+        }
+        // Start on C with no history, so Previous goes by list order.
+        await coordinator.playItem(id: items[2].id)
+        coordinator.previous()
+        try await waitFor { coordinator.currentItemID == items[0].id && coordinator.runtimeContext?.itemID == items[0].id }
+        #expect(coordinator.listeningHistory == [items[0].id])
+    }
+
+    @MainActor
+    @Test func repeatAllWrapsPastRejectedTracks() async throws {
+        let (coordinator, items, urls) = try makeCullingPlaylist(["a", "b", "c", "d"], rejected: [0, 3], repeatMode: .all)
+        defer {
+            coordinator.pause()
+            urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+        }
+        await coordinator.playItem(id: items[2].id)
+        coordinator.next()
+        try await waitFor { coordinator.currentItemID == items[1].id && coordinator.runtimeContext?.itemID == items[1].id }
+        #expect(coordinator.isPlaying)
+        #expect(!coordinator.listeningHistory.contains(items[3].id))
+        #expect(!coordinator.listeningHistory.contains(items[0].id))
+    }
+
+    @MainActor
+    @Test func shuffleNeverLandsOnARejectedTrack() async throws {
+        let (coordinator, items, urls) = try makeCullingPlaylist(["a", "b", "c", "d", "e"], rejected: [1, 3], repeatMode: .all)
+        defer {
+            coordinator.pause()
+            urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+        }
+        coordinator.setShuffleEnabled(true)
+        await coordinator.playItem(id: items[0].id)
+        let rejected: Set<UUID> = [items[1].id, items[3].id]
+        for _ in 0..<6 {
+            let context = coordinator.runtimeContext
+            coordinator.next()
+            try await waitFor { coordinator.runtimeContext != context && coordinator.runtimeContext?.itemID == coordinator.currentItemID }
+            #expect(coordinator.currentItemID != nil)
+            #expect(!rejected.contains(coordinator.currentItemID ?? UUID()))
+        }
+        #expect(coordinator.listeningHistory.allSatisfy { !rejected.contains($0) })
+    }
+
+    @MainActor
+    @Test func naturalAdvanceSkipsRejectedTracksAndEndsWhenOnlyRejectedRemain() async throws {
+        let short = try makeTemporaryAudioFile(name: "cull-short.wav", duration: 0.05)
+        let urls = try ["rejected.wav", "kept.wav", "tail.wav"].map { try makeTemporaryAudioFile(name: "cull-\($0)", duration: 2) }
+        defer { ([short] + urls).forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
+        let first = PlaylistItem(title: "Short", versions: [makePlaylistVersion(url: short, title: "Short", duration: 0.05)])
+        let rejected = PlaylistItem(
+            title: "Rejected", versions: [makePlaylistVersion(url: urls[0], title: "Rejected")], isRejected: true
+        )
+        let kept = PlaylistItem(title: "Kept", versions: [makePlaylistVersion(url: urls[1], title: "Kept")])
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [first, rejected, kept]))
+        defer { coordinator.pause() }
+
+        await coordinator.playItem(id: first.id)
+        try await waitFor { coordinator.currentItemID == kept.id }
+        #expect(coordinator.isPlaying)
+        #expect(!coordinator.listeningHistory.contains(rejected.id))
+
+        // Every remaining track rejected: playback ends at the last one heard.
+        let tail = PlaylistItem(
+            title: "Tail", versions: [makePlaylistVersion(url: urls[2], title: "Tail")], isRejected: true
+        )
+        let ending = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [first, tail]))
+        defer { ending.pause() }
+        await ending.playItem(id: first.id)
+        try await waitFor { !ending.isPlaying }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(ending.currentItemID == first.id)
+        #expect(!ending.isPlaying)
+    }
+
+    @MainActor
+    @Test func explicitPlayIgnoresTheFlagAndNavigationContinuesFromThere() async throws {
+        let (coordinator, items, urls) = try makeCullingPlaylist(["a", "b", "c"], rejected: [1])
+        defer {
+            coordinator.pause()
+            urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+        }
+        await coordinator.playItem(id: items[1].id)
+        #expect(coordinator.currentItemID == items[1].id)
+        #expect(coordinator.isPlaying)
+
+        coordinator.next()
+        try await waitFor { coordinator.currentItemID == items[2].id && coordinator.runtimeContext?.itemID == items[2].id }
+
+        // A rejected version row plays from the beginning too.
+        let urlsB = try ["v1.wav", "v2.wav"].map { try makeTemporaryAudioFile(name: "cull-\($0)") }
+        defer { urlsB.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
+        var rejectedVersion = makePlaylistVersion(url: urlsB[0], title: "Rejected take")
+        rejectedVersion.isRejected = true
+        let item = PlaylistItem(title: "Takes", versions: [rejectedVersion, makePlaylistVersion(url: urlsB[1], title: "Key")])
+        let versions = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
+        defer { versions.pause() }
+        await versions.playItem(id: item.id)
+        #expect(versions.currentVersionID == item.versions[1].id)
+        await versions.playItem(id: item.id, versionID: rejectedVersion.id, fromBeginning: true)
+        #expect(versions.currentVersionID == rejectedVersion.id)
+        #expect(versions.isPlaying)
+    }
+
+    @MainActor
+    @Test func playWithNoCurrentTrackStartsTheFirstTrackThatIsNotRejected() async throws {
+        let (coordinator, items, urls) = try makeCullingPlaylist(["a", "b"], rejected: [0])
+        defer {
+            coordinator.pause()
+            urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+        }
+        #expect(coordinator.currentItemID == nil)
+        #expect(coordinator.canPlay)
+        coordinator.play()
+        try await waitFor { coordinator.currentItemID == items[1].id && coordinator.isPlaying }
+
+        let (allRejected, _, moreURLs) = try makeCullingPlaylist(["c"], rejected: [0])
+        defer { moreURLs.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
+        #expect(!allRejected.canPlay)
+    }
+
+    @MainActor
+    @Test func rejectingTheCurrentTrackOrVersionKeepsItPlaying() async throws {
+        let (coordinator, items, urls) = try makeCullingPlaylist(["a", "b"], rejected: [])
+        defer {
+            coordinator.pause()
+            urls.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+        }
+        await coordinator.playItem(id: items[0].id)
+        let context = coordinator.runtimeContext
+        let presentation = PlaylistPresentationState()
+        presentation.selection = [.item(items[0].id)]
+        let command = PlaylistCommandContext(coordinator: coordinator, presentation: presentation, undoManager: nil)
+        #expect(!command.rejectionClears)
+        command.toggleRejection()
+
+        #expect(coordinator.workspace.items[0].isRejected)
+        #expect(presentation.selection == [.item(items[0].id)])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(coordinator.isPlaying)
+        #expect(coordinator.runtimeContext == context)
+        #expect(coordinator.currentItemID == items[0].id)
+        #expect(command.rejectionClears)
+
+        // The version flag doesn't interrupt the current version either.
+        #expect(coordinator.toggleRejection(versionIDs: [items[0].versions[0].id], undoManager: nil))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(coordinator.runtimeContext == context)
+        #expect(coordinator.isPlaying)
+
+        // Previous within the restart threshold still restarts it.
+        coordinator.seek(to: 1)
+        coordinator.previous()
+        #expect(coordinator.currentItemID == items[0].id)
+        #expect(coordinator.controller.displayTransportPosition() < 1)
+    }
+
+    @MainActor
+    @Test func rejectTargetsFollowTheSelectionAndAMixedSetRejectsAll() {
+        let a = PlaylistItem(title: "A", versions: ["a1", "a2"].map { makeVersion("\($0).wav") })
+        let b = PlaylistItem(title: "B", versions: [makeVersion("b.wav")], isRejected: true)
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [a, b]))
+        let presentation = PlaylistPresentationState()
+        let context = PlaylistCommandContext(coordinator: coordinator, presentation: presentation, undoManager: nil)
+        #expect(!PlaylistOrganizationAvailability(context).canReject)
+
+        // A selected item row targets the track only, not its versions.
+        presentation.selection = [.item(a.id), .item(b.id)]
+        #expect(PlaylistOrganizationAvailability(context).canReject)
+        #expect(PlaylistOrganizationAvailability(context).rejectionTitle == "Reject")
+        context.toggleRejection()
+        #expect(coordinator.workspace.items.map(\.isRejected) == [true, true])
+        #expect(coordinator.workspace.allVersions.allSatisfy { !$0.isRejected })
+        #expect(PlaylistOrganizationAvailability(context).rejectionTitle == "Clear Rejection")
+        context.toggleRejection()
+        #expect(coordinator.workspace.items.map(\.isRejected) == [false, false])
+
+        // Selected version rows target those versions.
+        presentation.selection = [.version(a.versions[1].id)]
+        context.toggleRejection()
+        #expect(coordinator.workspace.items[0].versions.map(\.isRejected) == [false, true])
+        #expect(!coordinator.workspace.items[0].isRejected)
+
+        // A context menu opened on an unselected row targets that row alone.
+        let clicked = PlaylistCommandContext(
+            coordinator: coordinator, presentation: presentation, undoManager: nil, rows: [.item(b.id)]
+        )
+        clicked.toggleRejection()
+        #expect(coordinator.workspace.items[1].isRejected)
+        #expect(coordinator.workspace.items[0].versions.map(\.isRejected) == [false, true])
+    }
+
+    @MainActor
+    @Test func rejectUndoesAndRedoesAsOneEdit() {
+        let a = PlaylistItem(title: "A", versions: ["a1", "a2"].map { makeVersion("\($0).wav") })
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [a]))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+
+        undo.beginUndoGrouping()
+        #expect(coordinator.toggleRejection(itemIDs: [a.id], versionIDs: [a.versions[0].id], undoManager: undo))
+        undo.endUndoGrouping()
+        #expect(undo.undoActionName == "Reject")
+        #expect(coordinator.workspace.items[0].isRejected)
+        #expect(coordinator.workspace.items[0].keyVersion?.id == a.versions[1].id)
+
+        undo.undo()
+        #expect(!coordinator.workspace.items[0].isRejected)
+        #expect(coordinator.workspace.allVersions.allSatisfy { !$0.isRejected })
+        #expect(coordinator.workspace.items[0].keyVersion?.id == a.versions[0].id)
+        undo.redo()
+        #expect(coordinator.workspace.items[0].isRejected)
+        #expect(coordinator.workspace.items[0].versions[0].isRejected)
+
+        undo.beginUndoGrouping()
+        coordinator.toggleRejection(itemIDs: [a.id], versionIDs: [a.versions[0].id], undoManager: undo)
+        undo.endUndoGrouping()
+        #expect(undo.undoActionName == "Clear Rejection")
+        #expect(!coordinator.workspace.items[0].isRejected)
+
+        // Undo rebases by stable ID: a reorder made since keeps its order.
+        undo.undo()
+        #expect(coordinator.workspace.items[0].isRejected)
+        #expect(coordinator.reorderVersion(a.versions[1].id, before: a.versions[0].id))
+        #expect(coordinator.workspace.items[0].versions.map(\.isRejected) == [false, true])
+    }
+
     @MainActor
     private func waitFor(_ condition: @MainActor () -> Bool) async throws {
         for _ in 0..<200 {

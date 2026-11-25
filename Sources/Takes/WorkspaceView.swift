@@ -870,6 +870,12 @@ struct WorkspaceView: View {
             switch event.keyCode {
             case 49 where flags.isEmpty:
                 coordinator.togglePlayback(); return true
+            case PlaylistRejectionCommand.keyCode where flags.isEmpty:
+                // Reject / Clear Rejection, both modes. Taken even with no
+                // target, so the playlist's type-select never sees R.
+                let context = commandContext
+                if context.canToggleRejection { context.toggleRejection() }
+                return true
             case 7 where isComparison && (flags.isEmpty || flags == .shift):
                 // Switch Track; the playlist uses ⌘← / ⌘→ instead.
                 if flags == .shift { coordinator.previous() } else { coordinator.next() }; return true

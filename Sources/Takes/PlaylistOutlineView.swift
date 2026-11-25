@@ -815,6 +815,13 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         }
         sections.append(playback)
 
+        let reject = ClosureMenuItem(
+            PlaylistRejectionCommand.title(clears: context.rejectionClears), enabled: context.canToggleRejection
+        ) { context.toggleRejection() }
+        reject.keyEquivalent = String(PlaylistRejectionCommand.key.character)
+        reject.keyEquivalentModifierMask = []
+        sections.append([reject])
+
         var organize: [NSMenuItem] = []
         if rows.count > 1, !itemIDs.isEmpty {
             organize.append(ClosureMenuItem("Group as Versions", enabled: context.canGroup) { context.group() })

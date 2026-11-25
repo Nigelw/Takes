@@ -113,17 +113,21 @@ struct BottomBarAddRemoveControl: NSViewRepresentable {
 // MARK: - Playlist
 
 /// The playlist bar's summary (A2 §7): `6 tracks · 19:35`, one track per
-/// playlist item. The total adds up each item's playback version, the duration its row shows. An empty
-/// playlist shows no summary; its empty state already says so.
+/// playlist item. The total adds up each item's key version, the duration
+/// its row shows. Rejected tracks are left out of both the count and the
+/// total (culling spec §8, question 2). An empty playlist shows no summary;
+/// its empty state already says so.
 enum PlaylistSummaryText {
     static func text(for items: [PlaylistItem]) -> String {
         guard !items.isEmpty else { return "" }
-        return "\(count(items.count)) · \(PlaylistRowText.duration(totalDuration(of: items)))"
+        let counted = items.filter { !$0.isRejected }
+        return "\(count(counted.count)) · \(PlaylistRowText.duration(totalDuration(of: counted)))"
     }
 
     static func accessibilityText(for items: [PlaylistItem]) -> String {
         guard !items.isEmpty else { return "" }
-        return "\(count(items.count)), \(PlaylistRowText.duration(totalDuration(of: items))) in total"
+        let counted = items.filter { !$0.isRejected }
+        return "\(count(counted.count)), \(PlaylistRowText.duration(totalDuration(of: counted))) in total"
     }
 
     static func count(_ count: Int) -> String {
@@ -182,7 +186,8 @@ struct PlaylistBottomBar: View {
             .fixedSize()
             Menu {
                 playlistOrganizationMenuItems(
-                    context: context, availability: PlaylistOrganizationAvailability(context), move: context.moveSelection
+                    context: context, availability: PlaylistOrganizationAvailability(context), move: context.moveSelection,
+                    toggleRejection: context.toggleRejection
                 )
             } label: {
                 Image(systemName: "ellipsis")

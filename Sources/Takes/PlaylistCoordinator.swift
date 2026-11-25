@@ -270,6 +270,8 @@ final class PlaylistCoordinator {
     @ObservationIgnored private var importCancellationGeneration = 0
     @ObservationIgnored private var loadingOperationCount = 0
     @ObservationIgnored private var traversal: PlaylistTraversal
+    /// The items heard, in order; read by tests.
+    var listeningHistory: [PlaylistItem.ID] { traversal.history }
     @ObservationIgnored private var pendingRuntimeRefreshTask: Task<Void, Never>?
 
     private struct PlaybackSnapshot {
@@ -323,10 +325,13 @@ final class PlaylistCoordinator {
 
     private var canNavigateBetweenModes: Bool { controller.settings?.windowVisibility.showsPlaylist ?? true }
 
+    /// With no current track, Play starts the first track that isn't
+    /// rejected (culling spec §4.2), so a playlist of rejected tracks has
+    /// nothing to start.
     var canPlay: Bool {
         controller.session.isPlayable
             || workspace.items.contains { item in
-                guard let version = item.keyVersion else { return false }
+                guard currentItemID != nil || !item.isRejected, let version = item.keyVersion else { return false }
                 return version.metadata.duration > 0
             }
     }
@@ -669,7 +674,18 @@ final class PlaylistCoordinator {
             updateListeningStateFromRuntime()
             return
         }
-        guard let itemID = currentItemID ?? workspace.items.first?.id else { return }
+        // Space with a current track resumes it, rejected or not. With none,
+        // Play starts the first track that is neither rejected nor
+        // unavailable, as Next would.
+        guard let itemID = currentItemID else {
+            guard mode.itemID == nil, !workspace.items.isEmpty else { return }
+            let generation = navigationGeneration
+            Task { [weak self] in
+                guard let self, self.navigationGeneration == generation, self.mode.itemID == nil else { return }
+                await self.advancePlaylist(.next, from: nil, wasPlaying: true)
+            }
+            return
+        }
         let versionID = currentVersionID
             ?? workspace.items.first(where: { $0.id == itemID })?.keyVersion?.id
         Task { await playItem(id: itemID, versionID: versionID) }
@@ -769,6 +785,38 @@ final class PlaylistCoordinator {
 
     func toggleShuffle() {
         setShuffleEnabled(!workspace.isShuffleEnabled)
+    }
+
+    // MARK: - Culling
+
+    /// The version Reject acts on in compare: the active lane (spec §5.2).
+    var activeComparisonVersionID: PlaylistVersion.ID? {
+        mode.itemID == nil ? nil : controller.session.activeTrackID
+    }
+
+    /// True when every target is already rejected, so the toggle reads
+    /// Clear Rejection; a mixed or unrejected set reads Reject.
+    func rejectionClears(itemIDs: [PlaylistItem.ID], versionIDs: [PlaylistVersion.ID]) -> Bool {
+        guard !itemIDs.isEmpty || !versionIDs.isEmpty else { return false }
+        let items = Set(itemIDs), versions = Set(versionIDs)
+        let itemFlags = workspace.items.filter { items.contains($0.id) }.map(\.isRejected)
+        let versionFlags = workspace.allVersions.filter { versions.contains($0.id) }.map(\.isRejected)
+        return (itemFlags + versionFlags).allSatisfy { $0 }
+    }
+
+    /// Reject / Clear Rejection (spec §4.1): one undoable organization
+    /// edit. Applying Reject to a mixed set rejects all of it. Nothing
+    /// moves, the selection is untouched, and playback carries on: the
+    /// current track keeps playing, and compare's active lane stays active.
+    @discardableResult
+    func toggleRejection(
+        itemIDs: [PlaylistItem.ID] = [], versionIDs: [PlaylistVersion.ID] = [], undoManager: UndoManager?
+    ) -> Bool {
+        guard !itemIDs.isEmpty || !versionIDs.isEmpty else { return false }
+        let clears = rejectionClears(itemIDs: itemIDs, versionIDs: versionIDs)
+        return mutateWorkspace(beforeAction: clears ? "Clear Rejection" : "Reject", undoManager: undoManager) {
+            try $0.setRejected(!clears, itemIDs: itemIDs, versionIDs: versionIDs)
+        }
     }
 
     // MARK: - Organization
@@ -1556,9 +1604,15 @@ final class PlaylistCoordinator {
                 continue
             }
             cursor = itemID
-            let versionID = tryRepeatCurrent ? currentVersionID : keyVersion(for: itemID)?.id
+            let repeatingCurrent = tryRepeatCurrent
+            let versionID = repeatingCurrent ? currentVersionID : keyVersion(for: itemID)?.id
             tryRepeatCurrent = false
             guard attempted.insert(itemID).inserted, let versionID else { continue }
+            // Sequential navigation passes over rejected tracks the way it
+            // passes over unavailable files: skipped, and kept out of the
+            // listening history (`discardSkippedHistory`). Repeat One still
+            // repeats a rejected current track; the user chose to play it.
+            if !repeatingCurrent, workspace.items.first(where: { $0.id == itemID })?.isRejected == true { continue }
             let snapshot = PlaybackSnapshot(
                 itemID: itemID, versionID: versionID, filePosition: 0,
                 isPlaying: !returningToStart && (advance == .naturalEnd || wasPlaying)
@@ -2067,13 +2121,23 @@ final class PlaylistCoordinator {
             itemID = itemIDValue
         }
         guard let itemID else { return false }
-        let oldItem = before.items.first(where: { $0.id == itemID })
-        let newItem = after.items.first(where: { $0.id == itemID })
+        // Rejection never touches the audio runtime: a rejected version keeps
+        // playing, and compare lanes take the flag in place
+        // (`syncRuntimeRejection`). Compare versions without it.
+        let oldItem = before.items.first(where: { $0.id == itemID }).map(Self.ignoringRejection)
+        let newItem = after.items.first(where: { $0.id == itemID }).map(Self.ignoringRejection)
         if mode == .playlist, let versionID = currentVersionID {
             return oldItem?.versions.first { $0.id == versionID } != newItem?.versions.first { $0.id == versionID }
         }
         return oldItem?.versions != newItem?.versions
             || oldItem?.comparison != newItem?.comparison
+    }
+
+    private static func ignoringRejection(_ item: PlaylistItem) -> PlaylistItem {
+        var item = item
+        item.isRejected = false
+        for index in item.versions.indices { item.versions[index].isRejected = false }
+        return item
     }
 
     private func synchronizeModeWithWorkspaceView() {
