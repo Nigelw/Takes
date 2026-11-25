@@ -263,7 +263,7 @@ struct WorkspaceView: View {
     }
 
     private var presentedContent: some View {
-        windowContent
+        withVersionLimitAlert(windowContent, isActive: !openFiles.isPromptingForStreamingURL)
             // Open and Locate share one importer. SwiftUI resets its presentation
             // binding before calling back, so keep the request until then.
             .onChange(of: hasFileDialogRequest) { _, requested in
@@ -278,7 +278,24 @@ struct WorkspaceView: View {
             )
             .fileDialogMessage(Text(locateFileMessage))
             .fileDialogConfirmationLabel(Text(presentation.locateVersionID == nil ? "Open" : "Locate"))
-            .sheet(isPresented: $openFiles.isPromptingForStreamingURL) { streamingSheet }
+            .sheet(isPresented: $openFiles.isPromptingForStreamingURL) {
+                withVersionLimitAlert(streamingSheet, isActive: true)
+            }
+    }
+
+    private func withVersionLimitAlert(_ content: some View, isActive: Bool) -> some View {
+        content.alert(
+            "Too Many Versions",
+            isPresented: Binding(
+                get: { isActive && coordinator.versionLimitAlert != nil },
+                set: { if isActive && !$0 { coordinator.dismissVersionLimitAlert() } }
+            ),
+            presenting: coordinator.versionLimitAlert
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { alert in
+            Text(alert.message)
+        }
     }
 
     private var hasFileDialogRequest: Bool {
@@ -721,10 +738,9 @@ struct WorkspaceView: View {
     }
 
     /// The version whose cover the window shows: in playlist mode the playing
-    /// (or current) version, as the readout shows. In comparison the audible
-    /// version, so Switch Track swaps the cover (milestone 4 review) — except
-    /// in Blind Listening Mode, where the item's playback version stays up so
-    /// the cover can't reveal which version is audible.
+    /// (or current) version, as the readout shows. In comparison the cover
+    /// follows the audible version, or shows the record placeholder in
+    /// Blind Listening Mode.
     private var coverVersion: PlaylistVersion? {
         guard let itemID = coordinator.mode.itemID ?? coordinator.currentItemID,
               let item = coordinator.workspace.items.first(where: { $0.id == itemID }) else { return nil }
@@ -1177,13 +1193,9 @@ enum CoverVersionRule {
         item.versions.first(where: { $0.id == currentVersionID }) ?? item.keyVersion
     }
 
-    /// Compare: the audible version, so Switch Track swaps the cover. Blind
-    /// Listening Mode keeps the item's key version up instead, so the
-    /// cover can't reveal which version is audible.
+    /// Compare: the audible version, or the record placeholder when blind.
     static func comparison(item: PlaylistItem, audibleVersionID: PlaylistVersion.ID?, isBlind: Bool) -> PlaylistVersion? {
-        guard !isBlind, let audible = item.versions.first(where: { $0.id == audibleVersionID }) else {
-            return item.keyVersion
-        }
-        return audible
+        guard !isBlind else { return nil }
+        return item.versions.first(where: { $0.id == audibleVersionID }) ?? item.keyVersion
     }
 }

@@ -277,6 +277,8 @@ These are here to prevent parallel implementations and subtle regressions:
   animated playback page turns do not rearm it per frame.
 - Route new import/open entry points through the existing shared loading path
   instead of adding separate import behavior.
+- Adding files to Compare or organizing playlist versions beyond the 32-version
+  limit shows a version-limit alert and leaves group membership intact.
 - Validate multi-row organization on one candidate workspace; use the source
   and destination references from before the edit for offset translation.
   Undo and Redo rebase the recorded edit against current versions and retain
@@ -423,8 +425,10 @@ These are here to prevent parallel implementations and subtle regressions:
   `…` pull-down with the Playlist menu's organization commands except
   Reject, and the
   `N tracks · m:ss` summary (one track per item, at its key version's
-  duration; rejected tracks are left out of the count and the total). The File
-  menu has the import commands (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M). The Playlist menu has
+  duration; rejected tracks are left out). Selecting multiple track rows
+  shows `N of M tracks · m:ss` with the selected duration. This view
+  counts explicitly selected rejected tracks and uses the full playlist
+  count. The File menu has the import commands (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M). The Playlist menu has
   Remove Selected Items and Remove All Tracks in the playlist, and Remove
   Current Version and Remove All Versions in compare (Delete and ⌘Delete
   in both modes).
@@ -545,11 +549,10 @@ These are here to prevent parallel implementations and subtle regressions:
   visibility commands. The control bars take their top padding from
   `TakesWindowPolicy.controlBarTopPadding(showsArtwork:)`
   (12 under the cover, 24 under the titlebar). The cover's version comes from
-  `CoverVersionRule`: in compare it follows the audible version, except in
-  Blind Listening Mode, where it stays on the item's key version so it
-  can't reveal which version is audible. The previous cover stays up until
-  the next one has loaded (`shownCoverVersionID`), so switching never
-  flashes the placeholder.
+  `CoverVersionRule`: in compare it follows the audible version, and Blind
+  Listening Mode immediately shows the record placeholder. When switching
+  between versions with Blind Listening off, the previous cover stays up
+  until the next one has loaded (`shownCoverVersionID`).
 - Without artwork, the cover and the item rows' thumbnails show a record
   ([docs/a2-record-placeholder-spec.md](docs/a2-record-placeholder-spec.md)):
   bundled bitmaps, a light and a dark variant each, in
@@ -618,8 +621,9 @@ These are here to prevent parallel implementations and subtle regressions:
   playing (or current) version's title tag, else its filename without the
   extension, preserving its capitalization. With no current version, the
   title field shows `READY` in subdued dot-matrix text. Compare shows no
-  version title in its control bar or info bar; the active lane and the cover
-  carry the audible version.
+  version title in its control bar or info bar. The active lane indicates the
+  audible version, and its artwork appears on the cover when Blind Listening
+  Mode is off.
   Long titles scroll (`DotMatrixMarqueeText`). The title field takes
   its width from the line, never from its text (the cells draw in an
   overlay); sized by its cells it could only grow, and a launch-time layout at
@@ -670,8 +674,9 @@ These are here to prevent parallel implementations and subtle regressions:
   would stop receiving clicks and the playhead line would cross them. The
   strip's frame runs from the lane's top to the waveform band
   (`CompareLaneLayout.stripFrameHeight`), its contents centred. The offset
-  field (`LaneOffsetField`) sizes itself to its number, including while it is
-  typed; hovering it shows an "Offset" label to its left that takes room in
+  field (`LaneOffsetField`) sizes itself to its number. Typing and arrow-key
+  nudges stay in the field editor until Return or focus loss. Escape discards
+  the edit. Hovering the field shows an "Offset" label to its left that takes room in
   the row, so a long title truncates rather than running under it. Its hover
   comes from an AppKit tracking area (`HoverSensor`), because SwiftUI hover is
   unreliable over the AppKit text field. Strip titles use
@@ -679,7 +684,8 @@ These are here to prevent parallel implementations and subtle regressions:
   The Metadata tab has separate Format, Sample Rate, and Bitrate settings for
   Compare, all enabled by default. `LaneStripText.format` joins available,
   enabled values with ` • ` for the strip, tooltip, and drag preview. Blind Listening Mode
-  shows `Track n`, no format or tooltip, and disables Reveal in Finder.
+  shows `Track n`, hides the format, tooltip and offset field, and disables
+  Reveal in Finder.
 - A rejected lane (culling §5.4, §9.1) shows the 15 pt grey broken heart
   (`RejectionBadgeView`) in place of its index, a dimmed title and format,
   `LaneHatching` across the whole lane behind its visuals, and the inactive
@@ -843,7 +849,7 @@ these reintroduces the exact regressions it fixed):
 - `LoopingTests.swift`, `TimelineHeaderMarkerTests.swift`, and
   `TrackAlignerTests.swift`: their named subsystems.
 - `TrackDropHighlightTests.swift`: drop targeting, the playlist outline's
-  32-version limit for item and version row drops, and import command routing.
+  32-version limit alerts for item and version row drops, and import command routing.
 - `TrackMetadataMatcherTests.swift` and
   `TrackSimilarityClusteringTests.swift`: metadata normalization, duration
   safeguards, and deterministic conservative grouping. Coordinator integration

@@ -2286,39 +2286,51 @@ struct SessionTests {
     }
 
     @Test
-    func numericControlEditStateCommitsSteppedPendingText() {
+    func numericControlEditStateKeepsNudgesPendingUntilCommit() {
         var editState = NumericControlEditState(committedValue: 0)
         editState.beginEditing(currentValue: 0)
-        editState.updatePendingText("20")
 
-        let stepped = editState.commitSteppedPendingText(
+        let first = editState.stepEditingText(
+            currentText: "20",
             fallbackValue: 0,
             configuration: .offset,
             direction: 1,
             largeStep: true
         )
 
-        #expect(stepped == 520)
-        #expect(editState.committedValue == 520)
+        let second = editState.stepEditingText(
+            currentText: String(first),
+            fallbackValue: 0,
+            configuration: .offset,
+            direction: -1,
+            largeStep: false
+        )
+
+        #expect(first == 520)
+        #expect(second == 420)
+        #expect(editState.committedValue == 0)
+        #expect(editState.pendingText == "420")
+        #expect(editState.commitPendingText(fallbackValue: 0, configuration: .offset) == 420)
+        #expect(editState.committedValue == 420)
         #expect(editState.pendingText == nil)
     }
 
     @Test
-    func numericControlEditStateKeepsPendingTextWhenSteppingWithStaleControlText() {
-        var editState = NumericControlEditState(committedValue: 0)
-        editState.beginEditing(currentValue: 0)
-        editState.updatePendingText("20")
+    func numericControlEditStateDiscardsNudgesOnCancel() {
+        var editState = NumericControlEditState(committedValue: 200)
+        editState.beginEditing(currentValue: 200)
 
-        let stepped = editState.commitSteppedEditingText(
-            currentText: "0",
-            fallbackValue: 0,
+        let stepped = editState.stepEditingText(
+            currentText: "200",
+            fallbackValue: 200,
             configuration: .offset,
             direction: 1,
             largeStep: false
         )
 
-        #expect(stepped == 120)
-        #expect(editState.committedValue == 120)
+        #expect(stepped == 300)
+        #expect(editState.cancelledValue() == 200)
+        #expect(editState.committedValue == 200)
         #expect(editState.pendingText == nil)
     }
 
@@ -2331,22 +2343,6 @@ struct SessionTests {
         #expect(editState.cancelledValue() == 12)
         #expect(editState.pendingText == nil)
         #expect(editState.committedValue == 12)
-    }
-
-    @Test
-    func numericControlEditingTextPrefersFieldEditorTextWhenPresent() {
-        #expect(
-            NumericControlEditingText.current(
-                controlText: "0",
-                fieldEditorText: "25"
-            ) == "25"
-        )
-        #expect(
-            NumericControlEditingText.current(
-                controlText: "25",
-                fieldEditorText: nil
-            ) == "25"
-        )
     }
 
     @Test
@@ -2560,7 +2556,7 @@ struct SessionTests {
     }
 
     @Test
-    func compareCoverFollowsTheAudibleVersionUnlessBlind() {
+    func compareCoverUsesTheRecordPlaceholderWhenBlind() {
         func version(_ file: String) -> PlaylistVersion {
             PlaylistVersion(
                 file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/\(file)")),
@@ -2571,8 +2567,8 @@ struct SessionTests {
         let item = PlaylistItem(title: "Taxman", versions: [mono, stereo])
 
         #expect(CoverVersionRule.comparison(item: item, audibleVersionID: stereo.id, isBlind: false)?.id == stereo.id)
-        // Blind: the key version stays up whichever version is audible.
-        #expect(CoverVersionRule.comparison(item: item, audibleVersionID: stereo.id, isBlind: true)?.id == mono.id)
+        #expect(CoverVersionRule.comparison(item: item, audibleVersionID: stereo.id, isBlind: true) == nil)
+        #expect(CoverVersionRule.comparison(item: item, audibleVersionID: nil, isBlind: true) == nil)
         #expect(CoverVersionRule.comparison(item: item, audibleVersionID: nil, isBlind: false)?.id == mono.id)
 
         #expect(CoverVersionRule.playlist(item: item, currentVersionID: stereo.id)?.id == stereo.id)
@@ -2722,6 +2718,21 @@ struct SessionTests {
         #expect(PlaylistSummaryText.text(for: [taxman, rigby]) == "1 track · 2:41")
         #expect(PlaylistSummaryText.accessibilityText(for: [taxman, rigby]) == "1 track, 2:41 in total")
         #expect(PlaylistSummaryText.text(for: [rigby]) == "0 tracks · 0:00")
+    }
+
+    @Test
+    func playlistSummaryUsesSelectedTrackRowsAndTheirKeyDurations() {
+        let taxman = makeSummaryItem("Taxman", durations: [159, 161], playback: 1)
+        var rigby = makeSummaryItem("Eleanor Rigby", durations: [127.4])
+        rigby.isRejected = true
+        let unused = makeSummaryItem("Love You To", durations: [180])
+        let items = [taxman, rigby, unused]
+        let selection: Set<PlaylistRowID> = [.item(taxman.id), .item(rigby.id), .version(unused.versions[0].id)]
+
+        #expect(PlaylistSummaryText.text(for: items, selection: selection) == "2 of 3 tracks · 4:48")
+        #expect(PlaylistSummaryText.accessibilityText(for: items, selection: selection) == "2 of 3 tracks selected, 4:48 in total")
+        #expect(PlaylistSummaryText.text(for: items, selection: [.item(taxman.id), .version(unused.versions[0].id)])
+            == "2 tracks · 5:41")
     }
 
     @MainActor

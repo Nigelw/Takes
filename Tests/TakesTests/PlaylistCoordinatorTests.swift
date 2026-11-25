@@ -368,6 +368,33 @@ struct PlaylistCoordinatorTests {
     }
 
     @MainActor
+    @Test
+    func addingToAFullComparisonShowsTheLimitAndKeepsItsVersions() async throws {
+        let limit = PlaylistWorkspace.maximumVersionsPerItem
+        let item = PlaylistItem(title: "Full", versions: (0..<limit).map { makeVersion("full-\($0).wav") })
+        let before = PlaylistWorkspace(items: [item])
+        let url = try makeTemporaryAudioFile(name: "overflow.wav", duration: 0.05)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let coordinator = PlaylistCoordinator(
+            workspace: before,
+            loader: CoordinatorTestAudioLoader(tracks: [url: makeLoadedTrack(for: url, duration: 0.05)])
+        )
+        await coordinator.enterComparison(itemID: item.id)
+        let comparison = coordinator.snapshotForPersistence()
+        let context = coordinator.runtimeContext
+
+        let imported = await coordinator.importFiles([url], destination: coordinator.captureImportDestination())
+
+        #expect(imported.isEmpty)
+        #expect(coordinator.mode == .comparison(itemID: item.id))
+        #expect(coordinator.snapshotForPersistence() == comparison)
+        #expect(coordinator.runtimeContext == context)
+        #expect(coordinator.versionLimitAlert == .comparison(limit: limit))
+        coordinator.dismissVersionLimitAlert()
+        #expect(coordinator.versionLimitAlert == nil)
+    }
+
+    @MainActor
     @Test func mixedGroupOverLimitLeavesEveryItemAndUndoUnchanged() {
         let destination = PlaylistItem(title: "Destination", versions: (0..<31).map { makeVersion("dest-\($0).wav") })
         let first = makeVersion("loose-one.wav")
@@ -381,6 +408,7 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.workspace == before)
         #expect(!undo.canUndo)
         #expect(coordinator.errorMessage != nil)
+        #expect(coordinator.versionLimitAlert == .group(limit: PlaylistWorkspace.maximumVersionsPerItem))
     }
 
     @MainActor

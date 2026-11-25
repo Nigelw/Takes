@@ -50,7 +50,7 @@ struct TrackDropHighlightTests {
 
     @MainActor
     @Test(arguments: [false, true])
-    func playlistOutlineRejectsDropsPastVersionLimit(dragVersionRows: Bool) throws {
+    func playlistOutlineShowsAnAlertForDropsPastVersionLimit(dragVersionRows: Bool) throws {
         func makeVersion(_ name: String) -> PlaylistVersion {
             PlaylistVersion(
                 file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/\(name).wav")),
@@ -84,9 +84,12 @@ struct TrackDropHighlightTests {
         let sources = try sourceRows.map { row in try #require(outline.item(atRow: row)) }
         controller.outlineView(outline, draggingSession: session, willBeginAt: .zero, forItems: sources)
 
-        #expect(controller.outlineView(outline, validateDrop: info, proposedItem: target, proposedChildIndex: onItem).isEmpty)
+        #expect(controller.outlineView(outline, validateDrop: info, proposedItem: target, proposedChildIndex: onItem) == .move)
+        #expect(playlist.versionLimitAlert == nil)
         #expect(!controller.outlineView(outline, acceptDrop: info, item: target, childIndex: onItem))
         #expect(playlist.workspace == workspace)
+        #expect(playlist.versionLimitAlert == .group(limit: limit))
+        playlist.dismissVersionLimitAlert()
 
         let singleRow = try #require(outline.item(atRow: 2))
         controller.outlineView(outline, draggingSession: session, willBeginAt: .zero, forItems: [singleRow])

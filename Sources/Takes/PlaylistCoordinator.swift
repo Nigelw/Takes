@@ -248,6 +248,20 @@ final class PlaylistCoordinator {
         }
     }
 
+    enum VersionLimitAlert: Equatable {
+        case comparison(limit: Int)
+        case group(limit: Int)
+
+        var message: String {
+            switch self {
+            case let .comparison(limit):
+                "You can compare up to \(limit) versions at a time."
+            case let .group(limit):
+                "A track group can contain up to \(limit) versions."
+            }
+        }
+    }
+
     private(set) var workspace: PlaylistWorkspace
     private(set) var mode: Mode
     private(set) var controller: PlaybackController
@@ -255,6 +269,7 @@ final class PlaylistCoordinator {
     private(set) var currentVersionID: PlaylistVersion.ID?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
+    private(set) var versionLimitAlert: VersionLimitAlert?
     private(set) var fileIssues: [PlaylistVersion.ID: FileIssue] = [:]
     private(set) var runtimeContext: PlaylistRuntimeContext?
     private(set) var rowMoveRevision = 0
@@ -516,6 +531,11 @@ final class PlaylistCoordinator {
             }
             return newItemIDs
         } catch {
+            if operationGeneration == importGeneration,
+               case let PlaylistWorkspaceError.versionLimitExceeded(_, limit) = error,
+               case .item = destination {
+                versionLimitAlert = .comparison(limit: limit)
+            }
             if operationGeneration == importGeneration, !failures.isEmpty {
                 reportError((failures + [error.localizedDescription]).joined(separator: "\n"))
             } else if operationGeneration == importGeneration {
@@ -1268,6 +1288,10 @@ final class PlaylistCoordinator {
         errorMessage = nil
     }
 
+    func dismissVersionLimitAlert() {
+        versionLimitAlert = nil
+    }
+
     /// Cancels all playlist imports currently between metadata loading and
     /// their atomic commit. The generation check guarantees that no result
     /// commits after cancellation.
@@ -1515,6 +1539,9 @@ final class PlaylistCoordinator {
             return .activated
         } catch {
             guard generation == navigationGeneration else { return .superseded }
+            if case let PlaybackError.trackLimitExceeded(limit, _) = error {
+                versionLimitAlert = .comparison(limit: limit)
+            }
             if let fileError = error as? PlaybackError, let url = fileError.fileURL,
                let index = runtimeItem.versions.firstIndex(where: { $0.file.storedURL == url }) {
                 recordFileIssue(fileError, for: item.versions[index])
@@ -1901,6 +1928,9 @@ final class PlaylistCoordinator {
             clearError()
             return true
         } catch {
+            if case let PlaylistWorkspaceError.versionLimitExceeded(_, limit) = error {
+                versionLimitAlert = .group(limit: limit)
+            }
             reportError(error.localizedDescription)
             return false
         }

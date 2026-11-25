@@ -136,19 +136,31 @@ struct BottomBarRejectButton: View {
 /// The playlist bar's summary (A2 §7): `6 tracks · 19:35`, one track per
 /// playlist item. The total adds up each item's key version, the duration
 /// its row shows. Rejected tracks are left out of both the count and the
-/// total (culling spec §8, question 2). An empty playlist shows no summary;
-/// its empty state already says so.
+/// total (culling spec §8, question 2). Selecting multiple track rows shows
+/// their count out of all tracks and their combined duration.
 enum PlaylistSummaryText {
-    static func text(for items: [PlaylistItem]) -> String {
-        guard !items.isEmpty else { return "" }
-        let counted = items.filter { !$0.isRejected }
-        return "\(count(counted.count)) · \(PlaylistRowText.duration(totalDuration(of: counted)))"
+    static func text(for items: [PlaylistItem], selection: Set<PlaylistRowID> = []) -> String {
+        guard let summary = summary(for: items, selection: selection) else { return "" }
+        return "\(summary.count) · \(summary.duration)"
     }
 
-    static func accessibilityText(for items: [PlaylistItem]) -> String {
-        guard !items.isEmpty else { return "" }
+    static func accessibilityText(for items: [PlaylistItem], selection: Set<PlaylistRowID> = []) -> String {
+        guard let summary = summary(for: items, selection: selection) else { return "" }
+        let selectionLabel = summary.isSelection ? " selected" : ""
+        return "\(summary.count)\(selectionLabel), \(summary.duration) in total"
+    }
+
+    private static func summary(
+        for items: [PlaylistItem], selection: Set<PlaylistRowID>
+    ) -> (count: String, duration: String, isSelection: Bool)? {
+        guard !items.isEmpty else { return nil }
+        let selected = items.filter { selection.contains(.item($0.id)) }
+        if selected.count > 1 {
+            return ("\(selected.count.formatted()) of \(count(items.count))",
+                    PlaylistRowText.duration(totalDuration(of: selected)), true)
+        }
         let counted = items.filter { !$0.isRejected }
-        return "\(count(counted.count)), \(PlaylistRowText.duration(totalDuration(of: counted))) in total"
+        return (count(counted.count), PlaylistRowText.duration(totalDuration(of: counted)), false)
     }
 
     static func count(_ count: Int) -> String {
@@ -225,12 +237,13 @@ struct PlaylistBottomBar: View {
             .help("Playlist Actions")
             .accessibilityLabel("Playlist Actions")
         } trailing: {
-            Text(PlaylistSummaryText.text(for: items))
+            Text(PlaylistSummaryText.text(for: items, selection: presentation.selection))
                 .font(.system(size: 11))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .accessibilityLabel(PlaylistSummaryText.accessibilityText(for: items))
+                .minimumScaleFactor(0.8)
+                .accessibilityLabel(PlaylistSummaryText.accessibilityText(for: items, selection: presentation.selection))
         }
     }
 }

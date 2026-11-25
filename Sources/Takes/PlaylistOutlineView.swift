@@ -863,34 +863,39 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         let single = rows.count == 1 ? rows.first : nil
         var sections: [[NSMenuItem]] = []
 
-        var playback: [NSMenuItem] = [ClosureMenuItem("Play") { [weak self] in self?.play(rows) }]
+        var playback: [NSMenuItem] = [
+            ClosureMenuItem("Play", keyEquivalent: .return) { [weak self] in self?.play(rows) }
+        ]
         if case let .item(id)? = single, (itemsByID[id]?.versions.count ?? 0) > 1 {
-            playback.append(ClosureMenuItem("Compare Versions") { [weak self] in self?.compare(itemID: id) })
+            playback.append(ClosureMenuItem("Compare Versions", keyEquivalent: "]", modifiers: .command) { [weak self] in
+                self?.compare(itemID: id)
+            })
         }
         sections.append(playback)
 
         let reject = ClosureMenuItem(
-            PlaylistRejectionCommand.title(clears: context.rejectionClears), enabled: context.canToggleRejection
+            PlaylistRejectionCommand.title(clears: context.rejectionClears), enabled: context.canToggleRejection,
+            keyEquivalent: PlaylistRejectionCommand.key, modifiers: PlaylistRejectionCommand.appKitModifiers
         ) { context.toggleRejection() }
-        reject.keyEquivalent = String(PlaylistRejectionCommand.key.character)
-        reject.keyEquivalentModifierMask = PlaylistRejectionCommand.appKitModifiers
         sections.append([reject])
 
         var organize: [NSMenuItem] = []
         if rows.count > 1, !itemIDs.isEmpty {
-            organize.append(ClosureMenuItem("Group Versions", enabled: context.canGroup) { context.group() })
+            organize.append(ClosureMenuItem("Group Versions", enabled: context.canGroup, keyEquivalent: "g", modifiers: .command) {
+                context.group()
+            })
         }
         if context.canSeparate {
-            organize.append(ClosureMenuItem("Ungroup Versions") { context.separate() })
+            organize.append(ClosureMenuItem("Ungroup Versions", keyEquivalent: "g", modifiers: [.command, .shift]) {
+                context.separate()
+            })
         }
         if itemIDs.isEmpty, !versionIDs.isEmpty {
             let owners = Set(versionIDs.compactMap { ownerByVersionID[$0] })
             let submenu = NSMenu()
             submenu.autoenablesItems = false
             for destination in items where owners != [destination.id] {
-                let incoming = versionIDs.filter { ownerByVersionID[$0] != destination.id }.count
-                let hasRoom = destination.versions.count + incoming <= PlaylistWorkspace.maximumVersionsPerItem
-                submenu.addItem(ClosureMenuItem(PlaylistRowText.itemTitle(destination), enabled: hasRoom) { [weak self] in
+                submenu.addItem(ClosureMenuItem(PlaylistRowText.itemTitle(destination)) { [weak self] in
                     self?.moveVersions(versionIDs, to: destination.id, before: nil)
                 })
             }
@@ -903,7 +908,9 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
         let represented = rowsInDisplayOrder(rows).compactMap { representedVersion($0)?.version }
         let urls = represented.compactMap { availableURL(for: $0) }
-        var files: [NSMenuItem] = [ClosureMenuItem("Reveal in Finder", enabled: !urls.isEmpty) {
+        var files: [NSMenuItem] = [ClosureMenuItem(
+            "Reveal in Finder", enabled: !urls.isEmpty, keyEquivalent: "r", modifiers: [.command, .shift]
+        ) {
             NSWorkspace.shared.activateFileViewerSelecting(urls)
         }]
         if let single {
@@ -917,7 +924,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             }
         }
         sections.append(files)
-        sections.append([ClosureMenuItem("Remove", enabled: context.canRemove) { context.remove() }])
+        sections.append([ClosureMenuItem("Remove", enabled: context.canRemove, keyEquivalent: .delete) { context.remove() }])
 
         var result: [NSMenuItem] = []
         for section in sections {
@@ -1013,7 +1020,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         let draggedVersions = items.flatMap(\.versions).map(\.id).filter { dragged.contains(.version($0)) }
         // A drag carries items or versions, never both.
         guard draggedItems.isEmpty != draggedVersions.isEmpty else { return nil }
-        let limit = PlaylistWorkspace.maximumVersionsPerItem
 
         // Resolve the proposal to a target item (nil for the top level) and a
         // child index (-1 for "on the item").
@@ -1042,8 +1048,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             }
             // Dropping items on an item groups them into it as versions.
             guard !draggedItems.contains(target.id) else { return nil }
-            let incoming = draggedItems.reduce(0) { $0 + (itemsByID[$1]?.versions.count ?? 0) }
-            guard target.versions.count + incoming <= limit else { return nil }
             return ResolvedDrop(
                 plan: .group(draggedItems, into: target.id), item: node(.item(target.id)),
                 childIndex: NSOutlineViewDropOnItemIndex
@@ -1057,7 +1061,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             return ResolvedDrop(plan: .separate(draggedVersions, beforeItem: anchor), item: nil, childIndex: insertion)
         }
         let incoming = draggedVersions.filter { ownerByVersionID[$0] != target.id }.count
-        guard target.versions.count + incoming <= limit else { return nil }
         if index < 0 {
             guard incoming > 0 else { return nil }
             return ResolvedDrop(
@@ -2062,12 +2065,16 @@ final class PlaylistComparePill: NSButton {
     }
 }
 
-private final class ClosureMenuItem: NSMenuItem {
+final class ClosureMenuItem: NSMenuItem {
     private let handler: () -> Void
 
-    init(_ title: String, enabled: Bool = true, handler: @escaping () -> Void) {
+    init(
+        _ title: String, enabled: Bool = true, keyEquivalent: KeyEquivalent? = nil,
+        modifiers: NSEvent.ModifierFlags = [], handler: @escaping () -> Void
+    ) {
         self.handler = handler
-        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        super.init(title: title, action: #selector(fire), keyEquivalent: keyEquivalent.map { String($0.character) } ?? "")
+        keyEquivalentModifierMask = modifiers
         target = self
         isEnabled = enabled
     }

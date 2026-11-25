@@ -111,50 +111,21 @@ struct NumericControlEditState {
         return clamped
     }
 
-    mutating func commitSteppedPendingText(
-        fallbackValue: Int,
-        configuration: NumericControlConfiguration,
-        direction: Int,
-        largeStep: Bool
-    ) -> Int {
-        let stepped = configuration.steppedValue(
-            fromText: pendingText ?? "\(fallbackValue)",
-            fallbackValue: fallbackValue,
-            direction: direction,
-            largeStep: largeStep
-        )
-        commit(stepped)
-        return stepped
-    }
-
-    mutating func commitSteppedEditingText(
+    mutating func stepEditingText(
         currentText: String,
         fallbackValue: Int,
         configuration: NumericControlConfiguration,
         direction: Int,
         largeStep: Bool
     ) -> Int {
-        let textForStep: String
-        if let pendingText,
-           currentText.trimmingCharacters(in: .whitespacesAndNewlines) == "\(committedValue)" {
-            textForStep = pendingText
-        } else {
-            textForStep = currentText
-        }
-
-        updatePendingText(textForStep)
-        return commitSteppedPendingText(
+        let stepped = configuration.steppedValue(
+            fromText: currentText,
             fallbackValue: fallbackValue,
-            configuration: configuration,
             direction: direction,
             largeStep: largeStep
         )
-    }
-}
-
-enum NumericControlEditingText {
-    static func current(controlText: String, fieldEditorText: String?) -> String {
-        fieldEditorText ?? controlText
+        updatePendingText("\(stepped)")
+        return stepped
     }
 }
 
@@ -803,22 +774,21 @@ final class DragSourceNSView: NSView, NSDraggingSource {
         guard let actions = menuActions else { return nil }
         let menu = NSMenu()
         menu.autoenablesItems = false
-        let reject = ClosureMenuItem(title: actions.rejectionTitle, action: actions.toggleRejection)
-        reject.keyEquivalent = String(PlaylistRejectionCommand.key.character)
-        reject.keyEquivalentModifierMask = PlaylistRejectionCommand.appKitModifiers
-        menu.addItem(reject)
+        menu.addItem(ClosureMenuItem(
+            actions.rejectionTitle, keyEquivalent: PlaylistRejectionCommand.key,
+            modifiers: PlaylistRejectionCommand.appKitModifiers, handler: actions.toggleRejection
+        ))
         menu.addItem(.separator())
-        menu.addItem(ClosureMenuItem(title: "Remove Version", action: actions.remove))
+        menu.addItem(ClosureMenuItem("Remove Version", keyEquivalent: .delete, handler: actions.remove))
         menu.addItem(.separator())
         if actions.isMissing {
-            menu.addItem(ClosureMenuItem(title: "Locate File…", action: actions.locate))
+            menu.addItem(ClosureMenuItem("Locate File…", handler: actions.locate))
         }
         menu.addItem(ClosureMenuItem(
-            title: "Reveal in Finder",
-            isEnabled: actions.canRevealInFinder,
-            action: actions.revealInFinder
+            "Reveal in Finder", enabled: actions.canRevealInFinder,
+            keyEquivalent: "r", modifiers: [.command, .shift], handler: actions.revealInFinder
         ))
-        menu.addItem(ClosureMenuItem(title: "Reset Offset", isEnabled: actions.hasOffset, action: actions.resetOffset))
+        menu.addItem(ClosureMenuItem("Reset Offset", enabled: actions.hasOffset, handler: actions.resetOffset))
         return menu
     }
 
@@ -932,27 +902,6 @@ final class DragSourceNSView: NSView, NSDraggingSource {
         // already committed via the drop delegate's `performDrop`.
         activeDragImage = nil
         onDragEnded?()
-    }
-}
-
-/// A menu item that runs a closure, for menus built on the fly.
-private final class ClosureMenuItem: NSMenuItem {
-    private let handler: () -> Void
-
-    init(title: String, isEnabled: Bool = true, action handler: @escaping () -> Void) {
-        self.handler = handler
-        super.init(title: title, action: #selector(runHandler), keyEquivalent: "")
-        target = self
-        self.isEnabled = isEnabled
-    }
-
-    @available(*, unavailable)
-    required init(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    @objc private func runHandler() {
-        handler()
     }
 }
 
@@ -2974,6 +2923,7 @@ private struct IntegerInputField: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
+        context.coordinator.updateBinding($value)
         context.coordinator.configuration = configuration
         context.coordinator.onEditingTextChange = onEditingTextChange
         (nsView as? NumericInputTextField)?.onFocusChange = onFocusChange
@@ -2983,7 +2933,7 @@ private struct IntegerInputField: NSViewRepresentable {
                 self.value = clamped
             }
         }
-        if !context.coordinator.isEditing {
+        if !context.coordinator.isEditing, nsView.currentEditor() == nil {
             context.coordinator.refreshCommittedValue(clamped)
             if nsView.stringValue != "\(clamped)" {
                 nsView.stringValue = "\(clamped)"
@@ -3010,7 +2960,11 @@ private struct IntegerInputField: NSViewRepresentable {
 
         @MainActor
         func controlTextDidBeginEditing(_ obj: Notification) {
-            let displayedText = (obj.object as? NSTextField)?.stringValue ?? "\(value)"
+            beginEditing(displayedText: (obj.object as? NSTextField)?.stringValue ?? "\(value)")
+        }
+
+        private func beginEditing(displayedText: String) {
+            guard !isEditing else { return }
             editState.beginEditing(
                 displayedText: displayedText,
                 fallbackValue: value,
@@ -3022,32 +2976,29 @@ private struct IntegerInputField: NSViewRepresentable {
 
         @MainActor
         func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
-            guard let textField = control as? NSTextField else { return true }
-            editState.updatePendingText(fieldEditor.string)
-            if isCancellingEdit {
-                let restoredValue = editState.cancelledValue()
-                value = restoredValue
-                textField.stringValue = "\(restoredValue)"
-                return true
+            if isEditing && !isCancellingEdit {
+                editState.updatePendingText(fieldEditor.string)
             }
-            syncValue(from: textField, overrideText: fieldEditor.string)
             return true
         }
 
         @MainActor
         func controlTextDidEndEditing(_ obj: Notification) {
             guard let textField = obj.object as? NSTextField else { return }
-            defer { onEditingTextChange(nil) }
-            if isCancellingEdit {
-                let restoredValue = editState.cancelledValue()
-                value = restoredValue
-                textField.stringValue = "\(restoredValue)"
+            defer {
                 isEditing = false
                 isCancellingEdit = false
+                onEditingTextChange(nil)
+            }
+            if isCancellingEdit {
+                _ = editState.cancelledValue()
+            } else if editState.pendingText != nil {
+                let committedValue = editState.commitPendingText(fallbackValue: value, configuration: configuration)
+                value = committedValue
+                textField.stringValue = "\(committedValue)"
                 return
             }
-            syncValue(from: textField)
-            isEditing = false
+            textField.stringValue = "\(configuration.clamped(value))"
         }
 
         @MainActor
@@ -3058,8 +3009,8 @@ private struct IntegerInputField: NSViewRepresentable {
             onEditingTextChange(text)
         }
 
-        func applyStep(direction: Int, largeStep: Bool) {
-            value = configuration.steppedValue(from: value, direction: direction, largeStep: largeStep)
+        func updateBinding(_ binding: Binding<Int>) {
+            _value = binding
         }
 
         func refreshCommittedValue(_ value: Int) {
@@ -3067,111 +3018,35 @@ private struct IntegerInputField: NSViewRepresentable {
         }
 
         @MainActor
-        private func syncValue(from textField: NSTextField) {
-            syncValue(from: textField, overrideText: nil)
-        }
-
-        @MainActor
-        private func syncValue(from textField: NSTextField, overrideText: String?) {
-            editState.updatePendingText(overrideText ?? textField.stringValue)
-            let committedValue = editState.commitPendingText(
-                fallbackValue: value,
-                configuration: configuration
-            )
-            value = committedValue
-            textField.stringValue = "\(committedValue)"
-        }
-
-        @MainActor
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             switch commandSelector {
-            case #selector(NSResponder.moveUp(_:)):
-                let steppedValue = applyStep(
-                    using: NumericControlEditingText.current(
-                        controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
-                        fieldEditorText: textView.string
-                    ),
-                    direction: 1,
-                    largeStep: false
+            case #selector(NSResponder.moveUp(_:)), #selector(NSResponder.moveUpAndModifySelection(_:)),
+                 #selector(NSResponder.moveDown(_:)), #selector(NSResponder.moveDownAndModifySelection(_:)):
+                beginEditing(displayedText: (control as? NSTextField)?.stringValue ?? "\(value)")
+                let movesUp = commandSelector == #selector(NSResponder.moveUp(_:))
+                    || commandSelector == #selector(NSResponder.moveUpAndModifySelection(_:))
+                let steppedValue = editState.stepEditingText(
+                    currentText: textView.string,
+                    fallbackValue: value,
+                    configuration: configuration,
+                    direction: movesUp ? 1 : -1,
+                    largeStep: NumericControlConfiguration.isLargeStepCommand(commandSelector)
                 )
-                updateEditingText(control: control, textView: textView, value: steppedValue)
-                return true
-            case #selector(NSResponder.moveDown(_:)):
-                let steppedValue = applyStep(
-                    using: NumericControlEditingText.current(
-                        controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
-                        fieldEditorText: textView.string
-                    ),
-                    direction: -1,
-                    largeStep: false
+                textView.insertText(
+                    "\(steppedValue)",
+                    replacementRange: NSRange(location: 0, length: textView.string.utf16.count)
                 )
-                updateEditingText(control: control, textView: textView, value: steppedValue)
-                return true
-            case #selector(NSResponder.moveUpAndModifySelection(_:)):
-                let steppedValue = applyStep(
-                    using: NumericControlEditingText.current(
-                        controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
-                        fieldEditorText: textView.string
-                    ),
-                    direction: 1,
-                    largeStep: true
-                )
-                updateEditingText(control: control, textView: textView, value: steppedValue)
-                return true
-            case #selector(NSResponder.moveDownAndModifySelection(_:)):
-                let steppedValue = applyStep(
-                    using: NumericControlEditingText.current(
-                        controlText: (control as? NSTextField)?.stringValue ?? "\(value)",
-                        fieldEditorText: textView.string
-                    ),
-                    direction: -1,
-                    largeStep: true
-                )
-                updateEditingText(control: control, textView: textView, value: steppedValue)
                 return true
             case #selector(NSResponder.insertNewline(_:)):
-                if let textField = control as? NSTextField {
-                    syncValue(from: textField, overrideText: textView.string)
-                }
                 control.window?.makeFirstResponder(nil)
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
                 isCancellingEdit = true
-                if let textField = control as? NSTextField {
-                    let restoredValue = editState.cancelledValue()
-                    value = restoredValue
-                    textField.stringValue = "\(restoredValue)"
-                    textView.string = "\(restoredValue)"
-                }
-                isEditing = false
                 control.window?.makeFirstResponder(nil)
                 return true
             default:
                 return false
             }
-        }
-
-        private func applyStep(using currentText: String, direction: Int, largeStep: Bool) -> Int {
-            let steppedValue = editState.commitSteppedEditingText(
-                currentText: currentText,
-                fallbackValue: value,
-                configuration: configuration,
-                direction: direction,
-                largeStep: largeStep
-            )
-            value = steppedValue
-            return steppedValue
-        }
-
-        @MainActor
-        private func updateEditingText(control: NSControl, textView: NSTextView, value: Int) {
-            let text = "\(value)"
-            if let textField = control as? NSTextField {
-                textField.stringValue = text
-            }
-            textView.string = text
-            textView.setSelectedRange(NSRange(location: text.count, length: 0))
-            onEditingTextChange(text)
         }
     }
 
@@ -3389,13 +3264,15 @@ private struct LaneStripView: View, Equatable {
 
             Spacer(minLength: 0)
 
-            LaneOffsetField(
-                offsetMs: offsetMs,
-                isFocused: isOffsetFocused,
-                configuration: offsetConfiguration,
-                onSetOffsetMs: onSetOffsetMs,
-                onFocusChange: onOffsetFocusChange
-            )
+            if !isBlind {
+                LaneOffsetField(
+                    offsetMs: offsetMs,
+                    isFocused: isOffsetFocused,
+                    configuration: offsetConfiguration,
+                    onSetOffsetMs: onSetOffsetMs,
+                    onFocusChange: onOffsetFocusChange
+                )
+            }
         }
         .padding(.leading, Self.leadingInset)
         .padding(.trailing, Self.trailingInset)

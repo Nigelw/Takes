@@ -76,8 +76,8 @@ The header/context menu offers Group Versions, Rename, Separate, Move To,
 Remove, and Clear Playlist. Group actions accept selected
 item rows in workspace order. Version operations accept selected version IDs;
 mixed selections normalize away children whose parent is selected. Move To
-names a destination item and disables destinations exceeding 32 versions.
-Grouping beyond 32 fails atomically with a readable error. Reordering supports
+names a destination item. Grouping or moving versions beyond 32 leaves the
+playlist unchanged and shows a version-limit alert. Reordering supports
 selected items as one ordered block; expanded versions can reorder within an
 item or move through Move To. Provide Move Up/Down menu actions so organizing
 does not require a drag. Undo/Redo uses the main window's `UndoManager`, with
