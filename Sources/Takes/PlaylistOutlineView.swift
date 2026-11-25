@@ -834,7 +834,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
         var playback: [NSMenuItem] = [ClosureMenuItem("Play") { [weak self] in self?.play(rows) }]
         if case let .item(id)? = single, (itemsByID[id]?.versions.count ?? 0) > 1 {
-            playback.append(ClosureMenuItem("Compare") { [weak self] in self?.compare(itemID: id) })
+            playback.append(ClosureMenuItem("Compare Versions") { [weak self] in self?.compare(itemID: id) })
         }
         sections.append(playback)
 
@@ -842,7 +842,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             PlaylistRejectionCommand.title(clears: context.rejectionClears), enabled: context.canToggleRejection
         ) { context.toggleRejection() }
         reject.keyEquivalent = String(PlaylistRejectionCommand.key.character)
-        reject.keyEquivalentModifierMask = []
+        reject.keyEquivalentModifierMask = PlaylistRejectionCommand.appKitModifiers
         sections.append([reject])
 
         var organize: [NSMenuItem] = []

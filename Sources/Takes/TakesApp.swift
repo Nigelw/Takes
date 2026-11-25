@@ -787,11 +787,11 @@ struct TakesApp: App {
                 }
             }
 
-            FileCommands(coordinator: coordinator)
+            FileCommands()
+            EditCommands(coordinator: coordinator)
             PlaylistCommands(coordinator: coordinator)
             PlaybackCommands(coordinator: coordinator)
             ViewCommands(coordinator: coordinator)
-
 
             CommandGroup(replacing: .help) {
                 Link("Visit Website", destination: URL(string: "https://takes.nigelwarren.com")!)
@@ -965,7 +965,7 @@ private struct OpenAnalysisWindowButton: View {
         Button("Analysis") {
             controller.show()
         }
-        .keyboardShortcut("l", modifiers: [.command])
+        .keyboardShortcut("z", modifiers: [.command, .option])
     }
 }
 
@@ -981,12 +981,9 @@ private struct ResetMainWindowSizeButton: View {
 }
 
 private struct FileCommands: Commands {
-    let coordinator: PlaylistCoordinator
     @FocusedValue(\.openFileCommandState) private var openFileCommandState
     @FocusedValue(\.canShowActiveTrackInFinder) private var canShowActiveTrackInFinder
-    @FocusedValue(\.canRemoveActiveTrack) private var canRemoveActiveTrack
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
-    @FocusedValue(\.canClearTracks) private var canClearTracks
     @FocusedValue(\.playlistCommandContext) private var playlistContext
 
     var body: some Commands {
@@ -1027,25 +1024,40 @@ private struct FileCommands: Commands {
             // offer it from their strip menu.
             Button("Locate File…") { playlistContext?.locate() }
                 .disabled(playlistContext?.locateVersionID == nil || canUseGlobalMenuShortcuts != true)
-
-            Divider()
-
-            Button(coordinator.mode.itemID == nil ? "Remove Selected Items" : "Remove Version") {
-                openFileCommandState?.removeActiveTrack()
-            }
-            .keyboardShortcut(.delete, modifiers: [])
-            .disabled(
-                openFileCommandState == nil
-                    || canRemoveActiveTrack != true
-                    || canUseGlobalMenuShortcuts != true
-            )
-
-            Button(coordinator.mode.itemID == nil ? "Clear Playlist" : "Remove All Versions") {
-                openFileCommandState?.clearAllTracks()
-            }
-            .keyboardShortcut(.delete, modifiers: [.command])
-            .disabled(openFileCommandState == nil || canClearTracks != true || canUseGlobalMenuShortcuts != true)
         }
+    }
+}
+
+private struct EditCommands: Commands {
+    let coordinator: PlaylistCoordinator
+    @FocusedValue(\.playlistCommandContext) private var playlistContext
+    @FocusedValue(\.canDeselect) private var canDeselect
+
+    private var isComparison: Bool { coordinator.mode.itemID != nil }
+
+    var body: some Commands {
+        CommandGroup(replacing: .pasteboard) {
+            responderCommand("Cut", key: "x", action: #selector(NSText.cut(_:)))
+            responderCommand("Copy", key: "c", action: #selector(NSText.copy(_:)))
+            responderCommand("Paste", key: "v", action: #selector(NSText.paste(_:)))
+            Divider()
+            responderCommand("Select All", key: "a", action: #selector(NSText.selectAll(_:)))
+            Button(isComparison ? "Deselect" : "Deselect All") {
+                if isComparison {
+                    coordinator.deselectLoop()
+                } else {
+                    playlistContext?.deselectAll()
+                }
+            }
+            .keyboardShortcut("d", modifiers: [.command])
+            .disabled(canDeselect != true)
+        }
+    }
+
+    private func responderCommand(_ title: String, key: KeyEquivalent, action: Selector) -> some View {
+        Button(title) { NSApp.sendAction(action, to: nil, from: nil) }
+            .keyboardShortcut(key, modifiers: [.command])
+            .disabled(NSApp.target(forAction: action) == nil)
     }
 }
 
@@ -1053,7 +1065,6 @@ private struct PlaybackCommands: Commands {
     let coordinator: PlaylistCoordinator
     private var controller: PlaybackController { coordinator.controller }
     private var isComparison: Bool { coordinator.mode.itemID != nil }
-    @FocusedValue(\.playlistCommandContext) private var playlistContext
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
 
     var body: some Commands {
@@ -1110,35 +1121,42 @@ private struct PlaybackCommands: Commands {
 
             Divider()
 
-            Button("Change Repeat Mode") {
-                if isComparison { coordinator.cycleRepeatMode() } else { coordinator.cyclePlaylistRepeatMode() }
-            }
-            .keyboardShortcut("r", modifiers: [.command])
-            .disabled(isComparison && !controller.session.isPlayable)
-
             Menu("Repeat") {
-                if !isComparison {
-                    Picker("Repeat", selection: Binding(
+                Button("Change Repeat Mode") {
+                    if isComparison { coordinator.cycleRepeatMode() } else { coordinator.cyclePlaylistRepeatMode() }
+                }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+
+                Divider()
+
+                if isComparison {
+                    Picker(selection: Binding(
+                        get: { controller.session.repeatMode },
+                        set: { coordinator.setRepeatMode($0) }
+                    )) {
+                        Text("Off").tag(RepeatMode.off)
+                        Text("One").tag(RepeatMode.one)
+                        Text("Switch & Repeat").tag(RepeatMode.switchAndRepeat)
+                    } label: {
+                        EmptyView()
+                    }
+                    .pickerStyle(.inline)
+                } else {
+                    Picker(selection: Binding(
                         get: { coordinator.workspace.playlistRepeatMode },
                         set: { coordinator.setPlaylistRepeatMode($0) }
                     )) {
                         Text("Off").tag(PlaylistRepeatMode.off)
                         Text("All").tag(PlaylistRepeatMode.all)
                         Text("One").tag(PlaylistRepeatMode.one)
-                    }.pickerStyle(.inline)
-                } else {
-                Picker("Repeat", selection: Binding(
-                    get: { controller.session.repeatMode },
-                    set: { coordinator.setRepeatMode($0) }
-                )) {
-                    Text("Off").tag(RepeatMode.off)
-                    Text("One").tag(RepeatMode.one)
-                    Text("Switch & Repeat").tag(RepeatMode.switchAndRepeat)
-                }
-                .pickerStyle(.inline)
+                    } label: {
+                        EmptyView()
+                    }
+                    .pickerStyle(.inline)
+                    .disabled(!coordinator.canPlay)
                 }
             }
-            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
+            .disabled((isComparison && !controller.session.isPlayable) || canUseGlobalMenuShortcuts != true)
 
             if !isComparison {
                 Toggle("Shuffle", isOn: Binding(get: { coordinator.workspace.isShuffleEnabled }, set: { coordinator.setShuffleEnabled($0) }))
@@ -1207,17 +1225,12 @@ private struct ViewCommands: Commands {
                 .disabled(mainWindowCommandState?.visibility.canToggle(region) != true)
             }
             Divider()
-            Button("Compare") { playlistContext?.compare() }
+            Button("Compare Versions") { playlistContext?.compare() }
                 .keyboardShortcut("]", modifiers: [.command])
                 .disabled(!showsPlaylist || coordinator.mode.itemID != nil || playlistContext?.compareItemID == nil)
             Button("Back to Playlist") { Task { await coordinator.backToPlaylist() } }
                 .keyboardShortcut("[", modifiers: [.command])
                 .disabled(!showsPlaylist || coordinator.mode.itemID == nil)
-            // Compare only: removes the loop. The playlist clears its
-            // selection with Esc.
-            Button("Deselect") { coordinator.deselectLoop() }
-                .keyboardShortcut("d", modifiers: [.command])
-                .disabled(coordinator.mode.itemID == nil || controller.session.loopRegion == nil)
             Divider()
             Button("Zoom In") {
                 controller.stepZoom(zoomingIn: true)

@@ -343,9 +343,8 @@ These are here to prevent parallel implementations and subtle regressions:
   targets the track only and version rows their versions; in compare the
   active lane, or the right-clicked lane from the strip menu. It appears in
   the Playlist menu, the row context menu, the bottom bar's `…` (one builder)
-  and the lane strip's menu; plain R runs it in both modes through the key
-  monitor (`PlaylistRejectionCommand.keyCode`), which always takes R so the
-  outline's type-select never does. Rejecting never moves rows, never
+  and the lane strip's menu. ⌘R runs it in both modes through the key
+  monitor (`PlaylistRejectionCommand.keyCode`). Rejecting never moves rows, never
   changes the selection and never refreshes the audio runtime
   (`runtimeRequiresRefresh` ignores the flags): the current track or version
   keeps playing, and compare's lanes take the flag in place
@@ -376,9 +375,11 @@ These are here to prevent parallel implementations and subtle regressions:
   (⌘O's dialog) and Remove Selected (Delete's selection-aware removal), the
   `…` pull-down with the Playlist menu's organization commands, and the
   `N tracks · m:ss` summary (one track per item, at its key version's
-  duration; rejected tracks are left out of the count and the total). The File menu (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M), Delete, the
-  context menu and the Playlist menu keep every one of those commands; the
-  bar is another way in, not a replacement.
+  duration; rejected tracks are left out of the count and the total). The File
+  menu has the import commands (⌘O, ⇧⌘O, ⇧⌘F, ⇧⌘M). The Playlist menu has
+  Remove Selected Items and Remove All Tracks in the playlist, and Remove
+  Current Version and Remove All Versions in compare (Delete and ⌘Delete
+  in both modes).
 - Help ▸ Debug ▸ Reset Window Size (`WorkspaceView.resetWindowSize`) turns
   the artwork on and sets the default 360 pt width and the mode's height: the
   playlist's default (760 pt, then stored as its height) or compare's fit
@@ -408,16 +409,17 @@ These are here to prevent parallel implementations and subtle regressions:
   not; with none, Play starts the first track that is neither rejected nor
   unavailable. The control bar's buttons and the media keys use the same
   commands. ⌥← / ⌥→ skip (⇧ for 10 s), since plain arrows move through the
-  list; Esc clears the selection. Compare: X / ⇧X Switch Track (passing
+  list. Edit ▸ Deselect All (⌘D) and Esc clear the selection. Playlist ▸ Go
+  to Current Song (⌘L) selects the current item. Compare: X / ⇧X Switch Track (passing
   over rejected lanes in displayed order, Blind Listening's included,
   wrapping; disabled when `ComparisonSession.canSwitchPlayback` finds no
   non-rejected lane other than the active one), ⌘← / ⌘→
-  Jump to Beginning / End, plain arrows skip, ⌘D Deselect (the loop; disabled
-  in the playlist), Esc leaves; clicking a lane and the number hotkeys
-  select rejected lanes too. Both: R Reject / Clear Rejection, ⌘R Change
-  Repeat Mode, ⇧⌘A Show/Hide
+  Jump to Beginning / End, plain arrows skip, Edit ▸ Deselect (⌘D) clears
+  the loop, and Esc leaves. Clicking a lane and the number hotkeys select
+  rejected lanes too. Both modes use ⌘R for Reject / Clear Rejection,
+  ⌥⌘R for Change Repeat Mode (Playback ▸ Repeat), and ⇧⌘A for Show/Hide
   Artwork (`MainWindowCommandState.toggleVisibility`, the titlebar toggle's
-  animated path). Playlist only: ⌘] Compare (`PlaylistCommandContext.compare`,
+  animated path). Playlist only: ⌘] Compare Versions (`PlaylistCommandContext.compare`,
   one multi-version item), ⌥⌘S Shuffle, ⌘G / ⇧⌘G Group / Separate Versions,
   File ▸ Locate File… (`locateVersionID`). Both modes: ⌥⌘↑ / ⌥⌘↓
   Move Up / Down.
@@ -766,9 +768,10 @@ these reintroduces the exact regressions it fixed):
   provenance tiers. Guards the cutoff-scalar defect: two files whose measured
   cutoffs agree but whose spectra diverge must still produce a bandwidth
   finding.
-- `LoopingTests.swift`, `TimelineHeaderMarkerTests.swift`,
-  `TrackAlignerTests.swift`, and `TrackDropHighlightTests.swift`: their named
-  subsystems.
+- `LoopingTests.swift`, `TimelineHeaderMarkerTests.swift`, and
+  `TrackAlignerTests.swift`: their named subsystems.
+- `TrackDropHighlightTests.swift`: drop targeting, the playlist outline's
+  32-version limit for item and version row drops, and import command routing.
 - `TrackMetadataMatcherTests.swift` and
   `TrackSimilarityClusteringTests.swift`: metadata normalization, duration
   safeguards, and deterministic conservative grouping. Coordinator integration

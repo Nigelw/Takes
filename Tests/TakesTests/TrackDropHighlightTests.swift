@@ -48,6 +48,60 @@ struct TrackDropHighlightTests {
         #expect(TrackReorderInsertionPlacement.location(y: 60, rowHeight: 100) == .after)
     }
 
+    @MainActor
+    @Test(arguments: [false, true])
+    func playlistOutlineRejectsDropsPastVersionLimit(dragVersionRows: Bool) throws {
+        func makeVersion(_ name: String) -> PlaylistVersion {
+            PlaylistVersion(
+                file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/\(name).wav")),
+                metadata: PlaylistMetadata(displayName: name)
+            )
+        }
+
+        let limit = PlaylistWorkspace.maximumVersionsPerItem
+        let destination = PlaylistItem(title: "Destination", versions: (1..<limit).map { makeVersion("Take \($0)") })
+        let source = PlaylistItem(title: "Source", versions: [makeVersion("First"), makeVersion("Second")])
+        let single = PlaylistItem(title: "Single", versions: [makeVersion("Single")])
+        let workspace = PlaylistWorkspace(items: [destination, source, single])
+        let playlist = PlaylistCoordinator(workspace: workspace)
+        let presentation = PlaylistPresentationState()
+        if dragVersionRows { presentation.expanded.insert(source.id) }
+        let controller = PlaylistOutlineController(
+            playlist: playlist, presentation: presentation, artworkStore: PlaylistArtworkStore()
+        )
+        let scroll = controller.makeScrollView()
+        let outline = try #require(scroll.documentView as? NSOutlineView)
+        controller.update(
+            items: workspace.items, fileIssues: [:], currentItemID: nil, currentVersionID: nil,
+            isPlaying: false, isActive: false, moveRevision: 0, reduceMotion: true, metadataFields: []
+        )
+
+        let info = PlaylistTestDraggingInfo(source: outline)
+        let session = NSDraggingSession()
+        let target = try #require(outline.item(atRow: 0))
+        let onItem = NSOutlineViewDropOnItemIndex
+        let sourceRows = dragVersionRows ? [2, 3] : [1]
+        let sources = try sourceRows.map { row in try #require(outline.item(atRow: row)) }
+        controller.outlineView(outline, draggingSession: session, willBeginAt: .zero, forItems: sources)
+
+        #expect(controller.outlineView(outline, validateDrop: info, proposedItem: target, proposedChildIndex: onItem).isEmpty)
+        #expect(!controller.outlineView(outline, acceptDrop: info, item: target, childIndex: onItem))
+        #expect(playlist.workspace == workspace)
+
+        let singleRow = try #require(outline.item(atRow: 2))
+        controller.outlineView(outline, draggingSession: session, willBeginAt: .zero, forItems: [singleRow])
+
+        #expect(controller.outlineView(outline, validateDrop: info, proposedItem: target, proposedChildIndex: onItem) == .move)
+        #expect(controller.outlineView(outline, acceptDrop: info, item: target, childIndex: onItem))
+        #expect(playlist.workspace.items.first?.versions.count == limit)
+        if dragVersionRows {
+            #expect(playlist.workspace.items[1].versions == Array(source.versions.dropFirst()))
+            #expect(playlist.workspace.items.last == single)
+        } else {
+            #expect(playlist.workspace.items.last == source)
+        }
+    }
+
     @Test
     func droppedFolderRecursivelyResolvesAudioFiles() throws {
         let root = FileManager.default.temporaryDirectory
@@ -486,4 +540,35 @@ private actor StreamingURLCancellationRecorder {
         }
         return didCancel
     }
+}
+
+@MainActor
+private final class PlaylistTestDraggingInfo: NSObject, NSDraggingInfo {
+    let draggingSource: Any?
+    let draggingDestinationWindow: NSWindow? = nil
+    let draggingSourceOperationMask: NSDragOperation = .move
+    let draggingLocation: NSPoint = .zero
+    let draggedImageLocation: NSPoint = .zero
+    let draggedImage: NSImage? = nil
+    let draggingPasteboard = NSPasteboard.withUniqueName()
+    let draggingSequenceNumber = 0
+    var draggingFormation: NSDraggingFormation = .none
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 0
+    let springLoadingHighlight: NSSpringLoadingHighlight = .none
+
+    init(source: NSOutlineView) {
+        draggingSource = source
+    }
+
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    func resetSpringLoading() {}
+
+    func enumerateDraggingItems(
+        options: NSDraggingItemEnumerationOptions,
+        for view: NSView?,
+        classes classArray: [AnyClass],
+        searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+        using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
 }

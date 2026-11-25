@@ -802,7 +802,7 @@ final class DragSourceNSView: NSView, NSDraggingSource {
         menu.autoenablesItems = false
         let reject = ClosureMenuItem(title: actions.rejectionTitle, action: actions.toggleRejection)
         reject.keyEquivalent = String(PlaylistRejectionCommand.key.character)
-        reject.keyEquivalentModifierMask = []
+        reject.keyEquivalentModifierMask = PlaylistRejectionCommand.appKitModifiers
         menu.addItem(reject)
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem(title: "Remove Version", action: actions.remove))

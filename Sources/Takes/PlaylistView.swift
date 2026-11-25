@@ -68,6 +68,15 @@ struct PlaylistCommandContext {
     var canRemove: Bool { !itemIDs.isEmpty || !versionIDs.isEmpty }
     var canSeparate: Bool { !versionsToSeparate.isEmpty }
 
+    func deselectAll() {
+        presentation.selection = []
+    }
+
+    func selectCurrentSong() {
+        guard let itemID = coordinator.currentItemID else { return }
+        presentation.selection = [.item(itemID)]
+    }
+
     func group() {
         guard let sources = groupSources,
               let destination = coordinator.groupItems(
@@ -143,7 +152,7 @@ struct PlaylistCommandContext {
         coordinator.toggleRejection(itemIDs: targets.items, versionIDs: targets.versions, undoManager: undoManager)
     }
 
-    /// View ▸ Compare (⌘]): the one multi-version item the selection points
+    /// View ▸ Compare Versions (⌘]): the one multi-version item the selection points
     /// at, as the row's Compare pill and context menu allow.
     var compareItemID: UUID? {
         let rows = targetRows
@@ -225,6 +234,8 @@ struct PlaylistCommandContext {
 /// key monitor.
 enum PlaylistRejectionCommand {
     static let key: KeyEquivalent = "r"
+    static let modifiers: EventModifiers = .command
+    static let appKitModifiers: NSEvent.ModifierFlags = .command
     /// The R key's virtual key code, for the workspace key monitor.
     static let keyCode: UInt16 = 15
 
@@ -237,7 +248,6 @@ struct PlaylistOrganizationAvailability: Equatable {
     let canSeparate: Bool
     let canMoveUp: Bool
     let canMoveDown: Bool
-    let canClear: Bool
     let canReject: Bool
     let rejectionClears: Bool
 
@@ -248,7 +258,6 @@ struct PlaylistOrganizationAvailability: Equatable {
         canSeparate = isPlaylist && context.canSeparate
         canMoveUp = isPlaylist ? context.canMove(.up) : context.coordinator.canMoveActiveComparisonVersion(.up)
         canMoveDown = isPlaylist ? context.canMove(.down) : context.coordinator.canMoveActiveComparisonVersion(.down)
-        canClear = isPlaylist && !context.coordinator.workspace.items.isEmpty
         canReject = context.canToggleRejection
         rejectionClears = context.rejectionClears
     }
@@ -266,7 +275,16 @@ private struct PlaylistOrganizationAvailabilityKey: FocusedValueKey {
     typealias Value = PlaylistOrganizationAvailability
 }
 
+private struct CanDeselectKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
 extension FocusedValues {
+    var canDeselect: Bool? {
+        get { self[CanDeselectKey.self] }
+        set { self[CanDeselectKey.self] = newValue }
+    }
+
     var playlistCommandContext: PlaylistCommandContext? {
         get { self[PlaylistCommandContextKey.self] }
         set { self[PlaylistCommandContextKey.self] = newValue }
@@ -282,9 +300,22 @@ struct PlaylistCommands: Commands {
     let coordinator: PlaylistCoordinator
     @FocusedValue(\.playlistCommandContext) private var context
     @FocusedValue(\.playlistOrganizationAvailability) private var availability
+    @FocusedValue(\.openFileCommandState) private var openFileCommandState
+    @FocusedValue(\.canRemoveActiveTrack) private var canRemoveActiveTrack
+    @FocusedValue(\.canClearTracks) private var canClearTracks
+    @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
+
+    private var isComparison: Bool { coordinator.mode.itemID != nil }
 
     var body: some Commands {
         CommandMenu("Playlist") {
+            if !isComparison {
+                Button("Go to Current Song") { context?.selectCurrentSong() }
+                    .keyboardShortcut("l", modifiers: [.command])
+                    .disabled(context == nil || coordinator.currentItemID == nil || canUseGlobalMenuShortcuts != true)
+                Divider()
+            }
+
             playlistOrganizationMenuItems(context: context, availability: availability, move: { direction in
                 if coordinator.mode == .playlist {
                     context?.moveSelection(direction)
@@ -298,6 +329,20 @@ struct PlaylistCommands: Commands {
                     coordinator.toggleRejection(versionIDs: [active], undoManager: NSApp.mainWindow?.undoManager)
                 }
             })
+
+            Divider()
+
+            Button(isComparison ? "Remove Current Version" : "Remove Selected Items") {
+                openFileCommandState?.removeActiveTrack()
+            }
+            .keyboardShortcut(.delete, modifiers: [])
+            .disabled(openFileCommandState == nil || canRemoveActiveTrack != true || canUseGlobalMenuShortcuts != true)
+
+            Button(isComparison ? "Remove All Versions" : "Remove All Tracks") {
+                openFileCommandState?.clearAllTracks()
+            }
+            .keyboardShortcut(.delete, modifiers: [.command])
+            .disabled(openFileCommandState == nil || canClearTracks != true || canUseGlobalMenuShortcuts != true)
         }
     }
 }
@@ -309,10 +354,8 @@ func playlistOrganizationMenuItems(
     context: PlaylistCommandContext?, availability: PlaylistOrganizationAvailability?,
     move: @escaping (RowMoveDirection) -> Void, toggleRejection: @escaping () -> Void
 ) -> some View {
-    // Plain R, like compare's X: the workspace key monitor handles the key
-    // first (so the outline's type-select never takes it); the menu shows it.
     Button(availability?.rejectionTitle ?? PlaylistRejectionCommand.title(clears: false)) { toggleRejection() }
-        .keyboardShortcut(PlaylistRejectionCommand.key, modifiers: [])
+        .keyboardShortcut(PlaylistRejectionCommand.key, modifiers: PlaylistRejectionCommand.modifiers)
         .disabled(availability?.canReject != true)
     Divider()
     Button("Group as Versions") { context?.group() }
@@ -328,15 +371,11 @@ func playlistOrganizationMenuItems(
     Button("Move Down") { move(.down) }
         .keyboardShortcut(.downArrow, modifiers: [.command, .option])
         .disabled(availability?.canMoveDown != true)
-    Divider()
-    Button("Clear Playlist") { _ = context?.coordinator.clearPlaylist(undoManager: context?.undoManager) }
-        .disabled(availability?.canClear != true)
 }
 
 /// The playlist list (A2 §6). There is no header bar: the bottom bar below
 /// it (`PlaylistBottomBar`, A2 §7) carries Add Files…, Remove Selected and
-/// the organisation commands, which the File menu, the Playlist menu and
-/// the context menu also offer.
+/// organisation commands shared with the Playlist menu.
 struct PlaylistView: View {
     let coordinator: PlaylistCoordinator
     @ObservedObject var presentation: PlaylistPresentationState

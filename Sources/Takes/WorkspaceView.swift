@@ -302,6 +302,8 @@ struct WorkspaceView: View {
             .focusedSceneValue(\.canRemoveActiveTrack, isComparison ? controller.session.activeTrackID != nil : commandContext.canRemove)
             .focusedSceneValue(\.canClearTracks, !coordinator.workspace.items.isEmpty)
             .focusedSceneValue(\.canUseGlobalMenuShortcuts, canUseShortcuts)
+            .focusedSceneValue(\.canDeselect, canUseShortcuts
+                               && (isComparison ? controller.session.loopRegion != nil : !presentation.selection.isEmpty))
             .focusedSceneValue(\.mainWindowCommandState, MainWindowCommandState(
                 resetWindowSizing: { resetWindowSize() },
                 visibility: visibility,
@@ -864,15 +866,12 @@ struct WorkspaceView: View {
                     if direction == .previous { coordinator.previous() } else { coordinator.next() }; return true
                 }
             } else if event.keyCode == 53 && flags.isEmpty && !presentation.selection.isEmpty {
-                // Esc clears the playlist selection (⌘D is compare's Deselect).
-                presentation.selection = []; return true
+                commandContext.deselectAll(); return true
             }
             switch event.keyCode {
             case 49 where flags.isEmpty:
                 coordinator.togglePlayback(); return true
-            case PlaylistRejectionCommand.keyCode where flags.isEmpty:
-                // Reject / Clear Rejection, both modes. Taken even with no
-                // target, so the playlist's type-select never sees R.
+            case PlaylistRejectionCommand.keyCode where flags == PlaylistRejectionCommand.appKitModifiers:
                 let context = commandContext
                 if context.canToggleRejection { context.toggleRejection() }
                 return true
