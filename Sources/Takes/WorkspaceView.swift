@@ -256,6 +256,7 @@ struct WorkspaceView: View {
             .overlay {
                 if !mainWindowIsKey { InactiveWindowInteractionShield(window: mainWindow).ignoresSafeArea() }
             }
+            .environment(\.isFileDropTargeted, isDropTargeted)
             .onDrop(of: [UTType.fileURL], delegate: WorkspaceFileDropDelegate(
                 isTargeted: $isDropTargeted, perform: importProviders
             ))
@@ -409,6 +410,7 @@ struct WorkspaceView: View {
     private var artworkCover: some View {
         ArtworkCoverView(image: artworkStore.artwork(for: shownCoverVersionID),
                          showsTitlebarControls: showsVisibilityToggles)
+            .overlay { FileDropShade() }
             .overlay(alignment: .bottom) {
                 if !visibility.showsPlayer && artworkIsHovered {
                     HStack(spacing: 7) {
@@ -1145,6 +1147,22 @@ struct FileImportHighlight: View {
                     .blur(radius: 5)
             }
             .clipped()
+            .opacity(isTargeted ? 1 : 0)
+            .animation(.easeInOut(duration: 0.15), value: isTargeted)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The cover's and control bar's part of the drop feedback: they take the
+/// drop too, so a window file drag shades them (`Theme.fileDropShade`)
+/// while the list or lanes take the accent highlight.
+struct FileDropShade: View {
+    var color: Color = Theme.fileDropShade
+    @Environment(\.isFileDropTargeted) private var isTargeted
+
+    var body: some View {
+        color
             .opacity(isTargeted ? 1 : 0)
             .animation(.easeInOut(duration: 0.15), value: isTargeted)
             .allowsHitTesting(false)

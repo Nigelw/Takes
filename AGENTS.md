@@ -303,7 +303,11 @@ These are here to prevent parallel implementations and subtle regressions:
   independent: they go through the shared import path, which merges into a
   metadata match or appends.
 - An external file drag over the window lights the visible list or waveform
-  area with the v2.9.0 wash and edge glow. Compare's lane list has its own
+  area with the v2.9.0 wash and edge glow, and shades the cover and the
+  control bar, buttons included (`FileDropShade`, `Theme.fileDropShade`:
+  black 10%; the control bar's `Theme.controlBarFileDropShade` is 20% in
+  dark), driven by
+  the `isFileDropTargeted` environment value. Compare's lane list has its own
   drop target, which combines its hover state with the window target's.
   The window-wide `onDrop` takes no `contentShape`: a full-window content
   shape made AppKit treat clicks in the titlebar band as window drags, so

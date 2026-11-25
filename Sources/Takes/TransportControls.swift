@@ -656,12 +656,16 @@ struct ControlBarLayout<Leading: View, Center: View, Trailing: View, Readout: Vi
             // The control bar doubles as the titlebar: clicks on empty bar
             // space drag the window.
             .background(WindowDragArea())
+            // A window file drag shades the whole bar, buttons included.
+            .overlay(FileDropShade(color: Theme.controlBarFileDropShade))
         }
         .fixedSize(horizontal: false, vertical: true)
     }
 }
 
 extension EnvironmentValues {
+    /// An external file drag is over the main window.
+    @Entry var isFileDropTargeted = false
     @Entry var controlBarTopPadding: CGFloat = TakesWindowPolicy.controlBarTopPaddingBelowArtwork
 }
 

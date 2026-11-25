@@ -174,6 +174,18 @@ enum Theme {
     /// of the work and this stays close to invisible.
     static let controlBarLift = whiteAlpha(light: 0.25, dark: 0.055)
 
+    /// File-drop shade for the regions around the drop highlight (the cover
+    /// and the control bar): black 10% in both appearances, so they read as
+    /// part of the drop target without competing with the list's or lanes'
+    /// accent glow.
+    static let fileDropShade = Color.black.opacity(0.10)
+
+    /// The control bar's file-drop shade: 20% in dark, where 10% barely
+    /// shows against the dark bar; 10% in light, like the cover.
+    static let controlBarFileDropShade = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.20 : 0.10)
+    })
+
     /// Faint dark scrim over the tracks/timeline area, recessing it beneath
     /// the control bar. Laid over the shared window material rather than
     /// replacing it, so both regions keep the same desktop-tinted vibrancy.
