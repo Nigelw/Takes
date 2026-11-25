@@ -472,6 +472,16 @@ extension WorkspaceVisibility.Region {
         }
         return "\(isVisible ? "Hide" : "Show") \(name)"
     }
+
+    /// The View menu's shortcut: ⌥⌘A, ⌥⌘P, ⌥⌘L.
+    var visibilityShortcut: KeyboardShortcut {
+        let key: KeyEquivalent = switch self {
+        case .artwork: "a"
+        case .player: "p"
+        case .playlist: "l"
+        }
+        return KeyboardShortcut(key, modifiers: [.command, .option])
+    }
 }
 
 private struct WorkspaceVisibilityButtonStyle: ButtonStyle {

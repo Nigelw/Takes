@@ -55,7 +55,7 @@ always available to explicit play.
   and offset. Organization operations carry it with the version or item:
   moving a version to another track keeps its flag; Group as Versions keeps
   each version's flag and the destination track's flag (the absorbed
-  tracks' flags are dropped with the tracks); Separate Versions gives each
+  tracks' flags are dropped with the tracks); Ungroup Versions gives each
   new track `isRejected = false` and keeps each version's flag.
 - Comparison capture (`PlaylistPlaybackBoundary.capture`) no longer writes a
   key version. Leaving compare still keeps the audible version playing
@@ -94,9 +94,10 @@ always available to explicit play.
   row targets the track only, not its versions (unlike Move Up/Down, where a
   selected track covers its child rows). Selected version rows target those
   versions.
-- Where it appears: the Playlist menu, the row context menu, and the bottom
+- Where it appears: the Playlist menu, the row context menu, the bottom
   bar's `…` pull-down (built by `playlistOrganizationMenuItems`, so all three
-  stay in step). Enablement comes from `PlaylistOrganizationAvailability`:
+  stay in step), and the Reject button in both bottom bars
+  (`BottomBarRejectButton`; in compare it targets the active lane). Enablement comes from `PlaylistOrganizationAvailability`:
   enabled when there is at least one target.
 - Shortcut: see §8, question 1.
 - Undo: each Reject / Clear Rejection is one undoable organization edit

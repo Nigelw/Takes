@@ -1190,7 +1190,7 @@ private struct PlaybackCommands: Commands {
             Button("Auto-Align Tracks") {
                 controller.autoAlignTracks()
             }
-            .keyboardShortcut("a", modifiers: [.command, .option])
+            .keyboardShortcut("a", modifiers: [.command, .shift])
             .disabled(!isComparison || !controller.session.hasMultipleTracks || controller.isAligning)
 
             Menu("Nudge Track") {
@@ -1234,7 +1234,7 @@ private struct ViewCommands: Commands {
                 Button(region.visibilityAction(isVisible: mainWindowCommandState?.visibility[region] ?? true)) {
                     mainWindowCommandState?.toggleVisibility(region)
                 }
-                .keyboardShortcut(region == .artwork ? KeyboardShortcut("a", modifiers: [.command, .shift]) : nil)
+                .keyboardShortcut(region.visibilityShortcut)
                 .disabled(mainWindowCommandState?.visibility.canToggle(region) != true)
             }
             Divider()

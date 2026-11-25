@@ -867,7 +867,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             organize.append(ClosureMenuItem("Group as Versions", enabled: context.canGroup) { context.group() })
         }
         if context.canSeparate {
-            organize.append(ClosureMenuItem("Separate Versions") { context.separate() })
+            organize.append(ClosureMenuItem("Ungroup Versions") { context.separate() })
         }
         if itemIDs.isEmpty, !versionIDs.isEmpty {
             let owners = Set(versionIDs.compactMap { ownerByVersionID[$0] })

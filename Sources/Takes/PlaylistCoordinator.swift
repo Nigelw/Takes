@@ -848,7 +848,7 @@ final class PlaylistCoordinator {
 
     func separateVersions(_ ids: [UUID], placement: SeparationPlacement, undoManager: UndoManager?) -> [UUID]? {
         var created: [UUID] = []
-        let succeeded = mutateWorkspace(beforeAction: ids.count == 1 ? "Separate Version" : "Separate Versions",
+        let succeeded = mutateWorkspace(beforeAction: ids.count == 1 ? "Ungroup Version" : "Ungroup Versions",
                                         undoManager: undoManager) { candidate in
             let selected = Set(ids)
             guard selected.count == ids.count else { throw PlaylistWorkspaceError.invalidItemOrder }
@@ -1055,7 +1055,7 @@ final class PlaylistCoordinator {
         undoManager: UndoManager? = nil
     ) -> PlaylistItem.ID? {
         var result: PlaylistItem.ID?
-        let succeeded = mutateWorkspace(beforeAction: "Separate Version", undoManager: undoManager) {
+        let succeeded = mutateWorkspace(beforeAction: "Ungroup Version", undoManager: undoManager) {
             result = try $0.separateVersion(versionID, from: itemID)
         }
         return succeeded ? result : nil

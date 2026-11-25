@@ -70,7 +70,8 @@ Key ownership:
   window drag/background helpers, and the Debug Appearance Tuner.
 - `BottomBar.swift`: the A2 bottom bar both modes share (A2 §7):
   `BottomBarLayout` and `BottomBarMetrics`, the +/− segmented control
-  (`BottomBarAddRemoveControl`), the playlist bar (`PlaylistBottomBar`, its
+  (`BottomBarAddRemoveControl`), the Reject button
+  (`BottomBarRejectButton`), the playlist bar (`PlaylistBottomBar`, its
   `…` pull-down and summary text, `PlaylistSummaryText`), the compare bar
   (`CompareBottomBar`: `CompareAlignButton` with the "Couldn't Align Tracks"
   popover and `AlignmentOfferText`, and the zoom leaf `CompareZoomControl`),
@@ -95,7 +96,8 @@ Key ownership:
   including Reject / Clear Rejection's targets, `rejectionTargets`); the
   shared organization menu builder (`playlistOrganizationMenuItems`) and
   focused validation (`PlaylistOrganizationAvailability`) for the Playlist
-  menu and the bottom bar's `…` pull-down; and `PlaylistRejectionCommand`
+  menu and the bottom bar's `…` pull-down (Move Up/Down, Group/Ungroup
+  Versions, Reject, in that order); and `PlaylistRejectionCommand`
   (the command's title rule and its R key).
 - `PlaylistOutlineView.swift`: the playlist table — an `NSOutlineView` wrapped
   in `NSViewRepresentable` (items with versions as children), the A2 rows
@@ -287,6 +289,9 @@ These are here to prevent parallel implementations and subtle regressions:
 - An external file drag over the window lights the visible list or waveform
   area with the v2.9.0 wash and edge glow. Compare's lane list has its own
   drop target, which combines its hover state with the window target's.
+  The window-wide `onDrop` takes no `contentShape`: a full-window content
+  shape made AppKit treat clicks in the titlebar band as window drags, so
+  the titlebar toggles stopped responding.
   The empty playlist and timeline share a clickable badge that darkens and
   swaps its drag prompt for a click prompt on mouse hover. A file drag tints
   the badge and restores the drag prompt.
@@ -301,7 +306,7 @@ These are here to prevent parallel implementations and subtle regressions:
   a Blind Listening move changes only the displayed order. Both animations
   respect Reduce Motion.
   Group as Versions uses the first selected track as the destination.
-  Separate Versions splits all versions of each selected track and any
+  Ungroup Versions splits all versions of each selected track and any
   individually selected versions into standalone tracks, then selects the
   resulting track rows.
 - The playlist table (A2 §6) is one full-width column with no header.
@@ -346,7 +351,7 @@ These are here to prevent parallel implementations and subtle regressions:
   if that item is playing, otherwise on the key version.
 - Culling ([docs/culling-spec.md](docs/culling-spec.md)): tracks and
   versions carry independent `isRejected` flags, saved by stable ID and
-  carried by every organization operation (Separate Versions starts the new
+  carried by every organization operation (Ungroup Versions starts the new
   track unrejected). Reject / Clear Rejection is one toggle
   (`PlaylistCoordinator.toggleRejection`, one undoable organization edit
   rebased by ID): it reads Clear Rejection only when every target is
@@ -354,9 +359,9 @@ These are here to prevent parallel implementations and subtle regressions:
   (`PlaylistCommandContext.rejectionTargets`), where a selected item row
   targets the track only and version rows their versions; in compare the
   active lane, or the right-clicked lane from the strip menu. It appears in
-  the Playlist menu, the row context menu, the bottom bar's `…` (one builder)
-  and the lane strip's menu. ⌘R runs it in both modes through the key
-  monitor (`PlaylistRejectionCommand.keyCode`). Rejecting never moves rows, never
+  the Playlist menu, the row context menu, the bottom bar's `…` (one builder),
+  both bottom bars' Reject button and the lane strip's menu. ⌘R runs it
+  in both modes through the key monitor (`PlaylistRejectionCommand.keyCode`). Rejecting never moves rows, never
   changes the selection and never refreshes the audio runtime
   (`runtimeRequiresRefresh` ignores the flags): the current track or version
   keeps playing, and compare's lanes take the flag in place
@@ -384,7 +389,8 @@ These are here to prevent parallel implementations and subtle regressions:
   (`PlaylistItemCellView.Content.showsSpeakerOnArtwork`); collapsing moves it
   back. The outline gets the current version (`currentVersionID`) for this.
 - The playlist has no header bar. Its bottom bar (A2 §7) has Add Files…
-  (⌘O's dialog) and Remove Selected (Delete's selection-aware removal), the
+  (⌘O's dialog) and Remove Selected (Delete's selection-aware removal),
+  Reject (`BottomBarRejectButton`, the menu's targets), the
   `…` pull-down with the Playlist menu's organization commands, and the
   `N tracks · m:ss` summary (one track per item, at its key version's
   duration; rejected tracks are left out of the count and the total). The File
@@ -432,10 +438,12 @@ These are here to prevent parallel implementations and subtle regressions:
   Jump to Beginning / End, plain arrows skip, Edit ▸ Deselect (⌘D) clears
   the loop, and Esc leaves. Clicking a lane and the number hotkeys select
   rejected lanes too. Both modes use ⌘R for Reject / Clear Rejection,
-  ⌥⌘R for Change Repeat Mode (Playback ▸ Repeat), and ⇧⌘A for Show/Hide
-  Artwork (`MainWindowCommandState.toggleVisibility`, the titlebar toggle's
-  animated path). Playlist only: ⌘] Compare Versions (`PlaylistCommandContext.compare`,
-  one multi-version item), ⌥⌘S Shuffle, ⌘G / ⇧⌘G Group / Separate Versions,
+  ⌥⌘R for Change Repeat Mode (Playback ▸ Repeat), and ⌥⌘A / ⌥⌘P / ⌥⌘L
+  for Show/Hide Artwork, Player and Playlist
+  (`WorkspaceVisibility.Region.visibilityShortcut`, through
+  `MainWindowCommandState.toggleVisibility`, the titlebar toggles' path).
+  Compare's Auto-Align Tracks is ⇧⌘A. Playlist only: ⌘] Compare Versions (`PlaylistCommandContext.compare`,
+  one multi-version item), ⌥⌘S Shuffle, ⌘G / ⇧⌘G Group / Ungroup Versions,
   File ▸ Locate File… (`locateVersionID`). Both modes: ⌥⌘↑ / ⌥⌘↓
   Move Up / Down.
 - One main window serves both modes (A2). With the player and lower region
@@ -637,8 +645,8 @@ These are here to prevent parallel implementations and subtle regressions:
   it is. Rejecting the active lane doesn't switch away from it.
 - Compare has no header. Its bottom bar (A2 §7) has Add Version… (⌘O's
   dialog, importing into the captured item), Remove Active Version (File ▸
-  Remove Version, Delete), Align (⌥⌘A) and zoom. Remove All Versions is
-  ⌘⌫ only. Align shows the quick pass's spinner, tempo analysis's progress
+  Remove Version, Delete), Align (⇧⌘A), Reject (the active lane) and
+  zoom. Remove All Versions is ⌘⌫ only. Align shows the quick pass's spinner, tempo analysis's progress
   ring and the two-second outcome flash, and anchors the "Couldn't Align
   Tracks → Analyze Further" popover; in Blind Listening Mode the popover
   lists `Track n`, never file names.

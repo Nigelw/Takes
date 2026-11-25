@@ -117,6 +117,22 @@ enum RejectedMark {
         return image
     }
 
+    /// The mark as a template image, for controls that tint their glyph
+    /// (the bottom bars' Reject button).
+    static func templateImage(size: CGFloat) -> NSImage {
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: true) { rect in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            let halves = halves(size: size, in: rect)
+            context.setFillColor(NSColor.black.cgColor)
+            context.addPath(halves.left)
+            context.addPath(halves.right)
+            context.fillPath()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
     /// The badge's ring as one outline: both halves widened by `ring` with
     /// mitred joins, so the ring stays an even offset of the heart, keeps the
     /// notch's V and a pointed tip, and covers the crack. Cut out of the
