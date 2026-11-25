@@ -365,6 +365,7 @@ struct PlaylistView: View {
                     metadataFields: settings.playlistMetadataFields,
                     fileIssues: coordinator.fileIssues,
                     currentItemID: coordinator.currentItemID,
+                    currentVersionID: coordinator.currentVersionID,
                     isPlaying: coordinator.isPlaying,
                     isActive: coordinator.mode == .playlist,
                     moveRevision: coordinator.rowMoveRevision,

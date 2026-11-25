@@ -129,7 +129,7 @@ struct SessionTests {
         let cell = PlaylistVersionCellView()
 
         light.performAsCurrentDrawingAppearance {
-            cell.configure(title: "Alternate Mix", format: "FLAC", duration: "2:41", mark: .none, toolTip: "")
+            cell.configure(title: "Alternate Mix", format: "FLAC", duration: "2:41", marks: .none, toolTip: "")
         }
         let titleColor = try #require(cell.textField?.textColor)
 
@@ -3000,10 +3000,102 @@ struct SessionTests {
         #expect(thumbnail.toolTip == nil)
 
         let version = PlaylistVersionCellView()
-        version.configure(title: "Missing", format: "WAV", duration: "0:35", mark: .warning(message), toolTip: "")
+        version.configure(title: "Missing", format: "WAV", duration: "0:35", marks: .init(warning: message), toolTip: "")
         #expect(version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
-        version.configure(title: "Available", format: "WAV", duration: "0:35", mark: .none, toolTip: "")
+        version.configure(title: "Available", format: "WAV", duration: "0:35", marks: .none, toolTip: "")
         #expect(!version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
+    }
+
+    // MARK: Culling visuals
+
+    @MainActor
+    @Test
+    func rejectedAndMissingRowsDimAlikeAndNowPlayingTintReplacesTheDimming() {
+        typealias S = PlaylistRowTextStyle
+        let plain = S.resolve(emphasized: false, nowPlaying: false, dimmed: false)
+        #expect(plain.title == .labelColor && plain.detail == .secondaryLabelColor)
+        let dimmed = S.resolve(emphasized: false, nowPlaying: false, dimmed: true)
+        #expect(dimmed.title == PlaylistRowPalette.dimmedTitle && dimmed.detail == PlaylistRowPalette.dimmedDetail)
+        // Rejected and missing are one dimmed state on version rows too.
+        #expect(PlaylistVersionCellView.Marks(isRejected: true).isDimmed)
+        #expect(PlaylistVersionCellView.Marks(warning: "Missing").isDimmed)
+        // Now playing tints title and details, and wins over the dimming.
+        let playing = S.resolve(emphasized: false, nowPlaying: true, dimmed: true)
+        #expect(playing.title == PlaylistRowPalette.nowPlayingTitle && playing.detail == PlaylistRowPalette.nowPlayingDetail)
+        // Selected rejected rows keep the selection colours at 65%.
+        let selected = S.resolve(emphasized: true, nowPlaying: false, dimmed: true)
+        #expect(selected.title.alphaComponent == PlaylistRowPalette.selectedDimmedTextOpacity)
+        #expect(abs(selected.detail.alphaComponent - 0.75 * PlaylistRowPalette.selectedDimmedTextOpacity) < 0.001)
+        #expect(S.resolve(emphasized: true, nowPlaying: true, dimmed: false).title.alphaComponent == 1)
+    }
+
+    @MainActor
+    @Test
+    func versionMarkColumnShowsSpeakerWarningAndRejectionSideBySide() {
+        let cell = PlaylistVersionCellView()
+        cell.frame = NSRect(x: 0, y: 0, width: 360, height: PlaylistRowMetrics.versionHeight)
+        cell.configure(title: "Take 9", format: "WAV", duration: "4:12",
+                       marks: .init(warning: "Missing", isRejected: true), toolTip: "")
+        cell.layoutSubtreeIfNeeded()
+        var frames = cell.visibleMarkFrames
+        #expect(frames.count == 2)
+        #expect(frames[0].maxX + PlaylistVersionCellView.markSpacing == frames[1].minX)
+        // Centred together in the 34 pt column under the thumbnail.
+        let column = PlaylistRowMetrics.thumbnailX + PlaylistRowMetrics.thumbnailSide / 2
+        #expect(abs((frames[0].minX + frames[1].maxX) / 2 - column) < 0.5)
+        #expect(cell.accessibilityValue() as? String == "Rejected")
+
+        // A playing rejected version shows the speaker and the × together.
+        cell.configure(title: "Take 1", format: "MP3", duration: "2:34",
+                       marks: .init(isRejected: true, nowPlaying: .playing), toolTip: "")
+        cell.layoutSubtreeIfNeeded()
+        frames = cell.visibleMarkFrames
+        #expect(frames.count == 2)
+        #expect(cell.textField?.textColor == PlaylistRowPalette.nowPlayingTitle)
+
+        cell.configure(title: "Take 2", format: "FLAC", duration: "3:28", marks: .none, toolTip: "")
+        cell.layoutSubtreeIfNeeded()
+        #expect(cell.visibleMarkFrames.isEmpty)
+        #expect(cell.accessibilityValue() == nil)
+    }
+
+    @MainActor
+    @Test
+    func rejectedThumbnailGoesGreyWithABadgeThatStaysInsideTheRow() {
+        let thumbnail = PlaylistThumbnailView(frame: .zero)
+        thumbnail.configure(image: nil, isStacked: true, status: .none, isDimmed: true, isRejected: true)
+        #expect(thumbnail.isDimmed)
+        #expect(thumbnail.showsRejectionBadge)
+        // A playing rejected track: not dimmed, still badged.
+        thumbnail.configure(image: nil, isStacked: true, status: .playing, isDimmed: false, isRejected: true)
+        #expect(!thumbnail.isDimmed)
+        #expect(thumbnail.showsRejectionBadge)
+        // Missing dims without a badge.
+        thumbnail.configure(image: nil, isStacked: false, status: .warning("Missing"), isDimmed: true, isRejected: false)
+        #expect(thumbnail.isDimmed)
+        #expect(!thumbnail.showsRejectionBadge)
+
+        typealias M = PlaylistRowMetrics
+        typealias T = PlaylistThumbnailView
+        let thumbnailTop = (M.itemHeight - M.thumbnailSide) / 2 - T.stackExtent
+        let ringBottom = thumbnailTop + T.badgeFrame.maxY + T.badgeRing
+        #expect(T.badgeFrame.width == 14)
+        #expect(ringBottom <= M.itemHeight)
+        #expect(ringBottom > thumbnailTop + T.stackExtent + M.thumbnailSide)
+    }
+
+    @Test
+    func expandedNowPlayingTrackMovesTheSpeakerToItsVersionRow() {
+        var content = PlaylistItemCellView.Content(
+            title: "Strawberry Fields", metadata: "", duration: "3:28", hasVersions: true, isExpanded: false,
+            nowPlaying: .playing, warning: nil, isDimmed: false, thumbnail: nil
+        )
+        #expect(content.showsSpeakerOnArtwork)
+        content.isExpanded = true
+        #expect(!content.showsSpeakerOnArtwork)
+        // A single-version track has no version rows, so it keeps the speaker.
+        content.hasVersions = false
+        #expect(content.showsSpeakerOnArtwork)
     }
 
     // MARK: Record placeholder

@@ -21,6 +21,9 @@ struct PlaylistOutline: NSViewRepresentable {
     let metadataFields: Set<TrackMetadataField>
     let fileIssues: [PlaylistVersion.ID: PlaylistCoordinator.FileIssue]
     let currentItemID: UUID?
+    /// The playing (or current) version: an expanded track shows the
+    /// speaker on that version's row instead of its artwork (culling §9.1).
+    let currentVersionID: UUID?
     let isPlaying: Bool
     let isActive: Bool
     let moveRevision: Int
@@ -42,7 +45,8 @@ struct PlaylistOutline: NSViewRepresentable {
         context.coordinator.undoManager = undoManager
         context.coordinator.showsDebugLabels = showsDebugLabels
         context.coordinator.update(
-            items: items, fileIssues: fileIssues, currentItemID: currentItemID, isPlaying: isPlaying, isActive: isActive,
+            items: items, fileIssues: fileIssues, currentItemID: currentItemID, currentVersionID: currentVersionID,
+            isPlaying: isPlaying, isActive: isActive,
             moveRevision: moveRevision, reduceMotion: reduceMotion, metadataFields: metadataFields
         )
     }
@@ -107,6 +111,9 @@ enum PlaylistRowMetrics {
 }
 
 enum PlaylistRowText {
+    /// Added to a rejected row's accessibility value (culling §4.3).
+    static let rejectedAccessibilityValue = "Rejected"
+
     /// `2:41`, or `1:02:41` past an hour — no leading zero on the first field.
     static func duration(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite else { return "" }
@@ -205,6 +212,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private var metadataFields: Set<TrackMetadataField> = []
     private var nodes: [PlaylistRowID: PlaylistNode] = [:]
     private var currentItemID: UUID?
+    private var currentVersionID: UUID?
     private var isPlaying = false
     private(set) var isActive = false
     private var hasLoaded = false
@@ -326,12 +334,13 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     func update(
         items newItems: [PlaylistItem], fileIssues newIssues: [PlaylistVersion.ID: PlaylistCoordinator.FileIssue],
-        currentItemID: UUID?, isPlaying: Bool, isActive: Bool,
+        currentItemID: UUID?, currentVersionID: UUID?, isPlaying: Bool, isActive: Bool,
         moveRevision: Int, reduceMotion: Bool, metadataFields: Set<TrackMetadataField>
     ) {
         let structureChanged = !hasLoaded || Self.structure(newItems) != Self.structure(items)
         let contentChanged = newItems != items || newIssues != fileIssues
-            || currentItemID != self.currentItemID || isPlaying != self.isPlaying
+            || currentItemID != self.currentItemID || currentVersionID != self.currentVersionID
+            || isPlaying != self.isPlaying
             || metadataFields != self.metadataFields
         let becameActive = isActive && !self.isActive
         let previousItems = items
@@ -344,6 +353,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             fileIssues = newIssues
         }
         self.currentItemID = currentItemID
+        self.currentVersionID = currentVersionID
         self.isPlaying = isPlaying
         self.isActive = isActive
         itemsByID = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
@@ -582,7 +592,12 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     }
 
     private func configureRowView(_ rowView: PlaylistRowView, node: PlaylistNode) {
-        rowView.isNowPlaying = node.itemID != nil && node.itemID == currentItemID
+        let isRejected: Bool
+        switch node.rowID {
+        case let .item(id): isRejected = itemsByID[id]?.isRejected == true
+        case let .version(id): isRejected = version(id)?.version.isRejected == true
+        }
+        rowView.setAccessibilityValue(isRejected ? PlaylistRowText.rejectedAccessibilityValue : nil)
         rowView.alphaValue = draggedNodes.contains(node) ? 0.3 : 1
         rowView.debugLabel = showsDebugLabels ? (node.versionID == nil ? "Item Row" : "Version Row") : nil
     }
@@ -593,6 +608,9 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         let versionURL = version.flatMap { availableURL(for: $0) }
         let warnings = item.versions.compactMap { fileWarning(for: $0) }
         let node = node(.item(id))
+        // Rejected and missing dim alike; only the track's own flag and its
+        // key version's file count. A track whose every version is rejected
+        // shows nothing extra here: its version rows carry that.
         cell.configure(PlaylistItemCellView.Content(
             title: PlaylistRowText.itemTitle(item),
             metadata: PlaylistRowText.metadataLine(version?.metadata, fields: metadataFields),
@@ -601,7 +619,8 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             isExpanded: outlineView.isItemExpanded(node),
             nowPlaying: currentItemID == id ? (isPlaying ? .playing : .paused) : nil,
             warning: warnings.isEmpty ? nil : warnings.joined(separator: "\n"),
-            isDimmed: version.flatMap { fileWarning(for: $0) } != nil,
+            isDimmed: item.isRejected || version.flatMap { fileWarning(for: $0) } != nil,
+            isRejected: item.isRejected,
             thumbnail: thumbnailImage(version: version, url: versionURL)
         ))
         cell.onDisclosure = { [weak self, weak node] in
@@ -616,12 +635,16 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     private func configureVersion(_ cell: PlaylistVersionCellView, versionID id: UUID) {
         guard let (item, version) = version(id) else { return }
-        let state = fileWarning(for: version).map(PlaylistVersionCellView.Mark.warning) ?? .none
+        let isCurrent = currentItemID == item.id && currentVersionID == id
         cell.configure(
             title: PlaylistRowText.versionName(version),
             format: PlaylistRowText.formatName(version.metadata),
             duration: PlaylistRowText.duration(version.metadata.duration),
-            mark: state,
+            marks: PlaylistVersionCellView.Marks(
+                warning: fileWarning(for: version),
+                isRejected: version.isRejected,
+                nowPlaying: isCurrent ? (isPlaying ? .playing : .paused) : nil
+            ),
             toolTip: [version.file.storedURL.lastPathComponent, PlaylistRowText.format(version.metadata)]
                 .filter { !$0.isEmpty }.joined(separator: "\n")
         )
@@ -1138,8 +1161,9 @@ final class PlaylistNSOutlineView: NSOutlineView {
 }
 
 /// Draws every row background inside the 10 pt edge inset with a 6 pt
-/// radius (A2 §3, §6): selection, the now-playing tint, hover, and the
-/// drop-on-item ring. Tracks hover for the Compare pill and key-version checkbox.
+/// radius (A2 §3, §6): selection, hover, and the drop-on-item ring. Now
+/// playing draws no background (culling §9.1): the cells tint their text and
+/// speaker instead. Tracks hover for the Compare pill.
 final class PlaylistRowView: NSTableRowView {
     private var hoverArea: NSTrackingArea?
 
@@ -1149,10 +1173,6 @@ final class PlaylistRowView: NSTableRowView {
             needsDisplay = true
             (view(atColumn: 0) as? PlaylistItemCellView)?.isHovered = isHovered
         }
-    }
-
-    var isNowPlaying = false {
-        didSet { if isNowPlaying != oldValue { needsDisplay = true } }
     }
 
     /// Help ▸ Show Component Names badge, drawn over the row's cells.
@@ -1192,10 +1212,6 @@ final class PlaylistRowView: NSTableRowView {
 
     override func drawBackground(in dirtyRect: NSRect) {
         guard !isSelected else { return }
-        if isNowPlaying {
-            PlaylistRowPalette.nowPlayingFill.setFill()
-            highlightPath.fill()
-        }
         if isHovered {
             PlaylistRowPalette.hoverFill.setFill()
             highlightPath.fill()
@@ -1222,7 +1238,6 @@ final class PlaylistRowView: NSTableRowView {
     override func prepareForReuse() {
         super.prepareForReuse()
         isHovered = false
-        isNowPlaying = false
         alphaValue = 1
     }
 
@@ -1278,6 +1293,54 @@ private extension NSTextField {
     }
 }
 
+/// A row's text colours for its state (culling §9.1). Selection wins, with
+/// a dimmed row's text at `selectedDimmedTextOpacity`; then now playing,
+/// whose tint replaces the dimming; then rejected or missing.
+struct PlaylistRowTextStyle: Equatable {
+    let title: NSColor
+    let detail: NSColor
+
+    static func resolve(emphasized: Bool, nowPlaying: Bool, dimmed: Bool) -> PlaylistRowTextStyle {
+        if emphasized {
+            let text = NSColor.alternateSelectedControlTextColor
+            let opacity = dimmed ? PlaylistRowPalette.selectedDimmedTextOpacity : 1
+            return .init(title: text.withAlphaComponent(opacity), detail: text.withAlphaComponent(0.75 * opacity))
+        }
+        if nowPlaying { return .init(title: PlaylistRowPalette.nowPlayingTitle, detail: PlaylistRowPalette.nowPlayingDetail) }
+        if dimmed { return .init(title: PlaylistRowPalette.dimmedTitle, detail: PlaylistRowPalette.dimmedDetail) }
+        // System label colours stay dynamic across appearance changes.
+        return .init(title: .labelColor, detail: .secondaryLabelColor)
+    }
+}
+
+/// The rejection indicator (culling §9.1): a filled circle whose × is
+/// knocked out, so whatever is behind it (the row, its selection) shows
+/// through. Drawn when displayed, so the dynamic colour follows the
+/// appearance.
+enum RejectionGlyph {
+    static func image(size: CGFloat) -> NSImage {
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            PlaylistRowPalette.rejectionBadge.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            // The × on the 24-unit grid of the design: 8…16, 3 units wide.
+            let unit = rect.width / 24
+            let cross = NSBezierPath()
+            cross.move(to: NSPoint(x: 8 * unit, y: 8 * unit))
+            cross.line(to: NSPoint(x: 16 * unit, y: 16 * unit))
+            cross.move(to: NSPoint(x: 16 * unit, y: 8 * unit))
+            cross.line(to: NSPoint(x: 8 * unit, y: 16 * unit))
+            cross.lineWidth = 3 * unit
+            cross.lineCapStyle = .round
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            NSColor.black.setStroke()
+            cross.stroke()
+            return true
+        }
+        image.accessibilityDescription = PlaylistRowText.rejectedAccessibilityValue
+        return image
+    }
+}
+
 private enum PlaylistGlyph {
     static func symbol(_ name: String, size: CGFloat, weight: NSFont.Weight = .regular, label: String? = nil) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: label)?
@@ -1309,9 +1372,16 @@ final class PlaylistItemCellView: NSTableCellView {
         var nowPlaying: NowPlaying?
         /// Playback errors for versions of this item.
         var warning: String?
-        /// The playback version's file is unavailable.
+        /// Rejected, or the key version's file is unavailable: the two dim
+        /// alike (culling §4.3).
         var isDimmed: Bool
+        /// The track is rejected: the × badge on its artwork.
+        var isRejected: Bool = false
         var thumbnail: NSImage?
+
+        /// The speaker sits on the artwork unless the track is expanded,
+        /// when it moves to the playing version's row (culling §9.1).
+        var showsSpeakerOnArtwork: Bool { !(hasVersions && isExpanded) }
     }
 
     private let titleField = NSTextField.playlistLabel(font: .systemFont(ofSize: 13, weight: .semibold), truncation: .byTruncatingMiddle)
@@ -1326,7 +1396,7 @@ final class PlaylistItemCellView: NSTableCellView {
     private let metadataHeight: CGFloat
     private var content = Content(
         title: "", metadata: "", duration: "", hasVersions: false, isExpanded: false,
-        nowPlaying: nil, warning: nil, isDimmed: false, thumbnail: nil
+        nowPlaying: nil, warning: nil, isDimmed: false, isRejected: false, thumbnail: nil
     )
 
     var onDisclosure: (() -> Void)?
@@ -1369,13 +1439,24 @@ final class PlaylistItemCellView: NSTableCellView {
         durationField.stringValue = content.duration
         disclosure.isHidden = !content.hasVersions
         disclosure.setExpanded(content.isExpanded, animated: false)
-        thumbnail.configure(
-            image: content.thumbnail, isStacked: content.hasVersions,
-            status: content.warning.map { .warning($0) } ?? content.nowPlaying.map { $0 == .playing ? .playing : .paused } ?? .none
-        )
+        configureThumbnail()
+        setAccessibilityValue(content.isRejected ? PlaylistRowText.rejectedAccessibilityValue : nil)
         updatePill()
         applyStyle()
         needsLayout = true
+    }
+
+    private func configureThumbnail() {
+        let speaker: PlaylistThumbnailView.Status? = content.showsSpeakerOnArtwork
+            ? content.nowPlaying.map { $0 == .playing ? .playing : .paused } : nil
+        thumbnail.configure(
+            image: content.thumbnail, isStacked: content.hasVersions,
+            status: content.warning.map { .warning($0) } ?? speaker ?? .none,
+            // A playing rejected track looks like any playing track, plus the
+            // badge: the tint replaces the dimming.
+            isDimmed: content.isDimmed && content.nowPlaying == nil,
+            isRejected: content.isRejected
+        )
     }
 
     func setThumbnail(_ image: NSImage?) {
@@ -1384,8 +1465,12 @@ final class PlaylistItemCellView: NSTableCellView {
     }
 
     func setExpanded(_ expanded: Bool, animated: Bool) {
+        let changed = content.isExpanded != expanded
         content.isExpanded = expanded
         disclosure.setExpanded(expanded, animated: animated)
+        // Expanding moves the speaker to the playing version's row;
+        // collapsing brings it back to the artwork.
+        if changed { configureThumbnail() }
     }
 
     private func updatePill() {
@@ -1399,17 +1484,14 @@ final class PlaylistItemCellView: NSTableCellView {
 
     private func applyStyle() {
         let emphasized = backgroundStyle == .emphasized
-        let selectedText = NSColor.alternateSelectedControlTextColor
-        if emphasized {
-            titleField.textColor = content.isDimmed ? selectedText.withAlphaComponent(0.6) : selectedText
-            metadataField.textColor = selectedText.withAlphaComponent(0.75)
-            durationField.textColor = selectedText.withAlphaComponent(0.75)
-        } else {
-            titleField.textColor = content.isDimmed ? .tertiaryLabelColor
-                : content.nowPlaying != nil ? PlaylistRowPalette.nowPlayingTitle : .labelColor
-            metadataField.textColor = .secondaryLabelColor
-            durationField.textColor = .secondaryLabelColor
-        }
+        // An expanded playing track keeps its tinted text; only the speaker
+        // moves to the version row.
+        let style = PlaylistRowTextStyle.resolve(
+            emphasized: emphasized, nowPlaying: content.nowPlaying != nil, dimmed: content.isDimmed
+        )
+        titleField.textColor = style.title
+        metadataField.textColor = style.detail
+        durationField.textColor = style.detail
         disclosure.isEmphasized = emphasized
     }
 
@@ -1453,31 +1535,41 @@ final class PlaylistItemCellView: NSTableCellView {
     @objc private func comparePressed() { onCompare?() }
 }
 
-/// Version row, 30 pt (A2 §6): the mark column under the item's thumbnail
-/// (missing-file warning), the version's title tag, its format, and its
-/// duration. There is no key-version control: the key version is derived
-/// (`PlaylistItem.keyVersion`).
+/// Version row, 30 pt (A2 §6): the mark column under the item's thumbnail,
+/// the version's title tag, its format, and its duration. The mark column
+/// holds the now-playing speaker (an expanded track's playing version), the
+/// missing-file warning and the rejection ×, side by side when several
+/// apply (culling §9.1). There is no key-version control: the key version
+/// is derived (`PlaylistItem.keyVersion`), and rejecting happens through
+/// the commands, never a control on the row.
 final class PlaylistVersionCellView: NSTableCellView {
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("version")
 
-    enum Mark: Equatable {
-        case none, warning(String)
+    struct Marks: Equatable {
+        /// The load error, for a version whose file is unavailable.
+        var warning: String?
+        var isRejected = false
+        var nowPlaying: PlaylistItemCellView.NowPlaying?
 
-        var isWarning: Bool {
-            if case .warning = self { return true }
-            return false
-        }
+        static let none = Marks()
+        /// Rejected and missing dim alike.
+        var isDimmed: Bool { warning != nil || isRejected }
     }
+
+    static let markSize: CGFloat = 12
+    static let markSpacing: CGFloat = 3
 
     private let titleField = NSTextField.playlistLabel(font: .systemFont(ofSize: 12), truncation: .byTruncatingMiddle)
     private let formatField = NSTextField.playlistLabel(font: .systemFont(ofSize: 11), truncation: .byClipping)
     private let durationField = NSTextField.playlistLabel(
         font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular), truncation: .byClipping, alignment: .right
     )
-    private let markView = NSImageView()
+    private let speakerView = NSImageView()
+    private let warningView = NSImageView()
+    private let rejectionView = NSImageView()
     private let titleHeight: CGFloat
     private let detailHeight: CGFloat
-    private var mark = Mark.none
+    private(set) var marks = Marks.none
 
     override var isFlipped: Bool { true }
 
@@ -1489,29 +1581,39 @@ final class PlaylistVersionCellView: NSTableCellView {
         textField = titleField
         // As on item rows, the duration shows no expansion tooltip.
         durationField.allowsExpansionToolTips = false
-        markView.imageScaling = .scaleNone
-        for view in [markView, titleField, formatField, durationField] as [NSView] { addSubview(view) }
+        for view in [speakerView, warningView, rejectionView] {
+            view.imageScaling = .scaleNone
+        }
+        warningView.image = PlaylistGlyph.warning(size: Self.markSize)
+        rejectionView.image = RejectionGlyph.image(size: Self.markSize)
+        rejectionView.toolTip = PlaylistRowText.rejectedAccessibilityValue
+        for view in [speakerView, warningView, rejectionView, titleField, formatField, durationField] as [NSView] {
+            addSubview(view)
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(title: String, format: String, duration: String, mark: Mark, toolTip: String) {
+    func configure(title: String, format: String, duration: String, marks: Marks, toolTip: String) {
         titleField.stringValue = title
         titleField.toolTip = toolTip
         formatField.stringValue = format
         durationField.stringValue = duration
-        self.mark = mark
-        switch mark {
-        case .none:
-            markView.image = nil
-            markView.toolTip = nil
-        case let .warning(message):
-            markView.image = PlaylistGlyph.warning(size: 12)
-            markView.toolTip = message
+        self.marks = marks
+        if let nowPlaying = marks.nowPlaying {
+            let playing = nowPlaying == .playing
+            speakerView.image = PlaylistGlyph.symbol(
+                playing ? "speaker.wave.2.fill" : "speaker.fill", size: 11, label: playing ? "Playing" : "Current"
+            )
         }
-        markView.setAccessibilityElement(mark != .none)
-        markView.setAccessibilityHelp(mark.isWarning ? markView.toolTip : nil)
+        speakerView.isHidden = marks.nowPlaying == nil
+        warningView.isHidden = marks.warning == nil
+        warningView.toolTip = marks.warning
+        warningView.setAccessibilityHelp(marks.warning)
+        rejectionView.isHidden = !marks.isRejected
+        for view in [speakerView, warningView, rejectionView] { view.setAccessibilityElement(!view.isHidden) }
+        setAccessibilityValue(marks.isRejected ? PlaylistRowText.rejectedAccessibilityValue : nil)
         applyStyle()
         needsLayout = true
     }
@@ -1522,25 +1624,31 @@ final class PlaylistVersionCellView: NSTableCellView {
 
     private func applyStyle() {
         let emphasized = backgroundStyle == .emphasized
-        let selectedText = NSColor.alternateSelectedControlTextColor
-        let dimmed = mark.isWarning
-        if emphasized {
-            titleField.textColor = dimmed ? selectedText.withAlphaComponent(0.6) : selectedText
-            formatField.textColor = selectedText.withAlphaComponent(0.75)
-            durationField.textColor = selectedText.withAlphaComponent(0.75)
-        } else {
-            // Keep the system label color dynamic across appearance changes.
-            titleField.textColor = dimmed ? .tertiaryLabelColor : .labelColor
-            formatField.textColor = .secondaryLabelColor
-            durationField.textColor = .secondaryLabelColor
-        }
+        let style = PlaylistRowTextStyle.resolve(
+            emphasized: emphasized, nowPlaying: marks.nowPlaying != nil, dimmed: marks.isDimmed
+        )
+        titleField.textColor = style.title
+        formatField.textColor = style.detail
+        durationField.textColor = style.detail
+        speakerView.contentTintColor = emphasized ? .alternateSelectedControlTextColor : PlaylistRowPalette.nowPlayingTitle
+    }
+
+    /// The visible marks, centred together in the 34 pt column.
+    var visibleMarkFrames: [NSRect] {
+        [speakerView, warningView, rejectionView].filter { !$0.isHidden }.map(\.frame)
     }
 
     override func layout() {
         super.layout()
         typealias M = PlaylistRowMetrics
         let height = bounds.height
-        markView.frame = NSRect(x: M.thumbnailX, y: 0, width: M.thumbnailSide, height: height)
+        let marks = [speakerView, warningView, rejectionView].filter { !$0.isHidden }
+        let marksWidth = CGFloat(marks.count) * Self.markSize + CGFloat(max(marks.count - 1, 0)) * Self.markSpacing
+        var markX = M.thumbnailX + (M.thumbnailSide - marksWidth) / 2
+        for mark in marks {
+            mark.frame = NSRect(x: markX, y: (height - Self.markSize) / 2, width: Self.markSize, height: Self.markSize)
+            markX += Self.markSize + Self.markSpacing
+        }
         let trailing = M.trailingX(rowWidth: bounds.width)
         let durationWidth = max(M.durationMinimumWidth, durationField.fittingTextWidth)
         let durationX = trailing - durationWidth
@@ -1628,9 +1736,10 @@ final class PlaylistDisclosureButton: NSView {
 
 /// The item row's 34 pt thumbnail: artwork (or the shared record
 /// placeholder, `RecordPlaceholder.thumbnail`), the
-/// stacked-card edges of a multi-version item, and the now-playing or
-/// missing-file overlay. Laid out flipped; the stack edges extend
-/// `stackExtent` above and to the right of the tile.
+/// stacked-card edges of a multi-version item, the now-playing or
+/// missing-file overlay, and a rejected track's × badge. Laid out flipped;
+/// the stack edges extend `stackExtent` above and to the right of the tile.
+/// A dimmed track's tile goes greyscale at 45% (culling §9.1).
 final class PlaylistThumbnailView: NSView {
     enum Status: Equatable {
         case none, playing, paused
@@ -1640,6 +1749,15 @@ final class PlaylistThumbnailView: NSView {
     static let stackExtent: CGFloat = PlaylistRowMetrics.stackOffsets.last.map { $0 - 2 } ?? 0
     static var size: NSSize {
         NSSize(width: PlaylistRowMetrics.thumbnailSide + stackExtent, height: PlaylistRowMetrics.thumbnailSide + stackExtent)
+    }
+    /// The × badge: 14 pt, its centre 3 pt right of and 2 pt below the
+    /// tile's corner less its radius, so the badge and its 2 pt ring stay
+    /// inside the 46 pt row (culling §9.1).
+    static let badgeSide: CGFloat = 14
+    static let badgeRing: CGFloat = 2
+    static var badgeFrame: NSRect {
+        let side = PlaylistRowMetrics.thumbnailSide
+        return NSRect(x: side + 3 - badgeSide, y: stackExtent + side + 2 - badgeSide, width: badgeSide, height: badgeSide)
     }
 
     var image: NSImage? {
@@ -1656,13 +1774,19 @@ final class PlaylistThumbnailView: NSView {
 
     /// The image the tile is showing, for tests.
     var displayedImage: NSImage? { tile.contentsImage }
+    private(set) var isDimmed = false
+    var showsRejectionBadge: Bool { !badge.isHidden }
 
     private var status: Status = .none
+    /// The tile and its stack, masked to cut the badge's ring out of them so
+    /// the row (and its selection) shows around the badge.
+    private let cards = PlaylistCardsView()
     private let farEdge = PlaylistFillView()
     private let nearEdge = PlaylistFillView()
     private let tile = PlaylistFillView()
     private let scrim = PlaylistFillView()
     private let statusGlyph = NSImageView()
+    private let badge = NSImageView()
 
     override var isFlipped: Bool { true }
 
@@ -1683,19 +1807,33 @@ final class PlaylistThumbnailView: NSView {
         tile.frame = tileRect
         tile.fillColor = PlaylistRowPalette.thumbnailFill
         tile.cornerRadius = M.thumbnailRadius
-        scrim.frame = tile.bounds
-        tile.addSubview(scrim)
+        // Greyscale through a Core Image filter on the tile's layer, so the
+        // shared thumbnails are never re-rendered on the main thread.
+        tile.layerUsesCoreImageFilters = true
+        // The scrim and glyph sit over the tile, not in it, so dimming the
+        // tile never greys the warning triangle.
+        scrim.frame = tileRect
+        scrim.cornerRadius = M.thumbnailRadius
         statusGlyph.imageScaling = .scaleNone
-        statusGlyph.frame = tile.bounds
-        tile.addSubview(statusGlyph)
-        for view in [farEdge, nearEdge, tile] { addSubview(view) }
+        statusGlyph.frame = tileRect
+        cards.frame = bounds
+        for view in [farEdge, nearEdge, tile, scrim, statusGlyph] { cards.addSubview(view) }
+        badge.image = RejectionGlyph.image(size: Self.badgeSide)
+        badge.imageScaling = .scaleNone
+        badge.frame = Self.badgeFrame
+        badge.isHidden = true
+        cards.cutoutCircle = nil
+        addSubview(cards)
+        addSubview(badge)
+        // The badge's ring reaches past the bottom edge, inside the row.
+        clipsToBounds = false
         setAccessibilityElement(false)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(image: NSImage?, isStacked: Bool, status: Status) {
+    func configure(image: NSImage?, isStacked: Bool, status: Status, isDimmed: Bool = false, isRejected: Bool = false) {
         self.status = status
         self.image = image
         nearEdge.isHidden = !isStacked
@@ -1711,10 +1849,11 @@ final class PlaylistThumbnailView: NSView {
             let playing = status == .playing
             statusGlyph.image = PlaylistGlyph.symbol(playing ? "speaker.wave.2.fill" : "speaker.fill", size: 13,
                                                      label: playing ? "Playing" : "Current")
-            statusGlyph.contentTintColor = .white
+            statusGlyph.contentTintColor = PlaylistRowPalette.nowPlayingSpeaker
         case let .warning(warning):
-            scrim.isHidden = false
-            scrim.fillColor = PlaylistRowPalette.missingScrim
+            // Dimming the tile already says "unavailable"; the triangle says
+            // why, without a scrim (rejected and missing dim alike).
+            scrim.isHidden = true
             statusGlyph.image = PlaylistGlyph.warning(size: 16)
             statusGlyph.contentTintColor = nil
             // The tile's decorative layer ignores hit testing. Register the
@@ -1723,6 +1862,67 @@ final class PlaylistThumbnailView: NSView {
         }
         statusGlyph.setAccessibilityElement(statusGlyph.image != nil)
         statusGlyph.setAccessibilityHelp(toolTip)
+        setDimmed(isDimmed)
+        badge.isHidden = !isRejected
+        badge.setAccessibilityElement(isRejected)
+        cards.cutoutCircle = isRejected
+            ? Self.badgeFrame.insetBy(dx: -Self.badgeRing, dy: -Self.badgeRing) : nil
+    }
+
+    private func setDimmed(_ dimmed: Bool) {
+        guard dimmed != isDimmed else { return }
+        isDimmed = dimmed
+        tile.alphaValue = dimmed ? PlaylistRowPalette.dimmedThumbnailOpacity : 1
+        tile.contentFilters = dimmed
+            ? [CIFilter(name: "CIColorControls", parameters: [kCIInputSaturationKey: 0])].compactMap { $0 } : []
+    }
+}
+
+/// The thumbnail's tile and stack, with an optional circle cut out of
+/// them for the rejection badge's ring.
+private final class PlaylistCardsView: NSView {
+    /// In this view's (flipped) coordinates.
+    var cutoutCircle: NSRect? {
+        didSet { if cutoutCircle != oldValue { updateMask() } }
+    }
+
+    override var isFlipped: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layout() {
+        super.layout()
+        updateMask()
+    }
+
+    private func updateMask() {
+        guard let layer else { return }
+        guard let circle = cutoutCircle else {
+            layer.mask = nil
+            return
+        }
+        // Convert through the layer so the cut-out lands in the same place
+        // whichever way AppKit flips the backing layer.
+        let origin = convertToLayer(NSPoint(x: circle.minX, y: circle.minY))
+        let corner = convertToLayer(NSPoint(x: circle.maxX, y: circle.maxY))
+        let hole = CGRect(
+            x: min(origin.x, corner.x), y: min(origin.y, corner.y),
+            width: abs(corner.x - origin.x), height: abs(corner.y - origin.y)
+        )
+        let path = CGMutablePath()
+        path.addRect(layer.bounds.insetBy(dx: -8, dy: -8))
+        path.addEllipse(in: hole)
+        let mask = (layer.mask as? CAShapeLayer) ?? CAShapeLayer()
+        mask.frame = layer.bounds
+        mask.fillRule = .evenOdd
+        mask.path = path
+        layer.mask = mask
     }
 }
 
