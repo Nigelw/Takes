@@ -52,9 +52,12 @@ Key ownership:
   to added and removed tracks (`frameFittingContent`), frame clamping), and
   Debug menu wiring.
 - `WorkspaceView.swift`: playlist/comparison navigation, shared import routing,
+  the shared Open and Locate file picker,
   startup restoration ordering, the playlist control bar
   (`PlaylistTransportView`) with the playlist bottom bar placed below the
-  list, keyboard focus handling (including Esc leaving compare), when the
+  list, window-wide file drops (`WorkspaceFileDropDelegate`), the shared
+  `FileImportEmptyState` badge and `FileImportHighlight` glow, keyboard focus
+  handling (including Esc leaving compare), when the
   window fits its tracks (`scheduleContentFit`), and the
   window chrome both modes share: the cover above the control bar and the
   titlebar Artwork, Player, and Playlist toggles.
@@ -272,6 +275,7 @@ These are here to prevent parallel implementations and subtle regressions:
   insertion indicator, drop-on-row, or multi-row drag image.
   `PlaylistPresentationState` stays the source of truth for selection and
   expansion; the outline controller mirrors it in both directions.
+  Imports preserve the playlist selection, including an empty selection.
 - Playlist row drags are in-app only for organization (reorder, drop on an
   item to group, drag versions between items or out to separate) and carry a
   file URL for dragging out to Finder. An item row dragged out copies every
@@ -280,13 +284,20 @@ These are here to prevent parallel implementations and subtle regressions:
   (`extraDraggingItems`); in-app drops read `draggedNodes`, never those. Finder file drops are position
   independent: they go through the shared import path, which merges into a
   metadata match or appends.
+- An external file drag over the window lights the visible list or waveform
+  area with the v2.9.0 wash and edge glow. Compare's lane list has its own
+  drop target, which combines its hover state with the window target's.
+  The empty playlist and timeline share a clickable badge that darkens and
+  swaps its drag prompt for a click prompt on mouse hover. A file drag tints
+  the badge and restores the drag prompt.
 - Context-menu commands act on the selection when opened on a selected row and
   on the clicked row alone otherwise (`PlaylistCommandContext.rows`).
 - Move Up/Down shifts selected tracks and selected versions one place among
   their siblings, keeping their relative order and disabling directions that
   would leave the order unchanged. A selected track covers its child rows.
-  The commands animate playlist rows through `NSOutlineView.moveItem` and
-  the active lane in Compare. Compare keeps the audio runtime in place, and
+  The commands animate playlist rows through `NSOutlineView.moveItem`, with
+  selected rows and their expanded children above the rows they pass, and
+  animate the active lane in Compare. Compare keeps the audio runtime in place, and
   a Blind Listening move changes only the displayed order. Both animations
   respect Reduce Motion.
   Group as Versions uses the first selected track as the destination.
@@ -391,8 +402,10 @@ These are here to prevent parallel implementations and subtle regressions:
   (`GlobalShortcutFocusPolicy`), never from `textInputIsFocused`: that
   notification-driven flag goes stale when a field is torn down mid-edit, and
   once blocked Space and every other global shortcut until relaunch. The flag
-  only disables menu shortcuts (`canUseShortcuts`), and the monitor and mode
-  switches correct it.
+  only disables menu shortcuts (`canUseShortcuts`). Editing notifications
+  come from workspace controls, excluding sheets and other windows. The
+  workspace rechecks its responder after a sheet ends, on return to the key
+  window, and on mode switches.
 - Transport shortcuts differ by mode. Playlist: Space play/pause; ⌘← / ⌘→
   Previous / Next Track, which behave like a media player
   (`PlaylistCoordinator.previous`/`next`): Previous restarts the track past
@@ -410,7 +423,8 @@ These are here to prevent parallel implementations and subtle regressions:
   not; with none, Play starts the first track that is neither rejected nor
   unavailable. The control bar's buttons and the media keys use the same
   commands. ⌥← / ⌥→ skip (⇧ for 10 s), since plain arrows move through the
-  list. Edit ▸ Deselect All (⌘D) and Esc clear the selection. Playlist ▸ Go
+  list. Edit ▸ Select All (⌘A) selects all visible rows when the playlist is
+  shown and has tracks. Edit ▸ Deselect All (⌘D) and Esc clear the selection. Playlist ▸ Go
   to Current Song (⌘L) selects the current item. Compare: X / ⇧X Switch Track (passing
   over rejected lanes in displayed order, Blind Listening's included,
   wrapping; disabled when `ComparisonSession.canSwitchPlayback` finds no
@@ -551,8 +565,10 @@ These are here to prevent parallel implementations and subtle regressions:
   removed, and their stored preferences are simply not read.
 - The readout title comes from `ControlBarReadoutTitle.playlist`: the
   playing (or current) version's title tag, else its filename without the
-  extension, preserving its capitalization. Compare shows no version title in its control bar
-  or info bar; the active lane and the cover carry the audible version.
+  extension, preserving its capitalization. With no current version, the
+  title field shows `READY` in subdued dot-matrix text. Compare shows no
+  version title in its control bar or info bar; the active lane and the cover
+  carry the audible version.
   Long titles scroll (`DotMatrixMarqueeText`). The title field takes
   its width from the line, never from its text (the cells draw in an
   overlay); sized by its cells it could only grow, and a launch-time layout at

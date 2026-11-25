@@ -33,8 +33,7 @@ struct WorkspaceView: View {
     /// has loaded or is known to be missing. Until then the previous cover
     /// stays up, so switching versions never flashes the placeholder.
     @State private var shownCoverVersionID: PlaylistVersion.ID?
-    /// The version the open Locate dialog is for, captured when it opens.
-    @State private var presentedLocateVersionID: PlaylistVersion.ID?
+    @State private var isFileDialogPresented = false
     /// Track count before the first of a run of adds or removes, while the
     /// resize that fits them is pending (`fitWindowToContent`).
     @State private var contentFitBaseline: Int?
@@ -172,9 +171,6 @@ struct WorkspaceView: View {
             .onChange(of: coordinator.workspace.items.map { [$0.id] + $0.versions.map(\.id) }) { _, _ in
                 presentation.prune(in: coordinator.workspace)
             }
-            .onChange(of: presentation.locateVersionID) { _, id in
-                if let id { presentedLocateVersionID = id }
-            }
             .onChange(of: isComparison) { wasComparison, _ in
                 switchModeHeight(wasComparison: wasComparison)
                 refreshTextInputFocus()
@@ -195,16 +191,24 @@ struct WorkspaceView: View {
             }
             .onChange(of: settings.appearanceTheme, initial: true) { _, theme in NSApp.appearance = theme.nsAppearance }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
-                if notification.object as? NSWindow === mainWindow { mainWindowIsKey = true }
+                guard let mainWindow, notification.object as? NSWindow === mainWindow else { return }
+                mainWindowIsKey = true
+                refreshTextInputFocus()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
                 if notification.object as? NSWindow === mainWindow { mainWindowIsKey = false }
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSControl.textDidBeginEditingNotification)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndSheetNotification)) { notification in
+                guard let mainWindow, notification.object as? NSWindow === mainWindow else { return }
+                refreshTextInputFocus()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSControl.textDidBeginEditingNotification)) { notification in
+                guard isWorkspaceTextEditingNotification(notification) else { return }
                 textInputIsFocused = true
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSControl.textDidEndEditingNotification)) { _ in
-                textInputIsFocused = false
+            .onReceive(NotificationCenter.default.publisher(for: NSControl.textDidEndEditingNotification)) { notification in
+                guard isWorkspaceTextEditingNotification(notification) else { return }
+                refreshTextInputFocus()
             }
             .onDisappear { keyMonitor?.stop() }
     }
@@ -247,44 +251,52 @@ struct WorkspaceView: View {
             .overlay {
                 if !mainWindowIsKey { InactiveWindowInteractionShield(window: mainWindow).ignoresSafeArea() }
             }
-            .onDrop(of: [UTType.fileURL], delegate: WorkspaceFileDropDelegate(isTargeted: $isDropTargeted, perform: importProviders))
-            .overlay {
-                if isDropTargeted {
-                    RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.primary, lineWidth: 3)
-                        .padding(3).allowsHitTesting(false)
-                }
-            }
+            .contentShape(Rectangle())
+            .onDrop(of: [UTType.fileURL], delegate: WorkspaceFileDropDelegate(
+                isTargeted: $isDropTargeted, perform: importProviders
+            ))
     }
 
     private var presentedContent: some View {
         windowContent
-            .fileImporter(isPresented: $openFiles.isImportingTracks, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
-                let destination = openFiles.importDestination
-                openFiles.dismissOpenDialog()
-                if case let .success(urls) = result {
-                    Task {
-                        await imports.submit(urls, destination: destination, undoManager: undoManager)
-                    }
-                }
+            // Open and Locate share one importer. SwiftUI resets its presentation
+            // binding before calling back, so keep the request until then.
+            .onChange(of: hasFileDialogRequest) { _, requested in
+                isFileDialogPresented = requested
             }
-            .sheet(isPresented: $openFiles.isPromptingForStreamingURL) { streamingSheet }
-            .fileImporter(isPresented: Binding(
-                get: { presentation.locateVersionID != nil },
-                // Cancelling calls no completion, so dismissal must clear the
-                // request itself; otherwise the next Locate for the same
-                // version changes nothing and the dialog never opens again.
-                // The completion reads the ID captured when it opened.
-                set: { if !$0 { presentation.locateVersionID = nil } }
-            ), allowedContentTypes: [.audio]) { result in
-                let versionID = presentedLocateVersionID
-                presentedLocateVersionID = nil
-                presentation.locateVersionID = nil
-                if case let .success(url) = result, let versionID {
-                    Task { await coordinator.locateFile(versionID: versionID, url: url) }
-                }
-            }
+            .fileImporter(
+                isPresented: $isFileDialogPresented,
+                allowedContentTypes: [.audio],
+                allowsMultipleSelection: presentation.locateVersionID == nil,
+                onCompletion: handleFileDialogResult,
+                onCancellation: clearFileDialogRequest
+            )
             .fileDialogMessage(Text(locateFileMessage))
             .fileDialogConfirmationLabel(Text(presentation.locateVersionID == nil ? "Open" : "Locate"))
+            .sheet(isPresented: $openFiles.isPromptingForStreamingURL) { streamingSheet }
+    }
+
+    private var hasFileDialogRequest: Bool {
+        openFiles.isImportingTracks || presentation.locateVersionID != nil
+    }
+
+    private func handleFileDialogResult(_ result: Result<[URL], Error>) {
+        let versionID = presentation.locateVersionID
+        let destination = openFiles.importDestination
+        clearFileDialogRequest()
+        guard case let .success(urls) = result else { return }
+        if let versionID {
+            guard let url = urls.first else { return }
+            Task { await coordinator.locateFile(versionID: versionID, url: url) }
+        } else {
+            Task { await imports.submit(urls, destination: destination, undoManager: undoManager) }
+        }
+    }
+
+    private func clearFileDialogRequest() {
+        presentation.locateVersionID = nil
+        openFiles.dismissOpenDialog()
+        refreshTextInputFocus()
     }
 
     private var locateFileMessage: String {
@@ -318,8 +330,7 @@ struct WorkspaceView: View {
     /// Everything but text editing, which the key monitor reads from the
     /// first responder at each key press instead.
     private var shortcutsAreAvailable: Bool {
-        persistence.restorationComplete && !openFiles.isPromptingForStreamingURL
-            && !openFiles.isImportingTracks && presentation.locateVersionID == nil
+        persistence.restorationComplete && !openFiles.isPromptingForStreamingURL && !hasFileDialogRequest
     }
 
     private func workspaceContent(artworkFraction: CGFloat, coverHeight: CGFloat) -> some View {
@@ -352,8 +363,6 @@ struct WorkspaceView: View {
             GeometryReader { proxy in
                 ZStack(alignment: .topLeading) {
                     playlistSurface
-                        // Dimmed in the background, as compare is.
-                        .windowActivityAppearance(isActive: mainWindowIsKey)
                         .frame(width: isComparison ? retainedPlaylistSize.width : proxy.size.width,
                                height: isComparison ? retainedPlaylistSize.height : proxy.size.height, alignment: .topLeading)
                         .opacity(isComparison ? 0 : 1)
@@ -365,6 +374,7 @@ struct WorkspaceView: View {
                         ContentView(
                             coordinator: coordinator,
                             openFileCommandState: openFiles,
+                            windowIsDropTargeted: isDropTargeted,
                             importProviders: importProviders,
                             locateVersion: { presentation.locateVersionID = $0 }
                         )
@@ -454,12 +464,18 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             if visibility.showsPlayer {
                 PlaylistTransportView(coordinator: coordinator)
+                    .windowActivityAppearance(isActive: mainWindowIsKey)
             }
             if visibility.showsPlaylist {
                 ControlBarDivider()
-                PlaylistView(coordinator: coordinator, presentation: presentation, openFiles: openFiles, artworkStore: artworkStore)
+                    .windowActivityAppearance(isActive: mainWindowIsKey)
+                PlaylistView(coordinator: coordinator, presentation: presentation, openFiles: openFiles,
+                             artworkStore: artworkStore, isDropTargeted: isDropTargeted)
+                    .windowActivityAppearance(isActive: mainWindowIsKey)
+                    .overlay { FileImportHighlight(isTargeted: isDropTargeted) }
                 PlaylistBottomBar(coordinator: coordinator, presentation: presentation, openFiles: openFiles, undoManager: undoManager)
                     .componentDebugLabel("Bottom Bar", enabled: settings.showsComponentDebugLabels)
+                    .windowActivityAppearance(isActive: mainWindowIsKey)
             }
         }
     }
@@ -514,11 +530,11 @@ struct WorkspaceView: View {
                         let url = try await PlaylistStreamingImporter().download(from: rawURL)
                         importedIDs.append(contentsOf: await imports.submit(
                             [url], destination: .playlist, isWorkspaceOwned: true,
-                            undoManager: undoManager, selectResults: false
+                            undoManager: undoManager, expandResults: false
                         ))
                     } catch { coordinator.reportError(error.localizedDescription) }
                 }
-                imports.select(importedIDs)
+                imports.expand(importedIDs)
             }
         }
     }
@@ -611,8 +627,15 @@ struct WorkspaceView: View {
         mainWindow.minSize = windowMinimumSize
     }
 
+    private func isWorkspaceTextEditingNotification(_ notification: Notification) -> Bool {
+        guard let mainWindow, mainWindow.attachedSheet == nil,
+              let control = notification.object as? NSControl else { return false }
+        return control.window === mainWindow
+    }
+
     private func refreshTextInputFocus() {
-        // A field torn down mid-edit never posts its end-of-editing notification.
+        // Let AppKit restore the workspace responder after dismissing a sheet
+        // or tearing down a field that was being edited.
         DispatchQueue.main.async {
             guard let mainWindow else { return }
             textInputIsFocused = !GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: mainWindow.firstResponder)
@@ -785,8 +808,8 @@ struct WorkspaceView: View {
 
     /// Adds and removes resize the window as in v2.9.0; mode switches,
     /// restoration and the artwork toggle's resize don't. The fit waits a
-    /// moment so an import's selection and expansion (`WorkspaceImports`)
-    /// land first, and a run of changes resizes once.
+    /// moment so an import's row expansion lands first and a run of changes
+    /// resizes once.
     private func scheduleContentFit(from old: ContentFitKey, to new: ContentFitKey) {
         guard old.mode == new.mode else {
             contentFitTask?.cancel()
@@ -916,20 +939,19 @@ private struct WorkspaceImports {
         destination: PlaylistImportDestination,
         isWorkspaceOwned: Bool = false,
         undoManager: UndoManager? = nil,
-        selectResults: Bool = true
+        expandResults: Bool = true
     ) async -> [PlaylistItem.ID] {
         let itemIDs = await coordinator.importFiles(
             urls, destination: destination, isWorkspaceOwned: isWorkspaceOwned,
             automaticGroupingMode: AppSettings.shared.automaticGroupingMode,
             undoManager: undoManager ?? NSApp.mainWindow?.undoManager
         )
-        if selectResults { select(itemIDs) }
+        if expandResults { expand(itemIDs) }
         return itemIDs
     }
 
-    func select(_ itemIDs: [PlaylistItem.ID]) {
+    func expand(_ itemIDs: [PlaylistItem.ID]) {
         guard !itemIDs.isEmpty else { return }
-        presentation.selection = Set(itemIDs.map(PlaylistRowID.item))
         presentation.expanded.formUnion(itemIDs)
     }
 }
@@ -979,9 +1001,8 @@ private struct PlaylistTransportView: View {
     }
 }
 
-/// Window-wide file drop. Playlist row drags also carry a file URL (so rows
-/// can be dragged out to Finder); they are rejected here so the import
-/// highlight never appears for an in-app reorder.
+/// Window-wide file drop. Takes rows and lanes also carry file URLs for
+/// dragging out to Finder. Their private types reserve them for reordering.
 private struct WorkspaceFileDropDelegate: DropDelegate {
     @Binding var isTargeted: Bool
     let perform: ([NSItemProvider]) -> Bool
@@ -989,14 +1010,88 @@ private struct WorkspaceFileDropDelegate: DropDelegate {
     func validateDrop(info: DropInfo) -> Bool {
         info.hasItemsConforming(to: [UTType.fileURL.identifier])
             && !info.hasItemsConforming(to: [PlaylistItemDrag.type.identifier])
+            && !info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier])
     }
 
     func dropEntered(info: DropInfo) { isTargeted = true }
     func dropExited(info: DropInfo) { isTargeted = false }
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .copy) }
 
     func performDrop(info: DropInfo) -> Bool {
         isTargeted = false
+        guard validateDrop(info: info) else { return false }
         return perform(info.itemProviders(for: [UTType.fileURL.identifier]))
+    }
+}
+
+/// Shared by the empty playlist and comparison timeline.
+struct FileImportEmptyState: View {
+    let icon: String
+    let dragPrompt: String
+    let clickPrompt: String
+    let accessibilityLabel: String
+    let isDropTargeted: Bool
+    let open: () -> Void
+    @State private var isHovered = false
+
+    private var showsClickPrompt: Bool { isHovered && !isDropTargeted }
+
+    var body: some View {
+        Button(action: open) {
+            VStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(badgeFill)
+                    Image(systemName: icon)
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(isDropTargeted ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(.secondary))
+                }
+                .frame(width: 52, height: 52)
+
+                // Both prompts take up space so their crossfade keeps the badge centred.
+                ZStack {
+                    Text(dragPrompt).opacity(showsClickPrompt ? 0 : 1)
+                    Text(clickPrompt).opacity(showsClickPrompt ? 1 : 0)
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(accessibilityLabel)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
+        .animation(.easeInOut(duration: 0.15), value: isDropTargeted)
+    }
+
+    private var badgeFill: AnyShapeStyle {
+        if isDropTargeted { return AnyShapeStyle(Theme.primary.opacity(0.16)) }
+        if isHovered { return AnyShapeStyle(.tertiary.opacity(0.55)) }
+        return AnyShapeStyle(.quaternary.opacity(0.6))
+    }
+}
+
+/// The v2.9.0 drop feedback. The clipped blur lets the glow follow the
+/// window mask without drawing a hard outline over its corners.
+struct FileImportHighlight: View {
+    let isTargeted: Bool
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.primary.opacity(0.11))
+            .overlay {
+                Rectangle()
+                    .strokeBorder(Theme.primary.opacity(0.65), lineWidth: 4)
+                    .blur(radius: 5)
+            }
+            .clipped()
+            .opacity(isTargeted ? 1 : 0)
+            .animation(.easeInOut(duration: 0.15), value: isTargeted)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

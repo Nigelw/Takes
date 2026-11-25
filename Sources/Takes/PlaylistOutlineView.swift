@@ -212,6 +212,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private(set) var isActive = false
     private var hasLoaded = false
     private var moveRevision = 0
+    private var moveAnimation: (id: UUID, foreground: Set<PlaylistRowID>)?
     /// True while this controller pushes model state into the outline view, so
     /// the resulting delegate callbacks are not echoed back into the model.
     private var isApplying = false
@@ -389,6 +390,14 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             return Set(old.versions.map(\.id)) == Set(new.versions.map(\.id))
         }) else { return false }
 
+        let animationID = UUID()
+        var foreground = presentation.selection
+        for item in previousItems where foreground.contains(.item(item.id)) {
+            foreground.formUnion(item.versions.map { .version($0.id) })
+        }
+        moveAnimation = (animationID, foreground)
+        updateMoveLayerOrder()
+
         isApplying = true
         defer { isApplying = false }
         NSAnimationContext.runAnimationGroup { context in
@@ -401,6 +410,11 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             }
             moveChildren(from: previousItems.map(\.id), to: items.map(\.id), in: nil)
             outlineView.endUpdates()
+        } completionHandler: { [weak self] in
+            // A repeated command can start another move before this one ends.
+            guard let self, self.moveAnimation?.id == animationID else { return }
+            self.moveAnimation = nil
+            self.updateMoveLayerOrder()
         }
         outlineView.enumerateAvailableRowViews { rowView, row in
             guard let rowView = rowView as? PlaylistRowView,
@@ -413,6 +427,14 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
             }
         }
         return true
+    }
+
+    private func updateMoveLayerOrder() {
+        outlineView.enumerateAvailableRowViews { rowView, row in
+            guard let rowView = rowView as? PlaylistRowView,
+                  let node = self.outlineView.item(atRow: row) as? PlaylistNode else { return }
+            rowView.setMoveForeground(self.moveAnimation?.foreground.contains(node.rowID) == true)
+        }
     }
 
     private func moveChildren(from oldOrder: [UUID], to newOrder: [UUID], in parent: PlaylistNode?) {
@@ -594,6 +616,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         }
         rowView.setAccessibilityValue(isRejected ? PlaylistRowText.rejectedAccessibilityValue : nil)
         rowView.alphaValue = draggedNodes.contains(node) ? 0.3 : 1
+        rowView.setMoveForeground(moveAnimation?.foreground.contains(node.rowID) == true)
         rowView.debugLabel = showsDebugLabels ? (node.versionID == nil ? "Item Row" : "Version Row") : nil
     }
 
@@ -1161,6 +1184,15 @@ final class PlaylistNSOutlineView: NSOutlineView {
 final class PlaylistRowView: NSTableRowView {
     private var hoverArea: NSTrackingArea?
 
+    func setMoveForeground(_ isForeground: Bool) {
+        if isForeground { wantsLayer = true }
+        guard let layer, layer.zPosition != (isForeground ? 1 : 0) else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.zPosition = isForeground ? 1 : 0
+        CATransaction.commit()
+    }
+
     var isHovered = false {
         didSet {
             guard isHovered != oldValue else { return }
@@ -1231,6 +1263,7 @@ final class PlaylistRowView: NSTableRowView {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        setMoveForeground(false)
         isHovered = false
         alphaValue = 1
     }

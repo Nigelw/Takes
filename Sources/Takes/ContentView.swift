@@ -631,7 +631,8 @@ private struct TrackListDropDelegate: DropDelegate {
     /// A reorder carries the file URL too (for dragging out of the window), so
     /// the marker type decides the kind, not the presence of a file URL.
     private func dropKind(_ info: DropInfo) -> TrackRowDropKind? {
-        TrackRowDropKind.kind(
+        guard !info.hasItemsConforming(to: [PlaylistItemDrag.type.identifier]) else { return nil }
+        return TrackRowDropKind.kind(
             hasFileURLs: info.hasItemsConforming(to: [UTType.fileURL.identifier]),
             hasReorderItems: info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier])
         )
@@ -1170,6 +1171,7 @@ extension FocusedValues {
 struct ContentView: View {
     let coordinator: PlaylistCoordinator
     private let importProviders: ([NSItemProvider]) -> Bool
+    private let windowIsDropTargeted: Bool
     /// Opens the Locate dialog for a missing version (the playlist's, so
     /// both modes share one dialog).
     private let locateVersion: (PlaylistVersion.ID) -> Void
@@ -1207,8 +1209,7 @@ struct ContentView: View {
     /// commits so it can fade in at its landed position (in sync with the system
     /// fading out the drag image) instead of sliding there from its old slot.
     @State private var reorderRevealingID: SessionTrack.ID?
-    @State private var windowIsDropTargeted = false
-    @State private var emptyStateIsHovered = false
+    @State private var laneListIsDropTargeted = false
     @State private var focusedOffsetTrackID: SessionTrack.ID?
     @State private var mainWindow: NSWindow?
     @State private var mainWindowIsKey = true
@@ -1268,11 +1269,13 @@ struct ContentView: View {
     init(
         coordinator: PlaylistCoordinator,
         openFileCommandState: OpenFileCommandState,
+        windowIsDropTargeted: Bool,
         importProviders: @escaping ([NSItemProvider]) -> Bool,
         locateVersion: @escaping (PlaylistVersion.ID) -> Void = { _ in }
     ) {
         self.coordinator = coordinator
         self.openFileCommandState = openFileCommandState
+        self.windowIsDropTargeted = windowIsDropTargeted
         self.importProviders = importProviders
         self.locateVersion = locateVersion
     }
@@ -1362,7 +1365,7 @@ struct ContentView: View {
                         + ControlBarDivider.height + CompareInfoBarMetrics.height
                         + (controller.displayedTrackRowCount == 0 ? 0 : CompareLaneLayout.seatBottom)
                 )
-            trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
+            FileImportHighlight(isTargeted: isFileImportTargeted)
             // The highlight stops at the bottom bar.
             Color.clear
                 .frame(height: BottomBarMetrics.height)
@@ -1455,8 +1458,12 @@ struct ContentView: View {
                 if displayedTrackRowCount == 0 {
                     // The empty state owns the whole section — no ruler —
                     // one centered drop/click target.
-                    trackAreaEmptyState
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    FileImportEmptyState(
+                        icon: "waveform", dragPrompt: "Drag Files Here to Compare", clickPrompt: "Click Here to Compare",
+                        accessibilityLabel: "Add audio files to compare", isDropTargeted: isFileImportTargeted
+                    ) {
+                        openFileCommandState.presentOpenDialog()
+                    }
                 } else {
                     timelineRuler(waveformWidth: waveformWidth)
                         .frame(width: proxy.size.width, height: CompareLaneLayout.rulerHeight)
@@ -1554,7 +1561,7 @@ struct ContentView: View {
                                 targetIndex: $reorderTargetIndex,
                                 gapGeneration: $reorderGapGeneration,
                                 revealingID: $reorderRevealingID,
-                                isImportTargeted: $windowIsDropTargeted,
+                                isImportTargeted: $laneListIsDropTargeted,
                                 loadDroppedURLs: importProviders,
                                 reorderVersion: { coordinator.reorderVersion($0, before: $1, undoManager: undoManager) }
                             )
@@ -1604,25 +1611,10 @@ struct ContentView: View {
             .allowsHitTesting(false)
     }
 
-    /// The drop-landing highlight for the track section (populated list and
-    /// empty state alike): a brand wash with a soft glow bleeding in from the
-    /// edges — a blurred edge band rather than a solid border, so there's no
-    /// crisp line whose corners could visibly deviate from the window's corner
-    /// curve (the window mask itself rounds the bottom corners). Kept mounted
-    /// and driven by opacity so it fades smoothly as drags enter and leave the
-    /// window.
-    private func trackAreaImportHighlight(isTargeted: Bool) -> some View {
-        Rectangle()
-            .fill(Theme.primary.opacity(0.11))
-            .overlay(
-                Rectangle()
-                    .strokeBorder(Theme.primary.opacity(0.65), lineWidth: 4)
-                    .blur(radius: 5)
-            )
-            .clipped()
-            .opacity(isTargeted ? 1 : 0)
-            .animation(.easeInOut(duration: 0.15), value: isTargeted)
-            .allowsHitTesting(false)
+    private var isFileImportTargeted: Bool {
+        // SwiftUI moves the drag between the window target and the lane target.
+        // Each owns its hover state so an exit cannot clear the other's entry.
+        windowIsDropTargeted || laneListIsDropTargeted
     }
 
     /// Vertical offset for the row at `index` so a gap opens at the drag's target
@@ -1935,70 +1927,6 @@ struct ContentView: View {
         return image
     }
 
-    /// Kaleidoscope-style empty state: one centered composition — a soft
-    /// circular badge holding a waveform glyph, a single line of text below —
-    /// owning the whole track section with no ruler. Hovering
-    /// darkens the badge and swaps the drag prompt for a click prompt; clicking
-    /// anywhere opens the file dialog. Dragging files over any part of the
-    /// window tints the badge and glyph with the indigo brand color, with the
-    /// area wash and edge glow supplied by the shared track-area import
-    /// highlight (drops are handled by the window-wide `onDrop`).
-    private var trackAreaEmptyState: some View {
-        let isTargeted = windowIsDropTargeted
-        return VStack(spacing: 10) {
-            Button {
-                performImportAction(.open)
-            } label: {
-                VStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(badgeFill(isTargeted: isTargeted))
-                        Image(systemName: "waveform")
-                            .font(.system(size: 22, weight: .medium))
-                            .foregroundStyle(isTargeted ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(.secondary))
-                    }
-                    .frame(width: 52, height: 52)
-
-                    // Both prompts stay mounted and crossfade so the swap doesn't
-                    // reflow the layout.
-                    ZStack {
-                        Text("Drag Files Here to Compare")
-                            .opacity(emptyStateIsHovered && !isTargeted ? 0 : 1)
-                        Text("Click Here to Compare")
-                            .opacity(emptyStateIsHovered && !isTargeted ? 1 : 0)
-                    }
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 10)
-                .padding(.horizontal, 14)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .onHover { inside in
-                emptyStateIsHovered = inside
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // The area wash and edge glow come from the shared track-area import
-        // highlight (drawn at the root); here only the badge and glyph tint.
-        .animation(.easeInOut(duration: 0.15), value: emptyStateIsHovered)
-        .animation(.easeInOut(duration: 0.15), value: isTargeted)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Add audio files to compare")
-        .accessibilityAddTraits(.isButton)
-    }
-
-    private func badgeFill(isTargeted: Bool) -> AnyShapeStyle {
-        if isTargeted {
-            return AnyShapeStyle(Theme.primary.opacity(0.16))
-        }
-        if emptyStateIsHovered {
-            return AnyShapeStyle(.tertiary.opacity(0.55))
-        }
-        return AnyShapeStyle(.quaternary.opacity(0.6))
-    }
-
     /// Geometry for the windowed waveform lanes. Each lane draws a
     /// 2×-viewport window anchored to a half-viewport grid in *absolute*
     /// timeline time; a leaf slides it with a plain `offset` as the timeline
@@ -2252,19 +2180,6 @@ struct ContentView: View {
             return nil
         }
         return controller.session.tracks[index].id
-    }
-
-    private func performImportAction(_ item: ImportActionMenuItem) {
-        switch item {
-        case .open:
-            openFileCommandState.presentOpenDialog()
-        case .streamingURL:
-            openFileCommandState.presentStreamingURLPrompt()
-        case .finderSelection:
-            openFileCommandState.openFinderSelection()
-        case .musicSelection:
-            openFileCommandState.openAppleMusicSelection()
-        }
     }
 
     private func backgroundStyle(for highlight: TrackDropHighlight) -> some ShapeStyle {
