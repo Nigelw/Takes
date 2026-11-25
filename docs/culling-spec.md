@@ -68,8 +68,8 @@ always available to explicit play.
 - The circle/checkmark UI on version rows is removed: the
   `checkmark.circle.fill` key mark, the hover "Set as Key Version" circle,
   and the context menu's Set as Key Version. The 34 pt mark column under the
-  thumbnail stays; the missing-file warning keeps using it, and it is
-  available to the rejection treatment.
+  thumbnail stays; it holds the missing-file warning, the rejection mark
+  and the now-playing speaker (§9.1).
 - Rejecting or un-rejecting a version, or reordering versions, can change
   the key version. The item row updates its title, thumbnail, duration and
   metadata to match, without a table reload (the existing cell-update path).
@@ -133,14 +133,13 @@ always available to explicit play.
 
 ### 4.3 Display
 
-Both row types get a rejected treatment (§9). Requirements whichever
-treatment is chosen:
+Both row types get a rejected treatment, specified in §9.1. Rules that
+hold across it:
 
-- Rejected must read differently from missing. Missing already dims the
-  title and shows a warning triangle; a row can be both rejected and
-  missing, and both must be legible at once.
-- It must survive selection (emphasized background), the now-playing tint
-  and hover. A rejected track can be now playing (explicit play).
+- Rejected and missing dim to the same level. The × marks a rejection
+  and the warning triangle a missing file; a row that is both shows both.
+- It must survive selection (emphasized background) and now playing. A
+  rejected track can be now playing (explicit play).
 - A rejected track whose versions are not rejected shows the track
   treatment on the item row only; its version rows show their own state.
 - The item row's thumbnail, title and metadata are the key version's. A
@@ -195,10 +194,14 @@ not offer it.
 
 ### 5.4 Display
 
-- Each lane gets a rejected treatment (§9). It must stay distinct from the
-  missing-file band (`WaveformLaneView.missingExtent`, the dashed warning
-  band), work on the active lane (primary tint, primary waveform, filled
-  badge), and not interfere with the strip's controls or the playhead.
+- Each lane gets a rejected treatment (§9.1). It must work on the active
+  lane (primary tint, primary waveform, filled badge) and not interfere
+  with the strip's controls or the playhead.
+- Missing lanes change too: they draw the same hatching as rejected lanes
+  in place of today's dashed warning band
+  (`WaveformLaneView.missingExtent`), across the whole lane as on a
+  rejected lane, and keep `File Not Found` in the strip. A missing lane and a rejected missing
+  lane look the same apart from the strip's × badge.
 - Blind Listening Mode shows the treatment too. It reveals only that the
   user rejected this lane, never which file it is, and rejected lanes are
   out of the switching set anyway, which is how a blind cull narrows
@@ -310,4 +313,53 @@ Options on the canvas:
 - Lanes: A Faded, B Hatched, C Flattened (× badge, grey waveform at a third
   of its height), D Label.
 
-Decision: pending.
+The canvas's Final page holds one artboard, "Culling · Final designs",
+with the decided playlist and compare states in dark and light; it is the
+design reference for §9.1. Every exploration, including the options
+above, the "Indicators" icon pairs and rounds 2–4, is on its Archive page.
+
+### 9.1 Decisions
+
+- **Indicator.** A filled circle with a knocked-out × (Indicators, option
+  2). Only rejection is designed for now; a picked state is out of scope.
+- **Playlist colour.** Grey (Round 2 · Playlist, grey columns), not red.
+- **Track rows.** Option C: the thumbnail goes greyscale at 45% and carries
+  the × badge (14 pt, a 2 pt ring in the row's background) at its
+  bottom-right corner, inset so the badge and its ring stay inside the
+  46 pt row. Title and metadata use the dimmed colours.
+- **Version rows.** Option C: the × in the 34 pt mark column, dimmed title,
+  format and duration. No hover affordance; rejecting happens through the
+  commands in §4.1, never a control on the row.
+- **Missing files** dim exactly as much as rejected rows. The warning
+  triangle is the only thing that tells them apart. A version that is both
+  shows the triangle and the × side by side in the mark column.
+- **Selected rejected rows** keep the selection colours with their text at
+  65% opacity.
+- **Now playing** (changes the current design):
+  - No row background. `PlaylistRowView` stops drawing the now-playing
+    tint; the speaker over the artwork, the title, the metadata and the
+    duration take the tint instead (`PlaylistRowPalette`).
+  - A rejected track that is playing looks like any playing track, plus
+    the badge; the tint replaces the rejected dimming.
+  - **Expanded tracks split the state.** The item row keeps its tinted
+    text; the speaker moves from its artwork to the playing version's mark
+    column, and that version's title, format and duration take the tint. A
+    playing rejected version shows the speaker and the × together.
+    Collapsing the track moves the speaker back to the artwork.
+- **Compare lanes.** The strip from option C (an × badge in place of the
+  index, a dimmed title) over the hatching from option B, in grey to match
+  the playlist: the playlist's grey badge with the knocked-out ×, the
+  dimmed title and format colours, neutral hatching, and the inactive
+  waveform colour (Round 3 · Compare, grey; Round 2 · Compare is the
+  same layout in red). Missing lanes take the same hatching and dimmed
+  strip instead of the dashed band (§5.4); the active tint stays on an
+  active rejected lane.
+
+### 9.2 Deferred
+
+- **Now-playing emphasis** (Round 3), deferred. Ship the existing speaker
+  with the tinted text (§9.1). The explored additions, to revisit later: A
+  equalizer bars in place of the speaker, B an accent ring around the
+  artwork, C a progress line under the row's text. Whichever is chosen
+  moves to the version row under the split rule; for C, decide whether
+  the line sits under the item row or the version row.
