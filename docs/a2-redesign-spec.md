@@ -179,7 +179,7 @@ Replaces the current column table. Still an `NSOutlineView`
   key version.
 - Name = the file's **track title tag**, not its filename
   (`Eleanor Rigby (2009 Stereo Mix)`), 12 pt, aligned with item titles.
-- Format (e.g. FLAC, MP3) and duration, secondary.
+- Duration in secondary text.
 - No drag handles; the whole row is draggable.
 
 **Text truncation:** item and version titles use **middle truncation**
@@ -454,10 +454,10 @@ None open. The version check for a missing file was decided in milestone 3
   in memory, from a bounded cache separate from the cover's; a version whose
   cover is decoded is scaled from it. See `AGENTS.md` for the rule.
 - **Version rows** (milestone 3). Name: the title tag, else the filename
-  without its extension (the readout's rule). The format
-  column shows the container alone (FLAC, MP3); sample rate, bit rate and the
-  filename are in the row's tooltip. A single click selects the row.
-  Double-click plays the version from the beginning. Click the empty circle
+  without its extension (the readout's rule). The row shows the duration.
+  The title tooltip includes the filename, container, sample rate and bit rate.
+  A single click selects the row. Double-click plays the version from the
+  beginning. Click the empty circle
   on a hovered row to make it the key version. Rows being dragged stay in
   place, dimmed, until the drop lands.
 - **Item rows without an artist tag** show the title alone, vertically
@@ -604,7 +604,7 @@ None open. The version check for a missing file was decided in milestone 3
   readout, its back button and its scrolling title are gone, and so is the
   compare readout title rule (`TRACK n` when blind). A 32 pt info bar
   sits between the divider and the ruler, on the well with no line to the
-  ruler: `N takes` (`1 take`) on the left in 12 pt medium secondary, the
+  ruler: `N versions` (`1 version`) on the left in 12 pt medium secondary, the
   elapsed time in a 24 pt Glass frame centred in the window, and a
   rectangular Done (22 pt, 5 pt radius, primary fill) on the right. Done
   leaves compare as the back button did (the audible version becomes the

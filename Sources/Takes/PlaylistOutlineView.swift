@@ -153,11 +153,6 @@ enum PlaylistRowText {
         return String(format: "%.0f kbps", (bitrate / 1000).rounded())
     }
 
-    /// The version row's format column: the container alone (FLAC, MP3).
-    static func formatName(_ metadata: PlaylistMetadata) -> String {
-        metadata.fileFormatDescription
-    }
-
     static func itemTitle(_ item: PlaylistItem) -> String {
         item.keyVersion.map(versionName) ?? item.title
     }
@@ -185,7 +180,7 @@ enum PlaylistRowText {
             switch field {
             case .artist: value = metadata.artist
             case .album: value = metadata.album
-            case .format: value = formatName(metadata)
+            case .format: value = metadata.fileFormatDescription
             case .sampleRate: value = sampleRateText(metadata.sampleRate)
             case .bitrate: value = bitrateText(metadata.bitRate)
             }
@@ -638,7 +633,6 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         let isCurrent = currentItemID == item.id && currentVersionID == id
         cell.configure(
             title: PlaylistRowText.versionName(version),
-            format: PlaylistRowText.formatName(version.metadata),
             duration: PlaylistRowText.duration(version.metadata.duration),
             marks: PlaylistVersionCellView.Marks(
                 warning: fileWarning(for: version),
@@ -1508,7 +1502,7 @@ final class PlaylistItemCellView: NSTableCellView {
 }
 
 /// Version row, 30 pt (A2 §6): the mark column under the item's thumbnail,
-/// the version's title tag, its format, and its duration. The mark column
+/// the version's title and duration. The mark column
 /// holds the now-playing speaker (an expanded track's playing version), the
 /// missing-file warning and the rejection ×, side by side when several
 /// apply (culling §9.1). There is no key-version control: the key version
@@ -1532,7 +1526,6 @@ final class PlaylistVersionCellView: NSTableCellView {
     static let markSpacing: CGFloat = 3
 
     private let titleField = NSTextField.playlistLabel(font: .systemFont(ofSize: 12), truncation: .byTruncatingMiddle)
-    private let formatField = NSTextField.playlistLabel(font: .systemFont(ofSize: 11), truncation: .byClipping)
     private let durationField = NSTextField.playlistLabel(
         font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular), truncation: .byClipping, alignment: .right
     )
@@ -1559,7 +1552,7 @@ final class PlaylistVersionCellView: NSTableCellView {
         warningView.image = PlaylistGlyph.warning(size: Self.markSize)
         rejectionView.image = RejectedMark.image(size: Self.markSize)
         rejectionView.toolTip = PlaylistRowText.rejectedAccessibilityValue
-        for view in [speakerView, warningView, rejectionView, titleField, formatField, durationField] as [NSView] {
+        for view in [speakerView, warningView, rejectionView, titleField, durationField] as [NSView] {
             addSubview(view)
         }
     }
@@ -1567,10 +1560,9 @@ final class PlaylistVersionCellView: NSTableCellView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(title: String, format: String, duration: String, marks: Marks, toolTip: String) {
+    func configure(title: String, duration: String, marks: Marks, toolTip: String) {
         titleField.stringValue = title
         titleField.toolTip = toolTip
-        formatField.stringValue = format
         durationField.stringValue = duration
         self.marks = marks
         if let nowPlaying = marks.nowPlaying {
@@ -1600,7 +1592,6 @@ final class PlaylistVersionCellView: NSTableCellView {
             emphasized: emphasized, nowPlaying: marks.nowPlaying != nil, dimmed: marks.isDimmed
         )
         titleField.textColor = style.title
-        formatField.textColor = style.detail
         durationField.textColor = style.detail
         speakerView.contentTintColor = emphasized ? .alternateSelectedControlTextColor : PlaylistRowPalette.nowPlayingTitle
     }
@@ -1625,14 +1616,7 @@ final class PlaylistVersionCellView: NSTableCellView {
         let durationWidth = max(M.durationMinimumWidth, durationField.fittingTextWidth)
         let durationX = trailing - durationWidth
         durationField.frame = NSRect(x: durationX, y: (height - detailHeight) / 2, width: durationWidth, height: detailHeight)
-        var textRight = durationX - M.gap
-        if !formatField.stringValue.isEmpty {
-            let formatWidth = formatField.fittingTextWidth
-            formatField.frame = NSRect(x: textRight - formatWidth, y: (height - detailHeight) / 2, width: formatWidth, height: detailHeight)
-            textRight -= formatWidth + M.gap
-        } else {
-            formatField.frame = .zero
-        }
+        let textRight = durationX - M.gap
         titleField.frame = NSRect(x: M.titleX, y: (height - titleHeight) / 2, width: max(0, textRight - M.titleX), height: titleHeight)
     }
 }

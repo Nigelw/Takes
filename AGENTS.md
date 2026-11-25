@@ -104,7 +104,7 @@ Key ownership:
   handling, and row drag and drop. Row colors are `PlaylistRowPalette` in
   `Theme.swift`.
 - `ContentView.swift`: the compare control bar's buttons, the compare title
-  bar (`CompareInfoBar`: `CompareInfoBarMetrics`, the take count and
+  bar (`CompareInfoBar`: `CompareInfoBarMetrics`, the version count and
   `CompareInfoBarText`, the centring `CompareInfoBarRow`, and
   `CompareDoneButtonStyle`; [docs/a2-compare-info-bar-spec.md](docs/a2-compare-info-bar-spec.md)),
   and the compact compare area (A2 §8): ruler and lane sizing
@@ -317,8 +317,9 @@ These are here to prevent parallel implementations and subtle regressions:
   dropped `selectedVersionID`; decoding a schema-1 item moves its stored
   key to the front of `versions`.
 - Version rows (30 pt) are named by their title tag, else the filename
-  without its extension (`PlaylistRowText.versionName`). A single click
-  selects the row. Double-clicking (or Return on) an item row plays its key
+  without its extension (`PlaylistRowText.versionName`). The row shows the
+  duration. The title tooltip includes the filename and format details.
+  A single click selects the row. Double-clicking (or Return on) an item row plays its key
   version, resuming a track that is already current on its current
   version; on a version row it plays that version from the beginning,
   rejected or not, and leaves the key alone. Unavailable files show a
@@ -557,7 +558,7 @@ These are here to prevent parallel implementations and subtle regressions:
   overlay); sized by its cells it could only grow, and a launch-time layout at
   a restored wider frame left the readout wider than the window.
 - Compare's info bar (32 pt, between the control bar's divider and the
-  ruler, on the well with no line to the ruler) shows `N takes` (`1 take`,
+  ruler, on the well with no line to the ruler) shows `N versions` (`1 version`,
   `CompareInfoBarText`, unchanged when blind) on the left, the elapsed
   time in a 24 pt Glass frame centred in the window
   (`CompareInfoBarRow` gives both sides equal widths), and Done on the

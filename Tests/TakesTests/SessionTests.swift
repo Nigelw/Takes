@@ -129,7 +129,7 @@ struct SessionTests {
         let cell = PlaylistVersionCellView()
 
         light.performAsCurrentDrawingAppearance {
-            cell.configure(title: "Alternate Mix", format: "FLAC", duration: "2:41", marks: .none, toolTip: "")
+            cell.configure(title: "Alternate Mix", duration: "2:41", marks: .none, toolTip: "")
         }
         let titleColor = try #require(cell.textField?.textColor)
 
@@ -232,10 +232,10 @@ struct SessionTests {
     }
 
     @Test
-    func compareTakeCountIsSingularForOneTake() {
-        #expect(CompareInfoBarText.takeCount(1) == "1 take")
-        #expect(CompareInfoBarText.takeCount(2) == "2 takes")
-        #expect(CompareInfoBarText.takeCount(32) == "32 takes")
+    func compareVersionCountUsesSingularAndPlural() {
+        #expect(CompareInfoBarText.versionCount(1) == "1 version")
+        #expect(CompareInfoBarText.versionCount(3) == "3 versions")
+        #expect(CompareInfoBarText.versionCount(32) == "32 versions")
     }
 
     /// The ruler labels' digits start level with their major notch's top,
@@ -3014,7 +3014,6 @@ struct SessionTests {
             == "Eleanor Rigby (2009 Stereo Mix)")
         #expect(PlaylistRowText.versionName(version(title: "  ", file: "02 eleanor.flac")) == "02 eleanor")
         #expect(PlaylistRowText.versionName(version(title: nil, file: "take.final.wav")) == "take.final")
-        #expect(PlaylistRowText.formatName(version(title: nil, file: "a.flac").metadata) == "FLAC")
 
         let tagged = version(title: "Stereo Mix", file: "stereo.wav")
         let untagged = version(title: nil, file: "Alternate Mix.wav")
@@ -3060,9 +3059,9 @@ struct SessionTests {
         #expect(thumbnail.toolTip == nil)
 
         let version = PlaylistVersionCellView()
-        version.configure(title: "Missing", format: "WAV", duration: "0:35", marks: .init(warning: message), toolTip: "")
+        version.configure(title: "Missing", duration: "0:35", marks: .init(warning: message), toolTip: "")
         #expect(version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
-        version.configure(title: "Available", format: "WAV", duration: "0:35", marks: .none, toolTip: "")
+        version.configure(title: "Available", duration: "0:35", marks: .none, toolTip: "")
         #expect(!version.subviews.contains { ($0 as? NSImageView)?.toolTip == message })
     }
 
@@ -3094,7 +3093,7 @@ struct SessionTests {
     func versionMarkColumnShowsSpeakerWarningAndRejectionSideBySide() {
         let cell = PlaylistVersionCellView()
         cell.frame = NSRect(x: 0, y: 0, width: 360, height: PlaylistRowMetrics.versionHeight)
-        cell.configure(title: "Take 9", format: "WAV", duration: "4:12",
+        cell.configure(title: "Take 9", duration: "4:12",
                        marks: .init(warning: "Missing", isRejected: true), toolTip: "")
         cell.layoutSubtreeIfNeeded()
         var frames = cell.visibleMarkFrames
@@ -3106,14 +3105,14 @@ struct SessionTests {
         #expect(cell.accessibilityValue() as? String == "Rejected")
 
         // A playing rejected version shows the speaker and the × together.
-        cell.configure(title: "Take 1", format: "MP3", duration: "2:34",
+        cell.configure(title: "Take 1", duration: "2:34",
                        marks: .init(isRejected: true, nowPlaying: .playing), toolTip: "")
         cell.layoutSubtreeIfNeeded()
         frames = cell.visibleMarkFrames
         #expect(frames.count == 2)
         #expect(cell.textField?.textColor == PlaylistRowPalette.nowPlayingTitle)
 
-        cell.configure(title: "Take 2", format: "FLAC", duration: "3:28", marks: .none, toolTip: "")
+        cell.configure(title: "Take 2", duration: "3:28", marks: .none, toolTip: "")
         cell.layoutSubtreeIfNeeded()
         #expect(cell.visibleMarkFrames.isEmpty)
         #expect(cell.accessibilityValue() == nil)

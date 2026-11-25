@@ -2,7 +2,7 @@
 
 A variant of A2's compare mode ([a2-redesign-spec.md](a2-redesign-spec.md),
 §5.2 and §8). The compare control bar loses its readout and back button. A
-32 pt info bar takes their place directly above the ruler: the take count on
+32 pt info bar takes their place directly above the ruler: the version count on
 the left, the elapsed time in a small Glass frame in the centre, and a Done
 button on the right.
 
@@ -53,9 +53,9 @@ The transport row itself doesn't move between modes.
   time stays centred. Long timestamps scale down when the space between
   the side columns is narrower than the clock.
 
-### 2.1 Take count (left)
+### 2.1 Version count (left)
 
-- Text: `N takes`, singular `1 take` (removal can leave compare with one
+- Text: `N versions`, singular `1 version` (removal can leave compare with one
   version). N is the number of versions loaded in compare.
 - One style: 12 pt medium, secondary label colour. No caps, no second weight.
 - Leading-aligned, single line, tail truncation if it ever meets the time.
@@ -140,5 +140,5 @@ are.
 - Should the info bar also appear when the artwork is hidden? This document
   assumes yes: it sits below the control bar, so the artwork state doesn't
   affect it.
-- Does the take count need a tooltip or menu (for example the item's title)?
+- Does the version count need a tooltip or menu (for example the item's title)?
   The canvas has none; this document adds none.

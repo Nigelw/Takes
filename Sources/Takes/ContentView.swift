@@ -257,7 +257,7 @@ enum CompareLaneLayout {
 
 /// The compare info bar (A2 compare info-bar variant §2): 32 pt between
 /// the control bar's divider and the ruler, on the well with no line to the
-/// ruler. The take count on the left, the elapsed time centred in the
+/// ruler. The version count on the left, the elapsed time centred in the
 /// window, Done on the right.
 ///
 /// The bar's own body reads nothing from the controller. The count and the
@@ -269,7 +269,7 @@ struct CompareInfoBar: View {
 
     var body: some View {
         CompareInfoBarRow {
-            CompareTakeCount(controller: controller)
+            CompareVersionCount(controller: controller)
             CompareInfoBarTime(controller: controller)
             Button("Done", action: done)
                 .buttonStyle(CompareDoneButtonStyle())
@@ -288,20 +288,20 @@ enum CompareInfoBarMetrics {
 }
 
 enum CompareInfoBarText {
-    /// `3 takes`; `1 take` (removal can leave compare with one version).
+    /// `3 versions` or `1 version` after removing the other versions.
     /// Unchanged in Blind Listening Mode: the count reveals nothing.
-    static func takeCount(_ count: Int) -> String {
-        count == 1 ? "1 take" : "\(count) takes"
+    static func versionCount(_ count: Int) -> String {
+        count == 1 ? "1 version" : "\(count) versions"
     }
 }
 
-/// The take count: one style, 12 pt medium secondary, tail-truncated if it
+/// The version count: one style, 12 pt medium secondary, tail-truncated if it
 /// ever meets the time.
-private struct CompareTakeCount: View {
+private struct CompareVersionCount: View {
     let controller: PlaybackController
 
     var body: some View {
-        Text(CompareInfoBarText.takeCount(controller.displayedTrackRowCount))
+        Text(CompareInfoBarText.versionCount(controller.displayedTrackRowCount))
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(.secondary)
             .lineLimit(1)
