@@ -3,6 +3,44 @@
     <channel>
         <title>Takes</title>
         <item>
+            <title>3.0b2</title>
+            <pubDate>Wed, 25 Nov 2026 13:42:55 -0500</pubDate>
+            <sparkle:channel>beta</sparkle:channel>
+            <sparkle:version>16</sparkle:version>
+            <sparkle:shortVersionString>3.0b2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[## New
+
+- Overhauled the app to add playlists, track versions, and culling.
+  - The old version was great for comparing multiple versions of a single track. Now you can use it to compare multiple versions of entire albums.
+  - The playlist also makes it a handy little audio player in its own right.
+- Major redesign. Collapsed the UI into a compact window with prominent artwork display.
+  - Toggle the artwork, playback controls, and playlist to make the player more compact as needed.
+- Added a playlist with versions.
+  - Any track in the playlist can have multiple versions.
+  - Takes auto-groups likely versions of the same track by default, and you can group, ungroup, and reorder them yourself.
+- Added support for culling tracks.
+  - Mark items as rejected, which skips them during playback and comparison.
+  - Still to come are features to build on top of this: adding non-rejected tracks to an iTunes playlist, copying them, deleting rejected tracks.
+
+## What Needs Testing
+  - The auto-grouping logic. Probably needs to be less strict, and maybe only look at track names.
+  - Should culling consist only of marking tracks as rejected, or do we need the ability to pick as well? What would you do with picked tracks vs. standard tracks that haven't been rejected?
+
+## Changes Since 3.0b1
+- Waveforms reappear faster when you reopen a comparison during the same app session.
+- The Compare button and now-playing speaker are easier to see when the row is highlighted
+- File drops highlight the artwork and playback controls along with the playlist area.
+- Use Reset Offset or Reset All Offsets in the Playback menu to clear timing adjustments in Compare.
+- Press Esc in Compare to clear the selected loop instead of navigate back to the playlist.
+- Switch Track and Switch & Repeat now skip versions whose files are missing.
+- Playlist commands no longer act on hidden playlist rows while Compare is open. ⌘R applies to the active version in Compare.
+- Navigating back to Playlist mode while tempo alignment is in progress cancels the alignment processing.
+- Artwork stays steady while you show or hide the Player or Playlist.
+]]></description>
+            <enclosure url="https://github.com/Nigelw/Takes/releases/download/v3.0b2/Takes.dmg" length="7331464" type="application/octet-stream" sparkle:edSignature="CWANx6DonnkGjhiYTpqa0ZzUV9US8bOhGMsEx8UwEbsLrHGhL59g4ANpIw2ULzioncgbasDb4alkWdhP+qbGAA=="/>
+        </item>
+        <item>
             <title>3.0b1</title>
             <pubDate>Wed, 25 Nov 2026 11:21:31 -0500</pubDate>
             <sparkle:channel>beta</sparkle:channel>
