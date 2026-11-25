@@ -728,12 +728,14 @@ struct TransportPlayButton: View {
     var body: some View {
         let isPlaying = coordinator.isPlaying
         let title = isPlaying ? "Pause" : "Play"
-        let canPlay = coordinator.mode.itemID == nil ? coordinator.canPlay : coordinator.controller.session.isPlayable
-        Button { coordinator.togglePlayback() } label: {
+        let mode = coordinator.mode
+        Button {
+            if coordinator.mode == mode { coordinator.togglePlayback() }
+        } label: {
             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
         }
         .buttonStyle(size.style(for: .primary))
-        .disabled(!canPlay)
+        .disabled(!coordinator.canPlay)
         .help(title)
         .accessibilityLabel(title)
         .componentDebugLabel("Play", enabled: settings.showsComponentDebugLabels)
@@ -756,6 +758,7 @@ struct BasicTransportButtons: View {
         let direction = isNext ? "Next" : "Previous"
         let title = direction + " Track"
         return Button {
+            guard coordinator.mode == .playlist else { return }
             if isNext { coordinator.next() } else { coordinator.previous() }
         } label: {
             Image(systemName: isNext ? "forward.end.fill" : "backward.end.fill")
@@ -783,6 +786,7 @@ struct CompareTransportButtons {
 
     private func switchTrackButton(size: TransportButtonSize) -> some View {
         Button {
+            guard coordinator.mode.itemID != nil else { return }
             if SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: NSApp.currentEvent?.modifierFlags) {
                 coordinator.previous()
             } else {
@@ -801,7 +805,7 @@ struct CompareTransportButtons {
     var repeatMode: some View {
         let mode = controller.session.repeatMode
         return Button {
-            coordinator.cycleRepeatMode()
+            if coordinator.mode.itemID != nil { coordinator.cycleRepeatMode() }
         } label: {
             Image(systemName: ControlBarRepeatSymbol.compare(mode))
         }
@@ -816,7 +820,7 @@ struct CompareTransportButtons {
     var blindListening: some View {
         let isOn = controller.session.isBlindListeningModeEnabled
         return Button {
-            controller.toggleBlindListeningMode()
+            if coordinator.mode.itemID != nil { controller.toggleBlindListeningMode() }
         } label: {
             if isOn {
                 // The custom symbol sits high in its box; nudged down by the

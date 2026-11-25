@@ -1088,6 +1088,7 @@ struct PlaylistCoordinatorTests {
         #expect(coordinator.controller.session.tracks.map(\.loadedTrack.isMissing) == [true])
         #expect(coordinator.controller.runtimeTrackCount == 0)
         // Nothing to play until the file is located.
+        #expect(!coordinator.canPlay)
         #expect(!coordinator.controller.session.isPlayable)
         #expect(coordinator.errorMessage == nil)
     }
@@ -1667,12 +1668,17 @@ struct PlaylistCoordinatorTests {
         // The Playlist menu's command targets the active lane, which stays
         // active and audible.
         controller.selectActiveTrack(ids[0])
-        let command = PlaylistCommandContext(
-            coordinator: coordinator, presentation: PlaylistPresentationState(), undoManager: undo
-        )
-        #expect(command.rejectionTargets.versions == [ids[0]])
-        undo.beginUndoGrouping()
+        let presentation = PlaylistPresentationState()
+        presentation.selection = [.item(item.id)]
+        let command = PlaylistCommandContext(coordinator: coordinator, presentation: presentation, undoManager: undo)
+        #expect(!command.canToggleRejection)
+        #expect(PlaylistOrganizationAvailability(command).canReject)
         command.toggleRejection()
+        #expect(coordinator.workspace.items[0].versions.map(\.isRejected) == [false, true, false])
+        undo.beginUndoGrouping()
+        if let active = coordinator.activeComparisonVersionID {
+            #expect(coordinator.toggleRejection(versionIDs: [active], undoManager: undo))
+        }
         undo.endUndoGrouping()
         #expect(controller.session.activeTrackID == ids[0])
         #expect(coordinator.runtimeContext == context)

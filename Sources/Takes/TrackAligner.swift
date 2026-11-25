@@ -271,6 +271,7 @@ enum TrackAligner {
     /// A detected ratio is reported, not corrected: playback stays at normal
     /// speed, so the returned offset aligns exactly at the playhead and
     /// drifts away from it at `|ratio − 1|` seconds per second.
+    /// Cancellation discards any partial offsets.
     static func alignTempo(
         _ request: Request,
         onProgress: @escaping @Sendable (Double) -> Void
@@ -280,6 +281,7 @@ enum TrackAligner {
         }
 
         guard let anchorNovelty = noveltyEnvelope(url: request.anchor.url) else {
+            guard !Task.isCancelled else { return [] }
             onProgress(1)
             return request.others.map(failure)
         }
@@ -307,13 +309,14 @@ enum TrackAligner {
                 completedSteps += 1
                 onProgress(Double(completedSteps) / Double(totalSteps))
             }
+            guard let result, !Task.isCancelled else { return [] }
             results.append(result)
             // Realign progress at track boundaries so early-outs (unreadable
             // file, no refinement) don't leave the bar short.
             completedSteps = stepsPerTrack * (trackIndex + 1)
             onProgress(Double(completedSteps) / Double(totalSteps))
         }
-        return results
+        return Task.isCancelled ? [] : results
     }
 
     private static func tempoAlignTrack(
@@ -323,18 +326,20 @@ enum TrackAligner {
         anchorOffsetSeconds: TimeInterval,
         gridDeviations: [Double],
         step: () -> Void
-    ) -> TempoResult {
+    ) -> TempoResult? {
         guard let novelty = noveltyEnvelope(url: source.url) else {
             return TempoResult(trackID: source.id, displayName: source.displayName, newOffsetSeconds: nil, speedRatio: nil, score: 0)
         }
 
         func evaluate(_ ratio: Double) -> Match? {
-            defer { step() }
-            return bestAlignment(reference: stretchedEnvelope(anchorNovelty, ratio: ratio), target: novelty)
+            let match = bestAlignment(reference: stretchedEnvelope(anchorNovelty, ratio: ratio), target: novelty)
+            if !Task.isCancelled { step() }
+            return match
         }
 
         var best: (ratio: Double, match: Match)?
         for deviation in gridDeviations {
+            guard !Task.isCancelled else { return nil }
             let ratio = 1 + deviation
             if let match = evaluate(ratio), best == nil || match.score > best!.match.score {
                 best = (ratio, match)
@@ -347,6 +352,7 @@ enum TrackAligner {
             var current = coarse
             for refinementStep in tempoRefinementStepDeviations {
                 for direction in [-1.0, 1.0] {
+                    guard !Task.isCancelled else { return nil }
                     if let match = evaluate(current.ratio + direction * refinementStep),
                        match.score > current.match.score {
                         current = (current.ratio + direction * refinementStep, match)
@@ -719,9 +725,10 @@ enum TrackAligner {
     /// Decode `url` and reduce it to a raw 1 kHz onset-novelty envelope:
     /// per-millisecond mean-square energy → log energy → half-wave-rectified
     /// rise. Smoothing is applied per correlation scale in `bestAlignment`.
-    /// Returns `nil` when the file can't be read.
+    /// Returns `nil` when the file can't be read or the task is cancelled.
     static func noveltyEnvelope(url: URL) -> [Float]? {
         guard
+            !Task.isCancelled,
             let file = try? AVAudioFile(forReading: url),
             file.length > 0,
             let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: framesPerChunk)
@@ -750,6 +757,7 @@ enum TrackAligner {
 
         var framesRead: AVAudioFramePosition = 0
         while framesRead < totalFrames {
+            guard !Task.isCancelled else { return nil }
             do {
                 try file.read(into: buffer, frameCount: framesPerChunk)
             } catch {
@@ -790,6 +798,7 @@ enum TrackAligner {
             framesRead += AVAudioFramePosition(frames)
         }
 
+        guard !Task.isCancelled else { return nil }
         return noveltyFromEnergy(energy, framesPerHop: framesPerHop)
     }
 

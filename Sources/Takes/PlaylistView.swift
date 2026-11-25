@@ -42,7 +42,8 @@ struct PlaylistCommandContext {
     /// menu opened on an unselected row passes that row instead.
     var rows: Set<PlaylistRowID>?
 
-    private var targetRows: Set<PlaylistRowID> { rows ?? presentation.selection }
+    private var isPlaylist: Bool { coordinator.mode == .playlist }
+    private var targetRows: Set<PlaylistRowID> { isPlaylist ? rows ?? presentation.selection : [] }
 
     var itemIDs: [UUID] {
         let rows = targetRows
@@ -69,15 +70,17 @@ struct PlaylistCommandContext {
     var canSeparate: Bool { !versionsToSeparate.isEmpty }
 
     func selectAll() {
+        guard isPlaylist else { return }
         presentation.selection = Set(presentation.visibleRows(in: coordinator.workspace))
     }
 
     func deselectAll() {
+        guard isPlaylist else { return }
         presentation.selection = []
     }
 
     func selectCurrentSong() {
-        guard let itemID = coordinator.currentItemID else { return }
+        guard isPlaylist, let itemID = coordinator.currentItemID else { return }
         presentation.selection = [.item(itemID)]
     }
 
@@ -131,11 +134,8 @@ struct PlaylistCommandContext {
 
     /// Reject / Clear Rejection targets (culling spec §4.1, §5.2). In the
     /// playlist a selected item row targets the track only, not its
-    /// versions; selected version rows target those versions. In compare the
-    /// target is the active lane.
+    /// versions; selected version rows target those versions.
     var rejectionTargets: (items: [UUID], versions: [UUID]) {
-        if let active = coordinator.activeComparisonVersionID { return ([], [active]) }
-        guard coordinator.mode == .playlist else { return ([], []) }
         let rows = targetRows
         return (itemIDs, coordinator.workspace.allVersions.filter { rows.contains(.version($0.id)) }.map(\.id))
     }
@@ -170,7 +170,10 @@ struct PlaylistCommandContext {
 
     func compare() {
         guard let id = compareItemID else { return }
-        Task { await coordinator.enterComparison(itemID: id) }
+        Task {
+            guard isPlaylist else { return }
+            await coordinator.enterComparison(itemID: id)
+        }
     }
 
     /// File ▸ Locate File…: the first missing file among the selected rows
@@ -188,6 +191,7 @@ struct PlaylistCommandContext {
     }
 
     func locate() {
+        guard isPlaylist else { return }
         presentation.locateVersionID = locateVersionID
     }
 
@@ -262,8 +266,13 @@ struct PlaylistOrganizationAvailability: Equatable {
         canSeparate = isPlaylist && context.canSeparate
         canMoveUp = isPlaylist ? context.canMove(.up) : context.coordinator.canMoveActiveComparisonVersion(.up)
         canMoveDown = isPlaylist ? context.canMove(.down) : context.coordinator.canMoveActiveComparisonVersion(.down)
-        canReject = context.canToggleRejection
-        rejectionClears = context.rejectionClears
+        if let active = context.coordinator.activeComparisonVersionID {
+            canReject = true
+            rejectionClears = context.coordinator.rejectionClears(itemIDs: [], versionIDs: [active])
+        } else {
+            canReject = context.canToggleRejection
+            rejectionClears = context.rejectionClears
+        }
     }
 
     /// The Reject command's title: Clear Rejection when every target is
@@ -327,10 +336,10 @@ struct PlaylistCommands: Commands {
                     coordinator.moveActiveComparisonVersion(direction, undoManager: NSApp.mainWindow?.undoManager)
                 }
             }, toggleRejection: {
-                if let context {
-                    context.toggleRejection()
-                } else if let active = coordinator.activeComparisonVersionID {
+                if let active = coordinator.activeComparisonVersionID {
                     coordinator.toggleRejection(versionIDs: [active], undoManager: NSApp.mainWindow?.undoManager)
+                } else {
+                    context?.toggleRejection()
                 }
             })
 
@@ -400,7 +409,7 @@ struct PlaylistView: View {
                     icon: "music.note.list", dragPrompt: "Drag Files Here to Play", clickPrompt: "Click Here to Play",
                     accessibilityLabel: "Add audio files to the playlist", isDropTargeted: isDropTargeted
                 ) {
-                    openFiles.presentOpenDialog()
+                    if coordinator.mode == .playlist { openFiles.presentOpenDialog() }
                 }
             } else {
                 PlaylistOutline(

@@ -1038,7 +1038,7 @@ private struct EditCommands: Commands {
     private var isComparison: Bool { coordinator.mode.itemID != nil }
 
     private var selectsPlaylistRows: Bool {
-        playlistContext != nil && canUseGlobalMenuShortcuts == true
+        !isComparison && playlistContext != nil && canUseGlobalMenuShortcuts == true
             && mainWindowCommandState?.visibility.showsPlaylist == true
     }
 
@@ -1053,7 +1053,13 @@ private struct EditCommands: Commands {
                     .keyboardShortcut("a", modifiers: [.command])
                     .disabled(coordinator.workspace.items.isEmpty)
             } else {
-                responderCommand("Select All", key: "a", action: #selector(NSText.selectAll(_:)))
+                Button("Select All") {
+                    if let target = selectAllResponder {
+                        NSApp.sendAction(#selector(NSText.selectAll(_:)), to: target, from: nil)
+                    }
+                }
+                .keyboardShortcut("a", modifiers: [.command])
+                .disabled(selectAllResponder == nil)
             }
             Button(isComparison ? "Deselect" : "Deselect All") {
                 if isComparison {
@@ -1065,6 +1071,12 @@ private struct EditCommands: Commands {
             .keyboardShortcut("d", modifiers: [.command])
             .disabled(canDeselect != true)
         }
+    }
+
+    private var selectAllResponder: Any? {
+        let target = NSApp.target(forAction: #selector(NSText.selectAll(_:)))
+        if mainWindowCommandState != nil { return target as? NSText }
+        return target
     }
 
     private func responderCommand(_ title: String, key: KeyEquivalent, action: Selector) -> some View {

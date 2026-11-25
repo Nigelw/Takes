@@ -329,7 +329,10 @@ final class PlaylistCoordinator {
     /// rejected (culling spec §4.2), so a playlist of rejected tracks has
     /// nothing to start.
     var canPlay: Bool {
-        controller.session.isPlayable
+        if let itemID = mode.itemID {
+            return runtimeContext?.itemID == itemID && controller.session.isPlayable
+        }
+        return controller.session.isPlayable
             || workspace.items.contains { item in
                 guard currentItemID != nil || !item.isRejected, let version = item.keyVersion else { return false }
                 return version.metadata.duration > 0
@@ -666,19 +669,18 @@ final class PlaylistCoordinator {
     }
 
     func play() {
-        let runtimeBelongsToCurrentMode = mode.itemID != nil
-            ? runtimeContext?.itemID == mode.itemID
-            : runtimeContext?.itemID == currentItemID
-        if controller.session.isPlayable, runtimeBelongsToCurrentMode {
+        let runtimeItemID = mode.itemID ?? currentItemID
+        if controller.session.isPlayable, runtimeContext?.itemID == runtimeItemID {
             controller.play()
             updateListeningStateFromRuntime()
             return
         }
+        guard mode == .playlist else { return }
         // Space with a current track resumes it, rejected or not. With none,
         // Play starts the first track that is neither rejected nor
         // unavailable, as Next would.
         guard let itemID = currentItemID else {
-            guard mode.itemID == nil, !workspace.items.isEmpty else { return }
+            guard !workspace.items.isEmpty else { return }
             let generation = navigationGeneration
             Task { [weak self] in
                 guard let self, self.navigationGeneration == generation, self.mode.itemID == nil else { return }
@@ -688,7 +690,10 @@ final class PlaylistCoordinator {
         }
         let versionID = currentVersionID
             ?? workspace.items.first(where: { $0.id == itemID })?.keyVersion?.id
-        Task { await playItem(id: itemID, versionID: versionID) }
+        Task {
+            guard mode == .playlist else { return }
+            await playItem(id: itemID, versionID: versionID)
+        }
     }
 
     func pause() {

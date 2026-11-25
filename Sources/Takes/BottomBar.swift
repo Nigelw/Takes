@@ -202,8 +202,10 @@ struct PlaylistBottomBar: View {
                 canRemove: state.canRemove,
                 // ⌘O and Delete: the shared import path, and the selection-
                 // aware removal.
-                add: { openFiles.presentOpenDialog() },
-                remove: { openFiles.removeActiveTrack() }
+                add: {
+                    if coordinator.mode == .playlist { openFiles.presentOpenDialog() }
+                },
+                remove: context.remove
             )
             .fixedSize()
             BottomBarRejectButton(
@@ -288,8 +290,13 @@ struct CompareBottomBar: View {
                 canRemove: state.canRemove,
                 // ⌘O, whose import targets the item being compared, and
                 // File ▸ Remove Version (Delete).
-                add: { openFiles.presentOpenDialog() },
-                remove: { openFiles.removeActiveTrack() }
+                add: {
+                    if coordinator.mode.itemID != nil { openFiles.presentOpenDialog() }
+                },
+                remove: {
+                    guard let active = coordinator.activeComparisonVersionID else { return }
+                    coordinator.removeVersion(active, undoManager: undoManager)
+                }
             )
             .fixedSize()
             CompareAlignButton(controller: controller, isEnabled: state.canAlign)
@@ -297,7 +304,7 @@ struct CompareBottomBar: View {
                 clears: active.map { coordinator.rejectionClears(itemIDs: [], versionIDs: [$0]) } ?? false,
                 isEnabled: active != nil
             ) {
-                guard let active else { return }
+                guard let active = coordinator.activeComparisonVersionID else { return }
                 coordinator.toggleRejection(versionIDs: [active], undoManager: undoManager)
             }
         } trailing: {
@@ -315,10 +322,10 @@ struct CompareBottomBar: View {
 struct CompareAlignButton: View {
     let controller: PlaybackController
     let isEnabled: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsOffer = false
 
     var body: some View {
-        let outcome = controller.alignmentOutcome
         Button {
             controller.autoAlignTracks()
         } label: {
@@ -328,9 +335,6 @@ struct CompareAlignButton: View {
         .help("Auto-Align Tracks")
         .accessibilityLabel("Auto-Align Tracks")
         .accessibilityValue(controller.isAligning ? "Aligning" : "")
-        // The flash: a glow in the outcome's colour while it lasts. Static,
-        // not pulsed; continuous motion is Core Animation's job in Takes.
-        .shadow(color: Self.glowColor(outcome).opacity(0.8), radius: outcome == nil ? 0 : 4)
         .popover(isPresented: $showsOffer, arrowEdge: .top) { offerContent }
         .onChange(of: controller.tempoAnalysisOffer) { _, offer in
             if offer != nil { showsOffer = true }
@@ -343,26 +347,33 @@ struct CompareAlignButton: View {
     @ViewBuilder
     private var label: some View {
         if let progress = controller.alignmentProgress {
-            ProgressView(value: progress)
-                .progressViewStyle(.circular)
-                .controlSize(.mini)
+            ZStack {
+                Circle()
+                    .stroke(Theme.primary.opacity(0.25), lineWidth: 2)
+                Circle()
+                    .trim(from: 0, to: max(0.02, progress))
+                    .stroke(Theme.primary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 12, height: 12)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: progress)
         } else if controller.isAligning {
             ProgressView()
                 .progressViewStyle(.circular)
                 .controlSize(.mini)
+                .scaleEffect(0.75)
         } else if let outcome = controller.alignmentOutcome {
+            let color: Color = outcome == .success ? .green : .red
             Image(systemName: outcome == .success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(Self.glowColor(outcome))
+                .foregroundStyle(color)
+                .background {
+                    AlignmentResultGlow(color: NSColor(color), reduceMotion: reduceMotion)
+                        .frame(width: AlignmentResultGlow.size, height: AlignmentResultGlow.size)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
         } else {
             Image(systemName: "arrow.right.and.line.vertical.and.arrow.left")
-        }
-    }
-
-    private static func glowColor(_ outcome: PlaybackController.AlignmentOutcome?) -> Color {
-        switch outcome {
-        case .success: .green
-        case .failure: .red
-        case nil: .clear
         }
     }
 
@@ -400,6 +411,49 @@ struct CompareAlignButton: View {
             .frame(width: 300)
             .controlSize(.regular)
         }
+    }
+}
+
+/// The two-second outcome pulse runs on the layer without updating the button.
+private struct AlignmentResultGlow: NSViewRepresentable {
+    static let size: CGFloat = 12
+    let color: NSColor
+    let reduceMotion: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.shadowPath = CGPath(
+            ellipseIn: CGRect(x: 0, y: 0, width: Self.size, height: Self.size),
+            transform: nil
+        )
+        view.layer?.shadowOffset = .zero
+        view.layer?.shadowRadius = 7
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        let restingOpacity: Float = reduceMotion ? 0.8 : 0.15
+        let shadowColor = color.cgColor
+        guard let layer = view.layer,
+              layer.shadowColor != shadowColor || layer.shadowOpacity != restingOpacity else { return }
+
+        layer.removeAnimation(forKey: "outcomePulse")
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.shadowColor = shadowColor
+        layer.shadowOpacity = restingOpacity
+        CATransaction.commit()
+
+        guard !reduceMotion else { return }
+        let pulse = CABasicAnimation(keyPath: #keyPath(CALayer.shadowOpacity))
+        pulse.fromValue = restingOpacity
+        pulse.toValue = 0.9
+        pulse.duration = 0.5
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        pulse.autoreverses = true
+        pulse.repeatCount = 2
+        layer.add(pulse, forKey: "outcomePulse")
     }
 }
 

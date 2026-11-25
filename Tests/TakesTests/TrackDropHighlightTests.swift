@@ -73,7 +73,7 @@ struct TrackDropHighlightTests {
         let outline = try #require(scroll.documentView as? NSOutlineView)
         controller.update(
             items: workspace.items, fileIssues: [:], currentItemID: nil, currentVersionID: nil,
-            isPlaying: false, isActive: false, moveRevision: 0, reduceMotion: true, metadataFields: []
+            isPlaying: false, isActive: true, moveRevision: 0, reduceMotion: true, metadataFields: []
         )
 
         let info = PlaylistTestDraggingInfo(source: outline)
@@ -100,6 +100,66 @@ struct TrackDropHighlightTests {
         } else {
             #expect(playlist.workspace.items.last == source)
         }
+    }
+
+    @MainActor
+    @Test
+    func comparisonDisablesRetainedOutlineAndPlaylistSelectionCommands() async throws {
+        let versions = ["Take 1", "Take 2"].map { name in
+            PlaylistVersion(
+                file: PlaylistFileReference(storedURL: URL(fileURLWithPath: "/tmp/\(UUID()).wav")),
+                metadata: PlaylistMetadata(duration: 2, sampleRate: 44_100, channelCount: 1, displayName: name)
+            )
+        }
+        let item = PlaylistItem(title: "Takes", versions: versions)
+        let playlist = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item]))
+        let presentation = PlaylistPresentationState()
+        presentation.expanded = [item.id]
+        let command = PlaylistCommandContext(coordinator: playlist, presentation: presentation, undoManager: nil)
+        let controller = PlaylistOutlineController(
+            playlist: playlist, presentation: presentation, artworkStore: PlaylistArtworkStore()
+        )
+        let scroll = controller.makeScrollView()
+        let outline = try #require(scroll.documentView as? PlaylistNSOutlineView)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 240),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = scroll
+        defer { window.close() }
+
+        func updateOutline() {
+            controller.update(
+                items: playlist.workspace.items, fileIssues: [:], currentItemID: nil, currentVersionID: nil,
+                isPlaying: false, isActive: playlist.mode == .playlist, moveRevision: 0,
+                reduceMotion: true, metadataFields: []
+            )
+        }
+
+        updateOutline()
+        #expect(window.makeFirstResponder(outline))
+        #expect(window.firstResponder === outline)
+        outline.selectRowIndexes([0], byExtendingSelection: false)
+        #expect(presentation.selection == [.item(item.id)])
+
+        await playlist.enterComparison(itemID: item.id)
+        try #require(playlist.mode.itemID == item.id)
+        // The live mode changes before SwiftUI updates the retained AppKit view.
+        outline.selectAll(nil)
+        command.selectAll()
+        command.deselectAll()
+        #expect(outline.selectedRowIndexes == [0])
+        #expect(presentation.selection == [.item(item.id)])
+
+        updateOutline()
+        #expect(window.firstResponder !== outline)
+        #expect(!outline.acceptsFirstResponder)
+        #expect(!outline.canBecomeKeyView)
+
+        await playlist.backToPlaylist()
+        updateOutline()
+        #expect(outline.acceptsFirstResponder)
+        outline.selectAll(nil)
+        #expect(presentation.selection == Set(presentation.visibleRows(in: playlist.workspace)))
     }
 
     @Test

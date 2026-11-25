@@ -129,10 +129,10 @@ struct WorkspaceView: View {
                 }
             },
             removeActiveTrack: {
-                if coordinator.mode.itemID != nil, let id = coordinator.controller.session.activeTrackID {
-                    coordinator.removeVersion(id, undoManager: NSApp.mainWindow?.undoManager)
-                } else {
+                if coordinator.mode == .playlist {
                     PlaylistCommandContext(coordinator: coordinator, presentation: presentation, undoManager: NSApp.mainWindow?.undoManager).remove()
+                } else if let id = coordinator.activeComparisonVersionID {
+                    coordinator.removeVersion(id, undoManager: NSApp.mainWindow?.undoManager)
                 }
             },
             clearAllTracks: {
@@ -943,8 +943,11 @@ struct WorkspaceView: View {
             case 49 where flags.isEmpty:
                 coordinator.togglePlayback(); return true
             case PlaylistRejectionCommand.keyCode where flags == PlaylistRejectionCommand.appKitModifiers:
-                let context = commandContext
-                if context.canToggleRejection { context.toggleRejection() }
+                if let active = coordinator.activeComparisonVersionID {
+                    coordinator.toggleRejection(versionIDs: [active], undoManager: undoManager)
+                } else {
+                    commandContext.toggleRejection()
+                }
                 return true
             case 7 where isComparison && (flags.isEmpty || flags == .shift):
                 // Switch Track; the playlist uses ⌘← / ⌘→ instead.
@@ -1013,7 +1016,9 @@ private struct PlaylistTransportView: View {
 
     var body: some View {
         ControlBarLayout {
-            Button { coordinator.toggleShuffle() } label: { Image(systemName: "shuffle") }
+            Button {
+                if coordinator.mode == .playlist { coordinator.toggleShuffle() }
+            } label: { Image(systemName: "shuffle") }
                 .buttonStyle(ControlBarSideButtonStyle(isOn: coordinator.workspace.isShuffleEnabled))
                 .help("Shuffle")
                 .accessibilityLabel("Shuffle").accessibilityValue(coordinator.workspace.isShuffleEnabled ? "On" : "Off")
@@ -1021,7 +1026,9 @@ private struct PlaylistTransportView: View {
         } center: {
             BasicTransportButtons(coordinator: coordinator)
         } trailing: {
-            Button { coordinator.cyclePlaylistRepeatMode() } label: {
+            Button {
+                if coordinator.mode == .playlist { coordinator.cyclePlaylistRepeatMode() }
+            } label: {
                 Image(systemName: coordinator.workspace.playlistRepeatMode == .one ? "repeat.1" : "repeat")
             }
             .buttonStyle(ControlBarSideButtonStyle(isOn: coordinator.workspace.playlistRepeatMode != .off))
@@ -1032,7 +1039,9 @@ private struct PlaylistTransportView: View {
             PlaylistControlBarReadout(
                 controller: controller,
                 title: ControlBarReadoutTitle.playlist(currentVersion),
-                seek: coordinator.seek
+                seek: { position in
+                    if coordinator.mode == .playlist { coordinator.seek(to: position) }
+                }
             )
             .componentDebugLabel("Readout", enabled: showsLabels, color: .orange)
         }

@@ -209,7 +209,8 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     private var currentItemID: UUID?
     private var currentVersionID: UUID?
     private var isPlaying = false
-    private(set) var isActive = false
+    private var isActive = false
+    var canInteract: Bool { isActive && playlist.mode == .playlist }
     private var hasLoaded = false
     private var moveRevision = 0
     private var moveAnimation: (id: UUID, foreground: Set<PlaylistRowID>)?
@@ -283,7 +284,8 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         menu.delegate = self
         outline.menu = menu
 
-        let scrollView = NSScrollView()
+        let scrollView = PlaylistScrollView()
+        scrollView.controller = self
         scrollView.documentView = outline
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
@@ -352,6 +354,11 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         self.currentVersionID = currentVersionID
         self.isPlaying = isPlaying
         self.isActive = isActive
+        if !canInteract, let window = outlineView.window,
+           let responder = window.firstResponder as? NSView,
+           responder === outlineView || responder.isDescendant(of: outlineView) {
+            window.makeFirstResponder(nil)
+        }
         itemsByID = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
         ownerByVersionID = [:]
         for item in newItems { for version in item.versions { ownerByVersionID[version.id] = item.id } }
@@ -485,7 +492,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 
     func focusOutline() {
         DispatchQueue.main.async { [weak self] in
-            guard let outline = self?.outlineView, let window = outline.window else { return }
+            guard let self, self.canInteract, let outline = self.outlineView, let window = outline.window else { return }
             if window.firstResponder !== outline { window.makeFirstResponder(outline) }
         }
     }
@@ -668,7 +675,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     }
 
     private func toggleExpansion(_ node: PlaylistNode) {
-        guard outlineView.isExpandable(node) else { return }
+        guard canInteract, outlineView.isExpandable(node) else { return }
         if outlineView.isItemExpanded(node) {
             outlineView.animator().collapseItem(node)
         } else {
@@ -733,7 +740,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
-        guard !isApplying else { return }
+        guard canInteract, !isApplying else { return }
         let selection = Set(outlineView.selectedRowIndexes.compactMap { (outlineView.item(atRow: $0) as? PlaylistNode)?.rowID })
         if selection != presentation.selection { presentation.selection = selection }
     }
@@ -742,7 +749,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         let node = notification.userInfo?["NSObject"] as? PlaylistNode
         updateDisclosure(for: node, animated: !isApplying)
         scheduleThumbnailRequest()
-        guard !isApplying, let id = node?.itemID else { return }
+        guard canInteract, !isApplying, let id = node?.itemID else { return }
         presentation.expanded.insert(id)
     }
 
@@ -750,7 +757,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
         let node = notification.userInfo?["NSObject"] as? PlaylistNode
         updateDisclosure(for: node, animated: !isApplying)
         scheduleThumbnailRequest()
-        guard !isApplying, let id = node?.itemID else { return }
+        guard canInteract, !isApplying, let id = node?.itemID else { return }
         presentation.expanded.remove(id)
         presentation.prune(in: playlist.workspace)
     }
@@ -785,20 +792,27 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     }
 
     private func play(_ rows: Set<PlaylistRowID>) {
-        guard let rowID = rowsInDisplayOrder(rows).first, let (item, version) = representedVersion(rowID) else { return }
+        guard canInteract, let rowID = rowsInDisplayOrder(rows).first,
+              let (item, version) = representedVersion(rowID) else { return }
         let fromBeginning: Bool
         switch rowID {
         case .item: fromBeginning = false
         case .version: fromBeginning = true
         }
-        Task { await playlist.playItem(id: item.id, versionID: version.id, fromBeginning: fromBeginning) }
+        Task {
+            guard canInteract else { return }
+            await playlist.playItem(id: item.id, versionID: version.id, fromBeginning: fromBeginning)
+        }
     }
 
     /// Compare opens even with missing files: their lanes show an error
     /// state, and the lane strip's menu offers Locate File….
     private func compare(itemID: UUID) {
-        guard itemsByID[itemID] != nil else { return }
-        Task { await playlist.enterComparison(itemID: itemID) }
+        guard canInteract, itemsByID[itemID] != nil else { return }
+        Task {
+            guard canInteract else { return }
+            await playlist.enterComparison(itemID: itemID)
+        }
     }
 
     /// Outline-style arrow keys: Left collapses, or moves from a version to
@@ -833,7 +847,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let row = outlineView.clickedRow
-        guard row >= 0, let node = outlineView.item(atRow: row) as? PlaylistNode else { return }
+        guard canInteract, row >= 0, let node = outlineView.item(atRow: row) as? PlaylistNode else { return }
         menuItems(for: targetRows(for: node)).forEach(menu.addItem)
     }
 
@@ -916,7 +930,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     // MARK: Drag source
 
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
-        guard let node = item as? PlaylistNode else { return nil }
+        guard canInteract, let node = item as? PlaylistNode else { return nil }
         let pasteboardItem = NSPasteboardItem()
         let id = node.itemID ?? node.versionID
         pasteboardItem.setString(id?.uuidString ?? "", forType: PlaylistItemDrag.pasteboardType)
@@ -993,6 +1007,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     }
 
     private func resolveDrop(proposedItem: PlaylistNode?, childIndex: Int) -> ResolvedDrop? {
+        guard canInteract else { return nil }
         let dragged = Set(draggedNodes.map(\.rowID))
         let draggedItems = items.map(\.id).filter { dragged.contains(.item($0)) }
         let draggedVersions = items.flatMap(\.versions).map(\.id).filter { dragged.contains(.version($0)) }
@@ -1098,7 +1113,7 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
     /// are reordered in place.
     @discardableResult
     private func moveVersions(_ versionIDs: [UUID], to destination: UUID, before anchor: UUID?) -> Bool {
-        guard playlist.moveVersions(versionIDs, to: destination, before: anchor, undoManager: undoManager) else {
+        guard canInteract, playlist.moveVersions(versionIDs, to: destination, before: anchor, undoManager: undoManager) else {
             return false
         }
         presentation.expanded.insert(destination)
@@ -1108,6 +1123,20 @@ final class PlaylistOutlineController: NSObject, NSOutlineViewDataSource, NSOutl
 }
 
 // MARK: - Outline view
+
+private final class PlaylistScrollView: NSScrollView {
+    weak var controller: PlaylistOutlineController?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard controller?.canInteract == true else { return nil }
+        return super.hitTest(point)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard controller?.canInteract == true else { return }
+        super.scrollWheel(with: event)
+    }
+}
 
 final class PlaylistNSOutlineView: NSOutlineView {
     weak var controller: PlaylistOutlineController?
@@ -1121,7 +1150,16 @@ final class PlaylistNSOutlineView: NSOutlineView {
     /// table leaves the Tab loop while it is inactive; otherwise Tab would
     /// stop on it before reaching the lanes' offset fields.
     override var canBecomeKeyView: Bool {
-        (controller?.isActive ?? true) && super.canBecomeKeyView
+        acceptsFirstResponder && super.canBecomeKeyView
+    }
+
+    override var acceptsFirstResponder: Bool {
+        controller?.canInteract == true && super.acceptsFirstResponder
+    }
+
+    override func selectAll(_ sender: Any?) {
+        guard controller?.canInteract == true else { return }
+        super.selectAll(sender)
     }
 
     /// Dragging an item out carries every version whose file is there, not
@@ -1146,6 +1184,7 @@ final class PlaylistNSOutlineView: NSOutlineView {
     }
 
     override func keyDown(with event: NSEvent) {
+        guard controller?.canInteract == true else { return }
         let flags = event.modifierFlags.intersection([.command, .shift, .control, .option])
         switch event.keyCode {
         case 36 where flags.isEmpty, 76 where flags.isEmpty:

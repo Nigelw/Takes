@@ -251,7 +251,8 @@ These are here to prevent parallel implementations and subtle regressions:
   metadata) but gets no audio nodes (`replaceRuntimeSession` skips it), no
   waveform decode (`WaveformStore.sync`), and no alignment; it is silent
   like a track out of range, and `ComparisonSession.isPlayable` needs at
-  least one available track. Switch Track passes over it
+  least one available track. When no lane is playable, Play does nothing in
+  Compare. Switch Track passes over the missing lane
   (`SessionTrack.isSwitchable`); clicking its lane or its number hotkey
   still selects it. Its lane draws
   no waveform and shows the rejected lanes' neutral hatching across the
@@ -422,6 +423,11 @@ These are here to prevent parallel implementations and subtle regressions:
   the artwork on and sets the default 360 pt width and the mode's height: the
   playlist's default (760 pt, then stored as its height) or compare's fit
   to its lanes; top-left kept (`frameResettingSize(currentFrame:height:)`).
+- The playlist outline stays mounted behind Compare to preserve its scroll
+  position. On deactivation it releases AppKit first responder, declines
+  keyboard, mouse and drag input, and stops writing selection or expansion
+  back to the presentation state. Playlist row commands require playlist mode.
+  Edit ▸ Select All uses the text responder when editing in the workspace.
 - Keep global shortcuts focus-safe; active numeric text fields should retain
   normal text editing behavior. The key monitor (`WorkspaceView.setupKeyboard`)
   reads text editing from the first responder at each key press
@@ -449,8 +455,8 @@ These are here to prevent parallel implementations and subtle regressions:
   not; with none, Play starts the first track that is neither rejected nor
   unavailable. The control bar's buttons and the media keys use the same
   commands. ⌥← / ⌥→ skip (⇧ for 10 s), since plain arrows move through the
-  list. Edit ▸ Select All (⌘A) selects all visible rows when the playlist is
-  shown and has tracks. Edit ▸ Deselect All (⌘D) and Esc clear the selection. Playlist ▸ Go
+  list. Edit ▸ Select All (⌘A) selects all visible rows in playlist mode when
+  the list is shown and has tracks. Edit ▸ Deselect All (⌘D) and Esc clear the selection. Playlist ▸ Go
   to Current Song (⌘L) selects the current item. Compare: X / ⇧X Switch Track (passing
   over rejected and missing lanes in displayed order, Blind Listening's included,
   wrapping; disabled when `ComparisonSession.canSwitchPlayback` finds no

@@ -625,13 +625,15 @@ private struct TrackListDropDelegate: DropDelegate {
     @Binding var gapGeneration: Int
     @Binding var revealingID: SessionTrack.ID?
     @Binding var isImportTargeted: Bool
+    let isComparisonActive: () -> Bool
     let loadDroppedURLs: ([NSItemProvider]) -> Bool
     let reorderVersion: (UUID, UUID?) -> Void
 
     /// A reorder carries the file URL too (for dragging out of the window), so
     /// the marker type decides the kind, not the presence of a file URL.
     private func dropKind(_ info: DropInfo) -> TrackRowDropKind? {
-        guard !info.hasItemsConforming(to: [PlaylistItemDrag.type.identifier]) else { return nil }
+        guard isComparisonActive(),
+              !info.hasItemsConforming(to: [PlaylistItemDrag.type.identifier]) else { return nil }
         return TrackRowDropKind.kind(
             hasFileURLs: info.hasItemsConforming(to: [UTType.fileURL.identifier]),
             hasReorderItems: info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier])
@@ -1176,6 +1178,7 @@ struct ContentView: View {
     /// both modes share one dialog).
     private let locateVersion: (PlaylistVersion.ID) -> Void
     var controller: PlaybackController { coordinator.controller }
+    private var isComparisonActive: Bool { coordinator.mode.itemID != nil }
     @Environment(\.undoManager) private var undoManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var settings: AppSettings
@@ -1282,6 +1285,9 @@ struct ContentView: View {
 
     var body: some View {
         inactiveAwareContent
+            .allowsHitTesting(isComparisonActive)
+            .disabled(!isComparisonActive)
+            .accessibilityHidden(!isComparisonActive)
             .frame(minWidth: TakesWindowPolicy.minimumWidth)
             .environment(\.transportAppearance, settings.transportAppearance)
             .background(WindowBackground().ignoresSafeArea())
@@ -1462,7 +1468,7 @@ struct ContentView: View {
                         icon: "waveform", dragPrompt: "Drag Files Here to Compare", clickPrompt: "Click Here to Compare",
                         accessibilityLabel: "Add audio files to compare", isDropTargeted: isFileImportTargeted
                     ) {
-                        openFileCommandState.presentOpenDialog()
+                        if isComparisonActive { openFileCommandState.presentOpenDialog() }
                     }
                 } else {
                     timelineRuler(waveformWidth: waveformWidth)
@@ -1562,6 +1568,7 @@ struct ContentView: View {
                                 gapGeneration: $reorderGapGeneration,
                                 revealingID: $reorderRevealingID,
                                 isImportTargeted: $laneListIsDropTargeted,
+                                isComparisonActive: { isComparisonActive },
                                 loadDroppedURLs: importProviders,
                                 reorderVersion: { coordinator.reorderVersion($0, before: $1, undoManager: undoManager) }
                             )
@@ -1729,6 +1736,7 @@ struct ContentView: View {
 
     private func handlePlayheadDragEnded(value: DragGesture.Value, waveformWidth: CGFloat) {
         playheadDragX = nil
+        guard isComparisonActive else { return }
         commitPlayheadDrag(atX: value.location.x, waveformWidth: waveformWidth)
         // The playhead now sits under the pointer, so the grab cursor is the
         // right resting state. Record it centrally so the next pointer move
@@ -1810,14 +1818,28 @@ struct ContentView: View {
                 hasOffset: offsetMs != 0,
                 isMissing: track.isMissing,
                 isRejected: track.isRejected,
-                remove: { _ = coordinator.removeVersion(trackID, undoManager: undoManager) },
-                revealInFinder: { NSWorkspace.shared.activateFileViewerSelecting([track.url]) },
-                resetOffset: { coordinator.setOffset(trackID, seconds: 0) },
-                locate: { locateVersion(trackID) },
-                toggleRejection: { coordinator.toggleRejection(versionIDs: [trackID], undoManager: undoManager) }
+                remove: {
+                    if isComparisonActive { coordinator.removeVersion(trackID, undoManager: undoManager) }
+                },
+                revealInFinder: {
+                    if isComparisonActive { NSWorkspace.shared.activateFileViewerSelecting([track.url]) }
+                },
+                resetOffset: {
+                    if isComparisonActive { coordinator.setOffset(trackID, seconds: 0) }
+                },
+                locate: {
+                    if isComparisonActive { locateVersion(trackID) }
+                },
+                toggleRejection: {
+                    if isComparisonActive { coordinator.toggleRejection(versionIDs: [trackID], undoManager: undoManager) }
+                }
             ),
-            onSelect: { controller.selectActiveTrack(trackID) },
-            onSetOffsetMs: { coordinator.setOffset(trackID, seconds: Double($0) / 1000) },
+            onSelect: {
+                if isComparisonActive { controller.selectActiveTrack(trackID) }
+            },
+            onSetOffsetMs: {
+                if isComparisonActive { coordinator.setOffset(trackID, seconds: Double($0) / 1000) }
+            },
             onOffsetFocusChange: { focused in
                 if focused {
                     focusedOffsetTrackID = trackID
@@ -2066,11 +2088,8 @@ struct ContentView: View {
     }
 
     private func commitLoopResize(start: TimeInterval? = nil, end: TimeInterval? = nil) {
-        guard let region = resizedLoopRegion(start: start, end: end) else {
-            loopResizeDraft = nil
-            return
-        }
-        loopResizeDraft = nil
+        defer { loopResizeDraft = nil }
+        guard isComparisonActive, let region = resizedLoopRegion(start: start, end: end) else { return }
         controller.resizeLoop(start: region.start, end: region.end)
     }
 
@@ -2134,6 +2153,7 @@ struct ContentView: View {
     }
 
     private func handleLoopSelectionEnded(value: DragGesture.Value, waveformWidth: CGFloat, rowStep: CGFloat) {
+        guard isComparisonActive else { return }
         if loopDraft != nil {
             loopDraft = nil
             if let region = LoopRegion.normalized(
@@ -2191,7 +2211,7 @@ struct ContentView: View {
 
     private func setupMouseMonitor() {
         let clickMonitor = MouseMonitor { event in
-            guard let window = event.window else { return }
+            guard isComparisonActive, let window = event.window, window === mainWindow else { return }
             let locationInWindow = event.locationInWindow
 
             if event.type == .mouseMoved {
@@ -2357,10 +2377,12 @@ struct ContentView: View {
     }
 
     private func handleTimelineScroll(_ visibleStart: TimeInterval) {
+        guard isComparisonActive else { return }
         controller.scrollTimeline(toVisibleStart: visibleStart)
     }
 
     private func handleTimelineMagnify(_ magnification: Double, atFraction fraction: Double) {
+        guard isComparisonActive else { return }
         controller.magnifyTimeline(by: magnification, atFraction: fraction)
     }
 

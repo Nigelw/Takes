@@ -313,6 +313,30 @@ struct TrackAlignerTests {
     }
 
     @Test
+    func tempoSearchStopsWhenCancelledDuringProgress() async throws {
+        let url = try Self.writeBurstFile(
+            sampleRate: 44_100, duration: 3, burstTimes: [0.3, 0.8, 1.5, 2.3]
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let request = TrackAligner.Request(
+            anchor: TrackAligner.Source(id: UUID(), url: url, displayName: "anchor", currentOffsetSeconds: 0),
+            anchorPlayheadFileTime: 0,
+            others: [TrackAligner.Source(id: UUID(), url: url, displayName: "other", currentOffsetSeconds: 0)]
+        )
+        let recorder = ProgressRecorder()
+        let task = Task {
+            await TrackAligner.alignTempo(request) { progress in
+                recorder.record(progress)
+                withUnsafeCurrentTask { $0?.cancel() }
+            }
+        }
+
+        #expect(await task.value.isEmpty)
+        #expect(recorder.snapshot().count == 1)
+    }
+
+    @Test
     func tempoSearchRejectsUnrelatedAudio() async throws {
         let anchorURL = try Self.writeBurstFile(
             sampleRate: 44_100,
