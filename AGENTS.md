@@ -99,7 +99,7 @@ Key ownership:
   (`PlaylistRowMetrics`, `PlaylistRowView`, `PlaylistItemCellView`,
   `PlaylistVersionCellView` and its mark column, the thumbnail with its
   rejection badge, chevron and Compare pill views), the row text colours
-  (`PlaylistRowTextStyle`), the rejection glyph (`RejectionGlyph`),
+  (`PlaylistRowTextStyle`),
   visible-row thumbnail requests, context menu, keyboard
   handling, and row drag and drop. Row colors are `PlaylistRowPalette` in
   `Theme.swift`.
@@ -154,6 +154,9 @@ Key ownership:
   duration safeguards for automatic playlist grouping.
 - `TrackSimilarityClustering.swift`: deterministic conservative grouping and
   existing-item admission from pairwise metadata evidence.
+- `RejectedMark.swift`: the rejection mark, a broken heart drawn in code
+  (culling §9.1): its geometry on the 24-unit grid (the zigzag per size,
+  the halves moved apart), its image, and the badge's ring outline.
 - `WaveformStore.swift`: in-memory (process-lifetime) waveform generation —
   bounded to 2 concurrent decodes in session (top-first) order — plus the
   multi-resolution peak pyramid (`Waveform.reducedLevels`) the lanes draw
@@ -349,12 +352,15 @@ These are here to prevent parallel implementations and subtle regressions:
   (`syncRuntimeRejection` → `PlaybackController.setRejectedTracks`).
 - Rejected and missing rows dim to the same grey
   (`PlaylistRowTextStyle`, `PlaylistRowPalette.dimmedTitle`/`dimmedDetail`);
-  the × marks a rejection and the triangle a missing file. A dimmed item's
+  the broken heart (`RejectedMark`) marks a rejection and the triangle a
+  missing file. A dimmed item's
   thumbnail goes greyscale at 45% (a Core Image filter on the tile layer),
-  and a rejected track carries the 14 pt × badge (`RejectionGlyph`) at its
-  artwork's bottom-right, its 2 pt ring cut out of the tile and stack
-  (`PlaylistCardsView`'s mask) so the row shows through. A version row's
-  34 pt mark column holds the speaker, the warning and the ×, side by side.
+  and a rejected track carries the 16 pt broken-heart badge at its
+  artwork's bottom-right, its 2 pt heart-shaped ring
+  (`RejectedMark.ringOutline`, `PlaylistThumbnailView.badgeCutout`) cut out
+  of the tile and stack (`PlaylistCardsView`'s mask) so the row shows
+  around it and through its crack. A version row's 34 pt mark column holds
+  the speaker, the warning and the 12 pt heart, side by side.
   Selected dimmed rows keep the selection colours at 65%. Rejected rows add
   "Rejected" to their accessibility value. The item row shows its own flag
   only; a track whose every version is rejected shows nothing extra.
@@ -604,7 +610,7 @@ These are here to prevent parallel implementations and subtle regressions:
   Compare, all enabled by default. `LaneStripText.format` joins available,
   enabled values with ` • ` for the strip, tooltip, and drag preview. Blind Listening Mode
   shows `Track n`, no format or tooltip, and disables Reveal in Finder.
-- A rejected lane (culling §5.4, §9.1) shows the grey × badge
+- A rejected lane (culling §5.4, §9.1) shows the 15 pt grey broken heart
   (`RejectionBadgeView`) in place of its index, a dimmed title and format,
   `LaneHatching` across the whole lane behind its visuals, and the inactive
   waveform colour, active or not; the active tint stays. Blind Listening
@@ -724,7 +730,9 @@ these reintroduces the exact regressions it fixed):
   `canSwitchPlayback`, Switch & Repeat degrading to Repeat One, Align's
   `hasMultipleTracks`), the rejected/missing lane hatching, the playlist
   culling visuals (row text styles, the version mark column, the
-  thumbnail's dimming and badge, the expanded now-playing split),
+  thumbnail's dimming and badge, the expanded now-playing split, the
+  broken heart's geometry: turns per size, the gap at notch and tip, and
+  halves that never overlap),
   persisted window visibility, compact heights, the artwork/player
   invariant, retired control-bar preferences loading as defaults, the
   A2 readout title rule (tag, filename), the compare control bar's height

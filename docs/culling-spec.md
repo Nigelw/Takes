@@ -256,7 +256,8 @@ not offer it.
 - `ContentView.swift`: lane and strip treatment, strip context menu item.
 - `Theme.swift`: rejected colors in `PlaylistRowPalette` and the lane theme.
 - `RejectedMark.swift` (new, added to the Takes target): the broken-heart
-  geometry, the cached template images and `RejectedBadgeView` (§9.1).
+  geometry, its image and the badge's ring outline (§9.1). It replaces
+  `RejectionGlyph` and the strip's `RejectionCross`.
 - `AGENTS.md`: the key-version, double-click, compare-exit and switching
   invariants, and the Test Map.
 
@@ -348,29 +349,27 @@ refined", is on its Archive page.
     is `1.1 + 0.028 × size` px, so about 1.4 px at 12 pt. The gap is
     transparent and shows whatever is behind the glyph, the selection
     included.
-  - The badge ring is each half's own path stroked in the ring colour with
-    mitred joins (miter limit 1.5), drawn under the fills, so the ring is
-    an even offset that keeps the notch's V and a pointed tip, and the
-    crack shows the ring colour.
+  - The badge ring is both halves widened by the ring width with mitred
+    joins (miter limit 1.5) and merged into one outline, so it is an even
+    offset that keeps the notch's V and a pointed tip and covers the
+    crack. It is cut out of the thumbnail, so the row (and its selection)
+    shows around the badge and through the crack.
   - Draw it in code (`RejectedMark`, a new `RejectedMark.swift`), not as an
     asset or a custom SF Symbol. It appears at three fixed sizes only:
     12 pt in the version mark column, 15 pt in the compare strip and 16 pt
     as the artwork badge. Drawing gives each size its exact gap and zigzag,
-    which a symbol's three scales or PDF templates would not, and lets the
-    badge ring take the row's background (selection included) at draw
-    time.
-    - `RejectedMark.halves(size:)` returns the two half `CGPath`s, already
-      moved apart, on the 24-unit grid scaled to `size`. Everything else
-      draws from it.
-    - `RejectedMark.image(size:)` returns a template `NSImage`
-      (`NSImage(size:flipped:drawingHandler:)`, `isTemplate = true`),
-      cached per size. The mark column tints it with `contentTintColor`;
-      the strip uses `Image(nsImage:)` with `.renderingMode(.template)`.
-    - The artwork badge is a small `NSView` (`RejectedBadgeView`) over the
-      thumbnail tile that strokes the halves in `ringColor`, then fills
-      them in the badge grey. The cell sets `ringColor` from the row's
-      background whenever selection or emphasis changes; the view redraws
-      only then, never per frame.
+    which a symbol's three scales or PDF templates would not.
+    - `RejectedMark.halves(size:in:)` returns the two half `CGPath`s,
+      already moved apart, on the 24-unit grid scaled to `size`.
+      Everything else draws from it.
+    - `RejectedMark.image(size:)` returns an `NSImage` drawn in the badge
+      grey when displayed, so the dynamic colour follows the appearance.
+      The version mark column, the artwork badge and the strip
+      (`RejectionBadgeView`, through `Image(nsImage:)`) all use it.
+    - `RejectedMark.ringOutline(size:ring:in:)` is the badge's ring as one
+      path. `PlaylistThumbnailView.badgeCutout` cuts it out of the tile and
+      its stack (`PlaylistCardsView`'s mask), replacing the circle the ×
+      badge used.
 - **Playlist colour.** Grey (Round 2 · Playlist, grey columns), not red.
 - **Track rows.** Option C: the thumbnail goes greyscale at 45% and carries
   the broken-heart badge (16 pt, a 2 pt ring in the row's background) at

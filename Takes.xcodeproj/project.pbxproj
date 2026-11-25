@@ -56,6 +56,7 @@
 		A1000000000000000000C01A /* StreamingTrackImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00A /* StreamingTrackImport.swift */; };
 		A1000000000000000000C01B /* StreamingTrackImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00B /* StreamingTrackImportTests.swift */; };
 		A1000000000000000000C01C /* ZoomHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00C /* ZoomHaptics.swift */; };
+		A1000000000000000000C01E /* RejectedMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00E /* RejectedMark.swift */; };
 		A1000000000000000000C01D /* ZoomHapticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000C00D /* ZoomHapticsTests.swift */; };
 		A6FE79452FDE592C003F2711 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A6FE79442FDE592C003F2711 /* Sparkle */; };
 		A1000000000000000000F101 /* PlaylistWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F001 /* PlaylistWorkspace.swift */; };
@@ -147,6 +148,7 @@
 		A1000000000000000000C00A /* StreamingTrackImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTrackImport.swift; sourceTree = "<group>"; };
 		A1000000000000000000C00B /* StreamingTrackImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTrackImportTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000C00C /* ZoomHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomHaptics.swift; sourceTree = "<group>"; };
+		A1000000000000000000C00E /* RejectedMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RejectedMark.swift; sourceTree = "<group>"; };
 		A1000000000000000000C00D /* ZoomHapticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomHapticsTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000F001 /* PlaylistWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistWorkspace.swift; sourceTree = "<group>"; };
 		A1000000000000000000F002 /* PlaylistContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistContracts.swift; sourceTree = "<group>"; };
@@ -271,6 +273,7 @@
 				A1000000000000000000C005 /* ComponentDebugLabel.swift */,
 				A10000000000000000000012 /* ContentView.swift */,
 				A1000000000000000000C00C /* ZoomHaptics.swift */,
+				A1000000000000000000C00E /* RejectedMark.swift */,
 				A10000000000000000000013 /* KeyMonitor.swift */,
 				A1000000000000000000001B /* LibraryTrackSelectionLoader.swift */,
 				A10000000000000000000014 /* Models.swift */,
@@ -457,6 +460,7 @@
 				A10000000000000000000022 /* ContentView.swift in Sources */,
 				A1000000000000000000C015 /* ComponentDebugLabel.swift in Sources */,
 				A1000000000000000000C01C /* ZoomHaptics.swift in Sources */,
+				A1000000000000000000C01E /* RejectedMark.swift in Sources */,
 				A1000000000000000000C016 /* Theme.swift in Sources */,
 				A1000000000000000000C017 /* TransportControls.swift in Sources */,
 				A1000000000000000000B101 /* DotMatrixReadout.swift in Sources */,

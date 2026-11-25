@@ -3472,7 +3472,7 @@ private struct LaneStripView: View, Equatable {
     /// the format truncates first; titles truncate in the middle (§13).
     private var identity: some View {
         HStack(spacing: Self.spacing) {
-            // A rejected lane's × badge replaces its index (culling §9.1);
+            // A rejected lane's broken heart replaces its index (culling §9.1);
             // blind listening shows it too: it says only that this lane was
             // rejected, never which file it is.
             if isRejected {
@@ -3509,35 +3509,15 @@ private struct LaneStripView: View, Equatable {
     private var isDimmed: Bool { isRejected || isMissing }
 }
 
-/// The rejection indicator in a lane strip: the playlist's grey circle with
-/// a knocked-out × (`RejectionGlyph`), drawn in SwiftUI so its dynamic
-/// colour follows the appearance.
+/// The rejection indicator in a lane strip: the playlist's broken heart
+/// (`RejectedMark`), in place of the lane's index badge.
 struct RejectionBadgeView: View {
     var side: CGFloat
 
     var body: some View {
-        ZStack {
-            Circle().fill(Color(nsColor: PlaylistRowPalette.rejectionBadge))
-            RejectionCross()
-                .stroke(style: StrokeStyle(lineWidth: side * 3 / 24, lineCap: .round))
-                .blendMode(.destinationOut)
-        }
-        .compositingGroup()
-        .frame(width: side, height: side)
-        .accessibilityLabel(PlaylistRowText.rejectedAccessibilityValue)
-    }
-}
-
-/// The × on the design's 24-unit grid, from 8 to 16 on both axes.
-private struct RejectionCross: Shape {
-    func path(in rect: CGRect) -> Path {
-        let unit = rect.width / 24
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX + 8 * unit, y: rect.minY + 8 * unit))
-        path.addLine(to: CGPoint(x: rect.minX + 16 * unit, y: rect.minY + 16 * unit))
-        path.move(to: CGPoint(x: rect.minX + 16 * unit, y: rect.minY + 8 * unit))
-        path.addLine(to: CGPoint(x: rect.minX + 8 * unit, y: rect.minY + 16 * unit))
-        return path
+        Image(nsImage: RejectedMark.image(size: side))
+            .frame(width: side, height: side)
+            .accessibilityLabel(PlaylistRowText.rejectedAccessibilityValue)
     }
 }
 

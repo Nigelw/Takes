@@ -3138,10 +3138,44 @@ struct SessionTests {
         typealias M = PlaylistRowMetrics
         typealias T = PlaylistThumbnailView
         let thumbnailTop = (M.itemHeight - M.thumbnailSide) / 2 - T.stackExtent
-        let ringBottom = thumbnailTop + T.badgeFrame.maxY + T.badgeRing
-        #expect(T.badgeFrame.width == 14)
+        // The ring is the heart's own outline, cut out of the tile.
+        let ringBottom = thumbnailTop + T.badgeCutout.boundingBox.maxY
+        #expect(T.badgeFrame.width == 16)
         #expect(ringBottom <= M.itemHeight)
         #expect(ringBottom > thumbnailTop + T.stackExtent + M.thumbnailSide)
+    }
+
+    @Test
+    func rejectedMarkUsesFewerTurnsAtSmallSizes() {
+        #expect(RejectedMark.turns(size: 12).count == 3)
+        #expect(RejectedMark.turns(size: 16).count == 3)
+        #expect(RejectedMark.turns(size: 18).count == 3)
+        #expect(RejectedMark.turns(size: 32).count == 5)
+    }
+
+    @Test
+    func rejectedMarkGapIsWidestAtTheNotchAndNarrowestAtTheTip() {
+        for size in [CGFloat(12), 15, 16] {
+            let separation = RejectedMark.separation(size: size)
+            func gap(at point: CGPoint) -> CGFloat {
+                point.applying(separation.rightTransform).x - point.applying(separation.leftTransform).x
+            }
+            #expect(abs(gap(at: RejectedMark.notch) - separation.baseGap * 1.5) < 0.001)
+            #expect(abs(gap(at: RejectedMark.tip) - separation.baseGap * 0.45) < 0.001)
+            // At least about a pixel and a half at the notch.
+            #expect(separation.notchGap * size / 24 >= 1.4)
+        }
+    }
+
+    @Test
+    func rejectedMarkHalvesNeverOverlapAndStayInTheirSquare() {
+        for size in [CGFloat(12), 15, 16, 32] {
+            let rect = CGRect(x: 0, y: 0, width: size, height: size)
+            let halves = RejectedMark.halves(size: size, in: rect)
+            #expect(!halves.left.intersects(halves.right))
+            #expect(rect.contains(halves.left.boundingBoxOfPath))
+            #expect(rect.contains(halves.right.boundingBoxOfPath))
+        }
     }
 
     @Test

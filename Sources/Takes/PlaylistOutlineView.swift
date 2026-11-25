@@ -1313,34 +1313,6 @@ struct PlaylistRowTextStyle: Equatable {
     }
 }
 
-/// The rejection indicator (culling §9.1): a filled circle whose × is
-/// knocked out, so whatever is behind it (the row, its selection) shows
-/// through. Drawn when displayed, so the dynamic colour follows the
-/// appearance.
-enum RejectionGlyph {
-    static func image(size: CGFloat) -> NSImage {
-        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-            PlaylistRowPalette.rejectionBadge.setFill()
-            NSBezierPath(ovalIn: rect).fill()
-            // The × on the 24-unit grid of the design: 8…16, 3 units wide.
-            let unit = rect.width / 24
-            let cross = NSBezierPath()
-            cross.move(to: NSPoint(x: 8 * unit, y: 8 * unit))
-            cross.line(to: NSPoint(x: 16 * unit, y: 16 * unit))
-            cross.move(to: NSPoint(x: 16 * unit, y: 8 * unit))
-            cross.line(to: NSPoint(x: 8 * unit, y: 16 * unit))
-            cross.lineWidth = 3 * unit
-            cross.lineCapStyle = .round
-            NSGraphicsContext.current?.compositingOperation = .destinationOut
-            NSColor.black.setStroke()
-            cross.stroke()
-            return true
-        }
-        image.accessibilityDescription = PlaylistRowText.rejectedAccessibilityValue
-        return image
-    }
-}
-
 private enum PlaylistGlyph {
     static func symbol(_ name: String, size: CGFloat, weight: NSFont.Weight = .regular, label: String? = nil) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: label)?
@@ -1585,7 +1557,7 @@ final class PlaylistVersionCellView: NSTableCellView {
             view.imageScaling = .scaleNone
         }
         warningView.image = PlaylistGlyph.warning(size: Self.markSize)
-        rejectionView.image = RejectionGlyph.image(size: Self.markSize)
+        rejectionView.image = RejectedMark.image(size: Self.markSize)
         rejectionView.toolTip = PlaylistRowText.rejectedAccessibilityValue
         for view in [speakerView, warningView, rejectionView, titleField, formatField, durationField] as [NSView] {
             addSubview(view)
@@ -1737,7 +1709,7 @@ final class PlaylistDisclosureButton: NSView {
 /// The item row's 34 pt thumbnail: artwork (or the shared record
 /// placeholder, `RecordPlaceholder.thumbnail`), the
 /// stacked-card edges of a multi-version item, the now-playing or
-/// missing-file overlay, and a rejected track's × badge. Laid out flipped;
+/// missing-file overlay, and a rejected track's broken-heart badge. Laid out flipped;
 /// the stack edges extend `stackExtent` above and to the right of the tile.
 /// A dimmed track's tile goes greyscale at 45% (culling §9.1).
 final class PlaylistThumbnailView: NSView {
@@ -1750,15 +1722,17 @@ final class PlaylistThumbnailView: NSView {
     static var size: NSSize {
         NSSize(width: PlaylistRowMetrics.thumbnailSide + stackExtent, height: PlaylistRowMetrics.thumbnailSide + stackExtent)
     }
-    /// The × badge: 14 pt, its centre 3 pt right of and 2 pt below the
-    /// tile's corner less its radius, so the badge and its 2 pt ring stay
-    /// inside the 46 pt row (culling §9.1).
-    static let badgeSide: CGFloat = 14
+    /// The broken-heart badge: 16 pt, overhanging the tile's corner by
+    /// 4 pt right and 3 pt down, so the badge and its 2 pt ring stay inside
+    /// the 46 pt row (culling §9.1).
+    static let badgeSide: CGFloat = 16
     static let badgeRing: CGFloat = 2
     static var badgeFrame: NSRect {
         let side = PlaylistRowMetrics.thumbnailSide
-        return NSRect(x: side + 3 - badgeSide, y: stackExtent + side + 2 - badgeSide, width: badgeSide, height: badgeSide)
+        return NSRect(x: side + 4 - badgeSide, y: stackExtent + side + 3 - badgeSide, width: badgeSide, height: badgeSide)
     }
+    /// The badge's ring, cut out of the tile and its stack (flipped coordinates).
+    static let badgeCutout = RejectedMark.ringOutline(size: badgeSide, ring: badgeRing, in: badgeFrame)
 
     var image: NSImage? {
         didSet { tile.contentsImage = Self.tileImage(artwork: image, status: status) }
@@ -1778,8 +1752,9 @@ final class PlaylistThumbnailView: NSView {
     var showsRejectionBadge: Bool { !badge.isHidden }
 
     private var status: Status = .none
-    /// The tile and its stack, masked to cut the badge's ring out of them so
-    /// the row (and its selection) shows around the badge.
+    /// The tile and its stack, masked to cut the badge's heart-shaped ring
+    /// out of them so the row (and its selection) shows around the badge and
+    /// through its crack.
     private let cards = PlaylistCardsView()
     private let farEdge = PlaylistFillView()
     private let nearEdge = PlaylistFillView()
@@ -1818,11 +1793,11 @@ final class PlaylistThumbnailView: NSView {
         statusGlyph.frame = tileRect
         cards.frame = bounds
         for view in [farEdge, nearEdge, tile, scrim, statusGlyph] { cards.addSubview(view) }
-        badge.image = RejectionGlyph.image(size: Self.badgeSide)
+        badge.image = RejectedMark.image(size: Self.badgeSide)
         badge.imageScaling = .scaleNone
         badge.frame = Self.badgeFrame
         badge.isHidden = true
-        cards.cutoutCircle = nil
+        cards.cutout = nil
         addSubview(cards)
         addSubview(badge)
         // The badge's ring reaches past the bottom edge, inside the row.
@@ -1865,8 +1840,7 @@ final class PlaylistThumbnailView: NSView {
         setDimmed(isDimmed)
         badge.isHidden = !isRejected
         badge.setAccessibilityElement(isRejected)
-        cards.cutoutCircle = isRejected
-            ? Self.badgeFrame.insetBy(dx: -Self.badgeRing, dy: -Self.badgeRing) : nil
+        cards.cutout = isRejected ? Self.badgeCutout : nil
     }
 
     private func setDimmed(_ dimmed: Bool) {
@@ -1878,12 +1852,12 @@ final class PlaylistThumbnailView: NSView {
     }
 }
 
-/// The thumbnail's tile and stack, with an optional circle cut out of
-/// them for the rejection badge's ring.
+/// The thumbnail's tile and stack, with an optional shape cut out of them
+/// for the rejection badge's ring.
 private final class PlaylistCardsView: NSView {
     /// In this view's (flipped) coordinates.
-    var cutoutCircle: NSRect? {
-        didSet { if cutoutCircle != oldValue { updateMask() } }
+    var cutout: CGPath? {
+        didSet { if cutout != oldValue { updateMask() } }
     }
 
     override var isFlipped: Bool { true }
@@ -1903,21 +1877,18 @@ private final class PlaylistCardsView: NSView {
 
     private func updateMask() {
         guard let layer else { return }
-        guard let circle = cutoutCircle else {
+        guard let cutout else {
             layer.mask = nil
             return
         }
         // Convert through the layer so the cut-out lands in the same place
         // whichever way AppKit flips the backing layer.
-        let origin = convertToLayer(NSPoint(x: circle.minX, y: circle.minY))
-        let corner = convertToLayer(NSPoint(x: circle.maxX, y: circle.maxY))
-        let hole = CGRect(
-            x: min(origin.x, corner.x), y: min(origin.y, corner.y),
-            width: abs(corner.x - origin.x), height: abs(corner.y - origin.y)
-        )
+        let origin = convertToLayer(NSPoint.zero)
+        let down = convertToLayer(NSPoint(x: 0, y: 1)).y - origin.y
+        let toLayer = CGAffineTransform(a: 1, b: 0, c: 0, d: down, tx: origin.x, ty: origin.y)
         let path = CGMutablePath()
         path.addRect(layer.bounds.insetBy(dx: -8, dy: -8))
-        path.addEllipse(in: hole)
+        path.addPath(cutout, transform: toLayer)
         let mask = (layer.mask as? CAShapeLayer) ?? CAShapeLayer()
         mask.frame = layer.bounds
         mask.fillRule = .evenOdd
