@@ -46,6 +46,15 @@ enum Theme {
         dark: (0.855, 0.843, 1.0)     // #DAD7FF — near-white indigo core
     )
 
+    /// Lit glyph of an engaged side button (Shuffle, Blind, Repeat) and of
+    /// the titlebar artwork toggle (side-button lamps spec §3). Dark is
+    /// brighter than `primaryLitGlyph`, near-white over its three-layer glow;
+    /// light is `primary`, as before.
+    static let sideButtonLitGlyph = dynamic(
+        light: (0.424, 0.388, 0.914), // #6C63E9
+        dark: (0.957, 0.949, 1.0)     // #F4F2FF
+    )
+
     /// Accent for the playhead and the loop-selection highlight. Tied to the
     /// transport readout's display color (`readoutGlass`/`readoutGlow`): amber
     /// in light mode, LED cyan in dark. The light amber is deepened a touch
@@ -57,8 +66,41 @@ enum Theme {
 
     // MARK: Semantic tokens
 
-    /// Fill behind an active track row (info + lane).
-    static let activeRowFill = primary.opacity(0.12)
+    private static func dynamicAlpha(
+        light: (r: Double, g: Double, b: Double, a: Double),
+        dark: (r: Double, g: Double, b: Double, a: Double)
+    ) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let c = appearance.isDark ? dark : light
+            return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a)
+        })
+    }
+
+    /// Behind the active compare lane (A2 §8): primary at 11% in dark, as on
+    /// the canvas, and 10% of the light primary, the playlist's now-playing
+    /// strength on the pale well.
+    static let activeLaneFill = dynamicAlpha(
+        light: (0.424, 0.388, 0.914, 0.10),
+        dark: (0.561, 0.529, 0.961, 0.11)
+    )
+
+    /// The ruler's bottom border and each lane's bottom divider: a line a step
+    /// darker than the well (the canvas's #18181A on #1F1F21 in dark).
+    static let laneDivider = dynamicAlpha(
+        light: (0, 0, 0, 0.1),
+        dark: (0, 0, 0, 0.3)
+    )
+
+    /// The lane strip's offset field box: the canvas's near-black at 85% with
+    /// a #3C3C40 hairline in dark; a white box with a soft hairline in light.
+    static let laneOffsetFieldFill = dynamicAlpha(
+        light: (1, 1, 1, 0.85),
+        dark: (0.078, 0.078, 0.086, 0.85)
+    )
+    static let laneOffsetFieldBorder = dynamicAlpha(
+        light: (0, 0, 0, 0.16),
+        dark: (0.235, 0.235, 0.251, 1)
+    )
 
     /// Opaque surface of a track row lifted for reordering — a raised card that
     /// floats above the rows sliding beneath it. White in light mode, a step
@@ -93,6 +135,13 @@ enum Theme {
         dark: (0.263, 0.272, 0.310)
     )
 
+    /// Neutral fill behind loaded cover artwork. Without artwork the cover
+    /// shows the record placeholder on its own ground (`RecordPlaceholder`).
+    static let artworkPlaceholderFill = dynamic(
+        light: (0.88, 0.88, 0.90),
+        dark: (0.10, 0.10, 0.11)
+    )
+
     /// Waveform color for inactive (non-selected) tracks.
     static let waveformInactive = dynamic(
         light: (0.52, 0.52, 0.56),
@@ -104,13 +153,6 @@ enum Theme {
 
     /// Major and minor timeline ruler ticks.
     static let timelineRulerTick = Color.secondary.opacity(0.45)
-
-    /// Subtle shadow cast by the frozen info/control column onto the timeline.
-    /// Slightly stronger in dark mode so the overlap still reads without a hard
-    /// divider line.
-    static let frozenColumnShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.42 : 0.15)
-    })
 
     /// Dark upper edge of the recessed groove between the control bar and timeline.
     static let transportDividerShadow = Color(nsColor: NSColor(name: nil) { appearance in
@@ -132,6 +174,15 @@ enum Theme {
     static let timelineWellShade = Color(nsColor: NSColor(name: nil) { appearance in
         NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.18 : 0.04)
     })
+
+    /// The bottom bar's surface (A2 §7): the well's scrim (black 18% dark,
+    /// 4% light), a step darker than the control bar and the same as the
+    /// playlist behind it, as the canvas draws it (#222224 in dark).
+    static let bottomBarSurface = timelineWellShade
+
+    /// The bottom bar's top hairline: the lane divider's line (the canvas's
+    /// #18181A in dark, black 10% in light).
+    static let bottomBarHairline = laneDivider
 
     // MARK: Beveled transport readout
 
@@ -165,11 +216,8 @@ enum Theme {
         dark: (0.220, 0.831, 0.902)   // #38D4E6
     )
 
-    /// Inner shadow of the readout's recessed glass well. Softer on the pale
-    /// LCD pane, deep on the dark LED glass.
-    static let readoutWellShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.65 : 0.28)
-    })
+    /// Deeper brown for the playlist title's sparse dots on amber glass.
+    static let lcdTitleInk = Color(.sRGB, red: 48 / 255, green: 25 / 255, blue: 4 / 255)
 
     /// Soft recessed inner-shadow edge of the readout.
     static let readoutShadow = Color(nsColor: NSColor(name: nil) { appearance in
@@ -177,24 +225,61 @@ enum Theme {
             ? NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.64)
             : NSColor(srgbRed: 96 / 255, green: 104 / 255, blue: 125 / 255, alpha: 0.28)
     })
+}
 
-    /// Outer hairline around the readout panel.
-    static let readoutStroke = whiteAlpha(light: 0.76, dark: 0.08)
+/// Playlist row colors (A2 spec §6). `NSColor`s because the playlist table is
+/// AppKit. Dark values come from the design canvas; light values are their
+/// counterparts on the pale list (§13): stacked-card edges step toward the
+/// background instead of away from it, and tints use the light primary.
+enum PlaylistRowPalette {
+    private static func dynamic(
+        light: (r: Double, g: Double, b: Double, a: Double),
+        dark: (r: Double, g: Double, b: Double, a: Double)
+    ) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let c = appearance.isDark ? dark : light
+            return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a)
+        }
+    }
 
-    /// Bright top edge of the raised bezel ring around the readout glass.
-    static let readoutBezelHighlight = whiteAlpha(light: 0.65, dark: 0.14)
+    // `Theme.primary`: #6C63E9 light, #8F87F5 dark.
+    private static let primaryLight = (r: 0.424, g: 0.388, b: 0.914)
+    private static let primaryDark = (r: 0.561, g: 0.529, b: 0.961)
 
-    /// Shadowed bottom edge of the bezel ring.
-    static let readoutBezelShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.45 : 0.16)
-    })
+    private static func primary(lightAlpha: Double, darkAlpha: Double) -> NSColor {
+        dynamic(
+            light: (primaryLight.r, primaryLight.g, primaryLight.b, lightAlpha),
+            dark: (primaryDark.r, primaryDark.g, primaryDark.b, darkAlpha)
+        )
+    }
 
-    /// Faint reflected light along the bezel's bottom edge — the glint that
-    /// makes the ring read as polished rather than matte.
-    static let readoutBezelReflection = whiteAlpha(light: 0.55, dark: 0.10)
+    /// Behind the now-playing item row.
+    static let nowPlayingFill = primary(lightAlpha: 0.12, darkAlpha: 0.14)
+    /// The now-playing item's title: a light primary tint in dark, a deep
+    /// one in light so it keeps its contrast on the tinted row.
+    static let nowPlayingTitle = dynamic(light: (0.310, 0.275, 0.784, 1), dark: (0.769, 0.749, 1.0, 1))
+    /// Behind the hovered row.
+    static let hoverFill = dynamic(light: (0, 0, 0, 0.04), dark: (1, 1, 1, 0.05))
+    /// Drop-on-item target: a tinted fill inside a 2 pt primary ring.
+    static let dropTargetFill = primary(lightAlpha: 0.14, darkAlpha: 0.18)
+    static let dropTargetRing = primary(lightAlpha: 1, darkAlpha: 1)
 
-    /// Soft drop shadow seating the readout panel on the control bar.
-    static let readoutFrameShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(srgbRed: 0, green: 0, blue: 0, alpha: appearance.isDark ? 0.5 : 0.14)
-    })
+    /// The plain thumbnail tile: under the warning state (no record
+    /// placeholder) and behind loaded artwork.
+    static let thumbnailFill = dynamic(light: (0.863, 0.863, 0.882, 1), dark: (0.227, 0.227, 0.243, 1))
+    /// Stacked-card edges behind a multi-version item's thumbnail: the near
+    /// card (3, −3) and the far card (6, −6).
+    static let stackNearEdge = dynamic(light: (0.725, 0.725, 0.753, 1), dark: (0.353, 0.353, 0.376, 1))
+    static let stackFarEdge = dynamic(light: (0.835, 0.835, 0.855, 1), dark: (0.243, 0.243, 0.263, 1))
+    /// Scrim over a thumbnail carrying the speaker or warning glyph.
+    static let playingScrim = NSColor.black.withAlphaComponent(0.45)
+    static let missingScrim = NSColor.black.withAlphaComponent(0.5)
+
+    /// The hover Compare pill.
+    static let comparePillFill = primary(lightAlpha: 0.14, darkAlpha: 0.2)
+    static let comparePillText = nowPlayingTitle
+
+    /// Warning triangle: yellow with a dark mark, in both appearances.
+    static let warningFill = NSColor(srgbRed: 0.957, green: 0.773, blue: 0.141, alpha: 1)
+    static let warningMark = NSColor(srgbRed: 0.227, green: 0.173, blue: 0, alpha: 1)
 }

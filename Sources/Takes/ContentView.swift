@@ -209,11 +209,293 @@ struct CursorResetPolicy {
     }
 }
 
-struct TimelineCursorHitPolicy {
-    static let columnResizeHitWidth: CGFloat = 12
+/// Compact compare geometry (A2 §8): a 21 pt ruler with a 1 pt bottom
+/// border, then full-width lanes of one fixed height, each carrying a 21 pt
+/// info strip at its top and a 1 pt divider at its bottom. Lanes never
+/// resize: more than fit the window scroll, fewer leave the well empty below.
+enum CompareLaneLayout {
+    /// The ruler, above its bottom border.
+    /// 21 pt: the 19 pt major notches and a 2 pt margin above them, where
+    /// the labels' tops align (was 26 until the labels moved down to the
+    /// notch tops).
+    static let rulerHeight: CGFloat = 21
+    /// The ruler's bottom border, and each lane's bottom divider.
+    static let dividerHeight: CGFloat = 1
+    /// The ruler's bottom edge, below its border: where the lanes start and
+    /// the playhead grabber's tip sits.
+    static let seatBottom: CGFloat = rulerHeight + dividerHeight
+    /// The info strip overlaid at the top of each lane.
+    static let stripHeight: CGFloat = 21
+    /// Clearance above and below the waveform in the space under the strip.
+    static let waveformVerticalInset: CGFloat = 5
+    /// One lane plus its divider. Fixed (milestone 4 review): the height five
+    /// versions shared in a 986 pt window with the artwork shown.
+    static let laneStep: CGFloat = 96
+    /// The drawn lane, without its divider.
+    static let laneHeight: CGFloat = laneStep - dividerHeight
 
-    static func isColumnResizeTarget(columnX: CGFloat, hasDisplayedTracks: Bool) -> Bool {
-        hasDisplayedTracks && abs(columnX) <= columnResizeHitWidth / 2
+    /// Every lane stacked, dividers included.
+    static func contentHeight(laneCount: Int) -> CGFloat {
+        laneStep * CGFloat(max(laneCount, 0))
+    }
+
+    /// The waveform's band in a lane of `laneHeight`: the space under the
+    /// strip, inset top and bottom, so the waveform is centred beneath it.
+    static func waveformBand(laneHeight: CGFloat = laneHeight) -> (minY: CGFloat, height: CGFloat) {
+        let below = max(laneHeight - stripHeight, 0)
+        let inset = min(waveformVerticalInset, below / 2)
+        return (stripHeight + inset, below - inset * 2)
+    }
+
+    /// The lane strip's frame height: everything from the lane's top (the
+    /// divider above it) down to the waveform band, so the strip's contents
+    /// sit centred between the two (milestone 4 review).
+    static var stripFrameHeight: CGFloat { waveformBand().minY }
+}
+
+// MARK: - Compare info bar
+
+/// The compare info bar (A2 compare info-bar variant §2): 32 pt between
+/// the control bar's divider and the ruler, on the well with no line to the
+/// ruler. The take count on the left, the elapsed time centred in the
+/// window, Done on the right.
+///
+/// The bar's own body reads nothing from the controller. The count and the
+/// time are leaves: the count re-renders when the session changes, the time
+/// (`ControlBarElapsedDigits`) once per displayed second.
+struct CompareInfoBar: View {
+    let controller: PlaybackController
+    let done: () -> Void
+
+    var body: some View {
+        CompareInfoBarRow {
+            CompareTakeCount(controller: controller)
+            CompareInfoBarTime(controller: controller)
+            Button("Done", action: done)
+                .buttonStyle(CompareDoneButtonStyle())
+                .help("Back to Playlist")
+                .accessibilityLabel("Back to Playlist")
+        }
+        .padding(.horizontal, CompareInfoBarMetrics.edgeInset)
+        .frame(height: CompareInfoBarMetrics.height)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+enum CompareInfoBarMetrics {
+    static let height: CGFloat = 32
+    static let edgeInset: CGFloat = 10
+}
+
+enum CompareInfoBarText {
+    /// `3 takes`; `1 take` (removal can leave compare with one version).
+    /// Unchanged in Blind Listening Mode: the count reveals nothing.
+    static func takeCount(_ count: Int) -> String {
+        count == 1 ? "1 take" : "\(count) takes"
+    }
+}
+
+/// The take count: one style, 12 pt medium secondary, tail-truncated if it
+/// ever meets the time.
+private struct CompareTakeCount: View {
+    let controller: PlaybackController
+
+    var body: some View {
+        Text(CompareInfoBarText.takeCount(controller.displayedTrackRowCount))
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+}
+
+/// The info bar's three columns: the centre at its natural width, centred
+/// in the bar whatever the sides hold; the sides each get the equal width
+/// left beside it, the first leading-aligned and the last trailing-aligned.
+/// Expects three subviews.
+struct CompareInfoBarRow: Layout {
+    static let columnSpacing: CGFloat = 8
+
+    /// The width each side column may take beside a centre of `centerWidth`.
+    static func sideWidth(barWidth: CGFloat, centerWidth: CGFloat) -> CGFloat {
+        max((barWidth - centerWidth) / 2 - columnSpacing, 0)
+    }
+
+    static func centerWidth(barWidth: CGFloat, sideWidth: CGFloat) -> CGFloat {
+        max(barWidth - 2 * (sideWidth + columnSpacing), 0)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 3 else { return .zero }
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        return CGSize(
+            width: proposal.width ?? sizes[1].width + 2 * (max(sizes[0].width, sizes[2].width) + Self.columnSpacing),
+            height: proposal.height ?? sizes.map(\.height).max() ?? 0
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 3 else { return }
+        let sideWidth = max(subviews[0].sizeThatFits(.unspecified).width, subviews[2].sizeThatFits(.unspecified).width)
+        let centerProposal = ProposedViewSize(
+            width: Self.centerWidth(barWidth: bounds.width, sideWidth: sideWidth), height: bounds.height
+        )
+        let center = subviews[1].sizeThatFits(centerProposal)
+        let side = ProposedViewSize(
+            width: Self.sideWidth(barWidth: bounds.width, centerWidth: center.width),
+            height: bounds.height
+        )
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: side)
+        subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: centerProposal)
+        subviews[2].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: side)
+    }
+}
+
+/// Done (§2.3): a rectangular button, not a pill. 22 pt tall, 5 pt radius,
+/// 12 pt horizontal padding, 12 pt semibold white on the primary fill (the
+/// light primary in light appearance), with a faint top highlight and a
+/// small drop shadow, the canvas's values. Built by hand because
+/// `.borderedProminent` follows the system accent and sizes differently.
+///
+/// Pressed, it sinks into the bar as Play does (`CircleTransportButtonStyle`):
+/// a dark inner shadow falls across the top of the face, the rim inverts
+/// (dark top edge), the drop shadow goes, the label drops half a point, and
+/// the face darkens.
+struct CompareDoneButtonStyle: ButtonStyle {
+    static let height: CGFloat = 22
+    static let cornerRadius: CGFloat = 5
+    static let horizontalPadding: CGFloat = 12
+    /// Play's pressed inner shadow, scaled from its 56 pt face to 22 pt.
+    static let pressedInnerShadowRadius: CGFloat = 1.5
+    static let pressedInnerShadowY: CGFloat = 1
+    static let pressedLabelOffset: CGFloat = 0.5
+
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        return configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .fixedSize()
+            .offset(y: pressed ? Self.pressedLabelOffset : 0)
+            .padding(.horizontal, Self.horizontalPadding)
+            .frame(height: Self.height)
+            .background {
+                shape
+                    .fill(face(pressed: pressed))
+                    // Canvas: inset 0 0.5px 0 rgba(255,255,255,0.3). Pressed,
+                    // the lit top edge becomes a shadowed one.
+                    .overlay {
+                        shape.strokeBorder(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: pressed ? .black.opacity(0.3) : .white.opacity(0.3), location: 0),
+                                    .init(color: .clear, location: 0.12)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.5
+                        )
+                    }
+                    // Canvas: 0 0.5px 1.5px rgba(0,0,0,0.5); lighter on the
+                    // pale light-appearance well. Gone while pressed: the
+                    // button sits in the bar instead of on it.
+                    .shadow(color: .black.opacity(pressed ? 0 : (colorScheme == .dark ? 0.5 : 0.25)),
+                            radius: 0.75, y: 0.5)
+            }
+            .brightness(pressed ? -0.10 : 0)
+            .animation(.easeOut(duration: 0.12), value: pressed)
+            .contentShape(shape)
+            .opacity(isEnabled ? 1 : 0.5)
+    }
+
+    /// The primary fill, with Play's dark inner shadow from the top while
+    /// pressed (its opacities: 0.80 light, 0.55 dark).
+    private func face(pressed: Bool) -> AnyShapeStyle {
+        guard pressed else { return AnyShapeStyle(Theme.primary) }
+        return AnyShapeStyle(Theme.primary.shadow(.inner(
+            color: .black.opacity(colorScheme == .dark ? 0.55 : 0.80),
+            radius: Self.pressedInnerShadowRadius,
+            y: Self.pressedInnerShadowY
+        )))
+    }
+}
+
+/// The ruler's notches and labels (A2 §8, v2.9.0's arrangement at 21 pt):
+/// notches hang from the bottom edge, and each label sits 4 pt right of its
+/// major notch (`TimelineHeaderLabelLayout.leading`) with its digits' tops
+/// level with the notch's top. The playhead grabber overlaps the labels; that
+/// is accepted (it replaced the info-bar variant's §3 rule, which kept them
+/// clear of it on a 26 pt ruler).
+enum TimelineRulerMetrics {
+    /// v2.9.0's notch heights.
+    static let majorTickHeight: CGFloat = 19
+    static let minorTickHeight: CGFloat = 8
+    static let labelFontSize: CGFloat = 10
+    /// The label's line: its frame height, tighter than the type's natural
+    /// line height, as on the canvas (10 pt type on a 10 pt line).
+    static let labelHeight: CGFloat = 10
+    static var labelFont: Font { .system(size: labelFontSize).monospacedDigit() }
+
+    /// Where a major notch's top, and so its label's digits' tops, sit.
+    static var majorTickTop: CGFloat { CompareLaneLayout.rulerHeight - majorTickHeight }
+
+    /// The label line's top inset, chosen so the digits' tops (the font's
+    /// cap height) land on `majorTickTop` (about 0.5 pt).
+    static let labelTopInset: CGFloat = majorTickTop - labelGlyphBand(topInset: 0).lowerBound
+
+    /// The glyph band of a label, in ruler coordinates: the font's natural
+    /// line centred on the `labelHeight` line, from the cap height down to
+    /// the baseline (the labels are digits and colons: no descenders).
+    static func labelGlyphBand(
+        topInset: CGFloat = labelTopInset,
+        font: NSFont = .systemFont(ofSize: labelFontSize)
+    ) -> ClosedRange<CGFloat> {
+        let naturalLine = font.ascender - font.descender + font.leading
+        let baseline = topInset + (labelHeight - naturalLine) / 2 + font.ascender
+        return (baseline - font.capHeight)...baseline
+    }
+
+    /// A 1 pt notch at `x`, hanging from the ruler's bottom edge.
+    static func tickFrame(x: CGFloat, height: CGFloat, rulerHeight: CGFloat = CompareLaneLayout.rulerHeight) -> CGRect {
+        CGRect(x: x, y: rulerHeight - height, width: 1, height: height)
+    }
+
+    /// Where a major notch's label starts.
+    static func labelOrigin(tickX: CGFloat, rulerWidth: CGFloat) -> CGPoint? {
+        let layout = TimelineHeaderLabelLayout.leading(tickX: Double(tickX), rulerWidth: Double(rulerWidth))
+        return layout.isVisible ? CGPoint(x: layout.x, y: labelTopInset) : nil
+    }
+}
+
+/// v2.9.0's playhead: a 2 pt line from the ruler's bottom edge down through
+/// the lanes, and a 14 × 16 pt grabber whose tip sits on that edge. Frames are
+/// relative to the carrier layer, whose x is the playhead position.
+enum PlayheadGeometry {
+    static let handleWidth: CGFloat = 14
+    static let handleHeight: CGFloat = 16
+    static let lineWidth: CGFloat = 2
+
+    /// The line, in the lanes' scroll content: from its top (the ruler's
+    /// bottom edge) down through every lane.
+    static func lineFrame(lineHeight: CGFloat) -> CGRect {
+        CGRect(x: -lineWidth / 2, y: 0, width: lineWidth, height: max(lineHeight, 0))
+    }
+
+    /// The grabber art's frame, padded by `padding` on every side for its
+    /// shadow; the unpadded art ends exactly at `seatBottom`.
+    static func grabberFrame(seatBottom: CGFloat, padding: CGFloat) -> CGRect {
+        CGRect(
+            x: -handleWidth / 2 - padding,
+            y: seatBottom - handleHeight - padding,
+            width: handleWidth + padding * 2,
+            height: handleHeight + padding * 2
+        )
     }
 }
 
@@ -234,20 +516,6 @@ enum TrackDropHighlight: Equatable {
 
     static func empty(isTargeted: Bool) -> TrackDropHighlight {
         isTargeted ? .dropTarget : .normal
-    }
-}
-
-enum DroppedFileImportAction: Equatable {
-    case append
-
-    static func action(targetTrackID _: SessionTrack.ID?) -> DroppedFileImportAction {
-        .append
-    }
-}
-
-enum DroppedFileURLResolver {
-    static func audioFileURLs(from urls: [URL], fileManager: FileManager = .default) -> [URL] {
-        AppOpenedURLResolver.audioFileURLs(from: urls, fileManager: fileManager)
     }
 }
 
@@ -358,6 +626,7 @@ private struct TrackListDropDelegate: DropDelegate {
     @Binding var revealingID: SessionTrack.ID?
     @Binding var isImportTargeted: Bool
     let loadDroppedURLs: ([NSItemProvider]) -> Bool
+    let reorderVersion: (UUID, UUID?) -> Void
 
     /// A reorder carries the file URL too (for dragging out of the window), so
     /// the marker type decides the kind, not the presence of a file URL.
@@ -427,10 +696,10 @@ private struct TrackListDropDelegate: DropDelegate {
         case .noChange:
             break
         case .append:
-            controller.reorderTrack(draggingID, before: nil)
+            reorderVersion(draggingID, nil)
         case .before(let destinationIndex):
             let destinationID = tracks.indices.contains(destinationIndex) ? tracks[destinationIndex].id : nil
-            controller.reorderTrack(draggingID, before: destinationID)
+            reorderVersion(draggingID, destinationID)
         }
         return true
     }
@@ -458,52 +727,39 @@ private struct TrackListDropDelegate: DropDelegate {
     }
 }
 
-/// The window-wide audio-file import target. Accepts genuine external file drags
-/// (append). A track being reordered also carries a file URL, so it lands here
-/// too when it strays over the window's chrome (control bar, header); it's
-/// claimed but proposed as `.cancel`, so it reads as a cancel matching the menu
-/// bar — leaving it target-less instead would make AppKit fall back to the drag
-/// source's copy mask and flash a stray copy badge.
-private struct WindowFileImportDropDelegate: DropDelegate {
-    @Binding var isTargeted: Bool
-    let loadDroppedURLs: ([NSItemProvider]) -> Bool
+/// The lane strip's context menu (A2 milestone 4), acting on the clicked lane
+/// rather than the active one.
+struct LaneStripMenuActions {
+    var isBlind: Bool
+    var hasOffset: Bool
+    /// The version's file can't be found: Locate File… replaces nothing, it
+    /// is added, and Reveal in Finder turns off.
+    var isMissing = false
+    var remove: () -> Void
+    var revealInFinder: () -> Void
+    var resetOffset: () -> Void
+    var locate: () -> Void = {}
 
-    private func isReorderDrag(_ info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [TrackReorderDrag.contentType.identifier])
-    }
-
-    func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [UTType.fileURL.identifier])
-    }
-
-    func dropEntered(info: DropInfo) {
-        isTargeted = !isReorderDrag(info)
-    }
-
-    func dropExited(info: DropInfo) { isTargeted = false }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: isReorderDrag(info) ? .cancel : .copy)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        isTargeted = false
-        guard !isReorderDrag(info) else { return false }
-        return loadDroppedURLs(info.itemProviders(for: [UTType.fileURL.identifier]))
-    }
+    /// Reveal in Finder would show the file's name, so blind listening turns
+    /// it off; a missing file has nothing to reveal.
+    var canRevealInFinder: Bool { !isBlind && !isMissing }
 }
 
-/// AppKit-backed drag source for a track row. SwiftUI's `onDrag` can't express a
-/// move-inside / copy-outside operation, so the row's drag is run here as an
+/// AppKit-backed drag source for a lane. SwiftUI's `onDrag` can't express a
+/// move-inside / copy-outside operation, so the lane's drag is run here as an
 /// `NSDraggingSession`: **move** (reorder) within the app, **copy** the audio file
 /// out to Finder / other apps / another Takes window, and **cancel** on the menu
-/// bar or any non-target. A plain click (no drag) selects the row.
+/// bar or any non-target. A plain click (no drag) selects the lane; a right-click
+/// opens the lane's context menu.
 ///
-/// Placed as the info column's background so the badge/name/metadata forward their
-/// clicks here while the column's own controls (trash, offset field) still work.
+/// Placed behind the lane strip's badge, title and format, which forward their
+/// clicks here. The rest of the strip passes clicks through to the lane's seek
+/// and loop gestures.
 struct TrackRowDragSource: NSViewRepresentable {
     let fileURL: URL
     let trackID: SessionTrack.ID
+    let toolTip: String?
+    let menuActions: LaneStripMenuActions
     let onSelect: () -> Void
     let onDragBegan: () -> Void
     let onDragEnded: () -> Void
@@ -516,6 +772,8 @@ struct TrackRowDragSource: NSViewRepresentable {
     func updateNSView(_ nsView: DragSourceNSView, context: Context) {
         nsView.fileURL = fileURL
         nsView.trackID = trackID
+        nsView.toolTip = toolTip
+        nsView.menuActions = menuActions
         nsView.onSelect = onSelect
         nsView.onDragBegan = onDragBegan
         nsView.onDragEnded = onDragEnded
@@ -526,10 +784,29 @@ struct TrackRowDragSource: NSViewRepresentable {
 final class DragSourceNSView: NSView, NSDraggingSource {
     var fileURL: URL?
     var trackID: SessionTrack.ID?
+    var menuActions: LaneStripMenuActions?
     var onSelect: (() -> Void)?
     var onDragBegan: (() -> Void)?
     var onDragEnded: (() -> Void)?
     var makeDragImage: (() -> NSImage?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let actions = menuActions else { return nil }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(ClosureMenuItem(title: "Remove Version", action: actions.remove))
+        menu.addItem(.separator())
+        if actions.isMissing {
+            menu.addItem(ClosureMenuItem(title: "Locate File…", action: actions.locate))
+        }
+        menu.addItem(ClosureMenuItem(
+            title: "Reveal in Finder",
+            isEnabled: actions.canRevealInFinder,
+            action: actions.revealInFinder
+        ))
+        menu.addItem(ClosureMenuItem(title: "Reset Offset", isEnabled: actions.hasOffset, action: actions.resetOffset))
+        return menu
+    }
 
     private var mouseDownPoint: NSPoint?
     private var isDragging = false
@@ -644,50 +921,24 @@ final class DragSourceNSView: NSView, NSDraggingSource {
     }
 }
 
-/// AppKit tooltip sensor that tracks a single-line title label's rendered width.
-/// It registers the standard tooltip only when the untruncated string is wider
-/// than the label's current bounds, and it never steals clicks/drags from the
-/// row because hit-testing passes through to the drag source behind it.
-private struct TruncationAwareTooltip: NSViewRepresentable {
-    let text: String
-    let font: NSFont
+/// A menu item that runs a closure, for menus built on the fly.
+private final class ClosureMenuItem: NSMenuItem {
+    private let handler: () -> Void
 
-    func makeNSView(context: Context) -> TruncationAwareTooltipNSView {
-        TruncationAwareTooltipNSView()
+    init(title: String, isEnabled: Bool = true, action handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(runHandler), keyEquivalent: "")
+        target = self
+        self.isEnabled = isEnabled
     }
 
-    func updateNSView(_ nsView: TruncationAwareTooltipNSView, context: Context) {
-        nsView.text = text
-        nsView.font = font
-        nsView.updateTooltipIfNeeded()
-    }
-}
-
-private final class TruncationAwareTooltipNSView: NSView {
-    var text = ""
-    var font = NSFont.preferredFont(forTextStyle: .headline)
-
-    override var isFlipped: Bool { true }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    override func layout() {
-        super.layout()
-        updateTooltipIfNeeded()
+    @available(*, unavailable)
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
     }
 
-    func updateTooltipIfNeeded() {
-        guard bounds.width > 0, !text.isEmpty else {
-            toolTip = nil
-            return
-        }
-
-        toolTip = measuredTextWidth > bounds.width + 0.5 ? text : nil
-    }
-
-    private var measuredTextWidth: CGFloat {
-        let attributed = NSAttributedString(string: text, attributes: [.font: font])
-        return ceil(attributed.size().width)
+    @objc private func runHandler() {
+        handler()
     }
 }
 
@@ -717,45 +968,6 @@ enum ImportActionMenuItem: CaseIterable {
     }
 }
 
-enum ImportActionControlMetrics {
-    static let controlWidth: CGFloat = 62
-    static let controlHeight: CGFloat = 34
-    static let primaryButtonWidth: CGFloat = 34
-    static let menuButtonWidth: CGFloat = 27
-}
-
-enum ImportActionSplitButtonHitTesting {
-    static func segment(
-        atX x: CGFloat,
-        controlWidth: CGFloat,
-        primaryWidth: CGFloat,
-        menuWidth: CGFloat,
-        layoutDirection: NSUserInterfaceLayoutDirection
-    ) -> Int? {
-        guard x >= 0, x <= controlWidth else { return nil }
-
-        switch layoutDirection {
-        case .rightToLeft:
-            return x <= controlWidth - primaryWidth ? 1 : 0
-        default:
-            return x <= primaryWidth ? 0 : 1
-        }
-    }
-}
-
-enum ImportActionSplitButtonMenuPlacement {
-    static func origin(
-        bounds: NSRect,
-        menuWidth: CGFloat,
-        layoutDirection: NSUserInterfaceLayoutDirection,
-        isFlipped: Bool
-    ) -> NSPoint {
-        let menuX = layoutDirection == .rightToLeft ? bounds.minX : bounds.maxX - menuWidth
-        let menuY = isFlipped ? bounds.maxY : bounds.minY
-        return NSPoint(x: menuX, y: menuY)
-    }
-}
-
 @MainActor
 final class OpenFileCommandState: ObservableObject {
     @Published var isImportingTracks = false
@@ -765,6 +977,10 @@ final class OpenFileCommandState: ObservableObject {
 
     private var streamingURLTask: Task<Void, Never>?
     private var streamingURLTaskID: UUID?
+
+    var captureDestination: () -> PlaylistImportDestination = { .playlist }
+    private(set) var importDestination: PlaylistImportDestination = .playlist
+    private(set) var streamingDestination: PlaylistImportDestination = .playlist
 
     private let loadStreamingURLAction: @MainActor (String, OpenFileCommandState) -> Void
     private let loadAppleMusicSelection: @MainActor () -> Void
@@ -790,6 +1006,7 @@ final class OpenFileCommandState: ObservableObject {
     }
 
     func presentOpenDialog() {
+        importDestination = captureDestination()
         isImportingTracks = true
     }
 
@@ -798,6 +1015,7 @@ final class OpenFileCommandState: ObservableObject {
     }
 
     func presentStreamingURLPrompt() {
+        streamingDestination = captureDestination()
         cancelStreamingURLTask()
         streamingURLText = ""
         streamingURLStatus = .idle
@@ -805,6 +1023,7 @@ final class OpenFileCommandState: ObservableObject {
     }
 
     func openStreamingURL(_ urlString: String) {
+        streamingDestination = captureDestination()
         guard !streamingURLStatus.isWorking else { return }
         streamingURLText = urlString
         streamingURLStatus = .idle
@@ -822,6 +1041,15 @@ final class OpenFileCommandState: ObservableObject {
     func registerStreamingURLTask(_ task: Task<Void, Never>, id: UUID) {
         streamingURLTask = task
         streamingURLTaskID = id
+    }
+
+    func isCurrentStreamingURLTask(_ id: UUID) -> Bool {
+        streamingURLTaskID == id
+    }
+
+    func updateStreamingURLStatus(_ status: StreamingURLPromptStatus, id: UUID) {
+        guard streamingURLTaskID == id else { return }
+        streamingURLStatus = status
     }
 
     func finishStreamingURLTask(id: UUID) {
@@ -867,6 +1095,8 @@ final class OpenFileCommandState: ObservableObject {
 
 struct MainWindowCommandState {
     let resetWindowSizing: @MainActor () -> Void
+    let visibility: WorkspaceVisibility
+    let toggleVisibility: @MainActor (WorkspaceVisibility.Region) -> Void
 }
 
 private struct OpenFileCommandStateKey: FocusedValueKey {
@@ -891,74 +1121,6 @@ private struct CanUseGlobalMenuShortcutsKey: FocusedValueKey {
 
 private struct CanShowActiveTrackInFinderKey: FocusedValueKey {
     typealias Value = Bool
-}
-
-private struct TransportReadoutWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 180
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct TrackInfoColumnResizeHandleView: NSViewRepresentable {
-    let sectionWidth: CGFloat
-    @Binding var columnWidth: Double
-
-    func makeNSView(context: Context) -> ResizeHandleNSView {
-        let view = ResizeHandleNSView()
-        view.sectionWidth = sectionWidth
-        view.columnWidth = CGFloat(columnWidth)
-        view.onColumnWidthChanged = { columnWidth = Double($0) }
-        return view
-    }
-
-    func updateNSView(_ nsView: ResizeHandleNSView, context: Context) {
-        nsView.sectionWidth = sectionWidth
-        nsView.columnWidth = CGFloat(columnWidth)
-        nsView.onColumnWidthChanged = { columnWidth = Double($0) }
-    }
-
-    final class ResizeHandleNSView: NSView {
-        var sectionWidth: CGFloat = 0
-        var columnWidth: CGFloat = TakesWindowPolicy.defaultTrackInfoColumnWidth
-        var onColumnWidthChanged: ((CGFloat) -> Void)?
-        private var dragStartWidth: CGFloat?
-        private var dragStartX: CGFloat?
-
-        override func resetCursorRects() {
-            addCursorRect(bounds, cursor: .resizeLeftRight)
-        }
-
-        override func cursorUpdate(with event: NSEvent) {
-            NSCursor.resizeLeftRight.set()
-        }
-
-        override func mouseMoved(with event: NSEvent) {
-            NSCursor.resizeLeftRight.set()
-        }
-
-        override func mouseDown(with event: NSEvent) {
-            dragStartWidth = columnWidth
-            dragStartX = event.locationInWindow.x
-            NSCursor.resizeLeftRight.set()
-        }
-
-        override func mouseDragged(with event: NSEvent) {
-            guard let dragStartWidth, let dragStartX else { return }
-            let nextWidth = TakesWindowPolicy.clampedTrackInfoColumnWidth(
-                dragStartWidth + event.locationInWindow.x - dragStartX,
-                sectionWidth: sectionWidth
-            )
-            onColumnWidthChanged?(nextWidth)
-            NSCursor.resizeLeftRight.set()
-        }
-
-        override func mouseUp(with event: NSEvent) {
-            dragStartWidth = nil
-            dragStartX = nil
-        }
-    }
 }
 
 extension FocusedValues {
@@ -995,23 +1157,26 @@ extension FocusedValues {
 }
 
 struct ContentView: View {
-    var controller: PlaybackController
+    let coordinator: PlaylistCoordinator
+    private let importProviders: ([NSItemProvider]) -> Bool
+    /// Opens the Locate dialog for a missing version (the playlist's, so
+    /// both modes share one dialog).
+    private let locateVersion: (PlaylistVersion.ID) -> Void
+    var controller: PlaybackController { coordinator.controller }
+    @Environment(\.undoManager) private var undoManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var zoomHaptics: ZoomHapticsController
-    private let appFileOpenRouter: AppFileOpenRouter?
-    private let usesTemporaryDefaultWindowLayout: Bool
 
-    @StateObject private var openFileCommandState = OpenFileCommandState()
+    @ObservedObject private var openFileCommandState: OpenFileCommandState
     @StateObject private var waveformStore = WaveformStore()
-    @State private var keyMonitor: KeyMonitor?
     @State private var mouseMonitor: MouseMonitor?
-    /// While a playhead drag is in flight: the preview's x within the waveform
-    /// column. `nil` when not dragging.
+    /// While a playhead drag is in flight: the preview's x across the lanes.
+    /// `nil` when not dragging.
     @State private var playheadDragX: CGFloat?
     /// The lane-wide gesture chooses playhead or loop behavior once at
     /// mouse-down, then keeps that mode for the full drag.
     @State private var laneDragMode: TimelineLaneDragMode?
-    /// Timeline frame + column split, captured for the mouse-monitor cursor
+    /// Timeline frame and lane step, captured for the mouse-monitor cursor
     /// manager (which works in window coordinates, outside SwiftUI hover).
     @State private var timelineCursorGeometry: TimelineCursorGeometry?
     /// The cursor shape the cursor manager last applied, so it only calls
@@ -1033,10 +1198,7 @@ struct ContentView: View {
     @State private var reorderRevealingID: SessionTrack.ID?
     @State private var windowIsDropTargeted = false
     @State private var emptyStateIsHovered = false
-    @State private var hoverStore = TrackHoverStore()
     @State private var focusedOffsetTrackID: SessionTrack.ID?
-    @FocusState private var streamingURLFieldIsFocused: Bool
-    @State private var didConfigureMainWindow = false
     @State private var mainWindow: NSWindow?
     @State private var mainWindowIsKey = true
     @State private var loopDraft: LoopDraft?
@@ -1053,10 +1215,7 @@ struct ContentView: View {
     /// re-laying-out. Written from the container via an equality-guarded
     /// `.onChange`; see `LaneViewport` for why it can't be a row input.
     @State private var laneViewportStore = LaneViewportStore()
-    @State private var transportReadoutWidth: CGFloat = TransportReadoutWidthKey.defaultValue
-    @State private var trackInfoColumnWidth: Double
-    @State private var showsAlignmentAttentionPopover = false
-    @State private var alignmentOutcomePulse = false
+    @State private var controlBarHeight: CGFloat = TakesWindowPolicy.controlBarReservedHeight - ControlBarDivider.height
 
     /// An in-progress loop drag, in absolute seconds. `start` is where the drag
     /// began; `current` tracks the pointer. Committed to a `LoopRegion` on mouse-up.
@@ -1065,15 +1224,12 @@ struct ContentView: View {
         var current: TimeInterval
     }
 
-    /// Height of one row plus its divider — the step between reorder target slots.
-    private var reorderRowStep: CGFloat { trackRowHeight + trackTimelineDividerHeight }
-
-    /// Coordinate space for the waveform column, so loop gestures report x in
-    /// `0...waveformWidth` regardless of the column's offset. (`fileprivate` so
-    /// the loop overlay leaf's handle gestures can name the same space.)
+    /// Coordinate space for the lanes, so loop gestures report x in
+    /// `0...waveformWidth`. (`fileprivate` so the loop overlay leaf's handle
+    /// gestures can name the same space.)
     fileprivate static let loopColumnSpace = "loopColumn"
     /// Coordinate space for the timeline ruler, so ruler gestures report x in
-    /// `0...waveformWidth` just like the waveform column.
+    /// `0...waveformWidth` just like the lanes.
     private static let rulerSpace = "timelineRuler"
     /// Coordinate space of the vertical track ScrollView, for reading the rows'
     /// content offset when computing the renderable row range.
@@ -1081,8 +1237,6 @@ struct ContentView: View {
     /// Rows beyond the visible viewport on each side that still rasterize, so
     /// small scrolls reveal already-rendered lanes.
     private static let renderableRowOverscan = 2
-    /// Shared extent of the shadows cast by frozen timeline surfaces.
-    private static let frozenSurfaceShadowExtent: CGFloat = 5
 
     /// Row indices intersecting the vertical viewport ± overscan. Rows are
     /// fixed-height, so this is pure math on the content offset.
@@ -1101,117 +1255,26 @@ struct ContentView: View {
     private static let loopDragThreshold: CGFloat = 4
 
     init(
-        controller: PlaybackController,
-        appFileOpenRouter: AppFileOpenRouter? = nil,
-        usesTemporaryDefaultWindowLayout: Bool = false
+        coordinator: PlaylistCoordinator,
+        openFileCommandState: OpenFileCommandState,
+        importProviders: @escaping ([NSItemProvider]) -> Bool,
+        locateVersion: @escaping (PlaylistVersion.ID) -> Void = { _ in }
     ) {
-        self.controller = controller
-        self.appFileOpenRouter = appFileOpenRouter
-        self.usesTemporaryDefaultWindowLayout = usesTemporaryDefaultWindowLayout
-        _trackInfoColumnWidth = State(
-            initialValue: Self.initialTrackInfoColumnWidth(
-                usesTemporaryDefaultWindowLayout: usesTemporaryDefaultWindowLayout
-            )
-        )
-        _openFileCommandState = StateObject(
-            wrappedValue: OpenFileCommandState(
-                loadStreamingURL: { urlString, commandState in
-                    let taskID = UUID()
-                    let task = Task {
-                        let didLoad = await controller.loadStreamingTrack(
-                            from: urlString,
-                            statusHandler: { status in
-                                await MainActor.run {
-                                    commandState.streamingURLStatus = status
-                                }
-                            }
-                        )
-                        await MainActor.run {
-                            commandState.finishStreamingURLTask(id: taskID)
-                        }
-                        if didLoad {
-                            await MainActor.run {
-                                commandState.dismissStreamingURLPrompt()
-                            }
-                        }
-                    }
-                    commandState.registerStreamingURLTask(task, id: taskID)
-                },
-                loadAppleMusicSelection: {
-                    Task { await controller.loadSelectedLibraryTracks() }
-                },
-                loadFinderSelection: {
-                    Task {
-                        do {
-                            let urls = try FinderSelectionLoader().selectedAudioFileURLs()
-                            await controller.loadImportedFiles(urls)
-                        } catch let error as PlaybackError {
-                            controller.setPlaybackError(error)
-                        } catch {
-                            controller.setPlaybackError(.librarySelectionFailed("Could not read the Finder selection."))
-                        }
-                    }
-                },
-                showActiveTrackInFinder: {
-                    guard let url = controller.session.activeTrack?.loadedTrack.url else { return }
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                },
-                removeActiveTrack: {
-                    guard let trackID = controller.session.activeTrackID else { return }
-                    controller.removeTrack(trackID)
-                },
-                clearAllTracks: {
-                    controller.clearTracks()
-                }
-            )
-        )
-    }
-
-    private static func initialTrackInfoColumnWidth(
-        usesTemporaryDefaultWindowLayout: Bool,
-        defaults: UserDefaults = .standard
-    ) -> Double {
-        guard !usesTemporaryDefaultWindowLayout,
-              let storedWidth = defaults.object(forKey: TakesWindowPolicy.trackInfoColumnWidthKey) as? NSNumber
-        else {
-            return TakesWindowPolicy.defaultTrackInfoColumnWidth
-        }
-
-        return storedWidth.doubleValue
-    }
-
-    private var trackInfoColumnWidthBinding: Binding<Double> {
-        Binding(
-            get: { trackInfoColumnWidth },
-            set: { width in
-                trackInfoColumnWidth = width
-                guard !usesTemporaryDefaultWindowLayout else { return }
-                UserDefaults.standard.set(width, forKey: TakesWindowPolicy.trackInfoColumnWidthKey)
-            }
-        )
+        self.coordinator = coordinator
+        self.openFileCommandState = openFileCommandState
+        self.importProviders = importProviders
+        self.locateVersion = locateVersion
     }
 
     var body: some View {
         inactiveAwareContent
-            .frame(
-                minWidth: TakesWindowPolicy.minimumContentWidth,
-                minHeight: TakesWindowPolicy.rootViewMinimumHeight
-            )
-            // The control bar doubles as the titlebar: lay the root view out
-            // under the hidden titlebar so the bar starts at the window's top edge.
-            .ignoresSafeArea(.container, edges: .top)
+            .frame(minWidth: TakesWindowPolicy.minimumWidth)
             .environment(\.transportAppearance, settings.transportAppearance)
             .background(WindowBackground().ignoresSafeArea())
             .background {
                 MainWindowConfigurationView { window in
                     mainWindow = window
                     mainWindowIsKey = window.isKeyWindow
-                    guard !didConfigureMainWindow else { return }
-                    didConfigureMainWindow = true
-                    TakesWindowPolicy.configureMainWindow(
-                        window,
-                        resetsLayoutForLaunch: usesTemporaryDefaultWindowLayout
-                    )
                 }
             }
             .overlay {
@@ -1220,60 +1283,9 @@ struct ContentView: View {
                         .ignoresSafeArea()
                 }
             }
-            .alert(
-                "Takes Error",
-                isPresented: Binding(
-                    get: { controller.playbackError != nil },
-                    set: { isPresented in
-                        if !isPresented {
-                            controller.clearPlaybackError()
-                        }
-                    }
-                )
-            ) {
-                Button("OK") {
-                    controller.clearPlaybackError()
-                }
-            } message: {
-                Text(controller.playbackError?.localizedDescription ?? "")
-            }
-            .onDrop(
-                of: [UTType.fileURL.identifier],
-                delegate: WindowFileImportDropDelegate(
-                    isTargeted: $windowIsDropTargeted,
-                    loadDroppedURLs: { loadDroppedURLs(from: $0) }
-                )
-            )
-            .fileImporter(
-                isPresented: $openFileCommandState.isImportingTracks,
-                allowedContentTypes: [.audio],
-                allowsMultipleSelection: true
-            ) { result in
-                handleImport(result)
-            }
-            .sheet(isPresented: $openFileCommandState.isPromptingForStreamingURL) {
-                streamingURLPrompt
-            }
-            .focusedSceneValue(\.openFileCommandState, openFileCommandState)
-            .focusedSceneValue(
-                \.mainWindowCommandState,
-                MainWindowCommandState {
-                    trackInfoColumnWidthBinding.wrappedValue = TakesWindowPolicy.defaultTrackInfoColumnWidth
-                    guard let mainWindow else { return }
-                    TakesWindowPolicy.resetMainWindowSize(mainWindow)
-                }
-            )
-            .focusedSceneValue(\.canShowActiveTrackInFinder, controller.session.activeTrack != nil)
-            .focusedSceneValue(\.canRemoveActiveTrack, controller.session.activeTrackID != nil)
-            .focusedSceneValue(
-                \.canUseGlobalMenuShortcuts,
-                focusedOffsetTrackID == nil && !streamingURLFieldIsFocused
-            )
-            .focusedSceneValue(\.canClearTracks, controller.displayedTrackRowCount > 0)
             .onAppear {
-                setupKeyMonitor()
-                configureAppOpenRouter()
-                waveformStore.sync(tracks: controller.session.tracks)
+                setupMouseMonitor()
+                waveformStore.sync(tracks: controller.session.tracks, context: controller.runtimeContext)
                 NSApp.appearance = settings.appearanceTheme.nsAppearance
             }
             .onChange(of: settings.appearanceTheme) { _, theme in
@@ -1288,27 +1300,13 @@ struct ContentView: View {
                 mainWindowIsKey = false
             }
             .onChange(of: controller.session.tracks) { _, tracks in
-                waveformStore.sync(tracks: tracks)
+                waveformStore.sync(tracks: tracks, context: controller.runtimeContext)
             }
-            .onChange(of: controller.displayedTrackRowCount) { previousTrackCount, trackCount in
-                guard let mainWindow else { return }
-                let shouldResize = TakesWindowPolicy.shouldAutoGrowWindow(
-                    previousTrackRowCount: previousTrackCount,
-                    newTrackRowCount: trackCount,
-                    currentWindowHeight: mainWindow.frame.height
-                ) || TakesWindowPolicy.shouldAutoShrinkWindow(
-                    previousTrackRowCount: previousTrackCount,
-                    newTrackRowCount: trackCount,
-                    currentWindowHeight: mainWindow.frame.height
-                )
-                guard shouldResize else { return }
-                TakesWindowPolicy.resizeMainWindow(mainWindow, displayingTrackRows: trackCount)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                controller.cleanupStreamingDownloads()
+            .onChange(of: controller.runtimeContext) { _, _ in
+                waveformStore.sync(tracks: controller.session.tracks, context: controller.runtimeContext)
             }
             .onDisappear {
-                keyMonitor?.stop()
+                waveformStore.sync(tracks: [], context: nil)
                 mouseMonitor?.stop()
             }
     }
@@ -1319,377 +1317,64 @@ struct ContentView: View {
             // Draw the import highlight after the inactive-window treatment so drag
             // hover stays vivid even while the window is in the background.
             .overlay {
-                trackDropHighlightOverlay
+                if settings.windowVisibility.showsPlaylist { trackDropHighlightOverlay }
             }
     }
 
     private var contentStack: some View {
         VStack(alignment: .leading, spacing: 0) {
-            controlBar
-                .fixedSize(horizontal: false, vertical: true)
-            trackTimelineSection
-                .frame(maxHeight: .infinity)
-                // Recess the complete timeline section—including its header
-                // and ruler—beneath the lighter transport surface.
-                .background(Theme.timelineWellShade)
-                // Restore the transport shadow using the fixed-column
-                // shadow's exact color and 5pt fade extent.
-                .overlay(alignment: .top) {
-                    LinearGradient(
-                        colors: [Theme.frozenColumnShadow, .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: Self.frozenSurfaceShadowExtent)
-                    .allowsHitTesting(false)
+            if settings.windowVisibility.showsPlayer {
+                controlBar
+            }
+            if settings.windowVisibility.showsPlaylist {
+                ControlBarDivider()
+                VStack(spacing: 0) {
+                    CompareInfoBar(controller: controller) {
+                        Task { await coordinator.backToPlaylist() }
+                    }
+                    .componentDebugLabel("Info Bar", enabled: settings.showsComponentDebugLabels)
+                    trackTimelineSection
+                        .frame(maxHeight: .infinity)
                 }
+                .background(Theme.timelineWellShade)
+                CompareBottomBar(coordinator: coordinator, openFiles: openFileCommandState)
+                    .componentDebugLabel("Bottom Bar", enabled: settings.showsComponentDebugLabels)
+            }
         }
-    }
-
-    /// Two half-point edges preserve the divider's 1pt layout height while
-    /// reading as a crisp recessed bevel on Retina displays.
-    private var beveledSectionDivider: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(Theme.transportDividerShadow)
-            Rectangle()
-                .fill(Theme.transportDividerHighlight)
-        }
-        .frame(height: 1)
-        .allowsHitTesting(false)
     }
 
     private var trackDropHighlightOverlay: some View {
         VStack(spacing: 0) {
             Color.clear
                 .frame(
-                    height: TakesWindowPolicy.controlBarReservedHeight
-                        + (controller.displayedTrackRowCount == 0 ? 0 : trackHeaderHeight + trackTimelineDividerHeight)
+                    height: (settings.windowVisibility.showsPlayer ? controlBarHeight : 0)
+                        + ControlBarDivider.height + CompareInfoBarMetrics.height
+                        + (controller.displayedTrackRowCount == 0 ? 0 : CompareLaneLayout.seatBottom)
                 )
             trackAreaImportHighlight(isTargeted: windowIsDropTargeted)
+            // The highlight stops at the bottom bar.
+            Color.clear
+                .frame(height: BottomBarMetrics.height)
         }
         .allowsHitTesting(false)
     }
 
+    /// Compare control bar (spec §5.1): Blind · Play · Switch Track · Repeat,
+    /// with no readout. The elapsed time and Done are in the info bar below
+    /// the divider (A2 compare info-bar variant).
     private var controlBar: some View {
-        GeometryReader { proxy in
-            let sideRegionWidth = max((proxy.size.width - transportReadoutWidth) / 2, 0)
-
-            ZStack {
-                HStack(spacing: 12) {
-                    playButton
-                    switchTrackButton
-                }
-                .frame(width: sideRegionWidth, alignment: .center)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                // Pinned to the true window center, independent of the side clusters.
-                // While playing the text comes from `playingReadoutText`,
-                // which changes only when the displayed second rolls over;
-                // while paused it derives from `transportPosition`, whose
-                // writes are then only user seeks. (A TimelineView here kept
-                // the window's display-link layout cycle running at full
-                // refresh for the whole duration of playback.)
-                DigitalTimeReadout(
-                    style: settings.readoutStyle,
-                    elapsed: controller.session.isPlaying
-                        ? controller.playingReadoutText
-                        : controller.session.transportPosition.formattedSignedTimestamp
-                )
-                .background {
-                    GeometryReader { readoutProxy in
-                        Color.clear.preference(
-                            key: TransportReadoutWidthKey.self,
-                            value: readoutProxy.size.width
-                        )
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-                // Purely informational, so let clicks fall through to the window
-                // drag area — the readout shouldn't be a dead spot in the titlebar.
-                .allowsHitTesting(false)
-
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    repeatButton
-                    blindListeningButton
-                        .padding(.leading, 8)
-                    Spacer(minLength: 8)
-                    zoomControls
-                }
-                .padding(.trailing, 18)
-                .frame(width: sideRegionWidth, alignment: .trailing)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            }
+        let buttons = CompareTransportButtons(coordinator: coordinator, showsDebugLabels: settings.showsComponentDebugLabels)
+        return ControlBarLayout {
+            buttons.blindListening
+        } center: {
+            buttons.center()
+        } trailing: {
+            buttons.repeatMode
         }
-        .frame(height: DigitalTimeReadout.panelHeight)
-        // Metrically 18 + 18, but shifted 2pt down: dead-center reads a touch
-        // high in the bar, so the controls sit slightly low of true center.
-        .padding(.top, 20)
-        .padding(.bottom, 16)
-        .onPreferenceChange(TransportReadoutWidthKey.self) { width in
-            guard width > 0, abs(width - transportReadoutWidth) > 0.5 else { return }
-            transportReadoutWidth = width
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            if abs(height - controlBarHeight) > 0.5 { controlBarHeight = height }
         }
-        // Raised deck: a light wash lifts the bar off the shared window
-        // material, pairing with `timelineWellShade` below the divider.
-        // Purely decorative, so it must not intercept clicks — otherwise it
-        // swallows the mouseDown before the WindowDragArea behind it can drag.
-        .background(Theme.controlBarLift.allowsHitTesting(false))
-        // The control bar is the titlebar: any click on empty bar space
-        // (not claimed by a control above) drags the window.
-        .background(WindowDragArea())
         .componentDebugLabel("Control Bar", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private var playButton: some View {
-        Button {
-            controller.session.isPlaying ? controller.pause() : controller.play()
-        } label: {
-            Image(systemName: controller.session.isPlaying ? "pause.fill" : "play.fill")
-        }
-        .buttonStyle(CircleTransportButtonStyle(
-            kind: .primary,
-            diameter: DigitalTimeReadout.panelHeight,
-            glyphSize: 22,
-            pressedGlyphOffset: 1.5
-        ))
-        .disabled(!controller.session.isPlayable)
-        .help(controller.session.isPlaying ? "Pause" : "Play")
-        .accessibilityLabel(controller.session.isPlaying ? "Pause" : "Play")
-        .componentDebugLabel("Play", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private var switchTrackButton: some View {
-        Button {
-            if SwitchTrackModifierPolicy.selectsPreviousTrack(currentEventFlags: NSApp.currentEvent?.modifierFlags) {
-                controller.selectPreviousTrack()
-            } else {
-                controller.selectNextTrack()
-            }
-        } label: {
-            Image(systemName: "arrow.trianglehead.swap")
-        }
-        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, diameter: 40, glyphSize: 15))
-        .disabled(!controller.session.canSwitchPlayback)
-        .help("Switch Track")
-        .accessibilityLabel("Switch Track")
-        .componentDebugLabel("Switch Track", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private var zoomControls: some View {
-        let contentSpan = controller.session.duration
-        let enabled = controller.canZoomTimeline
-        return HStack(spacing: 8) {
-            Button {
-                zoomHaptics.syncZoomProgress(zoomProgress)
-                controller.stepZoom(zoomingIn: false)
-                zoomHaptics.updateZoomProgress(zoomProgress)
-            } label: {
-                Image(systemName: "minus.magnifyingglass")
-            }
-            .buttonStyle(.borderless)
-            .disabled(!enabled)
-            .help("Zoom out")
-            .accessibilityLabel("Zoom Out")
-
-            Slider(
-                value: Binding(
-                    get: {
-                        TimelineViewport.sliderValue(
-                            visibleSpan: max(controller.visibleSpan, 0.001),
-                            contentSpan: contentSpan
-                        )
-                    },
-                    set: { value in
-                        zoomHaptics.syncZoomProgress(zoomProgress)
-                        controller.zoomVisibleSpan(
-                            to: TimelineViewport.visibleSpan(sliderValue: value, contentSpan: contentSpan)
-                        )
-                        zoomHaptics.updateZoomProgress(zoomProgress)
-                    }
-                ),
-                in: 0...1
-            )
-            .controlSize(.small)
-            .frame(width: 56)
-            .disabled(!enabled)
-            .accessibilityLabel("Timeline Zoom")
-
-            Button {
-                zoomHaptics.syncZoomProgress(zoomProgress)
-                controller.stepZoom(zoomingIn: true)
-                zoomHaptics.updateZoomProgress(zoomProgress)
-            } label: {
-                Image(systemName: "plus.magnifyingglass")
-            }
-            .buttonStyle(.borderless)
-            .disabled(!enabled)
-            .help("Zoom in")
-            .accessibilityLabel("Zoom In")
-        }
-        .componentDebugLabel("Zoom Controls", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private var repeatButton: some View {
-        let mode = controller.session.repeatMode
-        return Button {
-            controller.cycleRepeatMode()
-        } label: {
-            Image(systemName: Self.repeatSymbol(for: mode))
-        }
-        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: mode != .off, diameter: 40, glyphSize: 15))
-        .disabled(!controller.session.isPlayable)
-        .help(Self.repeatHelp(for: mode))
-        .accessibilityLabel("Repeat")
-        .accessibilityValue(Self.repeatModeName(for: mode))
-        .componentDebugLabel("Repeat", enabled: settings.showsComponentDebugLabels)
-    }
-
-    /// Header-sized companion to the import control: a native bordered button
-    /// (matching "Remove All") whose glyph swaps for a progress indicator
-    /// while an alignment run is in flight — an indeterminate spinner during
-    /// the quick pass, a determinate ring during tempo analysis. The fixed
-    /// label frame keeps the button from resizing during the swap.
-    private var autoAlignButton: some View {
-        Button {
-            controller.autoAlignTracks()
-        } label: {
-            Group {
-                if let progress = controller.alignmentProgress {
-                    ZStack {
-                        Circle()
-                            .stroke(Theme.primary.opacity(0.25), lineWidth: 2)
-                        Circle()
-                            .trim(from: 0, to: max(0.02, progress))
-                            .stroke(Theme.primary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                    }
-                    .frame(width: 13, height: 13)
-                    .animation(.easeInOut(duration: 0.2), value: progress)
-                } else if controller.isAligning {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.7)
-                        .tint(Theme.primary)
-                } else if let outcome = controller.alignmentOutcome {
-                    Image(systemName: outcome == .success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundStyle(outcome == .success ? Color.green : Color.red)
-                } else {
-                    Image(systemName: "arrow.right.and.line.vertical.and.arrow.left")
-                }
-            }
-            .frame(width: 18, height: 16)
-        }
-        .controlSize(.regular)
-        .disabled(!controller.session.canSwitchPlayback || controller.isAligning)
-        .help("Auto-Align Tracks")
-        .accessibilityLabel("Auto-Align Tracks")
-        .accessibilityValue(controller.isAligning ? "Aligning" : "")
-        .shadow(
-            color: alignmentOutcomeGlowColor.opacity(alignmentOutcomePulse ? 0.9 : 0.0),
-            radius: alignmentOutcomePulse ? 7 : 0
-        )
-        .onChange(of: controller.alignmentOutcome) { _, outcome in
-            if outcome == nil {
-                withAnimation(.easeOut(duration: 0.3)) { alignmentOutcomePulse = false }
-            } else {
-                alignmentOutcomePulse = false
-                // Finite, matching the 2 s outcome flash (see `flashOutcome`):
-                // a repeatForever here would keep a display link ticking
-                // indefinitely even after the glow faded.
-                withAnimation(.easeInOut(duration: 0.5).repeatCount(4, autoreverses: true)) {
-                    alignmentOutcomePulse = true
-                }
-            }
-        }
-        .popover(isPresented: $showsAlignmentAttentionPopover, arrowEdge: .bottom) {
-            alignmentOfferPopoverContent
-        }
-        .onChange(of: controller.tempoAnalysisOffer) { _, offer in
-            // Surface the offer automatically when the quick pass leaves
-            // unaligned tracks.
-            if offer != nil { showsAlignmentAttentionPopover = true }
-        }
-        .onChange(of: showsAlignmentAttentionPopover) { _, isShowing in
-            if !isShowing { controller.dismissAlignmentAttention() }
-        }
-        .componentDebugLabel("Auto-Align", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private var alignmentOutcomeGlowColor: Color {
-        switch controller.alignmentOutcome {
-        case .success: return .green
-        case .failure: return .red
-        case nil: return .clear
-        }
-    }
-
-    @ViewBuilder
-    private var alignmentOfferPopoverContent: some View {
-        if let offer = controller.tempoAnalysisOffer {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Couldn't Align Tracks")
-                    .font(.headline)
-                Text("No matching audio was found for:")
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(offer.trackNames.joined(separator: "\n"))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Deeper analysis can align audio across differing tempos, but it takes longer.")
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Spacer()
-                    Button("Analyze Further") {
-                        controller.startTempoAnalysis()
-                        showsAlignmentAttentionPopover = false
-                    }
-                    .keyboardShortcut(.defaultAction)
-                }
-            }
-            .padding()
-            .frame(width: 300)
-        }
-    }
-
-    private var blindListeningButton: some View {
-        let isOn = controller.session.isBlindListeningModeEnabled
-        return Button {
-            controller.toggleBlindListeningMode()
-        } label: {
-            if isOn {
-                Image("BlindListening")
-                    .offset(y: 2.5)
-            } else {
-                Image(systemName: "eye")
-            }
-        }
-        .buttonStyle(CircleTransportButtonStyle(kind: .secondary, isOn: isOn, diameter: 40, glyphSize: 15))
-        .disabled(!controller.session.canToggleBlindListeningMode)
-        .help("Blind Listening Mode")
-        .accessibilityLabel("Blind Listening Mode")
-        .accessibilityValue(isOn ? "On" : "Off")
-        .componentDebugLabel("Blind Listening Mode", enabled: settings.showsComponentDebugLabels)
-    }
-
-    private static func repeatSymbol(for mode: RepeatMode) -> String {
-        switch mode {
-        case .off, .one: return "repeat"
-        case .switchAndRepeat: return "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill"
-        }
-    }
-
-    private static func repeatModeName(for mode: RepeatMode) -> String {
-        switch mode {
-        case .off: return "Off"
-        case .one: return "One"
-        case .switchAndRepeat: return "Switch & Repeat"
-        }
-    }
-
-    private static func repeatHelp(for mode: RepeatMode) -> String {
-        "Repeat: \(repeatModeName(for: mode))"
     }
 
     // NOTE: `visibleStart` changes on every horizontal scroll event (and every
@@ -1708,18 +1393,6 @@ struct ContentView: View {
         max(controller.visibleSpan, 0.001)
     }
 
-    private var trackRowHeight: CGFloat {
-        TakesWindowPolicy.trackRowHeight
-    }
-
-    private func trackInfoWidth(sectionWidth: CGFloat) -> CGFloat {
-        TakesWindowPolicy.clampedTrackInfoColumnWidth(CGFloat(trackInfoColumnWidth), sectionWidth: sectionWidth)
-    }
-
-    private var trackHeaderHeight: CGFloat {
-        TakesWindowPolicy.trackTimelineHeaderHeight
-    }
-
     private var timelineHeaderTargetMarkerCount: Int {
         7
     }
@@ -1727,14 +1400,6 @@ struct ContentView: View {
     /// Minimum on-screen spacing (points) between minor ticks before they are hidden.
     private var timelineHeaderMinorTickMinSpacing: Double {
         7
-    }
-
-    private var trackTimelineDividerHeight: CGFloat {
-        TakesWindowPolicy.trackTimelineDividerHeight
-    }
-
-    private var trackTimelineHeight: CGFloat {
-        TakesWindowPolicy.trackTimelineHeight(displayingTrackRows: controller.displayedTrackRowCount)
     }
 
     // Both helpers read the per-event visible window — call them from gesture
@@ -1756,21 +1421,35 @@ struct ContentView: View {
         ) * width
     }
 
+    /// The compact compare area (A2 §8): the 26 pt ruler, then full-width
+    /// lanes of a fixed height (`CompareLaneLayout.laneStep`) that scroll when
+    /// they don't fit.
+    ///
+    /// The lanes' scroll content has four layers, back to front: the lane
+    /// visuals (`TrackRowView`), the seek / loop gesture surface with the loop
+    /// selection, the playhead line, and the lane strips (`LaneStripView`).
+    /// The strips sit on top so they draw over the playhead line, and so their
+    /// badge, title and format (drag source and context menu) and their offset
+    /// field take clicks; the rest of a strip passes clicks through to the
+    /// lane gestures beneath it. Both per-lane layers are equatable values
+    /// with no per-scroll or per-zoom inputs. The playhead's grabber stays on
+    /// the ruler, in an overlay above the section.
     private var trackTimelineSection: some View {
         GeometryReader { proxy in
-            let infoWidth = trackInfoWidth(sectionWidth: proxy.size.width)
-            let waveformWidth = max(proxy.size.width - infoWidth, 1)
+            let waveformWidth = max(proxy.size.width, 1)
             let displayedTrackRowCount = controller.displayedTrackRowCount
+            let laneStep = CompareLaneLayout.laneStep
+            let contentHeight = CompareLaneLayout.contentHeight(laneCount: displayedTrackRowCount)
             VStack(alignment: .leading, spacing: 0) {
                 if displayedTrackRowCount == 0 {
-                    // The empty state owns the whole section — no header, no
-                    // column split — one centered drop/click target.
+                    // The empty state owns the whole section — no ruler —
+                    // one centered drop/click target.
                     trackAreaEmptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    trackTimelineHeader(infoWidth: infoWidth, waveformWidth: waveformWidth)
-                        .frame(width: proxy.size.width, height: trackHeaderHeight)
-                    beveledSectionDivider
+                    timelineRuler(waveformWidth: waveformWidth)
+                        .frame(width: proxy.size.width, height: CompareLaneLayout.rulerHeight)
+                    laneDivider
 
                     ScrollView(.vertical) {
                         ZStack(alignment: .topLeading) {
@@ -1785,39 +1464,19 @@ struct ContentView: View {
                             let wideWidth = waveformWidth * 2
                             VStack(spacing: 0) {
                                 ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
-                                    let isLifted = reorderDraggingID == sessionTrack.id
-                                        || reorderRevealingID == sessionTrack.id
                                     trackRowView(
                                         index: index,
                                         sessionTrack: sessionTrack,
-                                        infoWidth: infoWidth,
+                                        laneHeight: CompareLaneLayout.laneHeight,
                                         wideWidth: wideWidth
                                     )
                                         .equatable()
-                                        // The dragged row's floating preview stands in
-                                        // for it; its slot stays reserved as the gap the
-                                        // other rows slide around. It stays hidden one
-                                        // tick past the commit (`reorderRevealingID`),
-                                        // then fades in at its landed position — the
-                                        // fade itself is applied by `withAnimation` in
-                                        // the drag-ended handler.
-                                        .opacity(isLifted ? 0 : 1)
-                                        .offset(y: reorderRowOffset(index: index))
-                                        .animation(.snappy(duration: 0.26), value: reorderGapGeneration)
-                                    if index < displayedTrackRowCount - 1 {
-                                        Divider()
-                                            .frame(height: trackTimelineDividerHeight)
-                                            .offset(y: reorderRowOffset(index: index))
-                                            .animation(.snappy(duration: 0.26), value: reorderGapGeneration)
-                                    }
+                                        .modifier(reorderPlacement(index: index, trackID: sessionTrack.id, rowStep: laneStep))
+                                    laneDivider
+                                        .modifier(reorderPlacement(index: index, trackID: nil, rowStep: laneStep))
                                 }
                             }
-                            .overlay(alignment: .bottom) {
-                                Rectangle()
-                                    .fill(Theme.hairline)
-                                    .frame(height: trackTimelineDividerHeight)
-                                    .allowsHitTesting(false)
-                            }
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: coordinator.rowMoveRevision)
                             // Publish the zoom-varying window to the store the
                             // lane leaves observe. The container body re-running
                             // per zoom step is fine (it's cheap and produces
@@ -1830,8 +1489,21 @@ struct ContentView: View {
                             }
 
                             if controller.session.isPlayable {
-                                loopSelectionOverlay(infoWidth: infoWidth, waveformWidth: waveformWidth)
+                                loopSelectionOverlay(waveformWidth: waveformWidth, contentHeight: contentHeight)
+                                // Behind the strips, so their badges, titles
+                                // and offset fields draw over it.
+                                timelinePlayhead(.line, waveformWidth: waveformWidth, height: contentHeight)
                             }
+
+                            VStack(spacing: 0) {
+                                ForEach(Array(controller.session.tracks.enumerated()), id: \.element.id) { index, sessionTrack in
+                                    laneStripView(index: index, sessionTrack: sessionTrack)
+                                        .equatable()
+                                        .frame(height: laneStep, alignment: .top)
+                                        .modifier(reorderPlacement(index: index, trackID: sessionTrack.id, rowStep: laneStep))
+                                }
+                            }
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: coordinator.rowMoveRevision)
                         }
                         .frame(width: proxy.size.width)
                         // Vertical visibility culling: track which row indices
@@ -1846,8 +1518,8 @@ struct ContentView: View {
                             GeometryReader { rowsGeometry in
                                 let range = Self.renderableRowRange(
                                     contentMinY: rowsGeometry.frame(in: .named(Self.trackScrollSpace)).minY,
-                                    viewportHeight: max(proxy.size.height - trackHeaderHeight, 0),
-                                    rowStep: reorderRowStep
+                                    viewportHeight: max(proxy.size.height - CompareLaneLayout.seatBottom, 0),
+                                    rowStep: laneStep
                                 )
                                 Color.clear
                                     .onChange(of: range, initial: true) { _, newRange in
@@ -1857,22 +1529,23 @@ struct ContentView: View {
                                     }
                             }
                         )
-                        // One drop target spanning the rows, taking reorders and
+                        // One drop target spanning the lanes, taking reorders and
                         // external file drops. For reorders it opens the gap as the
                         // pointer moves and commits on drop. A single target (rather
-                        // than per-row) keeps the target slot stable while the rows
+                        // than per-lane) keeps the target slot stable while the lanes
                         // shift, and lets the enclosing NSScrollView auto-scroll.
                         .onDrop(
                             of: TrackRowDropTarget.acceptedContentTypeIdentifiers,
                             delegate: TrackListDropDelegate(
                                 controller: controller,
-                                rowStep: reorderRowStep,
+                                rowStep: laneStep,
                                 draggingID: $reorderDraggingID,
                                 targetIndex: $reorderTargetIndex,
                                 gapGeneration: $reorderGapGeneration,
                                 revealingID: $reorderRevealingID,
                                 isImportTargeted: $windowIsDropTargeted,
-                                loadDroppedURLs: { loadDroppedURLs(from: $0) }
+                                loadDroppedURLs: importProviders,
+                                reorderVersion: { coordinator.reorderVersion($0, before: $1, undoManager: undoManager) }
                             )
                         )
                     }
@@ -1890,42 +1563,19 @@ struct ContentView: View {
                         onMagnify: handleTimelineMagnify
                     )
                         .frame(width: waveformWidth, height: proxy.size.height)
-                        .offset(x: infoWidth)
                 }
             }
-            // The playhead stays confined to the waveform column. The frozen
-            // column shadow is layered after it so the playhead reads as sliding
-            // underneath the info area at the boundary.
+            // The grabber sits on the ruler's bottom edge, above everything.
             .overlay(alignment: .topLeading) {
-                timelinePlayheadOverlay(sectionHeight: proxy.size.height, infoWidth: infoWidth, waveformWidth: waveformWidth)
-            }
-            .overlay(alignment: .topLeading) {
-                if displayedTrackRowCount > 0 {
-                    LinearGradient(
-                        colors: [Theme.frozenColumnShadow, .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: Self.frozenSurfaceShadowExtent, height: proxy.size.height)
-                    .offset(x: infoWidth)
-                    .allowsHitTesting(false)
-                }
-            }
-            .overlay(alignment: .topLeading) {
-                if displayedTrackRowCount > 0 {
-                    trackInfoColumnResizeHandle(
-                        sectionWidth: proxy.size.width,
-                        sectionHeight: proxy.size.height,
-                        infoWidth: infoWidth
-                    )
+                if controller.session.isPlayable {
+                    timelinePlayhead(.grabber, waveformWidth: waveformWidth, height: proxy.size.height)
                 }
             }
             // Keep the mouse-monitor cursor manager's picture of the timeline
-            // geometry current (window resize, column resize, scrolling).
+            // geometry current (window resize, lane count, scrolling).
             .onChange(
                 of: TimelineCursorGeometry(
                     sectionFrame: proxy.frame(in: .global),
-                    infoWidth: infoWidth,
                     waveformWidth: waveformWidth
                 ),
                 initial: true
@@ -1933,6 +1583,14 @@ struct ContentView: View {
                 timelineCursorGeometry = geometry
             }
         }
+    }
+
+    /// The ruler's bottom border and each lane's bottom divider (A2 §8).
+    private var laneDivider: some View {
+        Rectangle()
+            .fill(Theme.laneDivider)
+            .frame(height: CompareLaneLayout.dividerHeight)
+            .allowsHitTesting(false)
     }
 
     /// The drop-landing highlight for the track section (populated list and
@@ -1958,7 +1616,7 @@ struct ContentView: View {
 
     /// Vertical offset for the row at `index` so a gap opens at the drag's target
     /// slot while the dragged row's own slot collapses into it.
-    private func reorderRowOffset(index: Int) -> CGFloat {
+    private func reorderRowOffset(index: Int, rowStep: CGFloat) -> CGFloat {
         guard let draggingID = reorderDraggingID,
               let sourceIndex = controller.session.tracks.firstIndex(where: { $0.id == draggingID }),
               let targetIndex = reorderTargetIndex
@@ -1969,109 +1627,77 @@ struct ContentView: View {
             index: index,
             sourceIndex: sourceIndex,
             targetIndex: targetIndex,
-            rowStep: reorderRowStep
+            rowStep: rowStep
         )
     }
 
-    private func trackInfoColumnResizeHandle(sectionWidth: CGFloat, sectionHeight: CGFloat, infoWidth: CGFloat) -> some View {
-        return TrackInfoColumnResizeHandleView(
-            sectionWidth: sectionWidth,
-            columnWidth: trackInfoColumnWidthBinding
+    /// A lane's reorder placement, shared by its visual layer and its strip so
+    /// both move together. `trackID` is nil for the divider, which shifts with
+    /// its lane but is never hidden.
+    private func reorderPlacement(index: Int, trackID: SessionTrack.ID?, rowStep: CGFloat) -> ReorderPlacement {
+        ReorderPlacement(
+            isLifted: trackID != nil && (reorderDraggingID == trackID || reorderRevealingID == trackID),
+            offsetY: reorderRowOffset(index: index, rowStep: rowStep),
+            gapGeneration: reorderGapGeneration
         )
-            .frame(width: TimelineCursorHitPolicy.columnResizeHitWidth, height: sectionHeight)
+    }
+
+    /// The 26 pt ruler (A2 §8), full width. Dragging anywhere on it moves the
+    /// playhead: the visual follows the pointer and the transport seeks once
+    /// on mouse-up (no live scrubbing mid-drag). The same drag logic also
+    /// powers the narrow playhead band over the lanes; loop selection stays
+    /// lane-only.
+    private func timelineRuler(waveformWidth: CGFloat) -> some View {
+        TimelineHeaderRulerView(
+            controller: controller,
+            width: waveformWidth,
+            targetMarkerCount: timelineHeaderTargetMarkerCount,
+            minorTickMinSpacing: timelineHeaderMinorTickMinSpacing,
+            headerHeight: CompareLaneLayout.rulerHeight
+        )
             .contentShape(Rectangle())
-            .offset(x: infoWidth - TimelineCursorHitPolicy.columnResizeHitWidth / 2)
-            .accessibilityLabel("Resize track info column")
+            .gesture(playheadDragGesture(waveformWidth: waveformWidth, in: Self.rulerSpace))
+            .coordinateSpace(name: Self.rulerSpace)
+            .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
+            // Hide a notch on the window's edge, as the lanes hide their
+            // guides there; the label beside it stays.
+            .mask(TimelineLeadingEdgeMask())
     }
 
-    private func trackTimelineHeader(infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 8) {
-                ImportActionSplitButton(
-                    dropdownItems: ImportActionMenuItem.dropdownItems,
-                    performAction: performImportAction(_:)
-                )
-                .frame(width: ImportActionControlMetrics.controlWidth, height: ImportActionControlMetrics.controlHeight)
-                autoAlignButton
-            }
-            .padding(.leading, 8)
-            // Center the button cluster in the taller header rather than pinning it up top.
-            .frame(width: infoWidth, height: trackHeaderHeight, alignment: .leading)
-            .overlay(alignment: .trailing) {
-                Button("Remove All") {
-                    controller.clearTracks()
-                }
-                .controlSize(.regular)
-                .disabled(controller.displayedTrackRowCount == 0)
-                .help("Remove all tracks")
-                .padding(.trailing, 8)
-            }
-
-            TimelineHeaderRulerView(
-                controller: controller,
-                width: waveformWidth,
-                targetMarkerCount: timelineHeaderTargetMarkerCount,
-                minorTickMinSpacing: timelineHeaderMinorTickMinSpacing,
-                headerHeight: trackHeaderHeight
-            )
-                .frame(maxWidth: .infinity)
-                // Dragging anywhere on the ruler moves the playhead: the
-                // visual follows the pointer and the transport seeks once on
-                // mouse-up (no live scrubbing mid-drag). The same drag logic
-                // also powers the narrow playhead band over the lanes; loop
-                // selection remains lane-only everywhere else.
-                .contentShape(Rectangle())
-                .gesture(playheadDragGesture(waveformWidth: waveformWidth, in: Self.rulerSpace))
-                .coordinateSpace(name: Self.rulerSpace)
-                .componentDebugLabel("Timeline Ruler", enabled: settings.showsComponentDebugLabels, color: .orange)
-                // Let the info column visually cover the ruler's first pixel,
-                // hiding a tick exactly at the timeline's leading edge.
-                .mask(TimelineLeadingEdgeMask())
-        }
-        .componentDebugLabel("Timeline Header", enabled: settings.showsComponentDebugLabels)
-    }
-
-    /// The full playhead — the grabber seated on the ruler notches plus the line
-    /// running down over the lanes — drawn as one overlay on top of the whole
-    /// section so it sits ABOVE the frozen-column and header/row dividers.
+    /// One part of the playhead. The grabber sits on the ruler's bottom edge
+    /// in an overlay above the whole section; the line runs down through the
+    /// lanes inside their scroll content, beneath the lane strips, so the
+    /// strips draw over it. Both parts take the same inputs from the same
+    /// update, so they seat their tweens together.
     ///
-    /// Visuals only: the layers are moved by a single Core Animation linear
-    /// tween per transport anchor event (play, pause, seek, loop wrap, zoom,
-    /// scroll, resize) — see `TimelinePlayheadVisual` — so steady playback
-    /// does no per-frame main-thread work at all. Interaction lives on the
-    /// ruler and the lane drag strip (`playheadDragGesture`); cursor feedback
-    /// lives in the central mouse-monitor cursor manager.
+    /// Visuals only: each part's layers are moved by a single Core Animation
+    /// linear tween per transport anchor event (play, pause, seek, loop wrap,
+    /// zoom, scroll, resize) — see `TimelinePlayheadVisual` — so steady
+    /// playback does no per-frame main-thread work at all. Interaction lives
+    /// on the ruler and the lane drag strip (`playheadDragGesture`); cursor
+    /// feedback lives in the central mouse-monitor cursor manager.
     ///
     /// While a playhead drag is in flight (`playheadDragX != nil`) the
     /// playhead parks at the pointer as a preview; the transport itself
     /// doesn't move (and audio keeps playing from the old position) until
     /// mouse-up.
-    @ViewBuilder
-    private func timelinePlayheadOverlay(sectionHeight: CGFloat, infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
-        if controller.session.isPlayable {
-            // The x-positioning lives in a leaf that alone reads the per-event
-            // transport/window state, so a scroll or anchor event re-runs only
-            // the leaf (one representable update), not this section body.
-            TimelinePlayheadOverlayView(
-                controller: controller,
-                playheadDragX: playheadDragX,
-                infoWidth: infoWidth,
-                sectionHeight: sectionHeight,
-                waveformWidth: waveformWidth,
-                seatBottom: trackHeaderHeight + trackTimelineDividerHeight,
-                laneAreaHeight: trackTimelineHeight
-            )
-            // Confine (and clip, via the layer view's masksToBounds) the
-            // playhead to the waveform column so an off-viewport position
-            // never draws over the track-info column.
-            .frame(width: waveformWidth, height: sectionHeight, alignment: .topLeading)
-            .offset(x: infoWidth)
-            .allowsHitTesting(false)
-        }
+    private func timelinePlayhead(_ part: PlayheadPart, waveformWidth: CGFloat, height: CGFloat) -> some View {
+        // The x-positioning lives in a leaf that alone reads the per-event
+        // transport/window state, so a scroll or anchor event re-runs only
+        // the leaf (one representable update), not this section body.
+        TimelinePlayheadOverlayView(
+            controller: controller,
+            part: part,
+            playheadDragX: playheadDragX,
+            waveformWidth: waveformWidth,
+            height: height
+        )
+        // Clipped by the layer view's masksToBounds, so a position off
+        // either edge never draws.
+        .frame(width: waveformWidth, height: height, alignment: .topLeading)
+        .allowsHitTesting(false)
     }
 
-    static let playheadHandleWidth: CGFloat = 14
-    static let playheadHandleHeight: CGFloat = 16
     /// Comfortable ruler grab target a bit wider than the visible grabber.
     private static let rulerPlayheadHitWidth: CGFloat = 22
     /// Match the loop edge resize handles in the waveform lanes.
@@ -2121,64 +1747,82 @@ struct ContentView: View {
         controller.seek(to: time)
     }
 
-    /// Build the value for one equatable track row. All observable reads
+    /// Build the value for one equatable lane. All observable reads
     /// (`controller.session`, `waveformStore`, `settings`) happen here in the
-    /// container so the row itself stays a pure value: a horizontal scroll or a
-    /// reorder gap move re-runs this cheap builder + an `==` check per row, but
-    /// never re-runs a row's body unless one of its compared inputs changed.
+    /// container so the lane itself stays a pure value: a zoom step or a
+    /// reorder gap move re-runs this cheap builder + an `==` check per lane, but
+    /// never re-runs a lane's body unless one of its compared inputs changed.
     private func trackRowView(
         index: Int,
         sessionTrack: SessionTrack,
-        infoWidth: CGFloat,
+        laneHeight: CGFloat,
         wideWidth: CGFloat
     ) -> TrackRowView {
-        let isActive = controller.session.activeTrackID == sessionTrack.id
         let isBlind = controller.session.isBlindListeningModeEnabled
         return TrackRowView(
-            index: index,
-            sessionTrack: sessionTrack,
+            trackStart: sessionTrack.loadedTrack.offsetSeconds,
+            trackDuration: sessionTrack.loadedTrack.duration,
             // Blind listening feeds the lane a nil waveform so progress can't
             // leak identity through redraw timing (an invariant).
             waveform: isBlind ? nil : waveformStore.waveform(for: sessionTrack.id),
-            isActive: isActive,
+            isActive: controller.session.activeTrackID == sessionTrack.id,
             isBlind: isBlind,
+            isMissing: sessionTrack.loadedTrack.isMissing,
             isRenderable: renderableRows.contains(index),
-            isOffsetFocused: focusedOffsetTrackID == sessionTrack.id,
-            infoWidth: infoWidth,
-            rowHeight: trackRowHeight,
+            laneHeight: laneHeight,
             wideWidth: wideWidth,
+            showsDebugLabel: settings.showsComponentDebugLabels,
+            controller: controller,
+            viewportStore: laneViewportStore
+        )
+    }
+
+    /// Build the value for one equatable lane strip, the same way as
+    /// `trackRowView`: observable reads here, a pure value out.
+    private func laneStripView(index: Int, sessionTrack: SessionTrack) -> LaneStripView {
+        let track = sessionTrack.loadedTrack
+        let trackID = sessionTrack.id
+        let isBlind = controller.session.isBlindListeningModeEnabled
+        let offsetMs = Int((track.offsetSeconds * 1000).rounded())
+        let format = LaneStripText.format(for: track, isBlind: isBlind, fields: settings.compareMetadataFields)
+        return LaneStripView(
+            index: index,
+            trackID: trackID,
+            fileURL: track.url,
+            name: LaneStripText.name(for: track, index: index, isBlind: isBlind),
+            format: format,
+            toolTip: LaneStripText.toolTip(for: track, isBlind: isBlind, format: format),
+            offsetMs: offsetMs,
+            isActive: controller.session.activeTrackID == trackID,
+            isBlind: isBlind,
+            isMissing: track.isMissing,
+            isOffsetFocused: focusedOffsetTrackID == trackID,
             offsetConfiguration: settings.offsetConfiguration,
             indexBadgeAppearance: settings.indexBadgeAppearance,
             showsDebugLabel: settings.showsComponentDebugLabels,
-            controller: controller,
-            viewportStore: laneViewportStore,
-            hoverStore: hoverStore,
-            onSelect: { controller.selectActiveTrack(sessionTrack.id) },
-            onRemove: { controller.removeTrack(sessionTrack.id) },
-            onSetOffsetMs: { controller.setOffset(sessionTrack.id, seconds: Double($0) / 1000) },
+            menuActions: LaneStripMenuActions(
+                isBlind: isBlind,
+                hasOffset: offsetMs != 0,
+                isMissing: track.isMissing,
+                remove: { _ = coordinator.removeVersion(trackID, undoManager: undoManager) },
+                revealInFinder: { NSWorkspace.shared.activateFileViewerSelecting([track.url]) },
+                resetOffset: { coordinator.setOffset(trackID, seconds: 0) },
+                locate: { locateVersion(trackID) }
+            ),
+            onSelect: { controller.selectActiveTrack(trackID) },
+            onSetOffsetMs: { coordinator.setOffset(trackID, seconds: Double($0) / 1000) },
             onOffsetFocusChange: { focused in
                 if focused {
-                    focusedOffsetTrackID = sessionTrack.id
-                } else if focusedOffsetTrackID == sessionTrack.id {
+                    focusedOffsetTrackID = trackID
+                } else if focusedOffsetTrackID == trackID {
                     focusedOffsetTrackID = nil
                 }
             },
-            onHover: { inside in
-                // Suppress the hover trash button while a reorder drag is in
-                // flight: the drag drives the pointer across rows, so their
-                // hover states would otherwise flash the button on each one.
-                guard reorderDraggingID == nil else { return }
-                hoverStore.hoveredID = inside
-                    ? sessionTrack.id
-                    : (hoverStore.hoveredID == sessionTrack.id ? nil : hoverStore.hoveredID)
-            },
             onDragBegan: {
-                reorderDraggingID = sessionTrack.id
-                // Clear any hover so no row shows its trash button mid-drag.
-                hoverStore.hoveredID = nil
+                reorderDraggingID = trackID
             },
             onDragEnded: {
-                // A committed reorder has already moved the row into the reveal
+                // A committed reorder has already moved the lane into the reveal
                 // phase via the drop delegate; a cancelled or copied-out drag
                 // reveals in place the same way.
                 if let draggingID = reorderDraggingID {
@@ -2188,7 +1832,7 @@ struct ContentView: View {
                 reorderTargetIndex = nil
                 // Next tick: the (possibly reordered) layout has landed
                 // unanimated, so only the opacity animates — a fade-in at the
-                // row's final position, timed to the system's fade-out of the
+                // lane's final position, timed to the system's fade-out of the
                 // drag image.
                 DispatchQueue.main.async {
                     withAnimation(.easeInOut(duration: 0.24)) {
@@ -2197,36 +1841,36 @@ struct ContentView: View {
                 }
             },
             makeDragImage: {
-                reorderCardDragImage(index: index, sessionTrack: sessionTrack, width: infoWidth)
+                reorderCardDragImage(index: index, sessionTrack: sessionTrack, width: Self.reorderCardWidth)
             }
         )
     }
 
-    /// The floating card shown under the pointer while a track is dragged to
-    /// reorder — a compact, lifted rendition of the track's identity (index badge,
-    /// name, metadata). Sized to the info column so it reads as the row itself
-    /// lifting off the surface.
+    /// The lifted card's width: fixed, so it fits inside the 10 pt edge insets
+    /// (A2 §3) of the 360 pt default window and doesn't grow in a wider one.
+    private static let reorderCardWidth: CGFloat = 320
+
+    /// The floating card shown under the pointer while a lane is dragged to
+    /// reorder — a lifted rendition of the lane strip's identity (index badge,
+    /// title, format).
     private func reorderPreviewCard(index: Int, sessionTrack: SessionTrack, width: CGFloat) -> some View {
         let track = sessionTrack.loadedTrack
         let isBlind = controller.session.isBlindListeningModeEnabled
-        let title = isBlind ? "Track \(index + 1)" : track.displayName
+        let format = LaneStripText.format(for: track, isBlind: isBlind, fields: settings.compareMetadataFields)
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             TrackIndexBadgeView(
                 index: index,
                 isActive: controller.session.activeTrackID == sessionTrack.id,
                 appearance: settings.indexBadgeAppearance
             )
-                // Same 1pt optical nudge as the in-row badge: baseline-aligned to
-                // the filename, but the fixed badge frame reads a touch low.
-                .offset(y: -1)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.headline.weight(.medium))
+                Text(LaneStripText.name(for: track, index: index, isBlind: isBlind))
+                    .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if !isBlind {
-                    Text(track.metadataSummary)
-                        .font(.caption)
+                if !format.isEmpty {
+                    Text(format)
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -2235,10 +1879,9 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        // Width matches the info column so the card reads as the row's identity
-        // lifting off the surface; height hugs the badge/name/metadata content so
-        // the card stays a compact pill rather than an empty row-height slab.
-        .frame(width: width - 12, alignment: .leading)
+        // Height hugs the badge/title/format so the card stays a compact pill
+        // rather than an empty lane-height slab.
+        .frame(width: max(width, 1), alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Theme.reorderCardFill)
@@ -2279,7 +1922,7 @@ struct ContentView: View {
 
     /// Kaleidoscope-style empty state: one centered composition — a soft
     /// circular badge holding a waveform glyph, a single line of text below —
-    /// owning the whole track section with no header or column split. Hovering
+    /// owning the whole track section with no ruler. Hovering
     /// darkens the badge and swaps the drag prompt for a click prompt; clicking
     /// anywhere opens the file dialog. Dragging files over any part of the
     /// window tints the badge and glyph with the indigo brand color, with the
@@ -2339,76 +1982,6 @@ struct ContentView: View {
             return AnyShapeStyle(.tertiary.opacity(0.55))
         }
         return AnyShapeStyle(.quaternary.opacity(0.6))
-    }
-
-    private var streamingURLPrompt: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Open Streaming URL")
-                .font(.headline)
-
-            TextField("https://...", text: $openFileCommandState.streamingURLText)
-                .textFieldStyle(.roundedBorder)
-                .focused($streamingURLFieldIsFocused)
-                .disabled(openFileCommandState.streamingURLStatus.isWorking)
-                .onSubmit {
-                    openFileCommandState.submitStreamingURL()
-                }
-
-            if let message = openFileCommandState.streamingURLStatus.message {
-                if openFileCommandState.streamingURLStatus.isFailed {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                        streamingURLPromptStatusText(message)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(width: 16, height: 16)
-                            .alignmentGuide(.firstTextBaseline) { dimensions in
-                                dimensions[VerticalAlignment.center] + 4
-                            }
-                        streamingURLPromptStatusText(message)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else {
-                Text("Supports Apple Music, Spotify, YouTube, and YouTube Music URLs.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    openFileCommandState.dismissStreamingURLPrompt()
-                }
-                Button("Open") {
-                    openFileCommandState.submitStreamingURL()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(
-                    openFileCommandState.streamingURLStatus.isWorking
-                        || openFileCommandState.streamingURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
-            }
-        }
-        .padding(20)
-        .frame(width: 420)
-        .onAppear {
-            streamingURLFieldIsFocused = true
-        }
-    }
-
-    private func streamingURLPromptStatusText(_ message: String) -> some View {
-        Text(message)
-            .font(.caption)
-            .foregroundStyle(openFileCommandState.streamingURLStatus.isFailed ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-            .lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Geometry for the windowed waveform lanes. Each lane draws a
@@ -2478,16 +2051,21 @@ struct ContentView: View {
     // MARK: - Loop selection
 
     /// The interaction layer, selection rectangle, and resize handles for the
-    /// loop, spanning all lanes across the waveform column. Clipped to the column
-    /// so an off-screen loop never spills into the track-info column.
-    private func loopSelectionOverlay(infoWidth: CGFloat, waveformWidth: CGFloat) -> some View {
+    /// loop, spanning all lanes edge to edge. Clipped so an off-screen loop
+    /// never spills past the lanes. The lane strips sit above it, so only
+    /// their badge/title/format and offset field shadow it.
+    private func loopSelectionOverlay(waveformWidth: CGFloat, contentHeight: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             // One lane-wide gesture classifies its mouse-down against the live
             // playhead position, then locks into playhead-drag or loop-selection
             // mode. The closures' transport/window reads aren't observation-tracked.
             Color.clear
                 .contentShape(Rectangle())
-                .gesture(laneInteractionGesture(waveformWidth: waveformWidth, in: Self.loopColumnSpace))
+                .gesture(laneInteractionGesture(
+                    waveformWidth: waveformWidth,
+                    rowStep: CompareLaneLayout.laneStep,
+                    in: Self.loopColumnSpace
+                ))
 
             // Selection rectangle + resize handles. Their x-positioning depends
             // on the per-scroll-event visible window, so it lives in a leaf that
@@ -2495,7 +2073,7 @@ struct ContentView: View {
             LoopOverlayContentView(
                 controller: controller,
                 waveformWidth: waveformWidth,
-                height: trackTimelineHeight,
+                height: contentHeight,
                 draftRange: loopDraft.map { min($0.start, $0.current)...max($0.start, $0.current) },
                 displayedLoop: loopDraft == nil ? displayedLoopRegion : nil,
                 onHandleChanged: { isStart, value in
@@ -2512,7 +2090,7 @@ struct ContentView: View {
                         // over the lane's own gesture and would otherwise
                         // swallow it — run the same click-to-seek (and
                         // deselect-if-outside) behaviour as the lane.
-                        handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth)
+                        handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth, rowStep: CompareLaneLayout.laneStep)
                     } else {
                         let time = globalTime(atX: value.location.x, width: waveformWidth)
                         isStart ? commitLoopResize(start: time) : commitLoopResize(end: time)
@@ -2520,10 +2098,9 @@ struct ContentView: View {
                 }
             )
         }
-        .frame(width: waveformWidth, height: trackTimelineHeight, alignment: .topLeading)
+        .frame(width: waveformWidth, height: contentHeight, alignment: .topLeading)
         .clipped()
         .coordinateSpace(name: Self.loopColumnSpace)
-        .offset(x: infoWidth)
     }
 
     private var displayedLoopRegion: LoopRegion? {
@@ -2559,6 +2136,7 @@ struct ContentView: View {
     /// frame. Once chosen, the mode stays fixed until mouse-up.
     private func laneInteractionGesture(
         waveformWidth: CGFloat,
+        rowStep: CGFloat,
         in space: String
     ) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
@@ -2589,7 +2167,7 @@ struct ContentView: View {
                 case .playhead:
                     handlePlayheadDragEnded(value: value, waveformWidth: waveformWidth)
                 case .loopSelection:
-                    handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth)
+                    handleLoopSelectionEnded(value: value, waveformWidth: waveformWidth, rowStep: rowStep)
                 }
             }
     }
@@ -2612,7 +2190,7 @@ struct ContentView: View {
         }
     }
 
-    private func handleLoopSelectionEnded(value: DragGesture.Value, waveformWidth: CGFloat) {
+    private func handleLoopSelectionEnded(value: DragGesture.Value, waveformWidth: CGFloat, rowStep: CGFloat) {
         if loopDraft != nil {
             loopDraft = nil
             if let region = LoopRegion.normalized(
@@ -2639,7 +2217,7 @@ struct ContentView: View {
                 }
             } else {
                 // A plain click: seek, deselecting first if it lands outside the loop.
-                if let trackID = waveformTrackID(atY: value.location.y) {
+                if let trackID = waveformTrackID(atY: value.location.y, rowStep: rowStep) {
                     controller.selectActiveTrack(trackID)
                 }
                 if let loop = controller.session.loopRegion, t < loop.start || t > loop.end {
@@ -2650,28 +2228,15 @@ struct ContentView: View {
         }
     }
 
-    private func waveformTrackID(atY y: CGFloat) -> SessionTrack.ID? {
+    private func waveformTrackID(atY y: CGFloat, rowStep: CGFloat) -> SessionTrack.ID? {
         guard let index = WaveformTrackSelectionPolicy.trackIndex(
             atY: y,
-            rowStep: reorderRowStep,
+            rowStep: rowStep,
             trackCount: controller.session.tracks.count
         ) else {
             return nil
         }
         return controller.session.tracks[index].id
-    }
-
-    private func handleImport(_ result: Result<[URL], Error>) {
-        openFileCommandState.dismissOpenDialog()
-
-        switch result {
-        case let .success(urls):
-            Task {
-                await controller.loadImportedFiles(urls)
-            }
-        case .failure:
-            break
-        }
     }
 
     private func performImportAction(_ item: ImportActionMenuItem) {
@@ -2694,74 +2259,7 @@ struct ContentView: View {
         return AnyShapeStyle(Color.clear)
     }
 
-    private func setupKeyMonitor() {
-        let monitor = KeyMonitor { event in
-            if !GlobalShortcutFocusPolicy.shouldHandleGlobalShortcut(firstResponder: NSApp.keyWindow?.firstResponder) {
-                return false
-            }
-
-            if let hotkey = TrackNumberHotkey.hotkey(forKeyCode: event.keyCode, modifierFlags: event.modifierFlags),
-               controller.canSelectTrackForHotkey(hotkey) {
-                controller.selectTrackForHotkey(hotkey)
-                return true
-            }
-
-            if let direction = TrackSwitchArrowHotkey.direction(forKeyCode: event.keyCode, modifierFlags: event.modifierFlags),
-               controller.session.canSwitchPlayback {
-                switch direction {
-                case .previous:
-                    controller.selectPreviousTrack()
-                case .next:
-                    controller.selectNextTrack()
-                }
-                return true
-            }
-
-            switch event.keyCode {
-            case 49:
-                guard !event.modifierFlags.contains(.command),
-                      !event.modifierFlags.contains(.control),
-                      !event.modifierFlags.contains(.option),
-                      controller.session.isPlayable
-                else {
-                    return false
-                }
-                controller.session.isPlaying ? controller.pause() : controller.play()
-                return true
-            case 123:
-                if event.modifierFlags.contains(.command) {
-                    controller.seek(to: controller.session.timelineStart)
-                    return true
-                }
-                controller.skip(by: event.modifierFlags.contains(.shift) ? -10 : -1)
-                return true
-            case 124:
-                if event.modifierFlags.contains(.command) {
-                    controller.seek(to: controller.session.timelineEnd)
-                    return true
-                }
-                controller.skip(by: event.modifierFlags.contains(.shift) ? 10 : 1)
-                return true
-            case 7:
-                guard !event.modifierFlags.contains(.command),
-                      !event.modifierFlags.contains(.control),
-                      !event.modifierFlags.contains(.option)
-                else {
-                    return false
-                }
-                if event.modifierFlags.contains(.shift) {
-                    controller.selectPreviousTrack()
-                } else {
-                    controller.selectNextTrack()
-                }
-                return true
-            default:
-                return false
-            }
-        }
-        monitor.start()
-        keyMonitor = monitor
-
+    private func setupMouseMonitor() {
         let clickMonitor = MouseMonitor { event in
             guard let window = event.window else { return }
             let locationInWindow = event.locationInWindow
@@ -2810,13 +2308,11 @@ struct ContentView: View {
 
     struct TimelineCursorGeometry: Equatable {
         var sectionFrame: CGRect
-        var infoWidth: CGFloat
         var waveformWidth: CGFloat
     }
 
     enum TimelineCursorShape {
         case standard
-        case columnResize
         case playheadGrab
         case loopResize
     }
@@ -2846,20 +2342,8 @@ struct ContentView: View {
             point.y = contentView.bounds.height - point.y
         }
 
-        let columnX = point.x - geometry.sectionFrame.minX - geometry.infoWidth
+        let columnX = point.x - geometry.sectionFrame.minX
         let y = point.y - geometry.sectionFrame.minY
-
-        // The column resize handle is layered above the timeline and owns a
-        // 12pt strip centered on the split. Give its cursor the same priority
-        // as its hit testing before considering playhead or loop targets.
-        if geometry.sectionFrame.contains(point),
-            TimelineCursorHitPolicy.isColumnResizeTarget(
-                columnX: columnX,
-                hasDisplayedTracks: controller.displayedTrackRowCount > 0
-            ) {
-            setTimelineCursor(.columnResize)
-            return
-        }
 
         guard
             geometry.sectionFrame.contains(point),
@@ -2870,15 +2354,22 @@ struct ContentView: View {
             return
         }
 
-        let seatBottom = trackHeaderHeight + trackTimelineDividerHeight
+        let seatBottom = CompareLaneLayout.seatBottom
         let playheadX = xPosition(for: controller.displayTransportPosition(), width: geometry.waveformWidth)
 
         // The grabber band along the bottom of the ruler.
-        if y >= seatBottom - Self.playheadHandleHeight, y <= seatBottom {
+        if y >= seatBottom - PlayheadGeometry.handleHeight, y <= seatBottom {
             if abs(columnX - playheadX) <= Self.rulerPlayheadHitWidth / 2 {
                 setTimelineCursor(.playheadGrab)
                 return
             }
+        }
+
+        // A lane strip's badge/title/format and offset field sit above the
+        // lane gestures and take the click, so they keep their own cursor.
+        if y > seatBottom, isOverLaneStripControl(event) {
+            setTimelineCursor(.standard)
+            return
         }
 
         // The lanes: loop resize handles at the loop edges, otherwise the
@@ -2901,17 +2392,22 @@ struct ContentView: View {
         setTimelineCursor(.standard)
     }
 
+    /// Whether the pointer is over a lane strip control: the drag source
+    /// behind the badge, title and format, or the offset field.
+    private func isOverLaneStripControl(_ event: NSEvent) -> Bool {
+        guard let hitView = event.window?.contentView?.hitTest(event.locationInWindow) else { return false }
+        return hitView is DragSourceNSView || NumericControlFocusPolicy.isTextInputView(hitView)
+    }
+
     private func setTimelineCursor(_ shape: TimelineCursorShape) {
         switch shape {
         case .standard:
             // Push arrow only on the transition out of a timeline cursor so
-            // the manager never fights other controls' cursors (text fields'
-            // iBeam, the column-resize handle) while the pointer is elsewhere.
+            // the manager never fights other controls' cursors (the offset
+            // fields' iBeam) while the pointer is elsewhere.
             guard timelineCursorShape != .standard else { return }
             timelineCursorShape = .standard
             NSCursor.arrow.set()
-        case .columnResize:
-            reassertTimelineCursor(NSCursor.resizeLeftRight, shape: shape)
         case .playheadGrab:
             reassertTimelineCursor(NSCursor.openHand, shape: shape)
         case .loopResize:
@@ -2930,13 +2426,6 @@ struct ContentView: View {
         }
     }
 
-    private var zoomProgress: Double {
-        TimelineViewport.sliderValue(
-            visibleSpan: max(controller.visibleSpan, 0.001),
-            contentSpan: controller.session.duration
-        )
-    }
-
     private func handleTimelineScroll(_ visibleStart: TimeInterval) {
         controller.scrollTimeline(toVisibleStart: visibleStart)
     }
@@ -2945,47 +2434,66 @@ struct ContentView: View {
         controller.magnifyTimeline(by: magnification, atFraction: fraction)
     }
 
-    private func configureAppOpenRouter() {
-        appFileOpenRouter?.setHandler { urls in
-            Task { await controller.loadImportedFiles(urls) }
-        }
-        appFileOpenRouter?.setStreamingURLHandler { urlStrings in
-            for urlString in urlStrings {
-                openFileCommandState.openStreamingURL(urlString)
-            }
-        }
+}
+
+/// Where a lane sits during a reorder drag: hidden while it is lifted (the
+/// floating card stands in for it) and shifted to open the gap. Applied around
+/// the equatable lane and strip, never inside them, so a gap move only
+/// changes these modifiers and never re-runs a lane or strip body.
+private struct ReorderPlacement: ViewModifier {
+    var isLifted: Bool
+    var offsetY: CGFloat
+    var gapGeneration: Int
+
+    func body(content: Content) -> some View {
+        content
+            // The dragged lane stays hidden one tick past the commit
+            // (`reorderRevealingID`), then fades in at its landed position; the
+            // fade is applied by `withAnimation` in the drag-ended handler.
+            .opacity(isLifted ? 0 : 1)
+            .offset(y: offsetY)
+            .animation(.snappy(duration: 0.26), value: gapGeneration)
+    }
+}
+
+/// The lane strip's text (A2 §8). The title is the version's title tag, else
+/// its filename without the extension — milestone 3's version-row rule. The
+/// format shows the enabled container, sample rate and bit rate. Blind Listening Mode
+/// shows `Track n` and no format, as the pre-A2 info column did.
+enum LaneStripText {
+    /// Shown in place of the format when the version's file can't be found.
+    static let missingFile = "File Not Found"
+
+    static func name(for track: LoadedTrack, index: Int, isBlind: Bool) -> String {
+        isBlind ? "Track \(index + 1)" : PlaylistRowText.versionName(tag: track.title, url: track.url)
     }
 
-    private func loadDroppedURLs(from providers: [NSItemProvider]) -> Bool {
-        let fileProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
-        guard !fileProviders.isEmpty else { return false }
+    static func format(for track: LoadedTrack, isBlind: Bool, fields: Set<TrackMetadataField>) -> String {
+        guard !isBlind else { return "" }
+        return PlaylistRowText.formatParts(
+            fileFormat: track.fileFormatDescription,
+            sampleRate: track.sampleRate,
+            bitRate: track.bitRate,
+            fields: fields
+        ).joined(separator: " • ")
+    }
 
-        var urlsByProvider = Array<URL?>(repeating: nil, count: fileProviders.count)
-        let group = DispatchGroup()
-
-        for (index, provider) in fileProviders.enumerated() {
-            group.enter()
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                let url = extractDroppedFileURL(from: item)
-                DispatchQueue.main.async {
-                    urlsByProvider[index] = url
-                    group.leave()
-                }
-            }
+    /// The strip's tooltip: what the pre-A2 info column showed and the strip
+    /// has no room for — the duration and the filename. None while blind.
+    static func toolTip(for track: LoadedTrack, isBlind: Bool, format: String) -> String? {
+        guard !isBlind else { return nil }
+        if track.isMissing {
+            return PlaybackError.failedToOpenFile(track.url).localizedDescription
         }
-
-        group.notify(queue: .main) {
-            let urls = DroppedFileURLResolver.audioFileURLs(from: urlsByProvider.compactMap(\.self))
-            guard !urls.isEmpty else { return }
-            Task { @MainActor in
-                switch DroppedFileImportAction.action(targetTrackID: nil) {
-                case .append:
-                    await controller.loadImportedFiles(urls)
-                }
-            }
-        }
-
-        return true
+        let details = [
+            format,
+            PlaylistRowText.duration(track.duration)
+        ].filter { !$0.isEmpty }.joined(separator: " · ")
+        return [
+            name(for: track, index: 0, isBlind: false),
+            details,
+            track.url.lastPathComponent
+        ].filter { !$0.isEmpty }.joined(separator: "\n")
     }
 }
 
@@ -3026,113 +2534,6 @@ private struct PlayheadHandle: Shape {
         )
         path.closeSubpath()
         return path
-    }
-}
-
-private struct ImportActionSplitButton: NSViewRepresentable {
-    let dropdownItems: [ImportActionMenuItem]
-    let performAction: @MainActor (ImportActionMenuItem) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(dropdownItems: dropdownItems, performAction: performAction)
-    }
-
-    func makeNSView(context: Context) -> ImmediateMenuSegmentedControl {
-        let control = ImmediateMenuSegmentedControl(
-            labels: ["", ""],
-            trackingMode: .momentary,
-            target: context.coordinator,
-            action: #selector(Coordinator.segmentPressed(_:))
-        )
-        control.primarySegmentWidth = ImportActionControlMetrics.primaryButtonWidth
-        control.menuSegmentWidth = ImportActionControlMetrics.menuButtonWidth
-        control.segmentStyle = .rounded
-        control.controlSize = .regular
-        control.setImage(NSImage(systemSymbolName: "plus", accessibilityDescription: ImportActionMenuItem.open.title), forSegment: 0)
-        control.setImage(NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Open Track Menu"), forSegment: 1)
-        control.setImageScaling(.scaleProportionallyDown, forSegment: 0)
-        control.setImageScaling(.scaleProportionallyDown, forSegment: 1)
-        control.setWidth(ImportActionControlMetrics.primaryButtonWidth, forSegment: 0)
-        control.setWidth(ImportActionControlMetrics.menuButtonWidth, forSegment: 1)
-        control.setToolTip(ImportActionMenuItem.open.title, forSegment: 0)
-        control.setToolTip("Open Track Menu", forSegment: 1)
-        control.setShowsMenuIndicator(false, forSegment: 1)
-        control.setAccessibilityLabel("Open Tracks")
-        context.coordinator.configureMenu(for: control)
-        return control
-    }
-
-    func updateNSView(_ control: ImmediateMenuSegmentedControl, context: Context) {
-        context.coordinator.dropdownItems = dropdownItems
-        context.coordinator.performAction = performAction
-        context.coordinator.configureMenu(for: control)
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var dropdownItems: [ImportActionMenuItem]
-        var performAction: @MainActor (ImportActionMenuItem) -> Void
-
-        private let menu = NSMenu()
-
-        init(dropdownItems: [ImportActionMenuItem], performAction: @escaping @MainActor (ImportActionMenuItem) -> Void) {
-            self.dropdownItems = dropdownItems
-            self.performAction = performAction
-        }
-
-        func configureMenu(for control: ImmediateMenuSegmentedControl) {
-            menu.removeAllItems()
-            for item in dropdownItems {
-                let menuItem = NSMenuItem(title: item.title, action: #selector(menuItemSelected(_:)), keyEquivalent: "")
-                menuItem.target = self
-                menuItem.representedObject = item
-                menu.addItem(menuItem)
-            }
-            control.immediateMenu = menu
-        }
-
-        @objc func segmentPressed(_ sender: NSSegmentedControl) {
-            if sender.selectedSegment == 0 {
-                performAction(.open)
-            }
-        }
-
-        @objc func menuItemSelected(_ sender: NSMenuItem) {
-            guard let item = sender.representedObject as? ImportActionMenuItem else { return }
-            performAction(item)
-        }
-    }
-}
-
-private final class ImmediateMenuSegmentedControl: NSSegmentedControl {
-    var immediateMenu: NSMenu?
-    var primarySegmentWidth: CGFloat = 0
-    var menuSegmentWidth: CGFloat = 0
-
-    override func mouseDown(with event: NSEvent) {
-        let location = convert(event.locationInWindow, from: nil)
-        let pressedSegment = ImportActionSplitButtonHitTesting.segment(
-            atX: location.x,
-            controlWidth: bounds.width,
-            primaryWidth: primarySegmentWidth,
-            menuWidth: menuSegmentWidth,
-            layoutDirection: userInterfaceLayoutDirection
-        )
-
-        guard pressedSegment == 1, let immediateMenu else {
-            super.mouseDown(with: event)
-            return
-        }
-
-        selectedSegment = 1
-        let menuOrigin = ImportActionSplitButtonMenuPlacement.origin(
-            bounds: bounds,
-            menuWidth: menuSegmentWidth,
-            layoutDirection: userInterfaceLayoutDirection,
-            isFlipped: isFlipped
-        )
-        immediateMenu.popUp(positioning: nil, at: menuOrigin, in: self)
-        selectedSegment = -1
     }
 }
 
@@ -3488,7 +2889,7 @@ final class TimelineScrollNSView: NSScrollView {
     }
 }
 
-private struct MainWindowConfigurationView: NSViewRepresentable {
+struct MainWindowConfigurationView: NSViewRepresentable {
     let configure: @MainActor (NSWindow) -> Void
 
     func makeNSView(context: Context) -> NSView {
@@ -3509,7 +2910,7 @@ private struct MainWindowConfigurationView: NSViewRepresentable {
     }
 }
 
-private struct InactiveWindowInteractionShield: NSViewRepresentable {
+struct InactiveWindowInteractionShield: NSViewRepresentable {
     weak var window: NSWindow?
 
     func makeNSView(context: Context) -> ShieldView {
@@ -3561,7 +2962,10 @@ private struct InactiveWindowInteractionShield: NSViewRepresentable {
     }
 }
 
-private struct WindowActivityAppearanceModifier: ViewModifier {
+/// Dims a mode's content (control bar, list or lanes, bottom bar) while the
+/// main window is in the background, like an inactive AppKit window. Both
+/// modes use it; the cover above them stays at full colour.
+struct WindowActivityAppearanceModifier: ViewModifier {
     let isActive: Bool
 
     func body(content: Content) -> some View {
@@ -3579,7 +2983,7 @@ private struct WindowActivityAppearanceModifier: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
     func windowActivityAppearance(isActive: Bool) -> some View {
         modifier(WindowActivityAppearanceModifier(isActive: isActive))
     }
@@ -3589,7 +2993,11 @@ private extension View {
 private struct IntegerInputField: NSViewRepresentable {
     @Binding var value: Int
     let configuration: NumericControlConfiguration
+    var font: NSFont = .systemFont(ofSize: NSFont.smallSystemFontSize)
     var onFocusChange: (Bool) -> Void = { _ in }
+    /// The text while it is being edited (typed or stepped), and `nil` when
+    /// editing ends, so a host can size itself to what is being typed.
+    var onEditingTextChange: (String?) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -3606,7 +3014,7 @@ private struct IntegerInputField: NSViewRepresentable {
         textField.isBordered = false
         textField.drawsBackground = false
         textField.focusRingType = .none
-        textField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        textField.font = font
         textField.delegate = context.coordinator
         textField.stringValue = "\(value)"
         textField.onFocusChange = onFocusChange
@@ -3615,6 +3023,7 @@ private struct IntegerInputField: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
         context.coordinator.configuration = configuration
+        context.coordinator.onEditingTextChange = onEditingTextChange
         (nsView as? NumericInputTextField)?.onFocusChange = onFocusChange
         let clamped = configuration.clamped(value)
         if clamped != value {
@@ -3636,6 +3045,7 @@ private struct IntegerInputField: NSViewRepresentable {
         private var editState: NumericControlEditState
         private(set) var isEditing = false
         private var isCancellingEdit = false
+        var onEditingTextChange: (String?) -> Void = { _ in }
 
         init(
             value: Binding<Int>,
@@ -3675,6 +3085,7 @@ private struct IntegerInputField: NSViewRepresentable {
         @MainActor
         func controlTextDidEndEditing(_ obj: Notification) {
             guard let textField = obj.object as? NSTextField else { return }
+            defer { onEditingTextChange(nil) }
             if isCancellingEdit {
                 let restoredValue = editState.cancelledValue()
                 value = restoredValue
@@ -3690,7 +3101,9 @@ private struct IntegerInputField: NSViewRepresentable {
         @MainActor
         func controlTextDidChange(_ obj: Notification) {
             guard let textField = obj.object as? NSTextField else { return }
-            editState.updatePendingText((textField.currentEditor() as? NSTextView)?.string ?? textField.stringValue)
+            let text = (textField.currentEditor() as? NSTextView)?.string ?? textField.stringValue
+            editState.updatePendingText(text)
+            onEditingTextChange(text)
         }
 
         func applyStep(direction: Int, largeStep: Bool) {
@@ -3806,6 +3219,7 @@ private struct IntegerInputField: NSViewRepresentable {
             }
             textView.string = text
             textView.setSelectedRange(NSRange(location: text.count, length: 0))
+            onEditingTextChange(text)
         }
     }
 
@@ -3840,62 +3254,45 @@ private struct IntegerInputField: NSViewRepresentable {
     }
 }
 
-private func extractDroppedFileURL(from item: NSSecureCoding?) -> URL? {
-    if let data = item as? Data {
-        return URL(dataRepresentation: data, relativeTo: nil)
-    }
-
-    if let url = item as? URL {
-        return url
-    }
-
-    if let text = item as? String {
-        return URL(string: text)
-    }
-
-    return nil
-}
-
-/// One track row (info column + waveform lane) as a standalone, `Equatable`
-/// value view (`.equatable()` at the call site).
+/// One lane's visuals — the active tint and the waveform lane — as a
+/// standalone, `Equatable` value view (`.equatable()` at the call site).
 ///
-/// The whole point is isolation: a horizontal scroll writes `visibleStart` and
-/// a reorder gap move bumps parent `@State`, both of which re-run the container
-/// body — but the container only reconstructs these cheap values and runs `==`
-/// per row. Unless a *compared* input changed, SwiftUI skips this body and the
-/// entire info-column subtree (index badge, offset field, drag source) is left
-/// untouched. Three things are deliberately kept OUT of the compared surface so
-/// they can update without re-running the body:
+/// The whole point is isolation: a zoom step re-runs the container body and a
+/// reorder gap move bumps parent `@State`, but the container only reconstructs
+/// these cheap values and runs `==` per lane. Unless a *compared* input
+/// changed, SwiftUI skips this body. Three things are deliberately kept OUT of
+/// the compared surface so they can update without re-running the body:
 ///   - the per-scroll-event lane slide AND the zoom-varying lane window
 ///     (window bounds + tick guides), both handled inside the `LaneView` leaf
 ///     (which reads `controller.visibleStart` and `viewportStore` itself), so
 ///     scroll and zoom re-run only that fixed-frame leaf, not the row;
 ///   - the reorder gap `offset(y:)`/`opacity`/animation, applied by the
-///     container around this view.
-/// `controller`, `viewportStore`, and the action closures are stored but
-/// excluded from `==`; the closures only capture the row's own identity /
-/// actions, never per-event state, so a skipped body can't show stale visuals.
+///     container around this view (`ReorderPlacement`).
+/// `laneHeight` changes only on window resize or when versions are added or
+/// removed. `controller` and `viewportStore` are stored but excluded from `==`.
+///
+/// The lane's info strip is a separate layer (`LaneStripView`) above the
+/// lanes' gesture surface, so its controls take clicks; this view never
+/// hit-tests.
 private struct TrackRowView: View, Equatable {
-    var index: Int
-    var sessionTrack: SessionTrack
+    var trackStart: TimeInterval
+    var trackDuration: TimeInterval
     /// Nil while blind listening (so progress can't leak identity) or before
     /// generation starts. Array `==` short-circuits on shared storage, so the
-    /// common scroll case is O(1).
+    /// common case is O(1).
     var waveform: Waveform?
     var isActive: Bool
     var isBlind: Bool
-    /// Whether this row's lane may rasterize (it intersects the vertical
-    /// viewport ± overscan). Culled lanes keep showing their last image.
+    var isMissing: Bool
+    /// Whether this lane may rasterize (it intersects the vertical viewport
+    /// ± overscan). Culled lanes draw nothing.
     var isRenderable: Bool
-    var isOffsetFocused: Bool
-    var infoWidth: CGFloat
-    var rowHeight: CGFloat
-    /// Drawn width of the 2× lane window. Geometry-driven (2× the waveform
-    /// column), so it changes on window/column resize but NOT on zoom — safe
-    /// as an equatable input.
+    /// The drawn lane, without its divider.
+    var laneHeight: CGFloat
+    /// Drawn width of the 2× lane window. Geometry-driven (2× the lane
+    /// width), so it changes on window resize but NOT on zoom — safe as an
+    /// equatable input.
     var wideWidth: CGFloat
-    var offsetConfiguration: NumericControlConfiguration
-    var indexBadgeAppearance: IndexBadgeAppearance
     var showsDebugLabel: Bool
 
     /// References forwarded to the lane leaf; never read in this body. The
@@ -3903,47 +3300,121 @@ private struct TrackRowView: View, Equatable {
     /// leaf), so they can't be equatable inputs here — see `LaneViewport`.
     var controller: PlaybackController
     var viewportStore: LaneViewportStore
-    /// Observed only by the trash-button leaf, never by this body, so a hover
-    /// change re-evaluates that one leaf and not the equatable row.
-    var hoverStore: TrackHoverStore
+
+    nonisolated static func == (lhs: TrackRowView, rhs: TrackRowView) -> Bool {
+        lhs.trackStart == rhs.trackStart
+            && lhs.trackDuration == rhs.trackDuration
+            && lhs.waveform == rhs.waveform
+            && lhs.isActive == rhs.isActive
+            && lhs.isBlind == rhs.isBlind
+            && lhs.isMissing == rhs.isMissing
+            && lhs.isRenderable == rhs.isRenderable
+            && lhs.laneHeight == rhs.laneHeight
+            && lhs.wideWidth == rhs.wideWidth
+            && lhs.showsDebugLabel == rhs.showsDebugLabel
+    }
+
+    var body: some View {
+        // The lane is a self-observing leaf: it reads the shared viewport
+        // (zoom) and the live scroll position (`shiftX`) itself, so zoom and
+        // scroll re-run only this fixed-frame leaf, never the row body. Its
+        // frame is `wideWidth × laneHeight` (both fixed on zoom), so its
+        // re-runs never propagate layout up into the VStack.
+        LaneView(
+            controller: controller,
+            viewportStore: viewportStore,
+            waveform: waveform,
+            isActive: isActive,
+            isBlind: isBlind,
+            isMissing: isMissing,
+            isRenderable: isRenderable,
+            trackStart: trackStart,
+            trackDuration: trackDuration,
+            wideWidth: wideWidth,
+            laneHeight: laneHeight,
+            showsDebugLabel: showsDebugLabel
+        )
+        // The 0:00 marker and a tick guide land on the lane's first point
+        // whenever the timeline starts at 0:00; the active tint shows there.
+        .mask(TimelineLeadingEdgeMask())
+        .frame(height: laneHeight)
+        // Active lane (A2 §8): a primary tint, with no leading accent bar.
+        .background(isActive ? Theme.activeLaneFill : Color.clear)
+        .allowsHitTesting(false)
+    }
+}
+
+/// A lane's info strip (A2 §8): a 21 pt band across the top of the lane, in
+/// the space above the waveform (so it needs no fade), holding the index
+/// badge, the version's title and format, and its offset field. Every input is per-track static data — nothing varies with
+/// scroll or zoom — so, like `TrackRowView`, it is an equatable value
+/// (`.equatable()` at the call site) and its closures are excluded from `==`.
+///
+/// It sits above the lanes' gesture surface and the playhead line. Only the
+/// badge, title and format (the drag source and context menu behind them) and
+/// the offset field take clicks; the strip's empty middle passes clicks
+/// through to seeking, loop selection and the playhead band.
+private struct LaneStripView: View, Equatable {
+    var index: Int
+    var trackID: SessionTrack.ID
+    var fileURL: URL
+    var name: String
+    var format: String
+    var toolTip: String?
+    var offsetMs: Int
+    var isActive: Bool
+    var isBlind: Bool
+    var isMissing: Bool
+    var isOffsetFocused: Bool
+    var offsetConfiguration: NumericControlConfiguration
+    var indexBadgeAppearance: IndexBadgeAppearance
+    var showsDebugLabel: Bool
+
+    var menuActions: LaneStripMenuActions
     var onSelect: () -> Void
-    var onRemove: () -> Void
     var onSetOffsetMs: (Int) -> Void
     var onOffsetFocusChange: (Bool) -> Void
-    var onHover: (Bool) -> Void
     var onDragBegan: () -> Void
     var onDragEnded: () -> Void
     var makeDragImage: () -> NSImage?
 
-    nonisolated static func == (lhs: TrackRowView, rhs: TrackRowView) -> Bool {
+    /// Gap between the badge, title and format, and before the offset field.
+    static let spacing: CGFloat = 6
+    static let leadingInset: CGFloat = 9
+    static let trailingInset: CGFloat = 8
+    static let titleFontSize: CGFloat = 11.5
+    static let formatFontSize: CGFloat = 10
+
+    nonisolated static func == (lhs: LaneStripView, rhs: LaneStripView) -> Bool {
         lhs.index == rhs.index
-            && lhs.sessionTrack == rhs.sessionTrack
-            && lhs.waveform == rhs.waveform
+            && lhs.trackID == rhs.trackID
+            && lhs.fileURL == rhs.fileURL
+            && lhs.name == rhs.name
+            && lhs.format == rhs.format
+            && lhs.toolTip == rhs.toolTip
+            && lhs.offsetMs == rhs.offsetMs
             && lhs.isActive == rhs.isActive
             && lhs.isBlind == rhs.isBlind
-            && lhs.isRenderable == rhs.isRenderable
+            && lhs.isMissing == rhs.isMissing
             && lhs.isOffsetFocused == rhs.isOffsetFocused
-            && lhs.infoWidth == rhs.infoWidth
-            && lhs.rowHeight == rhs.rowHeight
-            && lhs.wideWidth == rhs.wideWidth
             && lhs.offsetConfiguration == rhs.offsetConfiguration
             && lhs.indexBadgeAppearance == rhs.indexBadgeAppearance
             && lhs.showsDebugLabel == rhs.showsDebugLabel
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            infoArea
-                .frame(width: infoWidth, height: rowHeight, alignment: .leading)
-                // Drag the info column to reorder in place (a move), or out of the
-                // window to copy the track's audio file onto Finder / another app /
-                // another Takes window. An AppKit drag source (behind the column's
-                // content, so its own controls still work) runs the drag with the
-                // right move-inside / copy-outside operation; a plain click selects.
+        HStack(spacing: Self.spacing) {
+            identity
+                // Drag the badge, title or format to reorder in place (a move),
+                // or out of the window to copy the version's audio file onto
+                // Finder / another app / another Takes window. A plain click
+                // makes the lane active; a right-click opens its menu.
                 .background(
                     TrackRowDragSource(
-                        fileURL: sessionTrack.loadedTrack.url,
-                        trackID: sessionTrack.id,
+                        fileURL: fileURL,
+                        trackID: trackID,
+                        toolTip: toolTip,
+                        menuActions: menuActions,
                         onSelect: onSelect,
                         onDragBegan: onDragBegan,
                         onDragEnded: onDragEnded,
@@ -3951,197 +3422,218 @@ private struct TrackRowView: View, Equatable {
                     )
                 )
 
-            // The lane is a self-observing leaf: it reads the shared viewport
-            // (zoom) and the live scroll position (`shiftX`) itself, so zoom and
-            // scroll re-run only this fixed-frame leaf, never the row body. Its
-            // frame is `wideWidth × rowHeight` (both fixed on zoom), so its
-            // re-runs never propagate layout up into the VStack.
-            LaneView(
-                controller: controller,
-                viewportStore: viewportStore,
-                waveform: waveform,
-                isActive: isActive,
-                isBlind: isBlind,
-                isRenderable: isRenderable,
-                trackStart: sessionTrack.loadedTrack.offsetSeconds,
-                trackDuration: sessionTrack.loadedTrack.duration,
-                wideWidth: wideWidth,
-                rowHeight: rowHeight,
-                showsDebugLabel: showsDebugLabel
+            Spacer(minLength: 0)
+
+            LaneOffsetField(
+                offsetMs: offsetMs,
+                isFocused: isOffsetFocused,
+                configuration: offsetConfiguration,
+                onSetOffsetMs: onSetOffsetMs,
+                onFocusChange: onOffsetFocusChange
             )
-            // Reveal the row's own background through the first lane pixel so
-            // a leading timeline guide stays tucked beneath the info column.
-            .mask(TimelineLeadingEdgeMask())
         }
-        .frame(height: rowHeight)
-        // Active highlight spans the whole row (info + lane) as one continuous
-        // band; a leading accent bar anchors the active track to the left edge.
-        // Drawn at the HStack level so the frozen-column edge (a top-level overlay)
-        // reads as crossing a single tinted band rather than two boxes.
-        .background(isActive ? Theme.activeRowFill : Color.clear)
-        .overlay(alignment: .leading) {
-            if isActive {
-                Rectangle()
-                    .fill(Theme.primary)
-                    .frame(width: 3)
-                    .allowsHitTesting(false)
-            }
-        }
-        .onHover { onHover($0) }
+        .padding(.leading, Self.leadingInset)
+        .padding(.trailing, Self.trailingInset)
+        // Centred between the divider above the lane and the waveform.
+        .frame(height: CompareLaneLayout.stripFrameHeight)
+        .componentDebugLabel("Lane Strip", enabled: showsDebugLabel, color: .green)
     }
 
-    private var infoArea: some View {
-        let track = sessionTrack.loadedTrack
-        let title = isBlind ? "Track \(index + 1)" : track.displayName
-        // Badge on the left; filename, metadata, and the Offset row form a single
-        // left-aligned column to its right so all three share the filename's left
-        // edge. Vertically centered so the info column matches the waveform lane.
-        // The badge, filename, and metadata opt out of hit-testing so the drag
-        // source behind the column receives their clicks (a drag anywhere but the
-        // trash button and offset field starts a reorder). The trash button and
-        // offset field keep hit-testing so they still work.
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+    /// Badge, title and format. Their own hit testing is off so their clicks
+    /// reach the drag source behind them. The title outranks the format, so
+    /// the format truncates first; titles truncate in the middle (§13).
+    private var identity: some View {
+        HStack(spacing: Self.spacing) {
             TrackIndexBadgeView(index: index, isActive: isActive, appearance: indexBadgeAppearance)
-                // Baseline is technically aligned, but the fixed badge frame makes
-                // the centered number read a touch low; nudge it up 1pt.
-                .offset(y: -1)
-                .allowsHitTesting(false)
 
-            // Outer spacing (12) pushes the Offset row down; the inner group's
-            // spacing (2) keeps the filename and metadata tightly associated.
-            // Tweak these two numbers to taste.
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 2) {
-                        Text(title)
-                            .font(.headline.weight(.medium))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .overlay {
-                                TruncationAwareTooltip(
-                                    text: title,
-                                    font: .systemFont(
-                                        ofSize: NSFont.preferredFont(forTextStyle: .headline).pointSize,
-                                        weight: .medium
-                                    )
-                                )
-                            }
-                            .allowsHitTesting(false)
+            Text(name)
+                .font(.system(size: Self.titleFontSize, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(1)
 
-                        Spacer(minLength: 0)
-
-                        TrackRowTrashButton(
-                            store: hoverStore,
-                            trackID: sessionTrack.id,
-                            index: index,
-                            onRemove: onRemove
-                        )
-                    }
-
-                    Text(track.metadataSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .opacity(isBlind ? 0 : 1)
-                        .accessibilityHidden(isBlind)
-                        .allowsHitTesting(false)
-                }
-
-                offsetControl
+            if isMissing {
+                // In place of the format, blind or not: the lane is silent.
+                Label(LaneStripText.missingFile, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: Self.formatFontSize))
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(Color(nsColor: PlaylistRowPalette.warningFill))
+                    .lineLimit(1)
+            } else if !format.isEmpty {
+                Text(format)
+                    .font(.system(size: Self.formatFontSize))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 12)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .componentDebugLabel("Track Info", enabled: showsDebugLabel, color: .green)
+        .allowsHitTesting(false)
+    }
+}
+
+/// The lane strip's offset field (A2 §8): `0 ms` in a 17 pt box that grows
+/// and shrinks with the number, as it is typed too. Typed entry, clamping and
+/// ↑/↓ stepping (⇧ for large steps) come from `IntegerInputField`;
+/// double-clicking "ms" resets the offset to zero. While
+/// it edits, its field editor is the first responder, so
+/// `GlobalShortcutFocusPolicy` keeps the global shortcuts off, and a click
+/// anywhere else ends the edit (`NumericControlFocusPolicy`).
+struct LaneOffsetField: View {
+    var offsetMs: Int
+    var isFocused: Bool
+    var configuration: NumericControlConfiguration
+    var onSetOffsetMs: (Int) -> Void
+    var onFocusChange: (Bool) -> Void
+
+    /// The text while the field is being edited, so the box grows and shrinks
+    /// with what is typed; nil otherwise, when it fits the committed value.
+    @State private var editingText: String?
+    /// The pointer is over the box: the "Offset" label shows to its left.
+    @State private var isHovered = false
+
+    static let height: CGFloat = 17
+    static let cornerRadius: CGFloat = 4
+    static let horizontalPadding: CGFloat = 5
+    static let labelSpacing: CGFloat = 4
+    static let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+
+    /// The field's width for `text`: what a borderless text-field cell in the
+    /// field's font needs to show it whole (its insets included), plus a point
+    /// for the caret. Empty text keeps one digit's room.
+    @MainActor
+    static func fieldWidth(for text: String) -> CGFloat {
+        measuringCell.stringValue = text.isEmpty ? "0" : text
+        return ceil(measuringCell.cellSize.width) + 1
     }
 
-    private var offsetControl: some View {
-        let offsetMs = Int((sessionTrack.loadedTrack.offsetSeconds * 1000).rounded())
+    @MainActor
+    private static let measuringCell: NSTextFieldCell = {
+        let cell = NSTextFieldCell(textCell: "")
+        cell.isBordered = false
+        cell.drawsBackground = false
+        cell.font = font
+        return cell
+    }()
+
+    var body: some View {
+        HStack(spacing: Self.labelSpacing) {
+            // Hovering the box names it. The label takes room in the strip's
+            // row rather than drawing over it, so a long title or format
+            // truncates to make space instead of running under the label.
+            if isHovered {
+                Text("Offset")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            box
+                .overlay(HoverSensor { isHovered = $0 })
+        }
+        .fixedSize()
+    }
+
+    private var box: some View {
         let binding = Binding(
             get: { offsetMs },
             set: { onSetOffsetMs($0) }
         )
-        // firstTextBaseline so the "Offset" caption sits on the same line as the
-        // field's numeric text; both use .caption so their baselines match.
-        return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("Offset")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            offsetField(binding: binding)
-        }
-    }
-
-    /// Composite offset control: a single rounded, bordered box holding the
-    /// borderless numeric field, a static "ms" unit, and an embedded stepper — so
-    /// it reads as one input `[  0  ms  ⌃⌄ ]`. Typed-entry/clamping and the
-    /// Shift-large-step behavior come from `IntegerInputField`; the stepper mirrors
-    /// the same step amounts.
-    private func offsetField(binding: Binding<Int>) -> some View {
-        HStack(spacing: 4) {
+        let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        return HStack(spacing: 3) {
             IntegerInputField(
                 value: binding,
-                configuration: offsetConfiguration,
-                onFocusChange: onOffsetFocusChange
+                configuration: configuration,
+                font: Self.font,
+                onFocusChange: onFocusChange,
+                onEditingTextChange: { editingText = $0 }
             )
-            .frame(width: 44)
+            .frame(width: Self.fieldWidth(for: editingText ?? "\(offsetMs)"))
+            .accessibilityLabel("Offset in milliseconds")
 
             Text("ms")
-                .font(.caption)
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+                .fixedSize()
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) {
                     binding.wrappedValue = 0
                 }
                 .accessibilityLabel("Offset units")
                 .accessibilityHint("Double click to reset offset to zero milliseconds.")
-
-            Stepper(
-                "Offset",
-                onIncrement: { stepOffset(binding, direction: 1) },
-                onDecrement: { stepOffset(binding, direction: -1) }
-            )
-            .labelsHidden()
-            .controlSize(.small)
         }
-        .padding(.leading, 6)
-        .padding(.trailing, 3)
-        .padding(.vertical, 2)
-        .fixedSize(horizontal: true, vertical: false)
-        // Recessed field: a filled surface with a soft top inner shadow, ringed by
-        // an inset bevel (dark top edge fading to a light bottom edge).
-        .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Theme.readoutSurface.shadow(.inner(color: .black.opacity(0.15), radius: 1.5, y: 1)))
-        }
-        // Focused: the bevel gives way to a solid ring in the app's active
+        .padding(.horizontal, Self.horizontalPadding)
+        .frame(height: Self.height)
+        .background { shape.fill(Theme.laneOffsetFieldFill) }
+        // Focused: the hairline gives way to a solid ring in the app's
         // indigo, plus a soft matching glow so the live field is unmissable.
         .overlay {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(
-                    isOffsetFocused
-                        ? AnyShapeStyle(Theme.primary)
-                        : AnyShapeStyle(LinearGradient(
-                            colors: [.black.opacity(0.14), .white.opacity(0.45)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )),
-                    lineWidth: isOffsetFocused ? 1.5 : 1
-                )
+            shape.strokeBorder(
+                isFocused ? Theme.primary : Theme.laneOffsetFieldBorder,
+                lineWidth: isFocused ? 1.5 : 1
+            )
         }
-        .shadow(color: isOffsetFocused ? Theme.primary.opacity(0.55) : .clear, radius: 3)
-        .animation(.easeOut(duration: 0.12), value: isOffsetFocused)
+        .shadow(color: isFocused ? Theme.primary.opacity(0.55) : .clear, radius: 3)
+        .animation(.easeOut(duration: 0.12), value: isFocused)
+        .fixedSize()
+    }
+}
+
+/// Reports the pointer entering and leaving its frame through an AppKit
+/// tracking area, and never takes a click, so it can sit over controls —
+/// an AppKit text field among them, where SwiftUI hover is unreliable —
+/// without stealing their events.
+struct HoverSensor: NSViewRepresentable {
+    var trackingActivity: NSTrackingArea.Options = .activeInKeyWindow
+    var onHover: (Bool) -> Void
+
+    func makeNSView(context: Context) -> HoverSensorView {
+        HoverSensorView(trackingActivity: trackingActivity)
     }
 
-    private func stepOffset(_ binding: Binding<Int>, direction: Int) {
-        binding.wrappedValue = offsetConfiguration.steppedValue(
-            from: binding.wrappedValue,
-            direction: direction,
-            largeStep: NumericControlConfiguration.isLargeStepModifierFlags(NSEvent.modifierFlags)
-        )
+    func updateNSView(_ view: HoverSensorView, context: Context) {
+        view.onHover = onHover
+    }
+
+    final class HoverSensorView: NSView {
+        var onHover: ((Bool) -> Void)?
+        private var isInside = false
+        private let trackingActivity: NSTrackingArea.Options
+
+        init(trackingActivity: NSTrackingArea.Options) {
+            self.trackingActivity = trackingActivity
+            super.init(frame: .zero)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(
+                rect: .zero,
+                options: [.mouseEnteredAndExited, trackingActivity, .inVisibleRect],
+                owner: self
+            ))
+        }
+
+        override func mouseEntered(with event: NSEvent) { setInside(true) }
+        override func mouseExited(with event: NSEvent) { setInside(false) }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil { setInside(false) }
+        }
+
+        private func setInside(_ inside: Bool) {
+            guard inside != isInside else { return }
+            isInside = inside
+            onHover?(inside)
+        }
     }
 }
 
@@ -4156,47 +3648,19 @@ final class LaneViewportStore {
     var viewport: ContentView.LaneViewport = .empty
 }
 
-/// Which track row the pointer is over, isolated so a hover change updates only
-/// the small trash-button leaf that reads it — not the equatable `TrackRowView`.
-/// Writing `hoveredID` here (instead of a `ContentView` `@State`) is what keeps
-/// a hover from re-running the track-list container and re-laying-out the rows.
-@MainActor
-@Observable
-final class TrackHoverStore {
-    var hoveredID: SessionTrack.ID?
-}
-
-/// The hover-revealed trash button, split into its own leaf so it — and nothing
-/// else in the row — re-evaluates when the hovered row changes. Reads the shared
-/// `TrackHoverStore`; the row body never does.
-private struct TrackRowTrashButton: View {
-    var store: TrackHoverStore
-    var trackID: SessionTrack.ID
-    var index: Int
-    var onRemove: () -> Void
-
-    var body: some View {
-        Button(action: onRemove) {
-            Image(systemName: "trash")
-                .accessibilityLabel("Remove Track \(index + 1)")
-                .frame(width: 16, height: 16)
-        }
-        .buttonStyle(.borderless)
-        .frame(width: 16, height: 16)
-        // Only surfaces on hover; kept mounted (opacity, not removed) so it
-        // stays reachable by accessibility/keyboard.
-        .opacity(store.hoveredID == trackID ? 1 : 0)
-    }
-}
-
-/// Masks the first point of ruler/lane drawing so the frozen info column reads
-/// as extending over the timeline's leading edge. The transparent strip reveals
-/// the real surface below, including the active-row tint.
+/// Masks the first point of the ruler and the lanes, so a notch, tick guide
+/// or 0:00 marker that lands exactly on the window's left edge isn't drawn
+/// as a stray line there (it does whenever the timeline starts at 0:00 and
+/// is zoomed to fit). Lines one point in from the edge draw as usual, and the
+/// transparent strip reveals the surface below, active-lane tint included.
 private struct TimelineLeadingEdgeMask: View {
+    /// The masked strip at the leading edge.
+    static let width: CGFloat = 1
+
     var body: some View {
         HStack(spacing: 0) {
             Color.clear
-                .frame(width: 1)
+                .frame(width: Self.width)
             Color.white
         }
     }
@@ -4208,10 +3672,10 @@ private struct TimelineLeadingEdgeMask: View {
 /// A self-observing leaf. It reads `viewportStore.viewport` (zoom / grid
 /// boundary) and `controller.visibleStart`/`visibleSpan` (per scroll event),
 /// so both zoom and scroll re-run only this body — never the equatable row
-/// around it. Its outer frame is `wideWidth × rowHeight`, both fixed on zoom
+/// around it. Its outer frame is `wideWidth × laneHeight`, both fixed on zoom
 /// AND scroll, so a re-run never propagates layout up into the VStack; the
-/// image moves purely by transforms inside that fixed frame. `WaveformLaneView`
-/// stays `.equatable()`, so its Canvas/image request is touched only when the
+/// waveform moves purely by transforms inside that fixed frame.
+/// `WaveformLaneView` stays `.equatable()`, so its Canvas redraws only when the
 /// window actually changes (boundary or zoom), not on an intra-window scroll.
 private struct LaneView: View {
     var controller: PlaybackController
@@ -4220,11 +3684,12 @@ private struct LaneView: View {
     var waveform: Waveform?
     var isActive: Bool
     var isBlind: Bool
+    var isMissing: Bool
     var isRenderable: Bool
     var trackStart: TimeInterval
     var trackDuration: TimeInterval
     var wideWidth: CGFloat
-    var rowHeight: CGFloat
+    var laneHeight: CGFloat
     var showsDebugLabel: Bool
 
     var body: some View {
@@ -4235,13 +3700,15 @@ private struct LaneView: View {
         let waveformWidth = wideWidth / 2
         let shiftX = CGFloat((controller.visibleStart - viewport.windowStart) / span) * waveformWidth
         Color.clear
-            .frame(height: rowHeight)
+            .frame(height: laneHeight)
             .frame(maxWidth: .infinity)
             .overlay(alignment: .topLeading) {
                 WaveformLaneView(
                     width: wideWidth,
+                    height: laneHeight,
                     waveform: waveform,
                     isBlindListening: isBlind,
+                    isMissing: isMissing,
                     isActive: isActive,
                     isRenderable: isRenderable,
                     trackStart: trackStart,
@@ -4253,7 +3720,7 @@ private struct LaneView: View {
                     showsDebugLabel: showsDebugLabel
                 )
                 .equatable()
-                .frame(width: wideWidth, height: rowHeight)
+                .frame(width: wideWidth, height: laneHeight)
                 .offset(x: -shiftX)
             }
             .clipped()
@@ -4272,15 +3739,12 @@ private struct TimelineHeaderRulerView: View {
     var minorTickMinSpacing: Double
     var headerHeight: CGFloat
 
-    // Ruler notches hang downward from below the numbers toward the rows, Fission-style:
-    // major (labeled) ticks are tall — their top edge comes up to just beneath the number so the
-    // label sits against the tick like a baseline — while minor ticks stay short. Both are
-    // bottom-anchored so they hang toward the rows.
+    // Ruler notches hang from the bottom edge toward the lanes (A2 §8): major
+    // (labeled) notches 19 pt, minor 8 pt (v2.9.0's heights). Labels sit
+    // 4 pt right of their notch with their digits' tops level with its top;
+    // the playhead grabber may overlap them. Geometry lives in
+    // `TimelineRulerMetrics`.
     private var tickColor: Color { Theme.timelineRulerTick }
-    private var majorTickHeight: CGFloat { 19 }
-    private var minorTickHeight: CGFloat { 8 }
-    /// Vertical inset of the time label from the top of the header.
-    private var labelTopInset: CGFloat { 7 }
 
     var body: some View {
         let visibleStart = controller.visibleStart
@@ -4308,10 +3772,12 @@ private struct TimelineHeaderRulerView: View {
 
             if ruler.majorTicks.isEmpty {
                 Text("00:00")
-                    .font(.caption.monospacedDigit())
+                    .font(TimelineRulerMetrics.labelFont)
                     .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .frame(height: TimelineRulerMetrics.labelHeight)
                     .padding(.leading, 8)
-                    .frame(maxHeight: .infinity, alignment: .center)
+                    .padding(.top, TimelineRulerMetrics.labelTopInset)
             } else {
                 if showMinorTicks {
                     ForEach(ruler.minorTicks, id: \.self) { tickTime in
@@ -4338,44 +3804,46 @@ private struct TimelineHeaderRulerView: View {
     }
 
     private func minorTick(at time: TimeInterval, visibleStart: TimeInterval, visibleEnd: TimeInterval) -> some View {
-        Rectangle()
-            .fill(tickColor)
-            .frame(width: 1, height: minorTickHeight)
-            .offset(x: xPosition(for: time, visibleStart: visibleStart, visibleEnd: visibleEnd))
-            // Anchor to the bottom so the notch hangs down toward the waveforms.
-            .frame(width: width, height: headerHeight, alignment: .bottomLeading)
+        notch(at: xPosition(for: time, visibleStart: visibleStart, visibleEnd: visibleEnd),
+              height: TimelineRulerMetrics.minorTickHeight)
             .accessibilityHidden(true)
     }
 
     private func majorMarker(_ marker: TimelineHeaderMarker, visibleStart: TimeInterval, visibleEnd: TimeInterval) -> some View {
         let tickX = xPosition(for: marker.time, visibleStart: visibleStart, visibleEnd: visibleEnd)
         let labelWidth: CGFloat = 60
-        let labelLayout = TimelineHeaderLabelLayout.leading(
-            tickX: Double(tickX),
-            rulerWidth: Double(width)
-        )
 
         return ZStack(alignment: .topLeading) {
-            // Number on top.
-            if labelLayout.isVisible {
+            if let labelOrigin = TimelineRulerMetrics.labelOrigin(tickX: tickX, rulerWidth: width) {
                 Text(marker.label)
-                    .font(.caption.monospacedDigit())
+                    .font(TimelineRulerMetrics.labelFont)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .frame(width: labelWidth, alignment: .leading)
-                    .offset(x: CGFloat(labelLayout.x), y: labelTopInset)
+                    // Natural height, so the short line below doesn't shrink
+                    // the type through the scale factor.
+                    .fixedSize(horizontal: false, vertical: true)
+                    // A 10 pt line, as the canvas draws it: the 10 pt type's
+                    // natural line (about 12 pt) is centred on it, and the
+                    // inset puts the digits' tops level with the notch's.
+                    .frame(width: labelWidth, height: TimelineRulerMetrics.labelHeight, alignment: .leading)
+                    .offset(x: labelOrigin.x, y: labelOrigin.y)
             }
 
-            // Taller notch hanging below the number, anchored to the header bottom.
-            Rectangle()
-                .fill(tickColor)
-                .frame(width: 1, height: majorTickHeight)
-                .offset(x: tickX)
-                .frame(width: width, height: headerHeight, alignment: .bottomLeading)
+            notch(at: tickX, height: TimelineRulerMetrics.majorTickHeight)
         }
         .frame(width: width, height: headerHeight, alignment: .topLeading)
         .accessibilityLabel(marker.label)
+    }
+
+    /// A notch hanging from the ruler's bottom edge.
+    private func notch(at x: CGFloat, height: CGFloat) -> some View {
+        let frame = TimelineRulerMetrics.tickFrame(x: x, height: height, rulerHeight: headerHeight)
+        return Rectangle()
+            .fill(tickColor)
+            .frame(width: frame.width, height: frame.height)
+            .offset(x: frame.minX, y: frame.minY)
+            .frame(width: width, height: headerHeight, alignment: .topLeading)
     }
 }
 
@@ -4410,26 +3878,22 @@ private struct TimelineScrollOverlayLeaf: View {
 /// costs zero main-thread work between anchor events.
 private struct TimelinePlayheadOverlayView: View {
     var controller: PlaybackController
-    /// While a playhead drag is in flight: the preview x within the column.
+    var part: PlayheadPart
+    /// While a playhead drag is in flight: the preview x across the lanes.
     var playheadDragX: CGFloat?
-    var infoWidth: CGFloat
-    var sectionHeight: CGFloat
     var waveformWidth: CGFloat
-    var seatBottom: CGFloat
-    var laneAreaHeight: CGFloat
+    /// The grabber's overlay spans the section; the line's spans the lanes.
+    var height: CGFloat
 
     var body: some View {
         let position = controller.displayTransportPosition()
         TimelinePlayheadVisual(
+            part: part,
             currentX: playheadDragX ?? xPosition(for: position),
             endX: xPosition(for: controller.session.playbackEnd),
             remaining: max(0, controller.session.playbackEnd - position),
             isPlaying: controller.session.isPlaying && playheadDragX == nil,
-            infoWidth: infoWidth,
-            sectionHeight: sectionHeight,
-            waveformWidth: waveformWidth,
-            seatBottom: seatBottom,
-            laneAreaHeight: laneAreaHeight
+            height: height
         )
         // Purely decorative (the caller disables hit testing too, and the layer
         // view overrides `hitTest` to nil); kept here so the leaf can never
@@ -4575,20 +4039,24 @@ private struct LoopOverlayContentView: View {
     }
 }
 
-/// The rounded index badge: filled with the primary color when the row is
-/// active (white number), a neutral fill otherwise (secondary number).
+/// The lane strip's 15 pt index badge (A2 §8): filled with the primary color
+/// when the lane is active (white number), a neutral fill otherwise
+/// (secondary number). The bevel and shadow come from `IndexBadgeAppearance`.
 private struct TrackIndexBadgeView: View {
     var index: Int
     var isActive: Bool
     var appearance: IndexBadgeAppearance
 
+    static let side: CGFloat = 15
+    static let cornerRadius: CGFloat = 4
+
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
         let badge = appearance
         return Text("\(index + 1)")
-            .font(.caption.weight(.semibold).monospacedDigit())
+            .font(.system(size: 10, weight: .bold).monospacedDigit())
             .foregroundStyle(isActive ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-            .frame(width: 20, height: 20)
+            .frame(width: Self.side, height: Self.side)
             .background {
                 shape.fill(isActive ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(Theme.indexBadgeInactiveFill))
             }
@@ -4625,11 +4093,17 @@ private struct TrackIndexBadgeView: View {
 /// objects and closures out of its stored properties.
 private struct WaveformLaneView: View, Equatable {
     var width: CGFloat
+    /// The drawn lane's height; the waveform sits in the band below the
+    /// lane strip (`CompareLaneLayout.waveformBand`).
+    var height: CGFloat
     /// The waveform to draw, or `nil` while blind listening (so waveform
     /// progress can't leak identity through redraw timing) or before
     /// generation starts.
     var waveform: Waveform?
     var isBlindListening: Bool
+    /// The file can't be found: the track's extent shows the error state
+    /// in place of a waveform, blind or not (the lane is silent either way).
+    var isMissing: Bool
     var isActive: Bool
     /// Whether the lane intersects the vertical viewport (± overscan) and may
     /// kick renders; culled lanes keep showing their last image.
@@ -4645,24 +4119,30 @@ private struct WaveformLaneView: View, Equatable {
     var showsDebugLabel: Bool
 
     var body: some View {
-        ZStack(alignment: .leading) {
+        let band = CompareLaneLayout.waveformBand(laneHeight: height)
+        ZStack(alignment: .topLeading) {
             Rectangle()
                 .fill(.background.opacity(0.01))
 
             // Faint major-tick guides behind the waveform, aligned with the
-            // ruler's labeled ticks above.
+            // ruler's labeled ticks above. They run the full lane height,
+            // behind the strip.
             ForEach(Array(majorTickXs.enumerated()), id: \.offset) { _, tickX in
                 Rectangle()
                     .fill(Theme.hairline.opacity(0.5))
-                    .frame(width: 1)
+                    .frame(width: 1, height: height)
                     .offset(x: tickX)
                     .accessibilityHidden(true)
             }
 
-            if isBlindListening {
-                blindPlaceholderWaveform
-                    .frame(width: width, height: 58)
-                    .foregroundStyle(isActive ? Theme.primary.opacity(0.70) : Theme.waveformInactive.opacity(0.58))
+            if isMissing {
+                missingExtent
+                    .frame(width: width, height: band.height)
+                    .offset(y: band.minY)
+            } else if isBlindListening {
+                blindHatch
+                    .frame(width: width, height: band.height)
+                    .offset(y: band.minY)
             } else {
                 // The peak envelope is drawn SYNCHRONOUSLY every frame straight
                 // from the 5a pyramid (WP-7): the `Canvas` draw closure runs
@@ -4671,26 +4151,30 @@ private struct WaveformLaneView: View, Equatable {
                 // no async image pipeline to fall behind, no blank/stale-stretch
                 // gap during zoom or scroll.
                 waveformContent
-                    .frame(width: width, height: 58)
+                    .frame(width: width, height: band.height)
+                    .offset(y: band.minY)
             }
 
             Rectangle()
                 .fill(.secondary.opacity(0.25))
-                .frame(width: 1)
+                .frame(width: 1, height: height)
                 .offset(x: zeroTickX)
         }
+        .frame(width: width, height: height, alignment: .topLeading)
         .clipped()
         // Lane visuals must NEVER hit-test: `.clipped()` clips drawing but NOT
         // hit testing, and this subtree is 2× the viewport wide and slid left
-        // by up to a viewport width, so it extends invisibly over the
-        // track-info column and would swallow its clicks. All lane interaction
-        // lives on the loop overlay / scroll overlay.
+        // by up to a viewport width, so it extends invisibly past the lane's
+        // edges. All lane interaction lives on the loop overlay, the lane
+        // strips and the scroll overlay.
         .allowsHitTesting(false)
         .componentDebugLabel("Waveform Lane", enabled: showsDebugLabel, color: .purple)
     }
 
-    /// Envelope tint. `isActive` is a color-only distinction, so an A/B switch
-    /// only re-tints — the pyramid path build is identical either way.
+    /// Envelope tint (A2 §8): primary for the active lane,
+    /// `Theme.waveformInactive` otherwise, at v2.9.0's strengths (85% and 70%).
+    /// `isActive` is a color-only distinction, so an A/B switch only re-tints —
+    /// the pyramid path build is identical either way.
     private var tint: Color {
         isActive ? Theme.primary.opacity(0.85) : Theme.waveformInactive.opacity(0.7)
     }
@@ -4743,43 +4227,67 @@ private struct WaveformLaneView: View, Equatable {
         }
     }
 
-    private var blindPlaceholderWaveform: some View {
+    /// The missing-file error state: the track's extent as a faint warning
+    /// band with a dashed outline, so the lane keeps its place on the
+    /// timeline. Static Canvas drawing, like the waveform.
+    private var missingExtent: some View {
         Canvas { context, size in
-            context.fill(Self.blindPlaceholderWaveformPath(in: size), with: .foreground)
+            guard isRenderable, let extent = LaneWaveformRenderer.trackExtent(
+                width: size.width, trackStart: trackStart, trackDuration: trackDuration,
+                visibleStart: visibleStart, visibleSpan: visibleSpan
+            ) else { return }
+            // The stroke sits inside the extent, and the start clears the
+            // lane's masked first point (`TimelineLeadingEdgeMask`), so a
+            // track starting at 0:00 keeps its left edge.
+            let startX = extent.lowerBound + TimelineLeadingEdgeMask.width + 0.5
+            let rect = CGRect(x: startX, y: 0.5, width: max(extent.upperBound - 0.5 - startX, 0), height: size.height - 1)
+            let band = Path(roundedRect: rect, cornerRadius: 4)
+            let color = Color(nsColor: PlaylistRowPalette.warningFill)
+            context.fill(band, with: .color(color.opacity(isActive ? 0.16 : 0.10)))
+            context.stroke(band, with: .color(color.opacity(0.6)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+        }
+        .accessibilityLabel("File not found")
+    }
+
+    /// Base tint for the masked-lane treatments: the same active/inactive
+    /// distinction as the real envelope, muted further so the lane reads as a
+    /// placeholder rather than data.
+    private var blindTint: Color {
+        isActive ? Theme.primary : Theme.waveformInactive
+    }
+
+    /// The blind branch: a redaction-bar diagonal hatch, static Canvas
+    /// drawing (no animation, no async/cached image — same rule as the
+    /// real-waveform branch).
+    private var blindHatch: some View {
+        Canvas { context, size in
+            guard size.width > 0, size.height > 0 else { return }
+            let rect = CGRect(origin: .zero, size: size)
+            let band = Path(roundedRect: rect, cornerRadius: 4)
+            context.fill(band, with: .color(blindTint.opacity(0.08)))
+
+            context.clip(to: band)
+            context.fill(Self.hatchPath(in: size), with: .color(blindTint.opacity(0.30)))
         }
         .accessibilityLabel("Masked waveform")
     }
 
-    private static func blindPlaceholderWaveformPath(in size: CGSize) -> Path {
-        guard size.width > 0, size.height > 0 else { return Path() }
-
-        let sampleCount = max(Int(size.width / 6), 12)
-        let midline = size.height / 2
-        let minHalfHeight: CGFloat = 1.2
-        var top: [CGPoint] = []
-        top.reserveCapacity(sampleCount + 1)
-
-        for index in 0...sampleCount {
-            let t = CGFloat(index) / CGFloat(sampleCount)
-            let wave = 0.48
-                + 0.24 * sin(t * .pi * 6.0)
-                + 0.16 * sin(t * .pi * 17.0 + 0.8)
-                + 0.08 * sin(t * .pi * 31.0 + 1.7)
-            let envelope = 0.55 + 0.45 * sin(t * .pi)
-            let halfHeight = max(minHalfHeight, min(0.92, wave * envelope) * midline)
-            top.append(CGPoint(x: t * size.width, y: midline - halfHeight))
-        }
-
+    private static func hatchPath(in size: CGSize) -> Path {
+        let period: CGFloat = 12
+        let stripeWidth: CGFloat = 4
+        let h = size.height
         var path = Path()
-        guard let first = top.first else { return path }
-        path.move(to: first)
-        for point in top.dropFirst() {
-            path.addLine(to: point)
+        // Each stripe runs bottom-left to top-right, offset by `h` so it
+        // covers the band edge to edge.
+        var x = -h
+        while x < size.width + period {
+            path.move(to: CGPoint(x: x, y: h))
+            path.addLine(to: CGPoint(x: x + h, y: 0))
+            path.addLine(to: CGPoint(x: x + h + stripeWidth, y: 0))
+            path.addLine(to: CGPoint(x: x + stripeWidth, y: h))
+            path.closeSubpath()
+            x += period
         }
-        for point in top.reversed() {
-            path.addLine(to: CGPoint(x: point.x, y: midline + (midline - point.y)))
-        }
-        path.closeSubpath()
         return path
     }
 
@@ -4790,6 +4298,21 @@ private struct WaveformLaneView: View, Equatable {
 /// a `Canvas`'s `GraphicsContext` during the frame's render pass (WP-7 — no
 /// async pipeline, no cached `NSImage`).
 enum LaneWaveformRenderer {
+    /// The x range a track covers in a lane `width` wide showing
+    /// `visibleStart ..< visibleStart + visibleSpan`, clamped a point past
+    /// each edge; `nil` when it is off screen.
+    static func trackExtent(
+        width: CGFloat, trackStart: TimeInterval, trackDuration: TimeInterval,
+        visibleStart: TimeInterval, visibleSpan: TimeInterval
+    ) -> ClosedRange<CGFloat>? {
+        guard width > 0, visibleSpan > 0, trackDuration > 0 else { return nil }
+        let scale = Double(width) / visibleSpan
+        let start = CGFloat((trackStart - visibleStart) * scale)
+        let end = CGFloat((trackStart + trackDuration - visibleStart) * scale)
+        guard end > 0, start < width else { return nil }
+        return max(start, -1)...min(end, width + 1)
+    }
+
     #if DEBUG
     private static let renderLog = Logger(subsystem: "com.nigelwarren.Takes", category: "waveform-render")
     #endif
@@ -4951,8 +4474,10 @@ enum LaneWaveformRenderer {
         return path
     }
 }
-/// The playhead's visual layer: the grabber and the line, hosted in an AppKit
-/// layer tree and moved by ONE `CABasicAnimation` per transport anchor event.
+
+/// One half of the playhead's visual layer (`PlayheadPart`): the grabber or
+/// the line, hosted in an AppKit layer tree and moved by ONE
+/// `CABasicAnimation` per transport anchor event.
 ///
 /// SwiftUI animations on macOS interpolate on the main thread every frame, so
 /// both a `TimelineView`-driven playhead and a SwiftUI-animated offset cost
@@ -4963,18 +4488,16 @@ enum LaneWaveformRenderer {
 /// thread does zero playhead work. Hit testing is disabled by the caller;
 /// interaction lives in the scrub strip.
 private struct TimelinePlayheadVisual: NSViewRepresentable {
+    var part: PlayheadPart
     var currentX: CGFloat
     var endX: CGFloat
     var remaining: TimeInterval
     var isPlaying: Bool
-    var infoWidth: CGFloat
-    var sectionHeight: CGFloat
-    var waveformWidth: CGFloat
-    var seatBottom: CGFloat
-    var laneAreaHeight: CGFloat
+    /// The line's length; the grabber ignores it.
+    var height: CGFloat
 
     func makeNSView(context: Context) -> PlayheadLayerView {
-        PlayheadLayerView()
+        PlayheadLayerView(part: part)
     }
 
     func updateNSView(_ view: PlayheadLayerView, context: Context) {
@@ -4983,10 +4506,17 @@ private struct TimelinePlayheadVisual: NSViewRepresentable {
             endX: endX,
             remaining: remaining,
             isPlaying: isPlaying,
-            seatBottom: seatBottom,
-            lineHeight: max(min(laneAreaHeight, sectionHeight - seatBottom), 0)
+            lineHeight: height
         )
     }
+}
+
+/// The two halves of the playhead, hosted in separate layer views so the
+/// lane strips can sit between them: the grabber over the ruler, the line
+/// beneath the strips.
+enum PlayheadPart {
+    case grabber
+    case line
 }
 
 /// Layer-backed host for the playhead visuals. The grabber art is the SwiftUI
@@ -4994,7 +4524,8 @@ private struct TimelinePlayheadVisual: NSViewRepresentable {
 /// layer's contents, so the art stays identical to the rest of the design
 /// system without any per-frame SwiftUI involvement.
 final class PlayheadLayerView: NSView {
-    /// Zero-size anchor layer that carries the line and grabber; the slide
+    let part: PlayheadPart
+    /// Zero-size anchor layer that carries the line or the grabber; the slide
     /// animation moves only this layer's x position.
     private let carrier = CALayer()
     private let line = CALayer()
@@ -5010,22 +4541,21 @@ final class PlayheadLayerView: NSView {
     private var lastEndX: CGFloat = 0
     private var lastRemaining: TimeInterval = 0
     private var lastIsPlaying = false
-    private var lastSeatBottom: CGFloat = 0
     private var lastLineHeight: CGFloat = 0
     /// Host time the current tween was seated at, so re-seats (appearance or
     /// layout changes mid-playback) can re-derive where the playhead is now.
     private var seatedAt: CFTimeInterval = 0
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    init(part: PlayheadPart) {
+        self.part = part
+        super.init(frame: .zero)
         wantsLayer = true
         layer?.masksToBounds = true
         carrier.anchorPoint = .zero
         carrier.bounds = .zero
         line.anchorPoint = .zero
         grabber.anchorPoint = .zero
-        carrier.addSublayer(line)
-        carrier.addSublayer(grabber)
+        carrier.addSublayer(part == .line ? line : grabber)
         layer?.addSublayer(carrier)
     }
 
@@ -5046,14 +4576,12 @@ final class PlayheadLayerView: NSView {
         endX: CGFloat,
         remaining: TimeInterval,
         isPlaying: Bool,
-        seatBottom: CGFloat,
         lineHeight: CGFloat
     ) {
         lastCurrentX = currentX
         lastEndX = endX
         lastRemaining = remaining
         lastIsPlaying = isPlaying
-        lastSeatBottom = seatBottom
         lastLineHeight = lineHeight
         seatedAt = CACurrentMediaTime()
         seat()
@@ -5063,13 +4591,17 @@ final class PlayheadLayerView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        line.frame = CGRect(x: -1, y: lastSeatBottom, width: 2, height: lastLineHeight)
-        grabber.frame = CGRect(
-            x: -ContentView.playheadHandleWidth / 2 - Self.grabberPadding,
-            y: lastSeatBottom - ContentView.playheadHandleHeight - Self.grabberPadding,
-            width: ContentView.playheadHandleWidth + Self.grabberPadding * 2,
-            height: ContentView.playheadHandleHeight + Self.grabberPadding * 2
-        )
+        switch part {
+        case .line:
+            // Inside the lanes' scroll content, which starts at the ruler's
+            // bottom edge.
+            line.frame = PlayheadGeometry.lineFrame(lineHeight: lastLineHeight)
+        case .grabber:
+            grabber.frame = PlayheadGeometry.grabberFrame(
+                seatBottom: CompareLaneLayout.seatBottom,
+                padding: Self.grabberPadding
+            )
+        }
 
         carrier.removeAnimation(forKey: "slide")
         if lastIsPlaying, lastRemaining > 0, lastEndX != lastCurrentX {
@@ -5107,15 +4639,18 @@ final class PlayheadLayerView: NSView {
     }
 
     private func refreshAppearanceDependentContent() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            line.backgroundColor = NSColor(Theme.secondary).cgColor
+        guard part == .grabber else {
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                line.backgroundColor = NSColor(Theme.secondary).cgColor
+            }
+            return
         }
 
         let renderer = ImageRenderer(
             content: PlayheadGrabberArt()
                 .frame(
-                    width: ContentView.playheadHandleWidth,
-                    height: ContentView.playheadHandleHeight
+                    width: PlayheadGeometry.handleWidth,
+                    height: PlayheadGeometry.handleHeight
                 )
                 .padding(Self.grabberPadding)
                 .environment(\.colorScheme, effectiveAppearance.isDark ? .dark : .light)

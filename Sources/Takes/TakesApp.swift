@@ -143,6 +143,20 @@ final class AppFileOpenRouter {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let fileOpenRouter = AppFileOpenRouter()
+    var flushWorkspaceBeforeTermination: (@MainActor () async -> Bool)?
+    private var terminationInProgress = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let flushWorkspaceBeforeTermination else { return .terminateNow }
+        guard !terminationInProgress else { return .terminateLater }
+        terminationInProgress = true
+        Task { @MainActor in
+            let saved = await flushWorkspaceBeforeTermination()
+            if !saved { terminationInProgress = false }
+            sender.reply(toApplicationShouldTerminate: saved)
+        }
+        return .terminateLater
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -210,94 +224,52 @@ final class RemotePlaybackCommandController: ObservableObject {
         let command: MPRemoteCommand
         let target: Any
     }
-
-    private weak var controller: PlaybackController?
+    private weak var coordinator: PlaylistCoordinator?
     private let commandCenter: MPRemoteCommandCenter
     private let nowPlayingInfoCenter: MPNowPlayingInfoCenter
     private var commandTargets: [CommandTarget] = []
 
-    init(
-        commandCenter: MPRemoteCommandCenter = .shared(),
-        nowPlayingInfoCenter: MPNowPlayingInfoCenter = .default()
-    ) {
+    init(commandCenter: MPRemoteCommandCenter = .shared(), nowPlayingInfoCenter: MPNowPlayingInfoCenter = .default()) {
         self.commandCenter = commandCenter
         self.nowPlayingInfoCenter = nowPlayingInfoCenter
     }
 
-    func connect(to controller: PlaybackController) {
-        guard self.controller == nil else { return }
-        self.controller = controller
+    func connect(to coordinator: PlaylistCoordinator) {
+        guard self.coordinator == nil else { return }
+        self.coordinator = coordinator
         configureCommands()
         refreshRemoteState()
     }
 
-    /// Push the current transport snapshot to the system, re-arming
-    /// observation so the next transport change (play/pause/seek/track
-    /// switch/loop wrap) pushes again. The snapshot deliberately has no
-    /// dependency on per-tick state, so this does not run during steady
-    /// playback — the system extrapolates position from elapsed + rate.
     private func refreshRemoteState() {
-        guard let controller else { return }
-        let snapshot = withObservationTracking {
-            controller.remotePlaybackSnapshot()
+        guard let coordinator else { return }
+        let state = withObservationTracking {
+            var snapshot = coordinator.controller.remotePlaybackSnapshot()
+            let item = coordinator.workspace.items.first { $0.id == coordinator.currentItemID }
+            let version = item?.versions.first { $0.id == coordinator.currentVersionID }
+            if coordinator.mode == .playlist {
+                snapshot.title = item?.title ?? "Takes"
+                snapshot.trackCount = coordinator.workspace.items.count
+                snapshot.trackNumber = coordinator.workspace.items.firstIndex { $0.id == coordinator.currentItemID }.map { $0 + 1 }
+            }
+            return (snapshot, coordinator.canNext, coordinator.canPrevious,
+                    coordinator.mode == .playlist ? version?.metadata.artist : nil,
+                    coordinator.mode == .playlist ? version?.metadata.album : nil)
         } onChange: { [weak self] in
-            Task { @MainActor in
-                self?.refreshRemoteState()
-            }
+            Task { @MainActor in self?.refreshRemoteState() }
         }
-        updateRemoteState(with: snapshot)
-    }
-
-    private func configureCommands() {
-        addHandler(to: commandCenter.playCommand) { [weak self] in
-            guard let controller = self?.controller, controller.session.isPlayable else { return }
-            controller.play()
-        }
-        addHandler(to: commandCenter.pauseCommand) { [weak self] in
-            guard let controller = self?.controller, controller.session.isPlaying else { return }
-            controller.pause()
-        }
-        addHandler(to: commandCenter.togglePlayPauseCommand) { [weak self] in
-            guard let controller = self?.controller, controller.session.isPlayable else { return }
-            controller.session.isPlaying ? controller.pause() : controller.play()
-        }
-        addHandler(to: commandCenter.nextTrackCommand) { [weak self] in
-            guard let controller = self?.controller, controller.session.canSwitchPlayback else { return }
-            controller.selectNextTrack()
-        }
-        addHandler(to: commandCenter.previousTrackCommand) { [weak self] in
-            guard let controller = self?.controller, controller.session.canSwitchPlayback else { return }
-            controller.selectPreviousTrack()
-        }
-    }
-
-    private func addHandler(to command: MPRemoteCommand, perform action: @escaping @MainActor () -> Void) {
-        let target = command.addTarget { _ in
-            Task { @MainActor in
-                action()
-            }
-            return .success
-        }
-        commandTargets.append(CommandTarget(command: command, target: target))
-    }
-
-    private func updateRemoteState(with snapshot: PlaybackController.RemotePlaybackSnapshot) {
-        commandCenter.playCommand.isEnabled = snapshot.isPlayable && !snapshot.isPlaying
+        let snapshot = state.0
+        commandCenter.playCommand.isEnabled = coordinator.canPlay && !snapshot.isPlaying
         commandCenter.pauseCommand.isEnabled = snapshot.isPlayable && snapshot.isPlaying
-        commandCenter.togglePlayPauseCommand.isEnabled = snapshot.isPlayable
-        commandCenter.nextTrackCommand.isEnabled = snapshot.canSwitchPlayback
-        commandCenter.previousTrackCommand.isEnabled = snapshot.canSwitchPlayback
-
-        if snapshot.isPlayable {
-            nowPlayingInfoCenter.nowPlayingInfo = nowPlayingInfo(for: snapshot)
-            nowPlayingInfoCenter.playbackState = snapshot.isPlaying ? .playing : .paused
-        } else {
+        commandCenter.togglePlayPauseCommand.isEnabled = coordinator.canPlay
+        commandCenter.nextTrackCommand.isEnabled = state.1
+        commandCenter.previousTrackCommand.isEnabled = state.2
+        commandCenter.changePlaybackPositionCommand.isEnabled = snapshot.isPlayable
+        guard snapshot.isPlayable else {
             nowPlayingInfoCenter.nowPlayingInfo = nil
             nowPlayingInfoCenter.playbackState = .stopped
+            return
         }
-    }
-
-    private func nowPlayingInfo(for snapshot: PlaybackController.RemotePlaybackSnapshot) -> [String: Any] {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: snapshot.title,
             MPMediaItemPropertyPlaybackDuration: snapshot.duration,
@@ -305,144 +277,372 @@ final class RemotePlaybackCommandController: ObservableObject {
             MPNowPlayingInfoPropertyPlaybackRate: snapshot.isPlaying ? 1.0 : 0.0,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue
         ]
-
-        if let trackNumber = snapshot.trackNumber {
-            info[MPMediaItemPropertyAlbumTrackNumber] = trackNumber
+        if let number = snapshot.trackNumber {
+            info[MPMediaItemPropertyAlbumTrackNumber] = number
             info[MPMediaItemPropertyAlbumTrackCount] = snapshot.trackCount
         }
+        if let artist = state.3 { info[MPMediaItemPropertyArtist] = artist }
+        if let album = state.4 { info[MPMediaItemPropertyAlbumTitle] = album }
+        nowPlayingInfoCenter.nowPlayingInfo = info
+        nowPlayingInfoCenter.playbackState = snapshot.isPlaying ? .playing : .paused
+    }
 
-        return info
+    private func configureCommands() {
+        addHandler(to: commandCenter.playCommand) { [weak self] in self?.coordinator?.play() }
+        addHandler(to: commandCenter.pauseCommand) { [weak self] in self?.coordinator?.pause() }
+        addHandler(to: commandCenter.togglePlayPauseCommand) { [weak self] in self?.coordinator?.togglePlayback() }
+        addHandler(to: commandCenter.nextTrackCommand) { [weak self] in self?.coordinator?.next() }
+        addHandler(to: commandCenter.previousTrackCommand) { [weak self] in self?.coordinator?.previous() }
+        let target = commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            let position = event.positionTime
+            Task { @MainActor in
+                guard let coordinator = self?.coordinator else { return }
+                coordinator.seek(to: coordinator.controller.session.playbackStart + position)
+            }
+            return .success
+        }
+        commandTargets.append(CommandTarget(command: commandCenter.changePlaybackPositionCommand, target: target))
+    }
+
+    private func addHandler(to command: MPRemoteCommand, perform action: @escaping @MainActor () -> Void) {
+        let target = command.addTarget { _ in
+            Task { @MainActor in action() }
+            return .success
+        }
+        commandTargets.append(CommandTarget(command: command, target: target))
     }
 }
 
+/// Main-window geometry for the A2 cover-column layout
+/// (docs/a2-redesign-spec.md §2).
+///
+/// One window serves playlist and comparison. It opens 360 pt wide in both
+/// modes, which share the same width. The artwork toggle, mode switches and
+/// track fitting keep the top edge in place when the window changes height.
 enum TakesWindowPolicy {
     static let mainWindowID = "main"
     static let analysisWindowID = "analysis"
     static let comparisonWindowID = "comparison"
     static let replacesDefaultNewItemCommands = true
-    static let mainWindowFrameAutosaveName = "NSWindow Frame \(mainWindowID)"
-    static let minimumContentWidth: CGFloat = 640
-    static let defaultWindowWidth: CGFloat = 700
-    static let trackInfoColumnWidthKey = "trackInfoColumnWidth"
-    static let defaultTrackInfoColumnWidth: CGFloat = 240
-    static let minimumTrackInfoColumnWidth: CGFloat = defaultTrackInfoColumnWidth - 10
-    static let minimumWaveformColumnWidth: CGFloat = 240
-    static let trackRowHeight: CGFloat = 96
-    static let trackTimelineDividerHeight: CGFloat = 1
-    static let trackTimelineHeaderHeight: CGFloat = 34
-    static let contentPadding: CGFloat = 0
-    static let timelineHeaderSpacing: CGFloat = 1
-    // Play button / readout (56) + vertical padding (20 top + 16 bottom,
-    // optically shifted 2pt below true center).
-    static let controlBarReservedHeight: CGFloat = 92
-    static let minimumContentHeight = contentHeight(displayingTrackRows: 1)
-    static let defaultContentHeight = contentHeight(displayingTrackRows: 1)
-    // The root view ignores the top safe area, so the control bar occupies
-    // the hidden-titlebar region and the window adds no extra chrome height.
-    static let windowChromeHeight: CGFloat = 0
+    /// The frame is saved under an A2-specific name so a pre-A2 frame (640 pt
+    /// or wider, sized per mode) is not restored into the cover-column layout.
+    static let mainWindowFrameAutosaveName = "main.a2"
+    static let mainWindowFrameDefaultsKey = "NSWindow Frame \(mainWindowFrameAutosaveName)"
+    /// Pre-A2 keys for the playlist frame, the comparison's per-window
+    /// autosave, and the comparison's track-info column width (removed with
+    /// the column in A2 milestone 4). No longer read; removed on launch.
+    static let retiredLayoutDefaultsKeys = ["playlistWindowFrame", "NSWindow Frame main", "trackInfoColumnWidth",
+                                            retiredCompareHeightDefaultsKey]
+
+    // MARK: Window size
+
+    static let defaultWidth: CGFloat = 360
+    static let minimumWidth = ControlBarMetrics.minimumWidth
+    static let artworkResizeDuration: TimeInterval = 0.24
+    /// Control-bar top padding under the cover.
+    static let controlBarTopPaddingBelowArtwork: CGFloat = 12
+    /// Control-bar top padding when the titlebar overlays the bar, so the
+    /// transport buttons clear the window buttons and the artwork toggle.
+    static let controlBarTopPaddingUnderTitlebar: CGFloat = 24
+    /// The cover is square when there is room. At wide, short frames it fits
+    /// above the same controls and minimum content area.
+    static func artworkHeight(in size: CGSize, reserving heightBelowArtwork: CGFloat = minimumHeightBelowArtwork) -> CGFloat {
+        max(min(size.width, size.height - heightBelowArtwork), 0)
+    }
+
+    static func artworkCollapseHeight(coverHeight: CGFloat) -> CGFloat {
+        max(coverHeight - (controlBarTopPaddingUnderTitlebar - controlBarTopPaddingBelowArtwork), 0)
+    }
+
+    /// For a full toggle the window itself drives the reveal. When the screen
+    /// clamps its travel, the cover still needs to slide the full distance.
+    struct ArtworkResize: Equatable {
+        let shownFrame: CGRect
+        let hiddenFrame: CGRect
+        let heightBelowArtwork: CGFloat
+        var showsArtwork: Bool
+
+        init(from frame: CGRect, showsArtwork: Bool, visibleFrame: CGRect,
+             heightBelowArtwork: CGFloat = minimumHeightBelowArtwork,
+             hiddenMinimumHeight: CGFloat = minimumHeightWithoutArtwork) {
+            let target = frameTogglingArtwork(
+                currentFrame: frame, showsArtwork: showsArtwork, visibleFrame: visibleFrame,
+                heightBelowArtwork: heightBelowArtwork, hiddenMinimumHeight: hiddenMinimumHeight
+            )
+            shownFrame = showsArtwork ? target : frame
+            hiddenFrame = showsArtwork ? frame : target
+            self.heightBelowArtwork = heightBelowArtwork
+            self.showsArtwork = showsArtwork
+        }
+
+        var targetFrame: CGRect { showsArtwork ? shownFrame : hiddenFrame }
+        var coverHeight: CGFloat { artworkHeight(in: shownFrame.size, reserving: heightBelowArtwork) }
+        var followsWindow: Bool {
+            let travel = shownFrame.height - hiddenFrame.height
+            return travel > 0 && abs(travel - artworkCollapseHeight(coverHeight: coverHeight)) < 1
+        }
+
+        func fraction(at windowHeight: CGFloat) -> CGFloat {
+            guard followsWindow else { return showsArtwork ? 1 : 0 }
+            let progress = (windowHeight - hiddenFrame.height) / (shownFrame.height - hiddenFrame.height)
+            return min(max(progress, 0), 1)
+        }
+    }
+    static let defaultHeightWithArtwork: CGFloat = 760
+    /// Room below the cover at the minimum height (A2 milestone 5, §13, and
+    /// the compare info-bar variant): the compare control bar, its title
+    /// bar, the ruler, one whole lane and the bottom bar (91 + 32 + 22 + 96
+    /// + 30 = 271 pt). The playlist's control bar is 51 pt taller, which
+    /// leaves its list two rows and part of a third.
+    static let minimumHeightWithoutArtwork: CGFloat = compareControlBarHeight(showsArtwork: false)
+        + CompareInfoBarMetrics.height + CompareLaneLayout.seatBottom + CompareLaneLayout.laneStep
+        + BottomBarMetrics.height
+    static let minimumHeightBelowArtwork = minimumHeightWithoutArtwork
+        - (controlBarTopPaddingUnderTitlebar - controlBarTopPaddingBelowArtwork)
+
+    static func controlBarTopPadding(showsArtwork: Bool) -> CGFloat {
+        controlBarTopPadding(artworkFraction: showsArtwork ? 1 : 0)
+    }
+
+    static func controlBarTopPadding(artworkFraction: CGFloat) -> CGFloat {
+        controlBarTopPaddingUnderTitlebar + (controlBarTopPaddingBelowArtwork - controlBarTopPaddingUnderTitlebar) * artworkFraction
+    }
+
+    static func defaultHeight(showsArtwork: Bool) -> CGFloat {
+        showsArtwork ? defaultHeightWithArtwork : defaultHeightWithArtwork - artworkCollapseHeight(coverHeight: defaultWidth)
+    }
+
+    static func minimumHeight(showsArtwork: Bool, width: CGFloat = minimumWidth) -> CGFloat {
+        showsArtwork ? width + minimumHeightBelowArtwork : minimumHeightWithoutArtwork
+    }
+
+    static func defaultSize(showsArtwork: Bool) -> CGSize {
+        CGSize(width: defaultWidth, height: defaultHeight(showsArtwork: showsArtwork))
+    }
+
+    static func minimumSize(showsArtwork: Bool) -> CGSize {
+        CGSize(width: minimumWidth, height: minimumHeight(showsArtwork: showsArtwork))
+    }
+
     // The hidden titlebar still reports a top safe-area inset, and
     // NSHostingView adds that inset to the root view's declared minimum height
     // when it enforces the window's minimum size — even though the root view
     // ignores the inset and lays out under the titlebar. Declare the SwiftUI
     // minimum short by the inset so the enforced window minimum lands exactly
-    // on `minimumContentHeight`.
+    // on the window policy's minimum.
     static let hiddenTitlebarSafeAreaInset: CGFloat = 28
-    static let rootViewMinimumHeight = minimumContentHeight - hiddenTitlebarSafeAreaInset
-    static let defaultWindowHeight = defaultContentHeight + windowChromeHeight
-    static let minimumWindowSize = CGSize(
-        width: minimumContentWidth,
-        height: minimumContentHeight + windowChromeHeight
-    )
-    static let defaultWindowSize = CGSize(
-        width: defaultWindowWidth,
-        height: defaultWindowHeight
-    )
 
-    static func trackTimelineHeight(displayingTrackRows rowCount: Int) -> CGFloat {
-        let rowCount = max(rowCount, 1)
-        let dividerCount = max(rowCount - 1, 0)
-        return trackRowHeight * CGFloat(rowCount) + trackTimelineDividerHeight * CGFloat(dividerCount)
+    @MainActor
+    static func heightBelowArtwork(for visibility: WorkspaceVisibility, isComparison: Bool) -> CGFloat {
+        if visibility.showsPlaylist {
+            return minimumHeight(showsArtwork: visibility.showsArtwork, width: 0)
+                - (visibility.showsPlayer ? 0 : playerHeightWithoutDivider(showsArtwork: visibility.showsArtwork, isComparison: true))
+        }
+        guard visibility.showsPlayer else { return 0 }
+        return playerHeightWithoutDivider(showsArtwork: visibility.showsArtwork, isComparison: isComparison)
     }
 
-    static func clampedTrackInfoColumnWidth(_ width: CGFloat, sectionWidth: CGFloat) -> CGFloat {
-        let maximumWidth = max(minimumTrackInfoColumnWidth, sectionWidth - minimumWaveformColumnWidth)
-        return min(max(width, minimumTrackInfoColumnWidth), maximumWidth)
+    /// The divider belongs to the lower content when the player is hidden.
+    @MainActor
+    static func playerHeightWithoutDivider(showsArtwork: Bool, isComparison: Bool) -> CGFloat {
+        let barHeight = isComparison ? compareControlBarHeight(showsArtwork: showsArtwork)
+            : playlistControlBarHeight(showsArtwork: showsArtwork)
+        return barHeight - ControlBarDivider.height
     }
 
-    static func contentHeight(displayingTrackRows rowCount: Int) -> CGFloat {
-        contentPadding * 2
-            + controlBarReservedHeight
-            + trackTimelineHeaderHeight
-            + timelineHeaderSpacing
-            + trackTimelineHeight(displayingTrackRows: rowCount)
+    @MainActor
+    static func minimumSize(for visibility: WorkspaceVisibility, isComparison: Bool) -> CGSize {
+        let cover = visibility.showsArtwork ? minimumWidth : 0
+        return CGSize(width: minimumWidth, height: cover + heightBelowArtwork(for: visibility, isComparison: isComparison))
     }
 
-    static func windowHeight(displayingTrackRows rowCount: Int) -> CGFloat {
-        contentHeight(displayingTrackRows: rowCount) + windowChromeHeight
+    @MainActor
+    static func defaultSize(for visibility: WorkspaceVisibility) -> CGSize {
+        let height = visibility.showsPlaylist
+            ? defaultHeight(showsArtwork: visibility.showsArtwork)
+                - (visibility.showsPlayer ? 0 : playerHeightWithoutDivider(showsArtwork: visibility.showsArtwork, isComparison: false))
+            : (visibility.showsArtwork ? defaultWidth : 0) + heightBelowArtwork(for: visibility, isComparison: false)
+        return CGSize(width: defaultWidth, height: height)
     }
 
-    static func frame(fittingTrackRows rowCount: Int, currentFrame: CGRect, visibleFrame: CGRect) -> CGRect {
-        let desiredHeight = windowHeight(displayingTrackRows: rowCount)
-        let maximumHeightBeforeMonitorBottom = max(currentFrame.maxY - visibleFrame.minY, 0)
-        let height = min(desiredHeight, maximumHeightBeforeMonitorBottom)
+    // MARK: Comparison
 
+    /// The compare control bar's height with the artwork shown (12 + 56 +
+    /// 10 + 1 divider; no readout): the import highlight's starting inset
+    /// until the bar's measured height arrives. The info bar, ruler and
+    /// lanes below it are sized by `CompareInfoBarMetrics` and `CompareLaneLayout`.
+    static let controlBarReservedHeight = controlBarTopPaddingBelowArtwork
+        + ControlBarMetrics.primaryDiameter + ControlBarMetrics.transportRowBottomPadding + ControlBarDivider.height
+
+    /// The compare control bar's height: 79 pt under the cover, 91 under
+    /// the titlebar, whose overlay adds 12 pt of top padding.
+    static func compareControlBarHeight(showsArtwork: Bool) -> CGFloat {
+        controlBarReservedHeight - controlBarTopPaddingBelowArtwork + controlBarTopPadding(showsArtwork: showsArtwork)
+    }
+
+    // MARK: Fitting content
+
+    /// The playlist control bar's height: compare's plus the readout row
+    /// (51 pt): 130 pt under the cover, 142 under the titlebar.
+    @MainActor
+    static func playlistControlBarHeight(showsArtwork: Bool) -> CGFloat {
+        compareControlBarHeight(showsArtwork: showsArtwork) - ControlBarMetrics.transportRowBottomPadding
+            + ControlBarMetrics.readoutTopSpacing + PlaylistControlBarReadout.height + ControlBarMetrics.readoutBottomPadding
+    }
+
+    /// The window height that shows every row of the playlist table without
+    /// scrolling, never below the minimum.
+    @MainActor
+    static func playlistFittingHeight(itemRows: Int, versionRows: Int, showsArtwork: Bool, width: CGFloat) -> CGFloat {
+        let list = PlaylistRowMetrics.listVerticalInset * 2
+            + PlaylistRowMetrics.itemHeight * CGFloat(itemRows)
+            + PlaylistRowMetrics.versionHeight * CGFloat(versionRows)
+        let height = (showsArtwork ? width : 0) + playlistControlBarHeight(showsArtwork: showsArtwork)
+            + list + BottomBarMetrics.height
+        return max(height, minimumHeight(showsArtwork: showsArtwork, width: width))
+    }
+
+    /// The window height that shows every compare lane without scrolling:
+    /// the minimum holds one lane, and each further lane adds a lane step.
+    static func compareFittingHeight(laneCount: Int, showsArtwork: Bool, width: CGFloat) -> CGFloat {
+        minimumHeight(showsArtwork: showsArtwork, width: width) + CGFloat(max(laneCount, 1) - 1) * CompareLaneLayout.laneStep
+    }
+
+    /// v2.9.0's resize on adding and removing tracks, for either mode.
+    /// Adding tracks grows a window too short to show them all; removing
+    /// tracks shrinks a window taller than the rest need. Otherwise the
+    /// window keeps its size, so a window the user made taller stays taller
+    /// as tracks are added. The top edge stays put, and growth stops at the
+    /// bottom of the screen. Returns `nil` when the frame should not change.
+    static func frameFittingContent(
+        previousTrackCount: Int,
+        newTrackCount: Int,
+        fittingHeight: CGFloat,
+        currentFrame: CGRect,
+        visibleFrame: CGRect
+    ) -> CGRect? {
+        let grows = newTrackCount > previousTrackCount && fittingHeight > currentFrame.height + 0.5
+        let shrinks = newTrackCount < previousTrackCount && fittingHeight < currentFrame.height - 0.5
+        guard grows || shrinks else { return nil }
+        let height = min(fittingHeight, max(currentFrame.maxY - visibleFrame.minY, 0))
+        guard grows ? height > currentFrame.height + 0.5 : height < currentFrame.height - 0.5 else { return nil }
+        return CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: currentFrame.width, height: height)
+    }
+
+    // MARK: Mode heights
+
+    /// The playlist remembers its window height; compare doesn't, and sizes
+    /// to its lanes instead (`compareFittingHeight`). The height is stored
+    /// without the cover and normalized to include the player, so one stored
+    /// height works with either visibility setting and at a different width.
+    static let playlistHeightDefaultsKey = "main.a2.height.playlist"
+    /// Written by an earlier build, when compare remembered its height too.
+    static let retiredCompareHeightDefaultsKey = "main.a2.height.compare"
+
+    static func storedPlaylistHeight(defaults: UserDefaults = .standard) -> CGFloat? {
+        guard let value = defaults.object(forKey: playlistHeightDefaultsKey) as? Double, value > 0 else { return nil }
+        return CGFloat(value)
+    }
+
+    static func storePlaylistHeight(_ size: CGSize, showsArtwork: Bool,
+                                    heightBelowArtwork: CGFloat = minimumHeightBelowArtwork,
+                                    playerHeightReduction: CGFloat = 0, defaults: UserDefaults = .standard) {
+        let coverHeight = showsArtwork ? artworkHeight(in: size, reserving: heightBelowArtwork) : 0
+        let height = size.height - artworkCollapseHeight(coverHeight: coverHeight) + playerHeightReduction
+        defaults.set(Double(max(height, minimumHeightWithoutArtwork)), forKey: playlistHeightDefaultsKey)
+    }
+
+    /// The frame for the stored playlist height: the cover added back when
+    /// shown. `nil` when the height is unchanged.
+    static func frameRestoringPlaylistHeight(_ storedHeight: CGFloat, showsArtwork: Bool,
+                                             currentFrame: CGRect, visibleFrame: CGRect) -> CGRect? {
+        let height = playlistHeight(restoring: storedHeight, coverWidth: showsArtwork ? currentFrame.width : 0)
+        return frameSettingHeight(height, showsArtwork: showsArtwork, currentFrame: currentFrame, visibleFrame: visibleFrame)
+    }
+
+    static func playlistHeight(restoring storedHeight: CGFloat, coverWidth: CGFloat) -> CGFloat {
+        max(storedHeight, minimumHeightWithoutArtwork) + artworkCollapseHeight(coverHeight: coverWidth)
+    }
+
+    /// A frame of the given window height: never below the minimum, top edge
+    /// fixed, and no lower than the bottom of the screen. Entering compare
+    /// uses it with `compareFittingHeight`, growing or shrinking to the
+    /// lanes. `nil` when the height is unchanged.
+    static func frameSettingHeight(_ windowHeight: CGFloat, showsArtwork: Bool,
+                                   currentFrame: CGRect, visibleFrame: CGRect) -> CGRect? {
+        frameSettingHeight(windowHeight, minimum: minimumHeight(showsArtwork: showsArtwork),
+                           currentFrame: currentFrame, visibleFrame: visibleFrame)
+    }
+
+    static func frameSettingHeight(_ windowHeight: CGFloat, minimum: CGFloat,
+                                   currentFrame: CGRect, visibleFrame: CGRect) -> CGRect? {
+        let height = max(min(max(windowHeight, minimum), currentFrame.maxY - visibleFrame.minY), minimum)
+        guard abs(height - currentFrame.height) > 0.5 else { return nil }
+        return CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: currentFrame.width, height: height)
+    }
+
+    // MARK: Frames
+
+    /// Default size at the top-left of the visible screen.
+    static func defaultFrame(showsArtwork: Bool, visibleFrame: CGRect) -> CGRect {
+        defaultFrame(size: defaultSize(showsArtwork: showsArtwork), visibleFrame: visibleFrame)
+    }
+
+    private static func defaultFrame(size: CGSize, visibleFrame: CGRect) -> CGRect {
+        return clampedFrame(
+            CGRect(x: visibleFrame.minX, y: visibleFrame.maxY - size.height, width: size.width, height: size.height),
+            visibleFrame: visibleFrame
+        )
+    }
+
+    /// Help ▸ Debug ▸ Reset Window Size: the default width and `height`,
+    /// keeping the top-left corner. The caller turns the artwork on and
+    /// picks the mode's height (`WorkspaceView.resetWindowSize`).
+    static func frameResettingSize(currentFrame: CGRect, height: CGFloat, visibleFrame: CGRect) -> CGRect {
+        clampedFrame(
+            CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: defaultWidth, height: height),
+            visibleFrame: visibleFrame
+        )
+    }
+
+    /// Default size, keeping the top-left corner.
+    static func frameResettingSize(currentFrame: CGRect, showsArtwork: Bool, visibleFrame: CGRect) -> CGRect {
+        let size = defaultSize(showsArtwork: showsArtwork)
+        return clampedFrame(
+            CGRect(x: currentFrame.minX, y: currentFrame.maxY - size.height, width: size.width, height: size.height),
+            visibleFrame: visibleFrame
+        )
+    }
+
+    /// Showing adds room for a square cover at the current width. Hiding
+    /// removes the cover's visible height. A window that
+    /// would run off the bottom of the screen moves up only as far as needed.
+    static func frameTogglingArtwork(currentFrame: CGRect, showsArtwork: Bool, visibleFrame: CGRect,
+                                     heightBelowArtwork: CGFloat = minimumHeightBelowArtwork,
+                                     hiddenMinimumHeight: CGFloat = minimumHeightWithoutArtwork) -> CGRect {
+        let coverHeight = showsArtwork ? currentFrame.width : artworkHeight(in: currentFrame.size, reserving: heightBelowArtwork)
+        let collapseHeight = artworkCollapseHeight(coverHeight: coverHeight)
+        let delta = showsArtwork ? collapseHeight : -collapseHeight
+        let minimum = showsArtwork ? minimumWidth + heightBelowArtwork : hiddenMinimumHeight
+        let height = max(currentFrame.height + delta, minimum)
+        return clampedFrame(
+            CGRect(x: currentFrame.minX, y: currentFrame.maxY - height, width: currentFrame.width, height: height),
+            visibleFrame: visibleFrame
+        )
+    }
+
+    /// Fits a frame inside the visible screen: shrinks it if it is larger,
+    /// then shifts it the least distance that brings it fully on screen.
+    static func clampedFrame(_ frame: CGRect, visibleFrame: CGRect) -> CGRect {
+        let width = min(frame.width, visibleFrame.width)
+        let height = min(frame.height, visibleFrame.height)
         return CGRect(
-            x: currentFrame.minX,
-            y: currentFrame.maxY - height,
-            width: currentFrame.width,
+            x: min(max(frame.minX, visibleFrame.minX), visibleFrame.maxX - width),
+            y: min(max(frame.maxY - height, visibleFrame.minY), visibleFrame.maxY - height),
+            width: width,
             height: height
         )
-    }
-
-    static func defaultFrame(visibleFrame: CGRect) -> CGRect {
-        CGRect(
-            x: visibleFrame.minX,
-            y: visibleFrame.maxY - defaultWindowSize.height,
-            width: defaultWindowSize.width,
-            height: defaultWindowSize.height
-        )
-    }
-
-    static func frameResettingHeight(currentFrame: CGRect, visibleFrame: CGRect) -> CGRect {
-        let height = min(defaultWindowHeight, max(currentFrame.maxY - visibleFrame.minY, 0))
-        return CGRect(
-            x: currentFrame.minX,
-            y: currentFrame.maxY - height,
-            width: currentFrame.width,
-            height: height
-        )
-    }
-
-    static func frameResettingSize(currentFrame: CGRect, visibleFrame: CGRect) -> CGRect {
-        let height = min(defaultWindowHeight, max(currentFrame.maxY - visibleFrame.minY, 0))
-        return CGRect(
-            x: currentFrame.minX,
-            y: currentFrame.maxY - height,
-            width: defaultWindowWidth,
-            height: height
-        )
-    }
-
-    static func shouldAutoGrowWindow(
-        previousTrackRowCount: Int,
-        newTrackRowCount: Int,
-        currentWindowHeight: CGFloat
-    ) -> Bool {
-        guard newTrackRowCount > previousTrackRowCount else { return false }
-
-        let desiredHeight = windowHeight(displayingTrackRows: newTrackRowCount)
-        return desiredHeight > currentWindowHeight + 0.5
-    }
-
-    static func shouldAutoShrinkWindow(
-        previousTrackRowCount: Int,
-        newTrackRowCount: Int,
-        currentWindowHeight: CGFloat
-    ) -> Bool {
-        guard newTrackRowCount < previousTrackRowCount else { return false }
-
-        let desiredHeight = windowHeight(displayingTrackRows: newTrackRowCount)
-        return desiredHeight < currentWindowHeight - 0.5
     }
 
     static func hasSavedMainWindowFrame(defaults: UserDefaults = .standard) -> Bool {
@@ -450,21 +650,26 @@ enum TakesWindowPolicy {
     }
 
     static func hasSavedMainWindowFrame(objectForKey: (String) -> Any?) -> Bool {
-        objectForKey(mainWindowFrameAutosaveName) != nil
+        objectForKey(mainWindowFrameDefaultsKey) != nil
     }
+
+    // MARK: Window configuration
 
     @MainActor
     static func configureMainWindow(
         _ window: NSWindow,
+        visibility: WorkspaceVisibility,
         defaults: UserDefaults = .standard,
         resetsLayoutForLaunch: Bool = false
     ) {
-        let hasSavedFrame = hasSavedMainWindowFrame(defaults: defaults)
-        window.minSize = minimumWindowSize
+        let minimum = minimumSize(for: visibility, isComparison: false)
+        let size = defaultSize(for: visibility)
+        let visibleFrame = visibleFrame(for: window)
+        window.minSize = minimum
 
-        // Unify the titlebar with the control bar: let content draw up
-        // behind a transparent titlebar so the top bar reads as one surface,
-        // with only the traffic lights floating over it.
+        // Content draws up behind a transparent titlebar so the cover (or,
+        // with the artwork hidden, the control bar) reaches the window's top
+        // edge, with only the window buttons and visibility toggles over it.
         window.styleMask.insert(.fullSizeContentView)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -472,46 +677,47 @@ enum TakesWindowPolicy {
         window.isMovableByWindowBackground = false
 
         guard !resetsLayoutForLaunch else {
-            resetMainWindowSize(window, animate: false)
+            let frame = frameResettingSize(currentFrame: window.frame, height: size.height, visibleFrame: visibleFrame)
+            if frame != window.frame { window.setFrame(frame, display: true) }
             return
         }
 
-        window.setFrameAutosaveName(mainWindowID)
+        retiredLayoutDefaultsKeys.forEach(defaults.removeObject(forKey:))
+        let hasSavedFrame = hasSavedMainWindowFrame(defaults: defaults)
+        window.setFrameAutosaveName(mainWindowFrameAutosaveName)
         if !hasSavedFrame {
-            let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-            window.setFrame(defaultFrame(visibleFrame: visibleFrame), display: true)
+            window.setFrame(defaultFrame(size: size, visibleFrame: visibleFrame), display: true)
         } else {
-            resetMainWindowHeight(window, animate: false)
+            // A frame saved with the other artwork state (or below the
+            // current minimum) is brought up to this state's minimum.
+            var frame = window.frame
+            frame.size.width = max(frame.width, minimum.width)
+            let height = max(frame.height, minimum.height)
+            frame.origin.y = frame.maxY - height
+            frame.size.height = height
+            window.setFrame(clampedFrame(frame, visibleFrame: visibleFrame), display: true)
         }
     }
 
     @MainActor
-    static func resizeMainWindow(_ window: NSWindow, displayingTrackRows rowCount: Int) {
-        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-        let resizedFrame = frame(
-            fittingTrackRows: rowCount,
-            currentFrame: window.frame,
-            visibleFrame: visibleFrame
-        )
-
-        guard abs(resizedFrame.height - window.frame.height) > 0.5 else { return }
-        window.setFrame(resizedFrame, display: true, animate: true)
+    static func resizeForArtwork(_ window: NSWindow, to frame: CGRect, minimumHeight: CGFloat, animate: Bool) async {
+        // Both the window and the hosting view must allow intermediate
+        // heights until the cover has finished opening.
+        window.minSize = CGSize(width: minimumWidth, height: minimumHeight)
+        if animate {
+            await NSAnimationContext.runAnimationGroup { context in
+                context.duration = artworkResizeDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                window.animator().setFrame(frame, display: true)
+            }
+        } else {
+            window.setFrame(frame, display: true)
+        }
     }
 
     @MainActor
-    static func resetMainWindowHeight(_ window: NSWindow, animate: Bool) {
-        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-        let resetFrame = frameResettingHeight(currentFrame: window.frame, visibleFrame: visibleFrame)
-        guard abs(resetFrame.height - window.frame.height) > 0.5 else { return }
-        window.setFrame(resetFrame, display: true, animate: animate)
-    }
-
-    @MainActor
-    static func resetMainWindowSize(_ window: NSWindow, animate: Bool = true) {
-        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-        let resetFrame = frameResettingSize(currentFrame: window.frame, visibleFrame: visibleFrame)
-        guard resetFrame != window.frame else { return }
-        window.setFrame(resetFrame, display: true, animate: animate)
+    static func visibleFrame(for window: NSWindow) -> CGRect {
+        window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
     }
 }
 
@@ -528,9 +734,11 @@ struct TakesLaunchOptions {
 @main
 struct TakesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var controller = PlaybackController()
+    @State private var coordinator: PlaylistCoordinator
+    @State private var persistence: PlaylistPersistenceController
+    private var controller: PlaybackController { coordinator.controller }
     @StateObject private var remotePlaybackCommands = RemotePlaybackCommandController()
-    @StateObject private var settings = AppSettings()
+    @StateObject private var settings = AppSettings.shared
     @StateObject private var updater = SoftwareUpdater()
     @StateObject private var ytdlpUpdates = YTDLPUpdateState()
     @StateObject private var zoomHaptics = ZoomHapticsController()
@@ -539,10 +747,17 @@ struct TakesApp: App {
     private let analysisWindowController = AnalysisWindowController()
     private let comparisonWindowController = ComparisonWindowController()
 
+    init() {
+        let coordinator = PlaylistCoordinator()
+        _coordinator = State(initialValue: coordinator)
+        _persistence = State(initialValue: PlaylistPersistenceController(coordinator: coordinator, store: PlaylistWorkspaceStore()))
+    }
+
     var body: some Scene {
         Window("Takes", id: TakesWindowPolicy.mainWindowID) {
-            ContentView(
-                controller: controller,
+            WorkspaceView(
+                coordinator: coordinator,
+                persistence: persistence,
                 appFileOpenRouter: appDelegate.fileOpenRouter,
                 usesTemporaryDefaultWindowLayout: launchOptions.usesDefaultWindowLayout
             )
@@ -551,13 +766,11 @@ struct TakesApp: App {
                 .environmentObject(zoomHaptics)
                 .onAppear {
                     controller.settings = settings
-                    remotePlaybackCommands.connect(to: controller)
+                    remotePlaybackCommands.connect(to: coordinator)
+                    appDelegate.flushWorkspaceBeforeTermination = { await persistence.flush() }
                 }
         }
-        .defaultSize(
-            width: TakesWindowPolicy.defaultWindowWidth,
-            height: TakesWindowPolicy.defaultWindowHeight
-        )
+        .defaultSize(TakesWindowPolicy.defaultSize(for: settings.windowVisibility))
         // Declared on the scene (not just patched onto the NSWindow later) so
         // SwiftUI sizes the hosting view full-height from creation, letting
         // the window background genuinely draw under the titlebar.
@@ -574,17 +787,11 @@ struct TakesApp: App {
                 }
             }
 
-            FileCommands()
-            PlaybackCommands(controller: controller)
-            ViewCommands(controller: controller)
+            FileCommands(coordinator: coordinator)
+            PlaylistCommands(coordinator: coordinator)
+            PlaybackCommands(coordinator: coordinator)
+            ViewCommands(coordinator: coordinator)
 
-            CommandGroup(after: .pasteboard) {
-                Button("Deselect") {
-                    controller.deselectLoop()
-                }
-                .keyboardShortcut("d", modifiers: [.command])
-                .disabled(controller.session.loopRegion == nil)
-            }
 
             CommandGroup(replacing: .help) {
                 Link("Visit Website", destination: URL(string: "https://takes.nigelwarren.com")!)
@@ -601,6 +808,7 @@ struct TakesApp: App {
                         controller: comparisonWindowController,
                         playbackController: controller
                     )
+                    .disabled(coordinator.mode.itemID == nil)
                 }
             }
         }
@@ -773,11 +981,13 @@ private struct ResetMainWindowSizeButton: View {
 }
 
 private struct FileCommands: Commands {
+    let coordinator: PlaylistCoordinator
     @FocusedValue(\.openFileCommandState) private var openFileCommandState
     @FocusedValue(\.canShowActiveTrackInFinder) private var canShowActiveTrackInFinder
     @FocusedValue(\.canRemoveActiveTrack) private var canRemoveActiveTrack
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
     @FocusedValue(\.canClearTracks) private var canClearTracks
+    @FocusedValue(\.playlistCommandContext) private var playlistContext
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -813,9 +1023,14 @@ private struct FileCommands: Commands {
             .keyboardShortcut("r", modifiers: [.shift, .command])
             .disabled(openFileCommandState == nil || canShowActiveTrackInFinder != true)
 
+            // Playlist: the selection's first missing file. Compare's lanes
+            // offer it from their strip menu.
+            Button("Locate File…") { playlistContext?.locate() }
+                .disabled(playlistContext?.locateVersionID == nil || canUseGlobalMenuShortcuts != true)
+
             Divider()
 
-            Button("Remove Track") {
+            Button(coordinator.mode.itemID == nil ? "Remove Selected Items" : "Remove Version") {
                 openFileCommandState?.removeActiveTrack()
             }
             .keyboardShortcut(.delete, modifiers: [])
@@ -825,104 +1040,119 @@ private struct FileCommands: Commands {
                     || canUseGlobalMenuShortcuts != true
             )
 
-            Button("Remove All Tracks") {
+            Button(coordinator.mode.itemID == nil ? "Clear Playlist" : "Remove All Versions") {
                 openFileCommandState?.clearAllTracks()
             }
             .keyboardShortcut(.delete, modifiers: [.command])
-            .disabled(openFileCommandState == nil || canClearTracks != true)
+            .disabled(openFileCommandState == nil || canClearTracks != true || canUseGlobalMenuShortcuts != true)
         }
     }
 }
 
 private struct PlaybackCommands: Commands {
-    var controller: PlaybackController
+    let coordinator: PlaylistCoordinator
+    private var controller: PlaybackController { coordinator.controller }
+    private var isComparison: Bool { coordinator.mode.itemID != nil }
+    @FocusedValue(\.playlistCommandContext) private var playlistContext
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
 
     var body: some Commands {
         CommandMenu("Playback") {
-            Button(controller.session.isPlaying ? "Pause" : "Play") {
-                controller.session.isPlaying ? controller.pause() : controller.play()
+            Button(coordinator.isPlaying ? "Pause" : "Play") {
+                coordinator.togglePlayback()
             }
             .keyboardShortcut(.space, modifiers: [])
-            .disabled(!controller.session.isPlayable)
+            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
-            Button("Switch Track") {
-                controller.selectNextTrack()
+            if isComparison {
+                Button("Switch Track") { coordinator.next() }
+                    .keyboardShortcut("x", modifiers: [])
+                    .disabled(!coordinator.canNext || canUseGlobalMenuShortcuts != true)
+
+                Button("Switch to Previous Track") { coordinator.previous() }
+                    .keyboardShortcut("x", modifiers: [.shift])
+                    .disabled(!coordinator.canPrevious || canUseGlobalMenuShortcuts != true)
+
+                Divider()
+
+                Button("Jump to Beginning") { coordinator.seek(to: controller.session.timelineStart) }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command])
+                    .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
+
+                Button("Jump to End") { coordinator.seek(to: controller.session.timelineEnd) }
+                    .keyboardShortcut(.rightArrow, modifiers: [.command])
+                    .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
+            } else {
+                // Standard media-player Previous/Next (`PlaylistCoordinator.previous`,
+                // `next`): Previous restarts a track past its first seconds.
+                Button("Next Track") { coordinator.next() }
+                    .keyboardShortcut(.rightArrow, modifiers: [.command])
+                    .disabled(!coordinator.canNext || canUseGlobalMenuShortcuts != true)
+
+                Button("Previous Track") { coordinator.previous() }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command])
+                    .disabled(!coordinator.canPrevious || canUseGlobalMenuShortcuts != true)
             }
-            .keyboardShortcut("x", modifiers: [])
-            .disabled(!controller.session.canSwitchPlayback)
 
-            Button("Switch to Previous Track") {
-                controller.selectPreviousTrack()
-            }
-            .keyboardShortcut("x", modifiers: [.shift])
-            .disabled(!controller.session.canSwitchPlayback)
-
-            Divider()
-
-            Button("Jump to Beginning") {
-                controller.seek(to: controller.session.timelineStart)
-            }
-            .keyboardShortcut(.leftArrow, modifiers: [.command])
-            .disabled(!controller.session.isPlayable)
-
-            Button("Jump to End") {
-                controller.seek(to: controller.session.timelineEnd)
-            }
-            .keyboardShortcut(.rightArrow, modifiers: [.command])
-            .disabled(!controller.session.isPlayable)
-
+            // Compare skips on the plain arrows; the playlist's arrows move
+            // through the list, so it skips with ⌥.
             Menu("Skip") {
-                Button("Skip Forward 1s") {
-                    controller.skip(by: 1)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [])
-                .disabled(!controller.session.isPlayable)
-
-                Button("Skip Forward 10s") {
-                    controller.skip(by: 10)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [.shift])
-                .disabled(!controller.session.isPlayable)
-
-                Button("Skip Backward 1s") {
-                    controller.skip(by: -1)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-                .disabled(!controller.session.isPlayable)
-
-                Button("Skip Backward 10s") {
-                    controller.skip(by: -10)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [.shift])
-                .disabled(!controller.session.isPlayable)
+                Button("Skip Forward 1s") { coordinator.skip(by: 1) }
+                    .keyboardShortcut(.rightArrow, modifiers: skipModifiers)
+                Button("Skip Forward 10s") { coordinator.skip(by: 10) }
+                    .keyboardShortcut(.rightArrow, modifiers: skipModifiers.union(.shift))
+                Button("Skip Backward 1s") { coordinator.skip(by: -1) }
+                    .keyboardShortcut(.leftArrow, modifiers: skipModifiers)
+                Button("Skip Backward 10s") { coordinator.skip(by: -10) }
+                    .keyboardShortcut(.leftArrow, modifiers: skipModifiers.union(.shift))
             }
-            .disabled(!controller.session.isPlayable)
+            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
             Divider()
+
+            Button("Change Repeat Mode") {
+                if isComparison { coordinator.cycleRepeatMode() } else { coordinator.cyclePlaylistRepeatMode() }
+            }
+            .keyboardShortcut("r", modifiers: [.command])
+            .disabled(isComparison && !controller.session.isPlayable)
 
             Menu("Repeat") {
+                if !isComparison {
+                    Picker("Repeat", selection: Binding(
+                        get: { coordinator.workspace.playlistRepeatMode },
+                        set: { coordinator.setPlaylistRepeatMode($0) }
+                    )) {
+                        Text("Off").tag(PlaylistRepeatMode.off)
+                        Text("All").tag(PlaylistRepeatMode.all)
+                        Text("One").tag(PlaylistRepeatMode.one)
+                    }.pickerStyle(.inline)
+                } else {
                 Picker("Repeat", selection: Binding(
                     get: { controller.session.repeatMode },
-                    set: { controller.setRepeatMode($0) }
+                    set: { coordinator.setRepeatMode($0) }
                 )) {
                     Text("Off").tag(RepeatMode.off)
                     Text("One").tag(RepeatMode.one)
                     Text("Switch & Repeat").tag(RepeatMode.switchAndRepeat)
                 }
                 .pickerStyle(.inline)
+                }
             }
-            .disabled(!controller.session.isPlayable)
+            .disabled(!coordinator.canPlay || canUseGlobalMenuShortcuts != true)
 
+            if !isComparison {
+                Toggle("Shuffle", isOn: Binding(get: { coordinator.workspace.isShuffleEnabled }, set: { coordinator.setShuffleEnabled($0) }))
+                    .keyboardShortcut("s", modifiers: [.command, .option])
+            }
             Toggle(
                 "Blind Listening Mode",
                 isOn: Binding(
                     get: { controller.session.isBlindListeningModeEnabled },
-                    set: { controller.setBlindListeningMode($0) }
+                    set: { coordinator.setBlindListeningMode($0) }
                 )
             )
             .keyboardShortcut("b", modifiers: [.command])
-            .disabled(!controller.session.canToggleBlindListeningMode)
+            .disabled(!isComparison || !controller.session.canToggleBlindListeningMode)
 
             Divider()
 
@@ -930,40 +1160,65 @@ private struct PlaybackCommands: Commands {
                 controller.autoAlignTracks()
             }
             .keyboardShortcut("a", modifiers: [.command, .option])
-            .disabled(!controller.session.canSwitchPlayback || controller.isAligning)
+            .disabled(!isComparison || !controller.session.canSwitchPlayback || controller.isAligning)
 
             Menu("Nudge Track") {
                 Button("Nudge Left") {
-                    controller.nudgeActiveTrackOffset(direction: -1, largeStep: false)
+                    coordinator.nudgeActiveTrackOffset(direction: -1, largeStep: false)
                 }
                 .keyboardShortcut("j", modifiers: [.command])
 
                 Button("Large Nudge Left") {
-                    controller.nudgeActiveTrackOffset(direction: -1, largeStep: true)
+                    coordinator.nudgeActiveTrackOffset(direction: -1, largeStep: true)
                 }
                 .keyboardShortcut("j", modifiers: [.command, .shift])
 
                 Button("Nudge Right") {
-                    controller.nudgeActiveTrackOffset(direction: 1, largeStep: false)
+                    coordinator.nudgeActiveTrackOffset(direction: 1, largeStep: false)
                 }
                 .keyboardShortcut("k", modifiers: [.command])
 
                 Button("Large Nudge Right") {
-                    controller.nudgeActiveTrackOffset(direction: 1, largeStep: true)
+                    coordinator.nudgeActiveTrackOffset(direction: 1, largeStep: true)
                 }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
             }
-            .disabled(controller.session.activeTrack == nil || canUseGlobalMenuShortcuts != true)
+            .disabled(!isComparison || controller.session.activeTrack == nil || canUseGlobalMenuShortcuts != true)
         }
     }
+
+    private var skipModifiers: EventModifiers { isComparison ? [] : [.option] }
 }
 
 private struct ViewCommands: Commands {
-    var controller: PlaybackController
+    let coordinator: PlaylistCoordinator
+    private var controller: PlaybackController { coordinator.controller }
+    @FocusedValue(\.playlistCommandContext) private var playlistContext
     @FocusedValue(\.canUseGlobalMenuShortcuts) private var canUseGlobalMenuShortcuts
+    @FocusedValue(\.mainWindowCommandState) private var mainWindowCommandState
 
     var body: some Commands {
         CommandGroup(after: .toolbar) {
+            ForEach(WorkspaceVisibility.Region.allCases, id: \.self) { region in
+                Button(region.visibilityAction(isVisible: mainWindowCommandState?.visibility[region] ?? true)) {
+                    mainWindowCommandState?.toggleVisibility(region)
+                }
+                .keyboardShortcut(region == .artwork ? KeyboardShortcut("a", modifiers: [.command, .shift]) : nil)
+                .disabled(mainWindowCommandState?.visibility.canToggle(region) != true)
+            }
+            Divider()
+            Button("Compare") { playlistContext?.compare() }
+                .keyboardShortcut("]", modifiers: [.command])
+                .disabled(!showsPlaylist || coordinator.mode.itemID != nil || playlistContext?.compareItemID == nil)
+            Button("Back to Playlist") { Task { await coordinator.backToPlaylist() } }
+                .keyboardShortcut("[", modifiers: [.command])
+                .disabled(!showsPlaylist || coordinator.mode.itemID == nil)
+            // Compare only: removes the loop. The playlist clears its
+            // selection with Esc.
+            Button("Deselect") { coordinator.deselectLoop() }
+                .keyboardShortcut("d", modifiers: [.command])
+                .disabled(coordinator.mode.itemID == nil || controller.session.loopRegion == nil)
+            Divider()
             Button("Zoom In") {
                 controller.stepZoom(zoomingIn: true)
             }
@@ -996,7 +1251,9 @@ private struct ViewCommands: Commands {
         }
     }
 
+    private var showsPlaylist: Bool { mainWindowCommandState?.visibility.showsPlaylist == true }
+
     private var canUseZoomShortcuts: Bool {
-        canUseGlobalMenuShortcuts == true
+        coordinator.mode.itemID != nil && canUseGlobalMenuShortcuts == true
     }
 }

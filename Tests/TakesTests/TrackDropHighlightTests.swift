@@ -49,14 +49,6 @@ struct TrackDropHighlightTests {
     }
 
     @Test
-    func droppedFilesAlwaysAppendRegardlessOfFormerRowTarget() {
-        let targetTrackID = UUID()
-
-        #expect(DroppedFileImportAction.action(targetTrackID: nil) == .append)
-        #expect(DroppedFileImportAction.action(targetTrackID: targetTrackID) == .append)
-    }
-
-    @Test
     func droppedFolderRecursivelyResolvesAudioFiles() throws {
         let root = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
@@ -74,7 +66,7 @@ struct TrackDropHighlightTests {
         try Data().write(to: directInputAudio)
         defer { try? FileManager.default.removeItem(at: directInputAudio) }
 
-        let resolvedURLs = DroppedFileURLResolver.audioFileURLs(from: [root, directInputAudio])
+        let resolvedURLs = AppOpenedURLResolver.audioFileURLs(from: [root, directInputAudio])
 
         #expect(
             resolvedURLs.map { $0.resolvingSymlinksInPath() }
@@ -472,91 +464,6 @@ struct TrackDropHighlightTests {
     func appUsesSingleMainWindowPolicy() {
         #expect(TakesWindowPolicy.mainWindowID == "main")
         #expect(TakesWindowPolicy.replacesDefaultNewItemCommands)
-    }
-
-    @Test
-    func importActionControlUsesCompactSplitButtonMetrics() {
-        #expect(ImportActionControlMetrics.controlWidth == 62)
-        #expect(ImportActionControlMetrics.controlHeight == 34)
-        #expect(ImportActionControlMetrics.primaryButtonWidth == 34)
-        #expect(ImportActionControlMetrics.menuButtonWidth == 27)
-    }
-
-    @Test
-    func importActionSplitButtonHitTestingFindsMenuSegmentOnMouseDown() {
-        #expect(
-            ImportActionSplitButtonHitTesting.segment(
-                atX: 50,
-                controlWidth: ImportActionControlMetrics.controlWidth,
-                primaryWidth: ImportActionControlMetrics.primaryButtonWidth,
-                menuWidth: ImportActionControlMetrics.menuButtonWidth,
-                layoutDirection: .leftToRight
-            ) == 1
-        )
-        #expect(
-            ImportActionSplitButtonHitTesting.segment(
-                atX: 16,
-                controlWidth: ImportActionControlMetrics.controlWidth,
-                primaryWidth: ImportActionControlMetrics.primaryButtonWidth,
-                menuWidth: ImportActionControlMetrics.menuButtonWidth,
-                layoutDirection: .leftToRight
-            ) == 0
-        )
-        #expect(
-            ImportActionSplitButtonHitTesting.segment(
-                atX: ImportActionControlMetrics.controlWidth,
-                controlWidth: ImportActionControlMetrics.controlWidth,
-                primaryWidth: ImportActionControlMetrics.primaryButtonWidth,
-                menuWidth: ImportActionControlMetrics.menuButtonWidth,
-                layoutDirection: .leftToRight
-            ) == 1
-        )
-        #expect(
-            ImportActionSplitButtonHitTesting.segment(
-                atX: 16,
-                controlWidth: ImportActionControlMetrics.controlWidth,
-                primaryWidth: ImportActionControlMetrics.primaryButtonWidth,
-                menuWidth: ImportActionControlMetrics.menuButtonWidth,
-                layoutDirection: .rightToLeft
-            ) == 1
-        )
-        #expect(
-            ImportActionSplitButtonHitTesting.segment(
-                atX: ImportActionControlMetrics.controlWidth,
-                controlWidth: ImportActionControlMetrics.controlWidth,
-                primaryWidth: ImportActionControlMetrics.primaryButtonWidth,
-                menuWidth: ImportActionControlMetrics.menuButtonWidth,
-                layoutDirection: .rightToLeft
-            ) == 0
-        )
-    }
-
-    @Test
-    func importActionSplitButtonMenuPlacementIsAnchoredBelowDropdownButton() {
-        let bounds = NSRect(
-            x: 0,
-            y: 0,
-            width: ImportActionControlMetrics.controlWidth,
-            height: ImportActionControlMetrics.controlHeight
-        )
-
-        let leftToRightOrigin = ImportActionSplitButtonMenuPlacement.origin(
-            bounds: bounds,
-            menuWidth: ImportActionControlMetrics.menuButtonWidth,
-            layoutDirection: .leftToRight,
-            isFlipped: true
-        )
-        let rightToLeftOrigin = ImportActionSplitButtonMenuPlacement.origin(
-            bounds: bounds,
-            menuWidth: ImportActionControlMetrics.menuButtonWidth,
-            layoutDirection: .rightToLeft,
-            isFlipped: false
-        )
-
-        #expect(leftToRightOrigin.x == bounds.maxX - ImportActionControlMetrics.menuButtonWidth)
-        #expect(leftToRightOrigin.y == bounds.maxY)
-        #expect(rightToLeftOrigin.x == bounds.minX)
-        #expect(rightToLeftOrigin.y == bounds.minY)
     }
 }
 

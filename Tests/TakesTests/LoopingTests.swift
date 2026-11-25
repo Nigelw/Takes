@@ -10,6 +10,11 @@ struct LoopingTests {
         #expect(RepeatMode.off.next == .one)
         #expect(RepeatMode.one.next == .switchAndRepeat)
         #expect(RepeatMode.switchAndRepeat.next == .off)
+        // The playlist cycles Off → All → One.
+        #expect(PlaylistRepeatMode.off.next == .all)
+        #expect(PlaylistRepeatMode.all.next == .one)
+        #expect(PlaylistRepeatMode.one.next == .off)
+        #expect(PlaylistRepeatMode.allCases == [.off, .all, .one])
     }
 
     // MARK: - advanceAtEnd

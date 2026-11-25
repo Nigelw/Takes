@@ -16,6 +16,7 @@ struct AudioFileLoader: AudioFileLoading {
                 throw PlaybackError.unsupportedFormat(url)
             }
 
+            let tags = await descriptiveMetadata(for: url)
             return LoadedTrack(
                 url: url,
                 displayName: url.lastPathComponent,
@@ -23,13 +24,58 @@ struct AudioFileLoader: AudioFileLoading {
                 duration: duration,
                 sampleRate: format.sampleRate,
                 channelCount: format.channelCount,
-                bitRate: await estimatedBitRate(for: url)
+                bitRate: await estimatedBitRate(for: url),
+                title: tags.title,
+                artist: tags.artist,
+                album: tags.album
             )
         } catch let error as PlaybackError {
             throw error
         } catch {
             throw PlaybackError.failedToOpenFile(url)
         }
+    }
+
+    private func descriptiveMetadata(for url: URL) async -> (title: String?, artist: String?, album: String?) {
+        let asset = AVURLAsset(url: url)
+        var items = (try? await asset.load(.commonMetadata)) ?? []
+        if let formats = try? await asset.load(.availableMetadataFormats) {
+            for format in formats {
+                if let formatItems = try? await asset.loadMetadata(for: format) {
+                    items.append(contentsOf: formatItems)
+                }
+            }
+        }
+        func value(_ key: AVMetadataKey) async -> String? {
+            for item in items where item.commonKey == key {
+                if let text = try? await item.load(.stringValue) {
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { return trimmed }
+                }
+            }
+            return nil
+        }
+        return await (value(.commonKeyTitle), value(.commonKeyArtist), value(.commonKeyAlbumName))
+    }
+
+    /// The file's embedded cover image, as stored (JPEG, PNG…), or `nil` when
+    /// it has none. Checks the common artwork key, then every format-specific
+    /// item that maps to it (ID3 `APIC`, iTunes `covr`, Vorbis pictures).
+    /// Nothing is cached here or written to disk.
+    nonisolated static func embeddedArtworkData(for url: URL) async -> Data? {
+        let asset = AVURLAsset(url: url)
+        var items = (try? await asset.load(.commonMetadata)) ?? []
+        if let formats = try? await asset.load(.availableMetadataFormats) {
+            for format in formats {
+                if let formatItems = try? await asset.loadMetadata(for: format) {
+                    items.append(contentsOf: formatItems)
+                }
+            }
+        }
+        for item in items where item.commonKey == .commonKeyArtwork {
+            if let data = try? await item.load(.dataValue), !data.isEmpty { return data }
+        }
+        return nil
     }
 
     /// Best-effort estimated data rate (bits/sec) of the file's first audio track.

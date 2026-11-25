@@ -16,6 +16,16 @@ struct LoadedTrack: Equatable {
     var gainDB: Float = 0
     var offsetSeconds: TimeInterval = 0
 
+    /// The file can't be found. Compare still shows the version as a lane,
+    /// from its stored metadata, but loads no audio and draws no waveform;
+    /// the lane shows an error state instead and stays silent.
+    var isMissing = false
+
+    /// Embedded descriptive tags, independent of the comparison's file label.
+    var title: String?
+    var artist: String?
+    var album: String?
+
     /// `[duration] • [sample rate] • [bit rate]`, e.g. `03:59 • 44.1 kHz • 256 kbps`.
     /// The bit-rate segment drops out when the source reports no usable rate.
     var metadataSummary: String {
@@ -30,7 +40,7 @@ struct LoadedTrack: Equatable {
 
 /// How playback behaves when the end of the playable range (timeline end, or the
 /// loop end when a loop is active) is reached.
-enum RepeatMode: String, CaseIterable, Equatable {
+enum RepeatMode: String, CaseIterable, Equatable, Codable {
     /// Stop at the end.
     case off
     /// Restart the same track from the beginning of the range.
@@ -49,7 +59,7 @@ enum RepeatMode: String, CaseIterable, Equatable {
 }
 
 /// A looped subsection of the timeline, in absolute seconds. Invariant: `start < end`.
-struct LoopRegion: Equatable {
+struct LoopRegion: Equatable, Codable {
     var start: TimeInterval
     var end: TimeInterval
 
@@ -148,7 +158,7 @@ struct ComparisonSession: Equatable {
     }
 
     var isPlayable: Bool {
-        !tracks.isEmpty && timelineEnd > timelineStart
+        tracks.contains { !$0.loadedTrack.isMissing } && timelineEnd > timelineStart
     }
 
     var canToggleBlindListeningMode: Bool {
@@ -322,6 +332,13 @@ enum PlaybackError: LocalizedError, Equatable {
     case importFailures([ImportFailure])
     case trackLimitExceeded(limit: Int, skippedFileNames: [String])
     case importSummary(failures: [ImportFailure], skippedFileNames: [String], limit: Int)
+
+    var fileURL: URL? {
+        switch self {
+        case let .unsupportedFormat(url), let .failedToOpenFile(url): url
+        default: nil
+        }
+    }
 
     var errorDescription: String? {
         switch self {
