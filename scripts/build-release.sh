@@ -105,8 +105,8 @@ echo "  release tag       : $TAG"
 
 APPCAST="$WEBSITE_DIR/appcast.xml"
 if [[ -n "$BETA_NOTES" ]]; then
-  [[ "$MARKETING_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+b[1-9][0-9]*$ ]] \
-    || die "beta marketing versions use X.Y.ZbN (for example 2.10.0b1)"
+  [[ "$MARKETING_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?b[1-9][0-9]*$ ]] \
+    || die "beta marketing versions use X.YbN or X.Y.ZbN (for example 3.0b2 or 2.10.0b1)"
   BUILD_DIR="$BUILD_DIR/beta/$MARKETING_VERSION"
 elif [[ "$MARKETING_VERSION" =~ b[0-9]+$ || "$MARKETING_VERSION" == *-beta* || "$MARKETING_VERSION" == *.beta* ]]; then
   die "use --beta-notes to prepare a beta for the Sparkle beta channel"
