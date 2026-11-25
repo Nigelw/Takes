@@ -1215,6 +1215,18 @@ private struct PlaybackCommands: Commands {
                 .keyboardShortcut("k", modifiers: [.command, .shift])
             }
             .disabled(!isComparison || controller.session.activeTrack == nil || canUseGlobalMenuShortcuts != true)
+
+            Button("Reset Offset") {
+                if let trackID = coordinator.activeComparisonVersionID {
+                    coordinator.setOffset(trackID, seconds: 0)
+                }
+            }
+            .disabled(!isComparison || (controller.session.activeTrack?.loadedTrack.offsetSeconds ?? 0) == 0)
+
+            Button("Reset All Offsets") {
+                coordinator.resetAllComparisonOffsets()
+            }
+            .disabled(!isComparison || !controller.session.tracks.contains { $0.loadedTrack.offsetSeconds != 0 })
         }
     }
 

@@ -465,7 +465,11 @@ These are here to prevent parallel implementations and subtle regressions:
   Compare's Auto-Align Tracks is ⇧⌘A. Playlist only: ⌘] Compare Versions (`PlaylistCommandContext.compare`,
   one multi-version item), ⌥⌘S Shuffle, ⌘G / ⇧⌘G Group / Ungroup Versions,
   File ▸ Locate File… (`locateVersionID`). Both modes: ⌥⌘↑ / ⌥⌘↓
-  Move Up / Down.
+  Move Up / Down. The Playback menu ends with Nudge Track (⌘J / ⌘K, ⇧ for
+  larger steps), Reset Offset for the active compare lane, and Reset All
+  Offsets for every lane in the current comparison. The bulk reset applies
+  the offsets together via `PlaybackController.setOffsets` and captures
+  the comparison edits once.
 - One main window serves both modes (A2). With the player and lower region
   visible, it opens 360 pt wide (760 tall with artwork, 412 without) and is
   user-resizable down to `TakesWindowPolicy.minimumSize(for:isComparison:)`:

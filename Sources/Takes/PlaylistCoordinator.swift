@@ -1168,6 +1168,13 @@ final class PlaylistCoordinator {
         captureRuntimeEdits()
     }
 
+    func resetAllComparisonOffsets() {
+        guard let itemID = mode.itemID, runtimeContext?.itemID == itemID else { return }
+        let offsets = Dictionary(uniqueKeysWithValues: controller.session.tracks.map { ($0.id, 0.0) })
+        controller.setOffsets(offsets)
+        captureRuntimeEdits()
+    }
+
     func nudgeActiveTrackOffset(direction: Int, largeStep: Bool) {
         controller.nudgeActiveTrackOffset(direction: direction, largeStep: largeStep)
         captureRuntimeEdits()

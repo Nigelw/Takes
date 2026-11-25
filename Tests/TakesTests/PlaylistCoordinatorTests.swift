@@ -1093,6 +1093,32 @@ struct PlaylistCoordinatorTests {
     }
 
     @MainActor
+    @Test func resetAllComparisonOffsetsPersistsOnlyTheCurrentItemsOffsets() async throws {
+        let url = try makeTemporaryAudioFile(name: "offset-reset.wav")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        var available = makePlaylistVersion(url: url, title: "Available")
+        available.offsetSeconds = -0.25
+        var missing = makeVersion("missing.wav")
+        missing.offsetSeconds = 0.5
+        var unrelated = makeVersion("unrelated.wav")
+        unrelated.offsetSeconds = 0.75
+        let item = PlaylistItem(title: "Compare", versions: [available, missing])
+        let otherItem = PlaylistItem(title: "Other", versions: [unrelated])
+        let coordinator = PlaylistCoordinator(workspace: PlaylistWorkspace(items: [item, otherItem]))
+        await coordinator.enterComparison(itemID: item.id)
+        let runtime = coordinator.runtimeContext
+        #expect(coordinator.controller.session.tracks.map(\.loadedTrack.offsetSeconds) == [-0.25, 0.5])
+
+        coordinator.resetAllComparisonOffsets()
+
+        #expect(coordinator.controller.session.tracks.map(\.loadedTrack.offsetSeconds) == [0, 0])
+        #expect(coordinator.controller.session.activeTrackID == available.id)
+        #expect(coordinator.runtimeContext == runtime)
+        #expect(coordinator.workspace.items[0].versions.map(\.offsetSeconds) == [0, 0])
+        #expect(coordinator.workspace.items[1].versions.map(\.offsetSeconds) == [0.75])
+    }
+
+    @MainActor
     @Test func backLeavesComparisonWhenItsFileDisappears() async throws {
         let url = try makeTemporaryAudioFile(name: "back.wav")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
