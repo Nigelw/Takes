@@ -120,8 +120,8 @@ struct WaveformSourceTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let progress = ProgressCounter()
-        await WaveformSource.generate(url: url) { _, _, isComplete in
-            await progress.record(isComplete: isComplete)
+        await WaveformSource.generate(url: url) { _, _, update in
+            await progress.record(isComplete: update.isComplete)
         }
 
         #expect(await progress.partialCount > 0)
@@ -140,6 +140,16 @@ struct WaveformSourceTests {
     }
 
     @Test
+    func finalUpdateSaysWhetherTheWholeFileWasRead() async throws {
+        let url = try writeTestFile(frameCount: 50_000) { _, _ in 0.5 }
+        defer { try? FileManager.default.removeItem(at: url) }
+        let missing = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("does-not-exist.caf")
+
+        #expect(await finalProgress(url: url) == .decoded)
+        #expect(await finalProgress(url: missing) == .stoppedEarly)
+    }
+
+    @Test
     func bucketCountCapsResolutionForLongFiles() {
         // Short files: one bucket per `minimumFramesPerBucket`.
         #expect(WaveformSource.bucketCount(forFrameCount: 0) == 0)
@@ -153,10 +163,18 @@ struct WaveformSourceTests {
 
     // MARK: - Helpers
 
+    private func finalProgress(url: URL) async -> WaveformProgress? {
+        let last = LastProgress()
+        await WaveformSource.generate(url: url) { _, _, progress in
+            await last.set(progress)
+        }
+        return await last.value
+    }
+
     private func collectWaveform(url: URL) async -> (peaks: [Float], bucketCount: Int, isComplete: Bool) {
         let collector = Collector()
-        await WaveformSource.generate(url: url) { peaks, bucketCount, isComplete in
-            await collector.record(peaks: peaks, bucketCount: bucketCount, isComplete: isComplete)
+        await WaveformSource.generate(url: url) { peaks, bucketCount, progress in
+            await collector.record(peaks: peaks, bucketCount: bucketCount, isComplete: progress.isComplete)
         }
         return await collector.snapshot()
     }
@@ -211,4 +229,9 @@ struct WaveformSourceTests {
             (peaks, bucketCount, isComplete)
         }
     }
+}
+
+private actor LastProgress {
+    private(set) var value: WaveformProgress?
+    func set(_ progress: WaveformProgress) { value = progress }
 }
